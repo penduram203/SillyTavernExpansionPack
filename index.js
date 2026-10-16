@@ -11,6 +11,10 @@ export { onInstall } from './modules/chat_window_onoff.js';
 import './modules/right_nav_kai.js';
 // right_nav_kai.js は IIFE で完結しており、export は不要
 
+// ---- STJ Editor ----
+import './modules/stj_editor.js';
+// stj_editor.js は IIFE で完結しており、export は不要
+
 // ---- 今後追加する拡張はここに追記していく ----
 // import './modules/image_display.js';
 // import './modules/gic.js';
