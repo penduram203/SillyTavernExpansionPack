@@ -3,6 +3,13 @@
 //   各拡張をモジュールとして読み込むエントリポイント
 // ============================================================
 
+// ---- Image Display ----
+// ★ 読み込み順序に注意: image-display.js は window.ImageDisplayExtension を
+//    公開する。text-styling.js が同 API を参照するため、
+//    image-display.js を先に読み込むことを推奨。
+import './modules/image-display.js';
+// image-display.js は IIFE で完結しており、export は不要
+
 // ---- Chat Window On/Off ----
 import './modules/chat_window_onoff.js';
 export { onInstall } from './modules/chat_window_onoff.js';
@@ -20,7 +27,6 @@ import './modules/text-styling.js';
 // text-styling.js は initTextStyling() を自動実行する形式のため、export は不要
 
 // ---- 今後追加する拡張はここに追記していく ----
-// import './modules/image_display.js';
 // import './modules/gic.js';
 // import './modules/gic_lorebook.js';
 // import './modules/Lorebook_Expansion.js';
