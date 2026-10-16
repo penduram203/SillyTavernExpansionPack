@@ -9,6 +9,9 @@
 /* ---- Right Nav Kai ---- */
 @import url('./styles/right_nav_kai.css');
 
+/* ---- STJ Editor ---- */
+@import url('./styles/stj_editor.css');
+
 /* ---- 今後追加する拡張はここに追記 ---- */
 /* @import url('./styles/image_display.css'); */
 /* @import url('./styles/gic.css'); */
