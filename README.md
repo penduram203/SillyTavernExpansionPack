@@ -240,6 +240,7 @@ window.GicLorebook = {
 
 // gic.js
 window.GicDumpGallery = function () { /* ギャラリー DOM 構造をダンプ */ };
+```
 
 ## インストール方法
 
