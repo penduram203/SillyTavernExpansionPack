@@ -4,6 +4,9 @@
 const MODULE_NAME = 'chat_window_onoff';
 const OLD_STORAGE_KEY = 'chatWindowHiddenState';
 
+// ★ #toggle-chat-button は除外。
+//    CSS クラス body.gallery-open / body.stj-editor-open で非表示化する。
+//    JS で inline style を当てると解除漏れの原因になるため。
 const GALLERY_HIDDEN_SELECTORS = [
     '#window-control-buttons',
     '#restore-panel-button',
@@ -14,7 +17,6 @@ const GALLERY_HIDDEN_SELECTORS = [
     '.text-styling-button',
     '.text-styling-toggle',
     '[data-text-styling-toggle]',
-    '#toggle-chat-button',  // ★ 追加: ギャラリー表示中は 💡 も非表示
 ];
 
 const BUTTON_WAKE_WIDTH = 110;
@@ -73,8 +75,6 @@ export async function onInstall() {
 
 // ============================================================
 // CSS ファイル依存を回避するための <style> 注入
-//   ※ #send_form の透過は Tパネル側のスライダーが担当するため、
-//      ここでは扱わない。
 // ============================================================
 function injectExtraStyle() {
     const styleId = 'chat-window-onoff-extra-style';
@@ -499,7 +499,6 @@ setupAuxButtonHover();
 
 // ============================================================
 // ギャラリー連動
-//   ★ ギャラリー開閉に応じて body.gallery-open クラスを同期
 // ============================================================
 
 let _galleryOpenCache = { value: false, timestamp: 0 };
@@ -554,22 +553,57 @@ function isGalleryOpen() {
     return result;
 }
 
+// ★ ギャラリー / STJエディタの実態を確認する
+function isStjEditorOpen() {
+    const modal = document.getElementById('stj_export_modal');
+    if (!modal) return false;
+    if (modal.style.display === 'block') return true;
+    const cs = window.getComputedStyle(modal);
+    return cs.display !== 'none' && cs.visibility !== 'hidden' && parseFloat(cs.opacity) !== 0;
+}
+
+// ============================================================
+// ★ body クラスの一元管理
+//   実態と乖離したクラスを強制的に除去する
+// ============================================================
+function syncBodyStateClasses() {
+    const galleryOpen = isGalleryOpen();
+    const stjOpen = isStjEditorOpen();
+
+    // gallery-open
+    const hasGalleryClass = document.body.classList.contains('gallery-open');
+    if (galleryOpen && !hasGalleryClass) {
+        document.body.classList.add('gallery-open');
+    } else if (!galleryOpen && hasGalleryClass) {
+        document.body.classList.remove('gallery-open');
+    }
+
+    // stj-editor-open
+    const hasStjClass = document.body.classList.contains('stj-editor-open');
+    if (stjOpen && !hasStjClass) {
+        document.body.classList.add('stj-editor-open');
+    } else if (!stjOpen && hasStjClass) {
+        document.body.classList.remove('stj-editor-open');
+    }
+
+    // ★ #toggle-chat-button に inline の display: none が残っていたら除去
+    //    （ギャラリーも STJ エディタも開いていないときのみ）
+    if (!galleryOpen && !stjOpen) {
+        const toggleBtn = document.getElementById('toggle-chat-button');
+        if (toggleBtn && toggleBtn.style.display === 'none') {
+            toggleBtn.style.removeProperty('display');
+            console.log('[Chat Window On/Off] 🧹 #toggle-chat-button の残留 display:none を除去');
+        }
+    }
+
+    return { galleryOpen, stjOpen };
+}
+
 let lastGalleryStateForButtons = null;
 
 function syncButtonsVisibilityForGallery() {
-    const galleryOpen = isGalleryOpen();
-
-    // ★ body.gallery-open クラスを常に同期
-    //   （CSS による 💡 の非表示・hover 無効化に使用）
-    if (galleryOpen) {
-        if (!document.body.classList.contains('gallery-open')) {
-            document.body.classList.add('gallery-open');
-        }
-    } else {
-        if (document.body.classList.contains('gallery-open')) {
-            document.body.classList.remove('gallery-open');
-        }
-    }
+    // まず body クラスを同期（不整合を常に解消）
+    const { galleryOpen } = syncBodyStateClasses();
 
     if (galleryOpen === lastGalleryStateForButtons) return;
     lastGalleryStateForButtons = galleryOpen;
@@ -646,7 +680,6 @@ function setupButtonWakeZone() {
         update(-1, -1);
     });
 
-    // ★ 定期的にもチェック（マウスが動かない間に state が変わった場合に対応）
     setInterval(() => {
         if (isAnyOverlayActive() && isInZone) {
             isInZone = false;
@@ -659,3 +692,35 @@ function setupButtonWakeZone() {
 }
 
 setupButtonWakeZone();
+
+// ============================================================
+// ★ 初期化時に残留 body クラスを一掃
+// ============================================================
+(function cleanupBodyClassesOnInit() {
+    const cleanup = () => {
+        // ページロード直後は gallery も stj editor も開いていないので、
+        // 残留していれば削除
+        if (!isGalleryOpen() && document.body.classList.contains('gallery-open')) {
+            document.body.classList.remove('gallery-open');
+            console.log('[Chat Window On/Off] 🧹 残留 gallery-open を除去');
+        }
+        if (!isStjEditorOpen() && document.body.classList.contains('stj-editor-open')) {
+            document.body.classList.remove('stj-editor-open');
+            console.log('[Chat Window On/Off] 🧹 残留 stj-editor-open を除去');
+        }
+        if (document.body.classList.contains('lbe-aux-hover')) {
+            document.body.classList.remove('lbe-aux-hover');
+            console.log('[Chat Window On/Off] 🧹 残留 lbe-aux-hover を除去');
+        }
+        if (document.body.classList.contains('gic-buttons-wake')) {
+            document.body.classList.remove('gic-buttons-wake');
+            console.log('[Chat Window On/Off] 🧹 残留 gic-buttons-wake を除去');
+        }
+    };
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', cleanup);
+    } else {
+        cleanup();
+    }
+})();
