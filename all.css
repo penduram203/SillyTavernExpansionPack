@@ -3,9 +3,6 @@
  *   各拡張の CSS を @import で集約
  * ============================================================ */
 
-/* ---- Image Display ---- */
-@import url('./styles/image-display.css');
-
 /* ---- Chat Window On/Off ---- */
 @import url('./styles/chat_window_onoff.css');
 
@@ -18,6 +15,11 @@
 /* ---- Text Styling ---- */
 @import url('./styles/text-styling.css');
 
+/* ---- Image Display ---- */
+@import url('./styles/image-display.css');
+
+/* ---- Lorebook Expansion ---- */
+@import url('./styles/Lorebook_Expansion.css');
+
 /* ---- 今後追加する拡張はここに追記 ---- */
 /* @import url('./styles/gic.css'); */
-/* @import url('./styles/Lorebook_Expansion.css'); */
