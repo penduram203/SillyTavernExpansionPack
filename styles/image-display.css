@@ -1,0 +1,183 @@
+#image-display-container {
+  position: absolute;
+  top: 100px;
+  left: 100px;
+  width: 300px;
+  height: 200px;
+  border: 1px solid #444;
+  background-color: #000; /* デフォルト黒 */
+  border-radius: 5px;
+  overflow: hidden;
+  z-index: 10;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  resize: none;
+}
+
+#image-display-header {
+  height: 30px;
+  background-color: #333;
+  color: #fff;
+  padding: 0 10px;
+  cursor: grab;
+  border-bottom: 1px solid #555;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  user-select: none;
+  position: relative;
+}
+
+#bg-color-picker {
+  position: absolute;
+  top: 5px;
+  right: 30px;
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+
+#bg-color-picker::-webkit-color-swatch {
+  border: 1px solid #888;
+  border-radius: 3px;
+}
+
+#bg-color-picker::-moz-color-swatch {
+  border: 1px solid #888;
+  border-radius: 3px;
+}
+
+#displayed-image {
+  width: 100%;
+  height: calc(100% - 30px);
+  object-fit: contain;
+  background-color: inherit; /* コンテナの背景色を継承 */
+}
+
+#resize-handle {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  background: #666;
+  bottom: 0;
+  right: 0;
+  cursor: nwse-resize;
+  border-radius: 3px 0 0 0;
+  z-index: 10000;
+  box-shadow: -1px -1px 2px rgba(0,0,0,0.2);
+}
+
+/* コントロールボタンコンテナ - 最下部に横並び配置 */
+#image-control-container {
+  position: fixed;
+  left: 1px;
+  bottom: 10px;
+  z-index: 15000;
+  display: flex;
+  flex-direction: row;
+  gap: 5px;
+}
+
+/* コントロールボタン共通スタイル */
+#text-mode-button,
+#custom-button,
+#maximize-button,
+#half-maximize-button {
+  padding: 5px 10px;
+  cursor: pointer;
+  background-color: #555;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  opacity: 0.1; /* 初期状態は透明度10% */
+  transition: background-color 0.0s, opacity 0.0s;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+#text-mode-button:hover,
+#custom-button:hover,
+#maximize-button:hover,
+#half-maximize-button:hover {
+  background-color: #666;
+  opacity: 1; /* ホバー時は不透明度100% */
+}
+
+/* 無効状態のボタンスタイル */
+button.disabled {
+  opacity: 0.1 !important;
+  cursor: not-allowed !important;
+  background-color: #333 !important;
+}
+
+/* 有効状態のボタンスタイル */
+button.enabled {
+  opacity: 0.1;
+  cursor: pointer;
+}
+
+/* 視覚的フィードバック */
+#image-display-container.dragging {
+  box-shadow: 0 0 15px rgba(66, 153, 225, 0.7);
+  border: 1px solid #4299e1;
+}
+
+#image-display-container.resizing {
+  border: 2px dashed #48bb78;
+}
+
+/* 左半分モード時の画像の右詰め */
+#image-display-container.half-maximized #displayed-image {
+  object-position: right;
+}
+
+/* カスタム設定ウィンドウ */
+#custom-window {
+  position: fixed;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 250px;
+  background-color: #333;
+  color: white;
+  border-radius: 5px;
+  padding: 10px;
+  z-index: 16000 !important;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.5);
+  display: none; /* 初期状態は非表示 */
+}
+
+#custom-window h3 {
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+
+#custom-window label {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 14px;
+}
+
+#custom-window input {
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 5px;
+  border: 1px solid #555;
+  background-color: #222;
+  color: white;
+  border-radius: 3px;
+}
+
+#custom-window .close-button {
+  background-color: #555;
+  color: white;
+  border: none;
+  padding: 5px 10px;
+  cursor: pointer;
+  border-radius: 3px;
+  float: right;
+}
