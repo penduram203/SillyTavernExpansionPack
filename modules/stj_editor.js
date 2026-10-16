@@ -742,6 +742,9 @@
         stjModalEl.style.zIndex = '10001';
         stjModalEl.scrollTop = 0;
 
+        // ★ 画面左下のボタン群を非表示・無効化するための body クラス
+        document.body.classList.add('stj-editor-open');
+
         modalOpenedTimestamp = Date.now();
 
         const charName = detectCharacterNameFromDOM() || '';
@@ -764,6 +767,9 @@
         if (!stjModalEl) return;
         if (isBulkDeleteMode || isDialogActive) return;
         stjModalEl.style.display = 'none';
+
+        // ★ 画面左下のボタン群を再表示するため body クラスを解除
+        document.body.classList.remove('stj-editor-open');
     }
 
     const applyBtnStyle = 'margin: 0; padding: 5px 14px; font-size: 13px; font-weight: bold; color: #000000; background-color: #e0e0e0; border: 1px solid #aaa; border-radius: 4px; cursor: pointer; white-space: nowrap;';
