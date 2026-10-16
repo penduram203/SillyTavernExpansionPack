@@ -14,6 +14,7 @@ const GALLERY_HIDDEN_SELECTORS = [
     '.text-styling-button',
     '.text-styling-toggle',
     '[data-text-styling-toggle]',
+    '#toggle-chat-button',  // ★ 追加: ギャラリー表示中は 💡 も非表示
 ];
 
 const BUTTON_WAKE_WIDTH = 110;
@@ -85,6 +86,34 @@ function injectExtraStyle() {
         /* Tパネル表示中は 💡/🎨 を完全無効化 */
         html body.tsp-open #toggle-chat-button,
         html body.tsp-open #gic-open-gallery-button {
+            pointer-events: none !important;
+            opacity: 0 !important;
+            cursor: default !important;
+        }
+
+        /* ★ ギャラリー表示中は 💡 を非表示・クリック無効・hover無効 */
+        html body.gallery-open #toggle-chat-button {
+            display: none !important;
+            pointer-events: none !important;
+            opacity: 0 !important;
+            cursor: default !important;
+        }
+
+        /* ★ JSON編集画面（stj_export_modal）表示中は
+             画面左下の全ボタンを非表示・クリック無効・hover無効 */
+        html body.stj-editor-open #toggle-chat-button,
+        html body.stj-editor-open #gic-open-gallery-button,
+        html body.stj-editor-open #gic-release-override-button,
+        html body.stj-editor-open #text-mode-button,
+        html body.stj-editor-open #restore-panel-button,
+        html body.stj-editor-open #center-button,
+        html body.stj-editor-open #right-half-button,
+        html body.stj-editor-open #custom-button,
+        html body.stj-editor-open #maximize-button,
+        html body.stj-editor-open #half-maximize-button,
+        html body.stj-editor-open #window-control-buttons,
+        html body.stj-editor-open #image-control-container {
+            display: none !important;
             pointer-events: none !important;
             opacity: 0 !important;
             cursor: default !important;
@@ -284,8 +313,8 @@ function applyToggleChatButtonLayout() {
     if (rect.width <= 0 || rect.height <= 0) return;
 
     const gap = 0;
-    const btnW = btn.offsetWidth || 50;   // ★ 49 → 50
-    const btnH = btn.offsetHeight || 50;  // ★ 49 → 50
+    const btnW = btn.offsetWidth || 50;
+    const btnH = btn.offsetHeight || 50;
 
     let left = rect.left - btnW - gap;
     let top = rect.top + (rect.height - btnH) / 2;
@@ -378,6 +407,7 @@ setupChatPaddingClickThrough();
 
 // ============================================================
 // 統合 hover 判定
+//   ★ gallery-open / stj-editor-open でも完全に無効化する
 // ============================================================
 function setupAuxButtonHover() {
     function getAuxButtonsRect() {
@@ -409,8 +439,14 @@ function setupAuxButtonHover() {
 
     let isInZone = false;
 
+    function isAnyOverlayActive() {
+        return document.body.classList.contains('tsp-open') ||
+               document.body.classList.contains('gallery-open') ||
+               document.body.classList.contains('stj-editor-open');
+    }
+
     function update(x, y) {
-        if (document.body.classList.contains('tsp-open')) {
+        if (isAnyOverlayActive()) {
             if (isInZone) {
                 isInZone = false;
                 document.body.classList.remove('lbe-aux-hover');
@@ -450,7 +486,7 @@ function setupAuxButtonHover() {
     });
 
     setInterval(() => {
-        if (document.body.classList.contains('tsp-open') && isInZone) {
+        if (isAnyOverlayActive() && isInZone) {
             isInZone = false;
             document.body.classList.remove('lbe-aux-hover');
         }
@@ -463,6 +499,7 @@ setupAuxButtonHover();
 
 // ============================================================
 // ギャラリー連動
+//   ★ ギャラリー開閉に応じて body.gallery-open クラスを同期
 // ============================================================
 
 let _galleryOpenCache = { value: false, timestamp: 0 };
@@ -521,6 +558,19 @@ let lastGalleryStateForButtons = null;
 
 function syncButtonsVisibilityForGallery() {
     const galleryOpen = isGalleryOpen();
+
+    // ★ body.gallery-open クラスを常に同期
+    //   （CSS による 💡 の非表示・hover 無効化に使用）
+    if (galleryOpen) {
+        if (!document.body.classList.contains('gallery-open')) {
+            document.body.classList.add('gallery-open');
+        }
+    } else {
+        if (document.body.classList.contains('gallery-open')) {
+            document.body.classList.remove('gallery-open');
+        }
+    }
+
     if (galleryOpen === lastGalleryStateForButtons) return;
     lastGalleryStateForButtons = galleryOpen;
 
@@ -552,6 +602,7 @@ setupGalleryButtonObserver();
 
 // ============================================================
 // 左下のボタン起動領域
+//   ★ gallery-open / stj-editor-open でも完全に無効化する
 // ============================================================
 
 function setupButtonWakeZone() {
@@ -564,7 +615,20 @@ function setupButtonWakeZone() {
                y >= window.innerHeight - WAKE_H && y <= window.innerHeight;
     }
 
+    function isAnyOverlayActive() {
+        return document.body.classList.contains('gallery-open') ||
+               document.body.classList.contains('stj-editor-open');
+    }
+
     function update(x, y) {
+        if (isAnyOverlayActive()) {
+            if (isInZone) {
+                isInZone = false;
+                document.body.classList.remove('gic-buttons-wake');
+            }
+            return;
+        }
+
         const inside = isInside(x, y);
         if (inside === isInZone) return;
         isInZone = inside;
@@ -581,6 +645,14 @@ function setupButtonWakeZone() {
     window.addEventListener('blur', () => {
         update(-1, -1);
     });
+
+    // ★ 定期的にもチェック（マウスが動かない間に state が変わった場合に対応）
+    setInterval(() => {
+        if (isAnyOverlayActive() && isInZone) {
+            isInZone = false;
+            document.body.classList.remove('gic-buttons-wake');
+        }
+    }, 200);
 
     document.body.classList.remove('gic-buttons-wake');
     console.log(`[Chat Window On/Off] 🖱 ボタン起動領域を設定: ${WAKE_W}px × ${WAKE_H}px (左下)`);
