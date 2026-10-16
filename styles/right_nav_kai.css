@@ -1,0 +1,129 @@
+/* SillyTavern 右ナビゲーションパネルのカスタムUI
+   スタイルが他のUIに影響しないように、すべてのセレクタとCSS変数のスコープを#right-nav-panel 内に限定しています。 */
+
+/* ----------------------------------
+   1. パネル全体のスタイルとローカル変数の定義
+---------------------------------- */
+#right-nav-panel.openDrawer {
+  /* ローカル変数を定義 */
+  --avatar-base-height: 21vh;
+  --avatar-base-width: 20vw;
+  --avatar-base-border-radius-round: 0%;
+
+  /* パネル自体のスタイル
+     SillyTavern本体の開閉アニメーション(transform, visibility等)を妨げないよう、
+     位置やサイズに関するプロパティのみを上書きします。
+     "inset"は"right"も上書きし、閉じる動作を阻害する可能性があるため使用しません。 */
+  width: 60vw !important;
+  height: calc(100% - 35px) !important; /* topとbottomの値を元に高さを計算 */
+  top: 34px !important;
+  bottom: 1px !important;
+  left: auto !important; /* 右寄せを維持 */
+  right: 0 !important; /* 開いた状態では右端に固定 */
+  margin: 2px 2px 2px auto !important;
+}
+
+/* ----------------------------------
+   2. キャラクターリストのコンテナのスタイル
+---------------------------------- */
+/* パネルが開いている時（.openDrawer）に限定してスタイルを適用することで、より安全にします */
+#right-nav-panel.openDrawer #rm_print_characters_block {
+  display: flex; /* グリッドレイアウトのためにflexを指定 */
+  flex-flow: row wrap;
+  align-content: flex-start;
+  justify-content: flex-start;
+  align-items: normal;
+  overflow-y: auto;
+}
+
+/* ----------------------------------
+   3. 個々のキャラクターブロックとアバターのスタイル
+---------------------------------- */
+#right-nav-panel .character_select {
+  width: 20% !important;
+  height: 36.5% !important;
+  box-sizing: border-box;
+  padding: 5px;
+  display: flex;
+  gap: 0px;
+  flex-wrap: wrap;
+}
+
+#right-nav-panel .character_select .avatar {
+  width: var(--avatar-base-width) !important;
+  height: var(--avatar-base-height) !important;
+  border-radius: var(--avatar-base-border-radius-round) !important;
+  overflow: hidden;
+  /* 余白を黒く塗り潰し & 中央配置 */
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+}
+
+#right-nav-panel .character_select .avatar img {
+  /* 縦横比を維持しつつ枠内に収める */
+  max-width: 100% !important;
+  max-height: 100% !important;
+  width: auto !important;
+  height: auto !important;
+  object-fit: contain !important;
+  border-radius: var(--avatar-base-border-radius-round) !important;
+}
+
+/* ----------------------------------
+   4. ブロック内のコンテナとテキストのスタイル
+---------------------------------- */
+#right-nav-panel .character_select_container {
+  height: 20%;
+}
+
+#right-nav-panel .tags.tags_inline {
+  display: none !important;
+}
+
+#right-nav-panel .character_name_block {
+  width: 11vw !important;
+  height: 70% !important;
+  margin-top: -5.5vh;
+}
+
+#right-nav-panel .character_name_block .ch_name {
+  font-weight: 900;
+  font-size: x-large;
+  position: relative;
+  -webkit-text-stroke: 2px black;
+  text-stroke: 2px black;
+  white-space: normal;
+  overflow-wrap: break-word;
+  padding-left: 0.5vw;
+  line-height: 1.0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+#right-nav-panel .character_name_block .character_version {
+  display: none;
+}
+
+#right-nav-panel .wide100pLess70px {
+  width: 100% !important;
+}
+
+#right-nav-panel .ch_description {
+  height: 100% !important;
+  margin-top: -0.5vh !important;
+  flex-grow: 0 !important;
+  overflow: hidden !important;
+  white-space: normal;
+}
+
+/* ----------------------------------
+   5. キャラクター作成/編集パネルのスタイル
+---------------------------------- */
+#avatar_load_preview {
+  width: 5vw !important;
+  height: 5vh !important;
+  object-fit: cover;
+}
