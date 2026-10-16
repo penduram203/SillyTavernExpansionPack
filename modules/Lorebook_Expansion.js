@@ -14,13 +14,13 @@
 import {
     extension_settings,
     getContext,
-} from '../../../extensions.js';
+} from '../../../../extensions.js';
 import {
     eventSource,
     event_types,
     saveSettingsDebounced,
     getRequestHeaders,
-} from '../../../../script.js';
+} from '../../../../../script.js';
 
 const MODULE_NAME = 'lorebook_expansion';
 const LOG = '[LBE]';
@@ -195,7 +195,8 @@ function setExpansionData(entry, data) {
 // ============================================================
 async function getWorldInfoModule() {
     try {
-        return await import('../../../world-info.js');
+        // ★ パスを1階層深く修正（modules/ 配下から scripts/ を参照）
+        return await import('../../../../world-info.js');
     } catch (e) {
         console.warn(LOG, 'world-info.js import 失敗:', e);
         return null;
