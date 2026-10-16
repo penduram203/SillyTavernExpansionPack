@@ -1,0 +1,632 @@
+// gic_lorebook.js
+// ロアブック駆動で画像生成プロンプトを切り替えるモジュール。
+
+import { eventSource, event_types, getRequestHeaders } from '../../../../../script.js';
+import { getContext } from '../../../../extensions.js';
+
+const MODULE_NAME = 'gic_lorebook_sd';
+const SETTINGS_VERSION = 2;
+
+const DEFAULT_SETTINGS = {
+    version: SETTINGS_VERSION,
+    enabled: true,
+    triggerOn: 'ai_reply',
+    quiet: false,
+    fallbackToLast: false,
+    verbose: true,
+};
+
+let settings = { ...DEFAULT_SETTINGS };
+
+// ===== 二重実行防止 =====
+let processInFlight = false;
+let lastProcessedMsgIdx = -1;      // 最後に処理したユーザーメッセージ idx
+let listenersInstalled = false;    // リスナー多重登録防止
+
+function loadSettings() {
+    const ctx = getContext();
+    const stored = ctx.extensionSettings[MODULE_NAME] || {};
+
+    if (!stored.version || stored.version < 2) {
+        console.log('[GIC-Lore] 設定を v2 に移行します（quiet: true → false）');
+        stored.quiet = false;
+        stored.version = SETTINGS_VERSION;
+        ctx.extensionSettings[MODULE_NAME] = stored;
+        ctx.saveSettingsDebounced();
+    }
+
+    settings = { ...DEFAULT_SETTINGS, ...stored };
+    if (settings.verbose) console.log('[GIC-Lore] 設定:', settings);
+}
+
+function saveSettings() {
+    const ctx = getContext();
+    ctx.extensionSettings[MODULE_NAME] = { ...settings };
+    ctx.saveSettingsDebounced();
+}
+
+// ===== 選択肢番号の抽出 =====
+const CHOICE_PATTERNS = [
+    /選択肢[「『"']?(\d{1,4})[」』"']?/,
+    /choice[^\d]{0,3}(\d{1,4})/i,
+    /(?:^|\s)(\d{3,4})(?:\s|$|[\u3000。、,.])/,
+    /(\d{3})/,
+];
+
+function extractChoiceNumber(text) {
+    if (!text || typeof text !== 'string') return null;
+    for (const pat of CHOICE_PATTERNS) {
+        const m = text.match(pat);
+        if (m) return String(m[1]).padStart(3, '0');
+    }
+    return null;
+}
+
+// ===== エントリからプロンプト抽出 =====
+const CONTENT_PROMPT_PATTERNS = [
+    /\[GIC_IMG:\s*([^\]]+)\]/i,
+    /\[IMG:\s*([^\]]+)\]/i,
+];
+
+function cleanPrompt(prompt) {
+    return String(prompt)
+        .replace(/,\s*$/, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+/**
+ * ★ LEX (Lorebook_Expansion) ストアから img_prompt を取得する。
+ *   優先順位:
+ *     1) extension_settings.lorebook_expansion.data[worldName][uid].img_prompt
+ *     2) entry.extensions.lorebook_expansion.img_prompt
+ *     3) entry.extensions.gic_prompt
+ */
+function getLexImgPrompt(worldName, uid, entry) {
+    // 1) 一次ストア (extension_settings)
+    try {
+        const ctx = getContext();
+        const lex = ctx?.extensionSettings?.lorebook_expansion;
+        if (lex && lex.data && worldName && uid !== null && uid !== undefined) {
+            const wd = lex.data[String(worldName)];
+            if (wd) {
+                const rec = wd[String(uid)];
+                if (rec && typeof rec.img_prompt === 'string' && rec.img_prompt.trim()) {
+                    return cleanPrompt(rec.img_prompt);
+                }
+            }
+        }
+    } catch (e) {
+        console.warn('[GIC-Lore] LEXストア読み込み失敗:', e);
+    }
+
+    // 2) entry.extensions.lorebook_expansion (二次 / ミラー)
+    if (entry && entry.extensions && typeof entry.extensions === 'object') {
+        const lexExt = entry.extensions.lorebook_expansion;
+        if (lexExt && typeof lexExt.img_prompt === 'string' && lexExt.img_prompt.trim()) {
+            return cleanPrompt(lexExt.img_prompt);
+        }
+    }
+
+    // 3) 旧形式
+    if (entry && entry.extensions && typeof entry.extensions === 'object') {
+        const ext = entry.extensions;
+        if (ext.gic_prompt && typeof ext.gic_prompt === 'string' && ext.gic_prompt.trim()) {
+            return cleanPrompt(ext.gic_prompt);
+        }
+    }
+
+    return null;
+}
+
+/**
+ * エントリからプロンプトを抽出する。
+ * worldName を渡すことで LEX ストアからの読み込みも行う。
+ */
+function extractPromptFromEntry(entry, worldName) {
+    if (!entry) return null;
+
+    // ★ 1) LEX (Lorebook_Expansion) を最優先
+    const lexPrompt = getLexImgPrompt(worldName, entry.uid, entry);
+    if (lexPrompt) return lexPrompt;
+
+    // 2) entry.prompt (旧形式)
+    if (entry.prompt && typeof entry.prompt === 'string') {
+        return cleanPrompt(entry.prompt);
+    }
+
+    // 3) entry.content 内の [GIC_IMG: ...] / [IMG: ...]
+    if (entry.content && typeof entry.content === 'string') {
+        for (const pat of CONTENT_PROMPT_PATTERNS) {
+            const m = entry.content.match(pat);
+            if (m && m[1]) return cleanPrompt(m[1]);
+        }
+    }
+
+    return null;
+}
+
+// ===== キャラに紐付くロアブック名 =====
+function getCharacterWorldInfoName() {
+    const ctx = getContext();
+    const char = ctx.characters && ctx.characterId !== undefined
+        ? ctx.characters[ctx.characterId]
+        : null;
+    if (!char) return null;
+
+    const fromExt = char.data?.extensions?.world;
+    if (fromExt && typeof fromExt === 'string') return fromExt;
+    const fromData = char.data?.world;
+    if (fromData && typeof fromData === 'string') return fromData;
+    return null;
+}
+
+// ===== ロアブックのエントリ読込 =====
+async function loadWorldInfoEntries(worldName) {
+    if (!worldName) return [];
+
+    try {
+        if (typeof window.world_info !== 'undefined' && window.world_info[worldName]) {
+            const wi = window.world_info[worldName];
+            if (wi.entries) return Object.values(wi.entries);
+        }
+    } catch (e) { /* ignore */ }
+
+    try {
+        const mod = await import('../../../world-info.js');
+        if (mod.world_info && mod.world_info[worldName] && mod.world_info[worldName].entries) {
+            return Object.values(mod.world_info[worldName].entries);
+        }
+    } catch (e) { /* ignore */ }
+
+    try {
+        const resp = await fetch('/api/worldinfo/get', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify({ name: worldName }),
+        });
+        if (resp.ok) {
+            const data = await resp.json();
+            if (data && data.entries) return Object.values(data.entries);
+        }
+    } catch (e) {
+        console.warn('[GIC-Lore] /api/worldinfo/get 失敗:', e);
+    }
+
+    return [];
+}
+
+// ===== key / keys 両対応 =====
+function getEntryKeys(entry) {
+    if (!entry) return [];
+    if (Array.isArray(entry.keys) && entry.keys.length) return entry.keys;
+    if (Array.isArray(entry.key) && entry.key.length) return entry.key;
+    if (typeof entry.keys === 'string' && entry.keys.trim()) return [entry.keys];
+    if (typeof entry.key === 'string' && entry.key.trim()) return [entry.key];
+    return [];
+}
+
+function findEntryByChoice(entries, choiceNum) {
+    if (!Array.isArray(entries) || !choiceNum) return null;
+
+    let partialMatch = null;
+
+    for (const entry of entries) {
+        if (!entry) continue;
+        const keys = getEntryKeys(entry);
+        for (const key of keys) {
+            const k = String(key).trim();
+            if (k === choiceNum) return entry;
+            if (!partialMatch && (k.startsWith(choiceNum) || k.includes(choiceNum))) {
+                partialMatch = entry;
+            }
+        }
+    }
+    return partialMatch;
+}
+
+// ===== メッセージ取得 =====
+function getLastUserMessageIndex() {
+    const ctx = getContext();
+    if (!ctx.chat || ctx.chat.length === 0) return -1;
+    for (let i = ctx.chat.length - 1; i >= 0; i--) {
+        const m = ctx.chat[i];
+        if (m.is_system) continue;
+        if (m.is_user) return i;
+    }
+    return -1;
+}
+
+function getLastUserMessageText() {
+    const idx = getLastUserMessageIndex();
+    if (idx < 0) return null;
+    const ctx = getContext();
+    return ctx.chat[idx]?.mes || '';
+}
+
+// ===== [GIC_IMG: ] 除去 =====
+const GIC_IMG_STRIP_REGEX = /\[GIC_IMG:[^\]]*\]\s*/gi;
+
+function stripGicImgFromMessage(messageId) {
+    const ctx = getContext();
+    if (!ctx.chat || messageId === undefined || messageId < 0) return;
+    const msg = ctx.chat[messageId];
+    if (!msg || msg.is_user || msg.is_system) return;
+    if (typeof msg.mes !== 'string') return;
+
+    GIC_IMG_STRIP_REGEX.lastIndex = 0;
+    if (!GIC_IMG_STRIP_REGEX.test(msg.mes)) return;
+    GIC_IMG_STRIP_REGEX.lastIndex = 0;
+
+    msg.mes = msg.mes.replace(GIC_IMG_STRIP_REGEX, '').replace(/\s+$/g, '');
+    if (settings.verbose) {
+        console.log('[GIC-Lore] AIメッセージから [GIC_IMG: ] を除去しました');
+    }
+}
+
+function stripGicImgFromDom() {
+    document.querySelectorAll('.mes_text').forEach(el => {
+        if (!el.textContent || !el.textContent.includes('[GIC_IMG:')) return;
+        const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+        const targets = [];
+        let node;
+        while ((node = walker.nextNode())) {
+            if (node.nodeValue && node.nodeValue.includes('[GIC_IMG:')) {
+                targets.push(node);
+            }
+        }
+        targets.forEach(n => {
+            n.nodeValue = n.nodeValue.replace(/\[GIC_IMG:[^\]]*\]\s*/gi, '');
+        });
+    });
+}
+
+// ===== /sd 実行 =====
+async function executeSd(prompt) {
+    const rawPrompt = cleanPrompt(prompt).replace(/[\r\n]+/g, ' ');
+    const escaped = rawPrompt.replace(/"/g, '\\"');
+    const cmd = settings.quiet
+        ? `/sd quiet=true "${escaped}"`
+        : `/sd "${escaped}"`;
+
+    console.log(`[GIC-Lore] /sd 実行試行: ${cmd.slice(0, 120)}${cmd.length > 120 ? '...' : ''}`);
+
+    try {
+        const mod = await import('../../../../script.js');
+        if (typeof mod.executeSlashCommandsWithOptions === 'function') {
+            await mod.executeSlashCommandsWithOptions(cmd);
+            console.log('[GIC-Lore] ✅ 方式1 成功');
+            return true;
+        }
+    } catch (e) {
+        console.warn('[GIC-Lore] 方式1 失敗:', e?.message || e);
+    }
+
+    try {
+        if (typeof window.executeSlashCommandsWithOptions === 'function') {
+            await window.executeSlashCommandsWithOptions(cmd);
+            console.log('[GIC-Lore] ✅ 方式2 成功');
+            return true;
+        }
+    } catch (e) {
+        console.warn('[GIC-Lore] 方式2 失敗:', e?.message || e);
+    }
+
+    try {
+        const { SlashCommandParser } = await import('../../../slash-commands/SlashCommandParser.js');
+        const sdCmd = SlashCommandParser?.commands?.['sd'];
+        if (sdCmd && typeof sdCmd.callback === 'function') {
+            const namedArgs = settings.quiet ? { quiet: 'true' } : {};
+            const unnamedArgs = rawPrompt;
+            try {
+                await sdCmd.callback(namedArgs, unnamedArgs, true);
+            } catch (e1) {
+                try {
+                    await sdCmd.callback(unnamedArgs, namedArgs);
+                } catch (e2) {
+                    await sdCmd.callback({ _scope: null, _abortController: null }, unnamedArgs, true);
+                }
+            }
+            console.log('[GIC-Lore] ✅ 方式3 成功');
+            return true;
+        }
+    } catch (e) {
+        console.warn('[GIC-Lore] 方式3 失敗:', e?.message || e);
+    }
+
+    console.error('[GIC-Lore] ❌ /sd を実行する全ての方式が失敗しました');
+    return false;
+}
+
+// ===== メイン処理 =====
+// force=true のときは重複チェックをバイパス（手動実行用）
+async function processChoice(force = false) {
+    if (!settings.enabled) return;
+
+    if (processInFlight) {
+        if (settings.verbose) console.log('[GIC-Lore] 処理中のため多重呼び出しをスキップ');
+        return;
+    }
+
+    const msgIdx = getLastUserMessageIndex();
+    if (msgIdx < 0) {
+        if (settings.verbose) console.log('[GIC-Lore] ユーザーメッセージが見つかりません');
+        return;
+    }
+
+    // ★ 同じユーザーメッセージには時間制限なく1回だけ処理（force時は除く）
+    if (!force && msgIdx === lastProcessedMsgIdx) {
+        if (settings.verbose) {
+            console.log(`[GIC-Lore] 同一メッセージ (idx=${msgIdx}) への重複呼び出しをスキップ`);
+        }
+        return;
+    }
+
+    // ★ 処理開始と同時にマーク（失敗時の再試行も防ぐ）
+    lastProcessedMsgIdx = msgIdx;
+    processInFlight = true;
+
+    try {
+        const userText = getLastUserMessageText();
+        const choiceNum = extractChoiceNumber(userText);
+
+        if (!choiceNum) {
+            if (settings.verbose) console.log('[GIC-Lore] 選択肢番号が検出できませんでした');
+            if (settings.fallbackToLast) {
+                console.log('[GIC-Lore] /sd last にフォールバック');
+                try {
+                    const mod = await import('../../../../script.js');
+                    if (typeof mod.executeSlashCommandsWithOptions === 'function') {
+                        const cmd = settings.quiet ? '/sd quiet=true' : '/sd';
+                        await mod.executeSlashCommandsWithOptions(cmd);
+                    }
+                } catch (e) {
+                    console.error('[GIC-Lore] fallback /sd エラー:', e);
+                }
+            }
+            return;
+        }
+        if (settings.verbose) console.log(`[GIC-Lore] 選択肢番号: ${choiceNum}`);
+
+        const worldName = getCharacterWorldInfoName();
+        if (!worldName) {
+            console.warn('[GIC-Lore] キャラクターにロアブックが紐付いていません');
+            return;
+        }
+        if (settings.verbose) console.log(`[GIC-Lore] ロアブック: ${worldName}`);
+
+        const entries = await loadWorldInfoEntries(worldName);
+        if (!entries.length) {
+            console.warn(`[GIC-Lore] ロアブック "${worldName}" にエントリが見つかりません`);
+            return;
+        }
+        if (settings.verbose) console.log(`[GIC-Lore] エントリ数: ${entries.length}`);
+
+        const entry = findEntryByChoice(entries, choiceNum);
+        if (!entry) {
+            console.warn(`[GIC-Lore] 選択肢 ${choiceNum} に対応するエントリが見つかりません`);
+            if (settings.verbose) {
+                entries.forEach(e => {
+                    console.log(`  uid=${e.uid} comment="${e.comment}" key=${JSON.stringify(e.key)}`);
+                });
+            }
+            return;
+        }
+        if (settings.verbose) {
+            console.log(`[GIC-Lore] エントリ採用: uid=${entry.uid}, comment="${entry.comment || ''}"`);
+        }
+
+        // ★ worldName を渡して LEX ストアからも読み込む
+        const prompt = extractPromptFromEntry(entry, worldName);
+        if (!prompt) {
+            console.warn('[GIC-Lore] プロンプトが抽出できませんでした');
+            if (settings.verbose) {
+                // デバッグ: LEX ストアの中身を確認
+                try {
+                    const ctx = getContext();
+                    const lex = ctx?.extensionSettings?.lorebook_expansion?.data;
+                    if (lex && lex[worldName]) {
+                        const uid = String(entry.uid);
+                        const rec = lex[worldName][uid];
+                        console.log(`[GIC-Lore] LEXストア[${worldName}][${uid}] =`, rec);
+                    } else {
+                        console.log(`[GIC-Lore] LEXストアに ${worldName} のエントリがありません`);
+                    }
+                } catch (e) { /* ignore */ }
+            }
+            return;
+        }
+
+        await executeSd(prompt);
+    } catch (e) {
+        console.error('[GIC-Lore] processChoice エラー:', e);
+    } finally {
+        processInFlight = false;
+    }
+}
+
+// ===== スラッシュコマンド登録 =====
+async function registerSlashCommand() {
+    let Parser = null;
+    let Command = null;
+
+    try {
+        const parserMod = await import('../../../slash-commands/SlashCommandParser.js');
+        Parser = parserMod.SlashCommandParser || parserMod.default;
+    } catch (e) {
+        console.warn('[GIC-Lore] SlashCommandParser import 失敗:', e);
+    }
+    try {
+        const cmdMod = await import('../../../slash-commands/SlashCommand.js');
+        Command = cmdMod.SlashCommand;
+    } catch (e) {
+        console.warn('[GIC-Lore] SlashCommand import 失敗:', e);
+    }
+
+    if (!Parser || typeof Parser.addCommandObject !== 'function') {
+        console.error('[GIC-Lore] SlashCommandParser が利用できません');
+        return;
+    }
+
+    // /gic-sd は手動実行なので force=true
+    const callbackFn = async () => {
+        try { await processChoice(true); } catch (e) { console.error('[GIC-Lore] /gic-sd エラー:', e); }
+        return '';
+    };
+
+    const testCallbackFn = async () => {
+        try {
+            console.group('[GIC-Lore] === 診断 ===');
+            console.log('1) 直前ユーザーメッセージ idx:', getLastUserMessageIndex());
+            console.log('   内容:', JSON.stringify(getLastUserMessageText()));
+            const cn = extractChoiceNumber(getLastUserMessageText());
+            console.log('2) 抽出選択肢番号:', cn);
+            const wn = getCharacterWorldInfoName();
+            console.log('3) ロアブック名:', wn);
+            if (wn) {
+                const entries = await loadWorldInfoEntries(wn);
+                console.log(`4) エントリ数: ${entries.length}`);
+                entries.forEach(e => {
+                    console.log(`   uid=${e.uid} comment="${e.comment}" key=${JSON.stringify(e.key)}`);
+                });
+                if (cn) {
+                    const found = findEntryByChoice(entries, cn);
+                    console.log('5) 一致エントリ:', found ? `uid=${found.uid}` : 'なし');
+                    if (found) {
+                        console.log('6) 抽出プロンプト:', extractPromptFromEntry(found, wn));
+                    }
+                }
+                // ★ LEX ストアのダンプ
+                try {
+                    const ctx = getContext();
+                    const lex = ctx?.extensionSettings?.lorebook_expansion?.data;
+                    if (lex && lex[wn]) {
+                        console.log(`7) LEXストア[${wn}]:`);
+                        Object.entries(lex[wn]).forEach(([uid, rec]) => {
+                            console.log(`   uid=${uid}:`, rec);
+                        });
+                    } else {
+                        console.log(`7) LEXストアに ${wn} のエントリがありません`);
+                    }
+                } catch (e) {
+                    console.log('7) LEXストア読み込みエラー:', e);
+                }
+            }
+            console.log('8) 設定:', window.GicLorebook?.getSettings?.() || '(non-public)');
+            console.groupEnd();
+        } catch (e) {
+            console.error('[GIC-Lore] 診断エラー:', e);
+        }
+        return '';
+    };
+
+    if (Command && typeof Command.fromProps === 'function') {
+        try {
+            Parser.addCommandObject(Command.fromProps({
+                name: 'gic-sd',
+                callback: callbackFn,
+                helpString: 'ロアブックから選択肢に対応したプロンプトを読み込み、画像を生成します。',
+                returns: '',
+                namedArgumentList: [],
+                unnamedArgumentList: [],
+            }));
+
+            Parser.addCommandObject(Command.fromProps({
+                name: 'gic-test',
+                callback: testCallbackFn,
+                helpString: 'ロアブック連携の診断情報を出力します。',
+                returns: '',
+                namedArgumentList: [],
+                unnamedArgumentList: [],
+            }));
+            console.log('[GIC-Lore] ✅ /gic-sd, /gic-test 登録完了 (fromProps)');
+            return;
+        } catch (e) {
+            console.warn('[GIC-Lore] fromProps 登録失敗:', e);
+        }
+    }
+
+    try {
+        Parser.addCommandObject({
+            name: 'gic-sd',
+            callback: callbackFn,
+            helpString: 'ロアブックから選択肢に対応したプロンプトを読み込み、画像を生成します。',
+        });
+        console.log('[GIC-Lore] ✅ /gic-sd 登録完了 (legacy)');
+    } catch (e) {
+        console.error('[GIC-Lore] 登録失敗:', e);
+    }
+}
+
+// ===== イベント登録 =====
+function setupListeners() {
+    if (listenersInstalled) {
+        console.log('[GIC-Lore] リスナーは既に登録済みのためスキップ');
+        return;
+    }
+    if (!eventSource || !event_types) return;
+    listenersInstalled = true;
+
+    const safeOn = (evt, handler) => { if (evt && eventSource.on) eventSource.on(evt, handler); };
+
+    safeOn(event_types.MESSAGE_RECEIVED, (messageId) => {
+        try { stripGicImgFromMessage(messageId); } catch (e) { console.error(e); }
+    });
+
+    if (settings.triggerOn === 'ai_reply') {
+        safeOn(event_types.CHARACTER_MESSAGE_RENDERED, () => {
+            setTimeout(() => {
+                try { stripGicImgFromDom(); } catch (e) { /* ignore */ }
+                processChoice(false).catch(e => console.error('[GIC-Lore] 処理エラー:', e));
+            }, 100);
+        });
+    } else if (settings.triggerOn === 'user_send') {
+        safeOn(event_types.USER_MESSAGE_RENDERED, () => {
+            setTimeout(() => {
+                processChoice(false).catch(e => console.error('[GIC-Lore] 処理エラー:', e));
+            }, 100);
+        });
+    }
+
+    console.log(`[GIC-Lore] イベント登録完了 (triggerOn=${settings.triggerOn}, quiet=${settings.quiet})`);
+}
+
+// ===== 初期化 =====
+async function initialize() {
+    console.log('[GIC-Lore] 初期化開始');
+    loadSettings();
+    await registerSlashCommand();
+    setupListeners();
+    try { stripGicImgFromDom(); } catch (e) { /* ignore */ }
+    console.log('[GIC-Lore] 初期化完了');
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initialize);
+} else {
+    initialize();
+}
+
+// ===== 公開 API =====
+window.GicLorebook = {
+    getSettings: () => ({ ...settings }),
+    setSettings: (patch) => {
+        settings = { ...settings, ...patch };
+        saveSettings();
+        console.log('[GIC-Lore] 設定更新:', settings);
+    },
+    processChoice,
+    extractChoiceNumber,
+    extractPromptFromEntry,
+    getLexImgPrompt,
+    loadWorldInfoEntries,
+    findEntryByChoice,
+    getEntryKeys,
+    stripGicImgFromDom,
+    executeSd,
+    resetDedup: () => {
+        lastProcessedMsgIdx = -1;
+        console.log('[GIC-Lore] 重複防止状態をリセット');
+    },
+};
+console.log('[GIC-Lore] window.GicLorebook にAPIを公開しました');
