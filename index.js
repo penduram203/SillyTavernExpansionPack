@@ -23,6 +23,6 @@ import './modules/text-styling.js';
 // ---- Lorebook Expansion ----
 import './modules/Lorebook_Expansion.js';
 
-// ---- 今後追加する拡張はここに追記していく ----
-// import './modules/gic.js';
-// import './modules/gic_lorebook.js';
+// ---- Generate Image Controller ----
+// ★ gic.js が gic_lorebook.js を import するため、こちらからは gic.js のみ import すれば OK
+import './modules/gic.js';
