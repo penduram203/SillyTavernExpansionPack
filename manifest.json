@@ -1,0 +1,11 @@
+{
+    "display_name": "    SillyTavernExpansionPack",
+    "loading_order": 100,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "all.css",
+    "author": "STKK",
+    "version": "1.0.0",
+    "homePage": "https://github.com/penduram203/SillyTavernExpansionPack"
+}
