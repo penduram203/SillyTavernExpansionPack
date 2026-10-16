@@ -21,5 +21,5 @@
 /* ---- Lorebook Expansion ---- */
 @import url('./styles/Lorebook_Expansion.css');
 
-/* ---- 今後追加する拡張はここに追記 ---- */
-/* @import url('./styles/gic.css'); */
+/* ---- Generate Image Controller ---- */
+@import url('./styles/gic.css');
