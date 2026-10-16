@@ -1,0 +1,1026 @@
+/* 新規追加ボタンスタイル */
+#stj_export_button {
+  width: 120px;
+  height: 40px;
+  background-color: #4a5568;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+  transition: background-color 0.2s;
+  font-weight: bold;
+  box-sizing: border-box;
+}
+#stj_export_button:hover {
+  background-color: #2d3748;
+}
+
+/* モーダルウィンドウスタイル */
+#stj_export_modal {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: max(calc(100vw + 80px), 1640px);
+  height: 100vh;
+  background-color: #2d3748;
+  border: 1px solid #4a5568;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+  z-index: 10001;
+  overflow-y: auto;
+  overflow-x: auto;
+  box-sizing: border-box;
+}
+
+.stj-input-group {
+  margin-bottom: 15px;
+  position: relative;
+}
+.stj-input-group label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 14px;
+  color: #e2e8f0;
+  font-weight: 500;
+}
+.stj-input-group input, .stj-input-group select {
+  width: 100%;
+  padding: 8px;
+  background-color: #4a5568;
+  border: 1px solid #718096;
+  border-radius: 4px;
+  color: white;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+.stj-input-group select {
+  cursor: pointer;
+}
+
+/* ===== 拡張子入力ボタン ===== */
+.stj-extension-buttons {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 0;
+  z-index: 40;
+  flex-direction: column;
+  gap: 0;
+  background-color: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  box-sizing: border-box;
+  pointer-events: auto;
+}
+.stj-extension-buttons.stj-visible {
+  display: flex;
+}
+.stj-ext-row {
+  display: flex;
+  gap: 0;
+}
+.stj-ext-row .stj-ext-btn {
+  box-sizing: border-box;
+  flex: 1 1 0;
+  height: 32px;
+  min-width: 0;
+  padding: 0;
+  font-size: 14px;
+  font-weight: bold;
+  background-color: #4a5568;
+  color: #ffffff;
+  border: 1px solid #718096;
+  border-radius: 0;
+  cursor: pointer;
+  white-space: nowrap;
+  text-align: center;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  -moz-user-select: none;
+  -webkit-user-select: none;
+}
+.stj-ext-row .stj-ext-btn[data-ext=".jpg,"] { flex-grow: 0.8; }
+.stj-ext-row .stj-ext-btn[data-ext=".webp,"] { flex-grow: 1.2; }
+.stj-ext-row .stj-ext-btn[data-ext=".avif,"] { flex-grow: 0.8; }
+.stj-ext-row .stj-ext-btn[data-ext=".gif,"] { flex-grow: 0.7; }
+.stj-ext-row .stj-ext-btn[data-ext=".webm,"] { flex-grow: 1.3; }
+.stj-ext-row .stj-ext-btn:hover {
+  background-color: #718096;
+}
+.stj-ext-row .stj-ext-btn:active {
+  background-color: #2d3748;
+}
+
+/* ===== ボタングループ ===== */
+.stj-button-group {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 20px;
+  padding: 15px 0;
+}
+.stj-button-group button {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+  font-size: 14px;
+  margin-right: 8px;
+}
+.stj-button-group button:last-child {
+  margin-right: 0;
+}
+.stj-button-group > div {
+  display: flex;
+  align-items: center;
+}
+#stj_export_json {
+  background-color: #48bb78;
+  color: white;
+  margin-left: 0 !important;
+}
+#stj_cancel_export {
+  background-color: #e53e3e;
+  color: white;
+}
+#stj_add_keyword {
+  background-color: #4299e1;
+  color: white;
+}
+#stj_bulk_delete {
+  background-color: #dd6b20;
+  color: white;
+}
+#stj_bulk_delete:hover {
+  background-color: #c05621;
+}
+#stj_delete_cancel {
+  background-color: #4a5568;
+  color: white;
+}
+#stj_delete_cancel:hover {
+  background-color: #2d3748;
+}
+#stj_delete_execute {
+  background-color: #e53e3e;
+  color: white;
+}
+#stj_delete_execute:hover {
+  background-color: #c53030;
+}
+
+/* ===== 無効化されたボタン ===== */
+#stj_export_modal button:disabled {
+  opacity: 0.4 !important;
+  cursor: not-allowed !important;
+  pointer-events: none !important;
+}
+
+/* ===== リアルタイムキーワード反応テスト セクション ===== */
+#stj_test_section {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: #1e1e1e;
+  border: 1px solid #555;
+  padding: 6px 10px 6px 10px;
+  margin-bottom: 12px;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+}
+
+/* ヘッダー行：左から「テスト」→「キャラ名」→「ヘルプ」の順で左詰め */
+#stj_test_section .stj-test-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 4px 0;
+  flex-wrap: wrap;
+  line-height: 1.2;
+}
+#stj_test_section .stj-test-header > label {
+  font-weight: bold;
+  color: #64b5f6;
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.2;
+}
+
+/* キャラクター名（左詰め） */
+#stj_char_name_display {
+  font-size: 18px;
+  font-weight: 900;
+  color: #ffffff;
+  letter-spacing: 0.5px;
+  line-height: 1.2;
+  text-shadow:
+    1px 0 0 #000000,
+    -1px 0 0 #000000,
+    0 1px 0 #000000,
+    0 -1px 0 #000000,
+    1px 1px 0 #000000,
+    -1px 1px 0 #000000,
+    1px -1px 0 #000000,
+    -1px -1px 0 #000000;
+  white-space: nowrap;
+}
+
+/* ヘルプボタン（細めの赤枠 + 薄い赤の発光） */
+#stj_test_section .stj-help-btn {
+  padding: 3px 14px;
+  font-size: 14px;
+  font-weight: bold;
+  background-color: #4a5568;
+  color: #ffffff;
+  border: 2px solid #ff9696;       /* ★ 4px → 2px：細く、#ff2d2d → #ff9696：薄い赤 */
+  border-radius: 6px;
+  cursor: pointer;
+  line-height: 1.2;
+  white-space: nowrap;
+  user-select: none;
+  -moz-user-select: none;
+  -webkit-user-select: none;
+  box-shadow:
+    0 0 6px rgba(255, 150, 150, 0.45),
+    0 0 12px rgba(255, 45, 45, 0.2),
+    inset 0 0 3px rgba(255, 150, 150, 0.25);
+  transition: all 0.15s ease;
+}
+#stj_test_section .stj-help-btn:hover {
+  background-color: #718096;
+  border-color: #ffb0b0;
+  box-shadow:
+    0 0 10px rgba(255, 176, 176, 0.6),
+    0 0 18px rgba(255, 100, 100, 0.35),
+    inset 0 0 4px rgba(255, 176, 176, 0.35);
+}
+#stj_test_section .stj-help-btn:active {
+  background-color: #2d3748;
+  border-color: #e06060;
+  box-shadow:
+    0 0 4px rgba(224, 96, 96, 0.5),
+    inset 0 0 6px rgba(255, 150, 150, 0.35);
+}
+
+/* ===== 条件分岐の詳細ガイド（ヘルプで表示） ===== */
+#stj_test_section .stj-syntax-guide {
+  display: none;
+  margin: 0 0 8px 0;
+  padding: 12px 16px;
+  background-color: rgba(100, 181, 246, 0.08);
+  border-left: 4px solid #64b5f6;
+  border-radius: 6px;
+  color: #e2e8f0;
+  max-height: 55vh;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+#stj_test_section .stj-syntax-guide.stj-help-visible {
+  display: block;
+}
+
+/* セクション区切り */
+.stj-guide-section {
+  margin-bottom: 16px;
+}
+.stj-guide-section:last-child {
+  margin-bottom: 0;
+}
+
+.stj-guide-section-title {
+  font-size: 18px;
+  font-weight: bold;
+  color: #64b5f6;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed rgba(100, 181, 246, 0.4);
+}
+
+/* リスト */
+.stj-guide-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.stj-guide-list > li {
+  margin-bottom: 12px;
+  padding-left: 2px;
+  line-height: 1.6;
+  font-size: 16px;
+}
+.stj-guide-list > li:last-child {
+  margin-bottom: 0;
+}
+
+/* 演算子バッジ */
+.stj-guide-list .stj-op {
+  display: inline-block;
+  background-color: rgba(100, 181, 246, 0.25);
+  color: #90cdf4;
+  padding: 2px 10px;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 16px;
+  font-weight: bold;
+  margin-right: 6px;
+  border: 1px solid rgba(100, 181, 246, 0.4);
+}
+
+.stj-guide-list b {
+  color: #aed581;
+  font-weight: bold;
+  font-size: 16px;
+}
+
+.stj-guide-list code {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 15px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+/* 例文ブロック */
+.stj-op-ex {
+  margin-top: 5px;
+  margin-left: 10px;
+  padding: 6px 12px;
+  background-color: rgba(0, 0, 0, 0.3);
+  border-left: 3px solid rgba(174, 213, 129, 0.6);
+  border-radius: 3px;
+  color: #cbd5e0;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.stj-op-ex code {
+  font-size: 15px;
+  background-color: rgba(100, 181, 246, 0.15);
+  color: #90cdf4;
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid rgba(100, 181, 246, 0.3);
+}
+
+/* テスト入力欄 */
+#stj_test_input {
+  width: 100%;
+  height: 28px;
+  background: #1e1e1e;
+  color: #fff;
+  border: 1px solid #444;
+  border-radius: 4px;
+  padding: 3px 8px;
+  box-sizing: border-box;
+  resize: vertical;
+  font-size: 15px;
+  line-height: 1.2;
+}
+#stj_test_input::placeholder {
+  font-size: 14px;
+  color: #888;
+}
+
+/* 判定結果 */
+#stj_test_result {
+  margin-top: 4px;
+  font-size: 15px;
+  font-weight: bold;
+  color: #aed581;
+  line-height: 1.3;
+}
+
+/* ===== 上部エリア（特殊セル + 説明パネル） ===== */
+.stj-top-section {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 25px;
+  align-items: stretch;
+}
+.stj-special-container {
+  display: flex;
+  gap: 12px;
+  flex: 0 0 auto;
+  justify-content: flex-start;
+  align-items: stretch;
+}
+.stj-info-panel {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 16px 22px;
+  background-color: #1a202c;
+  border-radius: 8px;
+  color: #e2e8f0;
+  box-sizing: border-box;
+  align-self: stretch;
+  min-height: 290px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.stj-info-note {
+  font-size: 15px;
+  color: #fbbf24;
+  margin-bottom: 14px;
+  font-weight: bold;
+  line-height: 1.5;
+}
+.stj-info-guide h4 {
+  margin: 0 0 10px 0;
+  font-size: 17px;
+  color: #64b5f6;
+  font-weight: bold;
+  line-height: 1.3;
+}
+.stj-info-guide ul {
+  margin: 0;
+  padding-left: 22px;
+  font-size: 15px;
+  line-height: 1.7;
+}
+.stj-info-guide li {
+  margin-bottom: 4px;
+}
+.stj-info-guide b {
+  color: #aed581;
+}
+
+/* ===== キーワードセル ===== */
+.stj-keyword-item {
+  position: relative;
+  width: 260px;
+  height: 260px;
+  padding: 0;
+  box-sizing: border-box;
+  background-color: #1a202c;
+  border-radius: 8px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+  counter-increment: stj-cell-num;
+  user-select: none;
+  -moz-user-select: none;
+  -webkit-user-select: none;
+}
+.stj-keyword-item::after {
+  content: counter(stj-cell-num);
+  display: block;
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  font-size: 34px;
+  font-weight: 900;
+  line-height: 1;
+  color: #ffffff;
+  text-shadow:
+    2px 0 0 #000000,
+    -2px 0 0 #000000,
+    0 2px 0 #000000,
+    0 -2px 0 #000000,
+    2px 2px 0 #000000,
+    -2px 2px 0 #000000,
+    2px -2px 0 #000000,
+    -2px -2px 0 #000000;
+  z-index: 30;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ===== キーワードグリッド（6列） ===== */
+.stj-grid-container {
+  display: grid;
+  grid-template-columns: repeat(6, 260px);
+  column-gap: 0;
+  row-gap: 8px;
+  width: max-content;
+  min-width: 1560px;
+  margin: 0 auto;
+  counter-reset: stj-cell-num;
+}
+.stj-keyword-width { flex: 1; min-width: 0; }
+.stj-image-width { flex: 1; min-width: 0; }
+.stj-extension-width { flex: 1; }
+
+/* ===== ❌削除ボタン ===== */
+.stj-delete-row {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  background-color: #e53e3e;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  z-index: 15;
+}
+
+/* セーブボタンのスタイル */
+#stj_save_data {
+  background-color: #4299e1;
+  color: white;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+  font-size: 14px;
+}
+#stj_save_data:hover { background-color: #3182ce; }
+
+/* ===== プレビュー枠 ===== */
+.stj-image-preview {
+  width: 260px;
+  height: 260px;
+  background-color: #1a202c;
+  border: 2px dashed #0d1117;
+  border-radius: 8px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+  position: relative;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  outline: none;
+  background-image: none;
+  filter: none;
+  box-shadow: none;
+  mix-blend-mode: normal;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  user-select: none;
+  -moz-user-select: none;
+  -webkit-user-select: none;
+}
+.stj-image-preview img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  -webkit-user-drag: none;
+  user-select: none;
+  pointer-events: none;
+}
+.stj-image-preview video {
+  -webkit-user-drag: none;
+  user-select: none;
+  pointer-events: none;
+}
+.stj-preview-text {
+  color: #a0aec0;
+  font-size: 14px;
+  text-align: center;
+  padding: 10px;
+  width: 100%;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.stj-preview-error {
+  color: #e53e3e !important;
+  font-weight: bold;
+}
+
+/* ===== カーソル ===== */
+.stj-keyword-item:not(.editing) .stj-image-preview { cursor: grab; }
+.stj-keyword-item:not(.editing) .stj-image-preview:active { cursor: grabbing; }
+.stj-keyword-item.editing .stj-image-preview::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  z-index: 5;
+  border-radius: 8px;
+  pointer-events: none;
+}
+
+/* ===== 一括削除モードのカーソル ===== */
+#stj_export_modal.stj-bulk-delete-mode .stj-keyword-item:not(.editing) .stj-image-preview { cursor: pointer; }
+#stj_export_modal.stj-bulk-delete-mode .stj-keyword-item:not(.editing) .stj-image-preview:active { cursor: pointer; }
+
+/* ===== ドラッグ中のソースセル ===== */
+.stj-keyword-item.stj-dragging .stj-image-preview {
+  border-color: #ff8c00;
+  border-style: solid;
+  box-shadow: 0 0 16px rgba(255, 140, 0, 0.85), inset 0 0 16px rgba(255, 140, 0, 0.4);
+  opacity: 0.35;
+}
+
+/* ===== ドロップ先のセル ===== */
+.stj-keyword-item.stj-drag-over {
+  outline: 4px solid #ff2d2d;
+  outline-offset: -4px;
+  box-shadow: 0 0 0 2px rgba(255, 45, 45, 0.4), 0 0 20px rgba(255, 45, 45, 0.7);
+  border-radius: 8px;
+}
+.stj-keyword-item.stj-drag-over .stj-image-preview {
+  border-color: #ff2d2d;
+  border-style: solid;
+}
+
+/* ===== 一括削除モードで削除候補のセル ===== */
+.stj-keyword-item.stj-marked-for-delete {
+  outline: 4px solid #ff2d2d;
+  outline-offset: -4px;
+  box-shadow: 0 0 0 2px rgba(255, 45, 45, 0.4), 0 0 20px rgba(255, 45, 45, 0.7);
+  border-radius: 8px;
+}
+.stj-keyword-item.stj-marked-for-delete .stj-image-preview {
+  border-color: #ff2d2d;
+  border-style: solid;
+}
+.stj-keyword-item.stj-marked-for-delete .stj-image-preview::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 45, 45, 0.2);
+  border-radius: 8px;
+  pointer-events: none;
+  z-index: 4;
+}
+
+/* ===== ドラッグ中はテスト枠を無視 ===== */
+#stj_export_modal.stj-drag-active #stj_test_section {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* ===== 一括削除モード時はテスト枠を完全非表示 ===== */
+#stj_export_modal.stj-bulk-delete-mode #stj_test_section {
+  display: none;
+}
+
+/* ===== 入力エリア ===== */
+.stj-inputs-container {
+  display: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 6px 10px 88px 10px;
+  padding-top: 48px;
+  box-sizing: border-box;
+  flex-direction: column;
+  gap: 6px;
+  justify-content: center;
+  z-index: 10;
+  overflow: visible;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.stj-inputs-container::-webkit-scrollbar { display: none; width: 0; height: 0; }
+.stj-keyword-item.editing .stj-inputs-container { display: flex; }
+.stj-inputs-container .stj-input-group { margin-bottom: 0; }
+.stj-inputs-container .stj-input-group label {
+  font-size: 14px;
+  margin-bottom: 3px;
+  font-weight: bold;
+  color: #e2e8f0;
+}
+.stj-inputs-container .stj-input-group input {
+  padding: 7px 9px;
+  font-size: 14px;
+}
+.stj-inputs-container .stj-input-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 0;
+  min-width: 0;
+}
+
+/* ===== セル上部アクション行（決定・キャンセル） ===== */
+.stj-inputs-container .stj-cell-action-row {
+  position: absolute;
+  top: 2px;
+  left: 38px;
+  display: flex;
+  gap: 0;
+  align-items: center;
+  z-index: 20;
+  margin: 0;
+  padding: 0;
+}
+.stj-inputs-container .stj-cell-action-row .stj-apply-row,
+.stj-inputs-container .stj-cell-action-row .stj-cancel-row {
+  margin: 0 !important;
+  padding: 0 7px !important;
+  height: 36px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px !important;
+  font-weight: bold;
+  white-space: nowrap;
+  cursor: pointer;
+  background-color: #e0e0e0;
+  color: #000000;
+  border: 1px solid #aaa;
+  border-radius: 0;
+  line-height: 1;
+}
+.stj-inputs-container .stj-cell-action-row .stj-cancel-row {
+  border-radius: 0 4px 4px 0;
+}
+.stj-inputs-container .stj-cell-action-row .stj-apply-row:hover,
+.stj-inputs-container .stj-cell-action-row .stj-cancel-row:hover {
+  background-color: #c8c8c8;
+}
+
+/* ===== 編集モード時は左右の切り替えボタンを隠す ===== */
+.stj-keyword-item.editing .stj-image-preview button {
+  z-index: 4 !important;
+  pointer-events: none !important;
+  opacity: 0;
+}
+
+/* ===== デフォルト/サムネイル セル ===== */
+.stj-special-item {
+  display: flex;
+  padding: 10px 8px;
+  background-color: #1a202c;
+  border-radius: 8px;
+  gap: 6px;
+  align-items: center;
+  min-height: 290px;
+  box-sizing: border-box;
+  position: relative;
+}
+.stj-special-preview { flex-shrink: 0; }
+.stj-special-inputs {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  justify-content: center;
+  height: 100%;
+  padding-top: 40px;
+  box-sizing: border-box;
+}
+.stj-special-item:nth-child(1) .stj-special-inputs::before,
+.stj-special-item:nth-child(2) .stj-special-inputs::before {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  text-align: left;
+  font-size: 24px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  color: #ffffff;
+  text-shadow:
+    2px 0 0 #000000,
+    -2px 0 0 #000000,
+    0 2px 0 #000000,
+    0 -2px 0 #000000,
+    2px 2px 0 #000000,
+    -2px 2px 0 #000000,
+    2px -2px 0 #000000,
+    -2px -2px 0 #000000;
+  z-index: 6;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.stj-special-item:nth-child(1) .stj-special-inputs::before { content: "デフォルト表示"; }
+.stj-special-item:nth-child(2) .stj-special-inputs::before { content: "サムネイル表示"; }
+
+#stj_custom_alert {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.9);
+  transform-origin: center;
+  padding: 30px 60px;
+  background-color: rgba(0, 0, 0, 0.85);
+  color: white;
+  font-size: 32px;
+  font-weight: bold;
+  border-radius: 12px;
+  z-index: 10002;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  transition: all 0.3s ease-out;
+  pointer-events: none;
+  text-align: center;
+  white-space: nowrap;
+  border: 3px solid #48bb78;
+  text-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+}
+@keyframes pulse {
+  0% { transform: translate(-50%, -50%) scale(1); }
+  50% { transform: translate(-50%, -50%) scale(1.05); }
+  100% { transform: translate(-50%, -50%) scale(1); }
+}
+#stj_custom_alert { animation: pulse 0.5s ease-in-out 0.3s; }
+
+.stj-keyword-input, .stj-image-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 14px;
+  padding: 8px;
+}
+
+.stj-image-preview button {
+  font-size: 16px;
+  font-weight: bold;
+  width: 30px;
+  height: 30px;
+  z-index: 25;
+}
+
+/* ===== 削除確認ダイアログ ===== */
+#stj_confirm_dialog {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  z-index: 10050;
+  display: none;
+  justify-content: center;
+  align-items: center;
+}
+#stj_confirm_dialog .stj-confirm-box {
+  background-color: #2d3748;
+  border: 2px solid #4a5568;
+  border-radius: 12px;
+  padding: 30px 40px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+  text-align: center;
+  min-width: 320px;
+}
+#stj_confirm_dialog .stj-confirm-message {
+  font-size: 20px;
+  font-weight: bold;
+  color: #ffffff;
+  margin-bottom: 25px;
+  white-space: nowrap;
+}
+#stj_confirm_dialog .stj-confirm-buttons {
+  display: flex;
+  gap: 15px;
+  justify-content: center;
+}
+#stj_confirm_dialog .stj-confirm-buttons button {
+  padding: 10px 30px;
+  border: none;
+  border-radius: 6px;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+  min-width: 90px;
+}
+#stj_confirm_dialog .stj-confirm-yes { background-color: #e53e3e; color: #ffffff; }
+#stj_confirm_dialog .stj-confirm-yes:hover { background-color: #c53030; }
+#stj_confirm_dialog .stj-confirm-no { background-color: #4a5568; color: #ffffff; }
+#stj_confirm_dialog .stj-confirm-no:hover { background-color: #2d3748; }
+
+/* ===== メッセージダイアログ ===== */
+#stj_message_dialog {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: rgba(0, 0, 0, 0.4);
+  z-index: 10060;
+  display: none;
+  justify-content: center;
+  align-items: center;
+  pointer-events: auto;
+}
+#stj_message_dialog .stj-message-box {
+  background-color: #2d3748;
+  border: 2px solid #48bb78;
+  border-radius: 12px;
+  padding: 30px 50px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7), 0 0 30px rgba(72, 187, 120, 0.5);
+  text-align: center;
+  min-width: 320px;
+}
+#stj_message_dialog .stj-message-text {
+  font-size: 20px;
+  font-weight: bold;
+  color: #ffffff;
+  white-space: nowrap;
+}
+
+/* ===== ドラッグゴースト ===== */
+.stj-drag-ghost {
+  position: fixed;
+  top: 0; left: 0;
+  width: 260px; height: 260px;
+  pointer-events: none;
+  z-index: 100000;
+  border-radius: 8px;
+  border: 3px solid #ff8c00;
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.75),
+    0 0 24px rgba(255, 140, 0, 0.85),
+    inset 0 0 12px rgba(255, 140, 0, 0.35);
+  overflow: hidden;
+  background-color: #1a202c;
+  opacity: 0.5;
+  transition: none;
+  will-change: transform;
+}
+.stj-drag-ghost img,
+.stj-drag-ghost video {
+  width: 100%; height: 100%;
+  object-fit: contain;
+  display: block;
+  pointer-events: none;
+}
+.stj-drag-ghost::after {
+  content: attr(data-cell-num);
+  position: absolute;
+  top: 6px; right: 10px;
+  font-size: 34px;
+  font-weight: 900;
+  line-height: 1;
+  color: #ffffff;
+  text-shadow:
+    2px 0 0 #000000,
+    -2px 0 0 #000000,
+    0 2px 0 #000000,
+    0 -2px 0 #000000,
+    2px 2px 0 #000000,
+    -2px 2px 0 #000000,
+    2px -2px 0 #000000,
+    -2px -2px 0 #000000;
+  z-index: 2;
+  pointer-events: none;
+  user-select: none;
+}
+.stj-drag-ghost::before {
+  content: "移動中";
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 3px 12px;
+  background: rgba(255, 140, 0, 0.9);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: bold;
+  border-radius: 4px;
+  z-index: 2;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* ===== レスポンシブ ===== */
+@media (max-width: 1640px) {
+  .stj-grid-container { grid-template-columns: repeat(5, 260px); min-width: 1300px; }
+}
+@media (max-width: 1380px) {
+  .stj-grid-container { grid-template-columns: repeat(4, 260px); min-width: 1040px; }
+}
+@media (max-width: 1120px) {
+  .stj-grid-container { grid-template-columns: repeat(3, 260px); min-width: 780px; }
+  .stj-top-section { flex-direction: column; }
+  .stj-info-panel { width: 100%; min-height: auto; }
+}
+@media (max-width: 860px) {
+  .stj-grid-container { grid-template-columns: repeat(2, 260px); min-width: 520px; }
+}
+@media (max-width: 600px) {
+  .stj-grid-container { grid-template-columns: 1fr; min-width: 260px; }
+  .stj-special-container { flex-direction: column; }
+  .stj-button-group { flex-direction: column; gap: 10px; }
+  .stj-button-group > div { justify-content: center; }
+  .stj-special-item:nth-child(1) .stj-special-inputs::before,
+  .stj-special-item:nth-child(2) .stj-special-inputs::before { font-size: 18px; }
+}
