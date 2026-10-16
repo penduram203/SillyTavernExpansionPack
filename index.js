@@ -15,9 +15,12 @@ import './modules/right_nav_kai.js';
 import './modules/stj_editor.js';
 // stj_editor.js は IIFE で完結しており、export は不要
 
+// ---- Text Styling ----
+import './modules/text-styling.js';
+// text-styling.js は initTextStyling() を自動実行する形式のため、export は不要
+
 // ---- 今後追加する拡張はここに追記していく ----
 // import './modules/image_display.js';
 // import './modules/gic.js';
 // import './modules/gic_lorebook.js';
-// import './modules/text-styling.js';
 // import './modules/Lorebook_Expansion.js';
