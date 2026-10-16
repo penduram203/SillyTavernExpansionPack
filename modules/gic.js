@@ -1,4 +1,6 @@
-import './gic_lorebook.js';   // ← 同ディレクトリ内なのでそのまま
+// ★ 最初に comfy_boot.js を読み込む（fetch インターセプタを最速で設置）
+import './comfy_boot.js';
+import './gic_lorebook.js';
 import { eventSource, event_types, saveChat, printMessages, getRequestHeaders } from '../../../../../script.js';
 import { getContext } from '../../../../extensions.js';
 
@@ -13,7 +15,10 @@ const LABEL_NORMAL     = '事前設定';
 const HIDE_CLASS       = 'gic-hidden-by-text-styling';
 const HIDDEN_MES_CLASS = 'gic-hidden-message';
 
-// ===== ★ ComfyUI 接続チェック関連 =====
+// ★ ComfyUI 可用性キャッシュキー（comfy_boot.js と共有）
+const COMFY_CACHE_KEY = 'gic_comfyUnavailable';
+
+// ===== ComfyUI 接続チェック関連 =====
 const COMFYUI_PROBE_URL_CANDIDATES = [
     'http://127.0.0.1:8188',
     'http://localhost:8188',
@@ -136,29 +141,20 @@ function checkImageExists(url) {
 // ★ ComfyUI 接続チェック & SD ソース自動調整
 // ============================================================
 
-/**
- * ComfyUI の /system_stats を叩いて接続可能か判定する。
- * タイムアウト・接続拒否などはすべて false として扱う。
- */
 async function checkComfyUIAvailable() {
+    const originalFetch = window.__gicOriginalFetch || window.fetch;
     for (const baseUrl of COMFYUI_PROBE_URL_CANDIDATES) {
         try {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), COMFYUI_PROBE_TIMEOUT_MS);
-
-            const resp = await fetch(`${baseUrl}/system_stats`, {
+            const resp = await originalFetch.call(window, `${baseUrl}/system_stats`, {
                 method: 'GET',
                 signal: controller.signal,
                 mode: 'cors',
                 cache: 'no-store',
             });
             clearTimeout(timeoutId);
-
-            if (resp.ok) {
-                console.debug(`[GIC] ComfyUI 接続確認 OK: ${baseUrl}`);
-                return true;
-            }
-            console.debug(`[GIC] ComfyUI probe ${baseUrl} → HTTP ${resp.status}`);
+            if (resp.ok) return true;
         } catch (e) {
             console.debug(`[GIC] ComfyUI probe ${baseUrl} → 例外: ${e.message || e}`);
         }
@@ -167,9 +163,10 @@ async function checkComfyUIAvailable() {
 }
 
 /**
- * SillyTavern 本体の stable-diffusion 拡張の source 設定を確認し、
- * ComfyUI が使えない場合に source を 'none' へ切り替える。
- * これにより、起動時に ST 本体が /api/sd/comfy/* を叩く 500 エラーを抑止する。
+ * ★ sd.source の整合性を取る。
+ *   - ComfyUI 検出成功 → 何もしない
+ *   - ComfyUI 検出失敗 → sd.source を 'none' に変更し、複数回保存を試行
+ *                        localStorage キャッシュも 'true' に設定
  */
 async function ensureSdSourceConsistency() {
     if (_sdSourceChecked) return;
@@ -179,7 +176,6 @@ async function ensureSdSourceConsistency() {
         const ctx = getContext();
         const sdSettings = ctx?.extensionSettings?.sd;
         if (!sdSettings) {
-            // SD 拡張が無効化されている環境
             console.debug('[GIC] SD設定が見つかりません（SD拡張無効の可能性）');
             return;
         }
@@ -187,22 +183,44 @@ async function ensureSdSourceConsistency() {
         const currentSource = sdSettings.source;
         if (currentSource !== 'comfy') {
             console.debug(`[GIC] SDソースは "${currentSource}" のため調整不要`);
+            localStorage.setItem(COMFY_CACHE_KEY, 'false');
             return;
         }
 
         const comfyAvailable = await checkComfyUIAvailable();
+
         if (comfyAvailable) {
             console.info('[GIC] ComfyUI 接続確認 OK → SDソースは "comfy" のまま維持');
+            localStorage.setItem(COMFY_CACHE_KEY, 'false');
             return;
         }
 
         console.warn('[GIC] ComfyUI 未検出 → SDソースを "none" に切り替えます');
-        sdSettings.source = 'none';
+        localStorage.setItem(COMFY_CACHE_KEY, 'true');
 
-        if (typeof ctx.saveSettingsDebounced === 'function') {
-            ctx.saveSettingsDebounced();
+        // 複数回、確実に保存されるまで試行
+        for (let attempt = 1; attempt <= 5; attempt++) {
+            try {
+                sdSettings.source = 'none';
+                if (typeof ctx.saveSettingsDebounced === 'function') {
+                    ctx.saveSettingsDebounced();
+                }
+                try {
+                    const scriptMod = await import('../../../../../script.js');
+                    if (typeof scriptMod.saveSettings === 'function') {
+                        scriptMod.saveSettings();
+                    }
+                } catch (e) { /* ignore */ }
+            } catch (e) {
+                console.warn(`[GIC] sd.source 保存試行 ${attempt} でエラー:`, e);
+            }
+            await wait(400);
+            if (sdSettings.source === 'none') {
+                console.info(`[GIC] ✅ sd.source を "none" に確定 (試行 ${attempt}回目)`);
+                return;
+            }
         }
-        console.info('[GIC] SDソースを "none" に変更しました（起動時のComfyUI 500エラーを抑止）');
+        console.warn('[GIC] sd.source を "none" に設定できませんでした。次回ロード時に再試行します');
     } catch (e) {
         console.warn('[GIC] SDソース自動調整に失敗:', e);
     }
@@ -3085,7 +3103,6 @@ function bootstrapGIC() {
 
     if (eventSource && event_types && event_types.APP_READY) {
         eventSource.on(event_types.APP_READY, startOnce);
-        // フォールバック: APP_READY が来ない場合に備える
         setTimeout(startOnce, 5000);
     } else {
         if (document.readyState === 'loading') {
@@ -3109,7 +3126,7 @@ export async function activate() {
     setupGalleryObserverForGic();
     applyGalleryLayout();
 
-    // ★ activate でも SDソース整合性チェック（activate が先に呼ばれる環境向け）
+    // ★ activate でも SDソース整合性チェック
     ensureSdSourceConsistency().catch(e => {
         console.warn('[GIC] SDソース整合性チェックに失敗:', e);
     });
