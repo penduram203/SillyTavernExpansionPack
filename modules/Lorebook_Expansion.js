@@ -10,6 +10,11 @@
 //   二次: entry.extensions.lorebook_expansion (best effort ミラー)
 //         → ロアブック JSON の可搬性のため。ST が保持すれば生き残る。
 //   読込時は一次を優先。一次が無ければ二次から移行（マイグレーション）。
+//
+// ★ v4 修正:
+//   - APP_READY 待機で初期化（NetworkError 回避）
+//   - /api/worldinfo/get のリトライ処理
+//   - 安全な初期化ラッパー
 
 import {
     extension_settings,
@@ -35,6 +40,10 @@ const DEFAULT_SETTINGS = {
     contentHeightRatio: 0.6,
 };
 
+// ★ リトライ設定
+const WORLDIINFO_FETCH_MAX_RETRIES = 3;
+const WORLDIINFO_FETCH_RETRY_DELAY_MS = 500;
+
 let settings = { ...DEFAULT_SETTINGS };
 
 // ============================================================
@@ -52,11 +61,9 @@ function loadSettings() {
         }
     }
 
-    // ストアの存在保証
     if (!stored.data || typeof stored.data !== 'object') stored.data = {};
 
     settings = { ...DEFAULT_SETTINGS, ...stored };
-    // ★ extension_settings[MODULE_NAME] は stored のまま維持（data を壊さない）
     console.log(`${LOG} 設定:`, {
         version: settings.version,
         enabled: settings.enabled,
@@ -72,7 +79,6 @@ function saveSettings() {
     if (!extension_settings[MODULE_NAME]) extension_settings[MODULE_NAME] = {};
     const s = extension_settings[MODULE_NAME];
 
-    // ★ s.data は触らない（そのまま保持）
     s.version = SETTINGS_VERSION;
     s.enabled = settings.enabled;
     s.autoAppendChoices = settings.autoAppendChoices;
@@ -85,6 +91,10 @@ function saveSettings() {
 
 function debugLog(...args) {
     if (settings.debug) console.log(LOG, ...args);
+}
+
+function wait(ms) {
+    return new Promise(r => setTimeout(r, ms));
 }
 
 // ============================================================
@@ -112,10 +122,6 @@ function normalizeLexData(raw) {
     };
 }
 
-/**
- * 指定 world + uid のデータを取得する。
- * 一次ストアに無ければ、entry.extensions からレガシーマイグレーションする。
- */
 function getDataFor(worldName, uid, entry) {
     if (!worldName || uid === null || uid === undefined) {
         return { img_prompt: '', choices: [] };
@@ -127,12 +133,10 @@ function getDataFor(worldName, uid, entry) {
     if (!store[wKey]) store[wKey] = {};
     const wd = store[wKey];
 
-    // 一次: extension_settings ストア
     if (wd[uKey] && typeof wd[uKey] === 'object') {
         return normalizeLexData(wd[uKey]);
     }
 
-    // 移行: entry.extensions.lorebook_expansion
     if (entry && entry.extensions && entry.extensions[MODULE_NAME]) {
         const migrated = normalizeLexData(entry.extensions[MODULE_NAME]);
         wd[uKey] = migrated;
@@ -141,16 +145,11 @@ function getDataFor(worldName, uid, entry) {
         return migrated;
     }
 
-    // デフォルト
     const def = { img_prompt: '', choices: [] };
     wd[uKey] = def;
     return def;
 }
 
-/**
- * 指定 world + uid のデータを保存する。
- * 一次ストア (extension_settings) に書き込み、entry.extensions にもミラーする。
- */
 function setDataFor(worldName, uid, entry, data) {
     if (!worldName || uid === null || uid === undefined) return;
     const store = getLexStore();
@@ -162,7 +161,6 @@ function setDataFor(worldName, uid, entry, data) {
     store[wKey][uKey] = normalized;
     saveSettings();
 
-    // best effort ミラー
     if (entry && typeof entry === 'object') {
         try {
             if (!entry.extensions || typeof entry.extensions !== 'object') entry.extensions = {};
@@ -195,7 +193,6 @@ function setExpansionData(entry, data) {
 // ============================================================
 async function getWorldInfoModule() {
     try {
-        // ★ パスを1階層深く修正（modules/ 配下から scripts/ を参照）
         return await import('../../../../world-info.js');
     } catch (e) {
         console.warn(LOG, 'world-info.js import 失敗:', e);
@@ -251,6 +248,33 @@ function getCurrentWorldName() {
     return null;
 }
 
+/**
+ * ★ /api/worldinfo/get をリトライ付きで叩く。
+ *   NetworkError（ST起動直後のレース）を吸収する。
+ */
+async function fetchWorldInfoWithRetry(worldName, maxRetries = WORLDIINFO_FETCH_MAX_RETRIES) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            const resp = await fetch('/api/worldinfo/get', {
+                method: 'POST',
+                headers: getRequestHeaders(),
+                body: JSON.stringify({ name: worldName }),
+            });
+            if (resp.ok) {
+                const data = await resp.json();
+                if (data && data.entries) return data.entries;
+            }
+            debugLog(`/api/worldinfo/get 試行 ${attempt}/${maxRetries} 失敗 (HTTP ${resp.status})`);
+        } catch (e) {
+            debugLog(`/api/worldinfo/get 試行 ${attempt}/${maxRetries} 例外: ${e.message || e}`);
+        }
+        if (attempt < maxRetries) {
+            await wait(WORLDIINFO_FETCH_RETRY_DELAY_MS * attempt);
+        }
+    }
+    return null;
+}
+
 async function loadWorldInfoEntriesByName(worldName) {
     if (!worldName) return null;
 
@@ -265,20 +289,11 @@ async function loadWorldInfoEntriesByName(worldName) {
         }
     } catch (e) { /* ignore */ }
 
-    try {
-        const resp = await fetch('/api/worldinfo/get', {
-            method: 'POST',
-            headers: getRequestHeaders(),
-            body: JSON.stringify({ name: worldName }),
-        });
-        if (resp.ok) {
-            const data = await resp.json();
-            if (data && data.entries) return data.entries;
-        }
-    } catch (e) {
-        console.warn(LOG, '/api/worldinfo/get 失敗:', e);
-    }
+    // ★ リトライ付き fetch
+    const entries = await fetchWorldInfoWithRetry(worldName);
+    if (entries) return entries;
 
+    console.warn(LOG, `/api/worldinfo/get 失敗 (world="${worldName}", リトライ後も取得できず)`);
     return null;
 }
 
@@ -396,7 +411,6 @@ async function appendChoicesToLastAiMessage() {
     const entry = findEntryByChoice(entries, choiceNum);
     if (!entry) return;
 
-    // ★ 一次ストアから取得（entry.extensions ではなく）
     const uid = entry.uid ?? null;
     const data = uid !== null && uid !== undefined
         ? getDataFor(worldName, uid, entry)
@@ -417,7 +431,6 @@ function refreshAllChoicesBlocks() {
 const UI_SECTION_CLASS = 'lbe-section';
 const ATTR_UID = 'data-lbe-uid';
 
-// 折りたたみ関連
 const COLLAPSIBLE_CLASS = 'lbe-collapsible';
 const COLLAPSED_CLASS = 'lbe-extras-collapsed';
 const TOGGLE_BTN_CLASS = 'lbe-extras-toggle';
@@ -565,9 +578,6 @@ function findInsertionPoint(entryEl) {
     return { parent: editBlock || entryEl, ref: null };
 }
 
-// ============================================================
-// content textarea の高さ縮小
-// ============================================================
 function shrinkContentTextarea(entryEl) {
     const ta = entryEl.querySelector('textarea[name="content"]');
     if (!ta) return;
@@ -591,9 +601,6 @@ function shrinkContentTextarea(entryEl) {
     }
 }
 
-// ============================================================
-// レイアウト再編 + 折りたたみトグル
-// ============================================================
 function reorganizeEntryLayout(entryEl) {
     const edit = entryEl.querySelector('.world_entry_edit');
     if (!edit) return;
@@ -674,9 +681,6 @@ function reorganizeEntryLayout(entryEl) {
     debugLog(`uid=${entryEl.getAttribute('uid')}: レイアウト再編 + 折りたたみトグル挿入`);
 }
 
-// ============================================================
-// 注入メイン
-// ============================================================
 async function injectExpansionSections() {
     if (!settings.enabled) return;
 
@@ -688,7 +692,8 @@ async function injectExpansionSections() {
 
     const entries = await loadWorldInfoEntriesByName(worldName);
     if (!entries) {
-        console.warn(LOG, `inject: world "${worldName}" のエントリ取得失敗`);
+        // ★ リトライ後も失敗した場合のみ警告（起動直後の一時的失敗を抑制）
+        debugLog(`inject: world "${worldName}" のエントリ取得失敗（リトライ後）`);
         return;
     }
 
@@ -736,10 +741,8 @@ async function injectExpansionSections() {
         }
         if (existing) existing.remove();
 
-        // ★ 一次ストアから取得
         const data = getDataFor(worldName, uid, entry);
 
-        // ★ 変更は一次ストアへ保存
         const onChange = (newData) => {
             setDataFor(worldName, uid, entry, newData);
         };
@@ -825,11 +828,7 @@ function onMessageUpdatedOrDeleted() {
 // ============================================================
 // 初期化
 // ============================================================
-async function init() {
-    console.log(LOG, 'Lorebook Expansion 初期化開始');
-    loadSettings();
-    setupObserver();
-
+function registerEventListeners() {
     eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, onCharacterMessageRendered);
     eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
     if (event_types.MESSAGE_UPDATED) {
@@ -838,7 +837,15 @@ async function init() {
     if (event_types.MESSAGE_DELETED) {
         eventSource.on(event_types.MESSAGE_DELETED, onMessageUpdatedOrDeleted);
     }
+}
 
+async function init() {
+    console.log(LOG, 'Lorebook Expansion 初期化開始');
+    loadSettings();
+    setupObserver();
+    registerEventListeners();
+
+    // ★ APP_READY 後に DOM 注入を試みる（worldinfo が確実に利用可能になるまで待つ）
     setTimeout(() => {
         injectExpansionSections().catch(() => {});
     }, 1000);
@@ -846,26 +853,41 @@ async function init() {
     console.log(LOG, '初期化完了');
 }
 
+// ★ APP_READY を待ってから init を実行（起動直後の NetworkError を回避）
+function bootstrap() {
+    let started = false;
+    const startOnce = () => {
+        if (started) return;
+        started = true;
+        init().catch(e => console.error(LOG, '初期化中に例外:', e));
+    };
+
+    if (eventSource && event_types && event_types.APP_READY) {
+        eventSource.on(event_types.APP_READY, startOnce);
+        // フォールバック: 万一 APP_READY が来ない場合に備えて遅延起動
+        setTimeout(startOnce, 5000);
+    } else {
+        // eventSource が使えない環境では即時起動
+        startOnce();
+    }
+}
+
 jQuery(async () => {
-    await init();
+    bootstrap();
 });
 
 // ============================================================
 // 外部公開 API
 // ============================================================
 window.LorebookExpansion = {
-    // 新ストレージ API (推奨)
     getDataFor,
     setDataFor,
 
-    // レガシー (entry 単体)
     getData: getExpansionData,
     setData: setExpansionData,
 
-    // ストア全体をダンプ
     dumpStore: () => JSON.parse(JSON.stringify(getLexStore())),
 
-    // 特定 world のデータを全消去
     clearWorldData: (worldName) => {
         const store = getLexStore();
         if (store[worldName]) {
@@ -946,7 +968,7 @@ window.LorebookExpansion = {
     collapseAll: () => {
         document.querySelectorAll('.world_entry_edit').forEach(edit => {
             edit.classList.add(COLLAPSED_CLASS);
-            const icon = edit.querySelector(':scope > .' + TOGGLE_BTN_CLASS + ' .' + TOGGLE_ICON_CLASS);
+            const icon = edit.querySelector(':scope > ' + TOGGLE_BTN_CLASS + ' .' + TOGGLE_ICON_CLASS);
             if (icon) {
                 icon.classList.remove('fa-circle-chevron-up');
                 icon.classList.add('fa-circle-chevron-down');
@@ -957,7 +979,7 @@ window.LorebookExpansion = {
     expandAll: () => {
         document.querySelectorAll('.world_entry_edit').forEach(edit => {
             edit.classList.remove(COLLAPSED_CLASS);
-            const icon = edit.querySelector(':scope > .' + TOGGLE_BTN_CLASS + ' .' + TOGGLE_ICON_CLASS);
+            const icon = edit.querySelector(':scope > ' + TOGGLE_BTN_CLASS + ' .' + TOGGLE_ICON_CLASS);
             if (icon) {
                 icon.classList.remove('fa-circle-chevron-down');
                 icon.classList.add('fa-circle-chevron-up');
