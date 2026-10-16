@@ -3,7 +3,8 @@
 //
 // ★ v3 修正:
 //   - SlashCommandParser/SlashCommand のインポートを複数パス試行
-//   - window グローバルからのフォールバック参照
+//   - window / context グローバルからのフォールバック参照
+//   - HEAD リクエストで URL 存在チェック（404 の text/html を回避）
 //   - APP_READY 待機
 //   - エラー時の安全なフォールバック（機能停止させない）
 
@@ -35,16 +36,18 @@ let _slashCommandModule = null;
 let _slashModulesResolved = false;
 
 // ===== インポートパス候補（SillyTavern のバージョン差を吸収） =====
+// 実行時ファイル位置: /scripts/extensions/third-party/SillyTavernExpansionPack/modules/gic_lorebook.js
+// → ../../../ は /scripts/extensions/ まで戻る
 const SLASH_PARSER_PATHS = [
-    '../../../slash-commands/SlashCommandParser.js',
-    '../../../../scripts/extensions/slash-commands/SlashCommandParser.js',
-    '../../../../../scripts/extensions/slash-commands/SlashCommandParser.js',
+    '../../../slash-commands/SlashCommandParser.js',                 // /scripts/extensions/slash-commands/
+    '../../../../slash-commands/SlashCommandParser.js',              // /scripts/slash-commands/ (ST 1.12+)
+    '../../../../../slash-commands/SlashCommandParser.js',           // /slash-commands/
 ];
 
 const SLASH_COMMAND_PATHS = [
     '../../../slash-commands/SlashCommand.js',
-    '../../../../scripts/extensions/slash-commands/SlashCommand.js',
-    '../../../../../scripts/extensions/slash-commands/SlashCommand.js',
+    '../../../../slash-commands/SlashCommand.js',
+    '../../../../../slash-commands/SlashCommand.js',
 ];
 
 function loadSettings() {
@@ -186,7 +189,6 @@ async function loadWorldInfoEntries(worldName) {
         }
     } catch (e) { /* ignore */ }
 
-    // ★ リトライ付き fetch
     for (let attempt = 1; attempt <= 3; attempt++) {
         try {
             const resp = await fetch('/api/worldinfo/get', {
@@ -295,6 +297,20 @@ function stripGicImgFromDom() {
     });
 }
 
+// ===== パス存在チェック（HEAD リクエスト） =====
+async function urlExists(url) {
+    try {
+        const resp = await fetch(url, { method: 'HEAD' });
+        if (!resp.ok) return false;
+        const ct = (resp.headers.get('content-type') || '').toLowerCase();
+        // text/html が返ってきたら SPA のフォールバック = 存在しない
+        if (ct.includes('text/html')) return false;
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
 // ===== SlashCommand モジュールの安全なロード =====
 async function loadSlashModules() {
     if (_slashModulesResolved) {
@@ -302,45 +318,72 @@ async function loadSlashModules() {
     }
     _slashModulesResolved = true;
 
-    // Parser を試行
-    for (const path of SLASH_PARSER_PATHS) {
-        try {
-            const mod = await import(path);
-            _slashParserModule = mod?.SlashCommandParser || mod?.default || null;
-            if (_slashParserModule) {
-                if (settings.verbose) console.log(`[GIC-Lore] SlashCommandParser 読み込み成功: ${path}`);
-                break;
-            }
-        } catch (e) {
-            // 次のパスへ
+    // ★ まず window グローバルを確認（最も安全）
+    if (typeof window !== 'undefined') {
+        if (window.SlashCommandParser && !_slashParserModule) {
+            _slashParserModule = window.SlashCommandParser;
+            if (settings.verbose) console.log('[GIC-Lore] SlashCommandParser を window から取得');
+        }
+        if (window.SlashCommand && !_slashCommandModule) {
+            _slashCommandModule = window.SlashCommand;
+            if (settings.verbose) console.log('[GIC-Lore] SlashCommand を window から取得');
         }
     }
 
-    // Command を試行
-    for (const path of SLASH_COMMAND_PATHS) {
+    // ★ SillyTavern.getContext() 経由も試行
+    if (!_slashParserModule) {
         try {
-            const mod = await import(path);
-            _slashCommandModule = mod?.SlashCommand || null;
-            if (_slashCommandModule) {
-                if (settings.verbose) console.log(`[GIC-Lore] SlashCommand 読み込み成功: ${path}`);
-                break;
+            const ctx = getContext();
+            if (ctx && ctx.SlashCommandParser) {
+                _slashParserModule = ctx.SlashCommandParser;
+                if (settings.verbose) console.log('[GIC-Lore] SlashCommandParser を context から取得');
             }
-        } catch (e) {
-            // 次のパスへ
+            if (ctx && ctx.SlashCommand && !_slashCommandModule) {
+                _slashCommandModule = ctx.SlashCommand;
+                if (settings.verbose) console.log('[GIC-Lore] SlashCommand を context から取得');
+            }
+        } catch (e) { /* ignore */ }
+    }
+
+    // ★ 動的 import で試行（HEAD チェックで 404 を避ける）
+    if (!_slashParserModule) {
+        for (const path of SLASH_PARSER_PATHS) {
+            try {
+                const absUrl = new URL(path, import.meta.url).href;
+                const exists = await urlExists(absUrl);
+                if (!exists) {
+                    if (settings.verbose) {
+                        console.debug(`[GIC-Lore] SlashCommandParser パス存在せず: ${absUrl}`);
+                    }
+                    continue;
+                }
+                const mod = await import(/* @vite-ignore */ path);
+                _slashParserModule = mod?.SlashCommandParser || mod?.default || null;
+                if (_slashParserModule) {
+                    if (settings.verbose) console.log(`[GIC-Lore] SlashCommandParser 読み込み成功: ${path}`);
+                    break;
+                }
+            } catch (e) {
+                // 次のパスへ
+            }
         }
     }
 
-    // ★ window グローバルからのフォールバック
-    if (!_slashParserModule && typeof window !== 'undefined') {
-        _slashParserModule = window.SlashCommandParser || null;
-        if (_slashParserModule && settings.verbose) {
-            console.log('[GIC-Lore] SlashCommandParser を window から取得');
-        }
-    }
-    if (!_slashCommandModule && typeof window !== 'undefined') {
-        _slashCommandModule = window.SlashCommand || null;
-        if (_slashCommandModule && settings.verbose) {
-            console.log('[GIC-Lore] SlashCommand を window から取得');
+    if (!_slashCommandModule) {
+        for (const path of SLASH_COMMAND_PATHS) {
+            try {
+                const absUrl = new URL(path, import.meta.url).href;
+                const exists = await urlExists(absUrl);
+                if (!exists) continue;
+                const mod = await import(/* @vite-ignore */ path);
+                _slashCommandModule = mod?.SlashCommand || null;
+                if (_slashCommandModule) {
+                    if (settings.verbose) console.log(`[GIC-Lore] SlashCommand 読み込み成功: ${path}`);
+                    break;
+                }
+            } catch (e) {
+                // 次のパスへ
+            }
         }
     }
 
@@ -357,7 +400,6 @@ async function executeSd(prompt) {
 
     console.log(`[GIC-Lore] /sd 実行試行: ${cmd.slice(0, 120)}${cmd.length > 120 ? '...' : ''}`);
 
-    // 方式1: script.js の executeSlashCommandsWithOptions
     try {
         const mod = await import('../../../../script.js');
         if (typeof mod.executeSlashCommandsWithOptions === 'function') {
@@ -369,7 +411,6 @@ async function executeSd(prompt) {
         console.warn('[GIC-Lore] 方式1 失敗:', e?.message || e);
     }
 
-    // 方式2: window グローバル
     try {
         if (typeof window.executeSlashCommandsWithOptions === 'function') {
             await window.executeSlashCommandsWithOptions(cmd);
@@ -380,7 +421,6 @@ async function executeSd(prompt) {
         console.warn('[GIC-Lore] 方式2 失敗:', e?.message || e);
     }
 
-    // 方式3: SlashCommandParser 経由（複数パスを試行済み）
     try {
         const { parser } = await loadSlashModules();
         const sdCmd = parser?.commands?.['sd'];
@@ -649,7 +689,6 @@ async function initialize() {
     console.log('[GIC-Lore] 初期化完了');
 }
 
-// ★ APP_READY を待ってから初期化（SlashCommandParser が利用可能になるのを待つ）
 function bootstrap() {
     let started = false;
     const startOnce = () => {
@@ -660,7 +699,6 @@ function bootstrap() {
 
     if (eventSource && event_types && event_types.APP_READY) {
         eventSource.on(event_types.APP_READY, startOnce);
-        // フォールバック
         setTimeout(startOnce, 5000);
     } else {
         if (document.readyState === 'loading') {
