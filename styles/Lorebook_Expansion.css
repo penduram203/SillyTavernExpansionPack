@@ -1,0 +1,184 @@
+/* Lorebook_Expansion.css */
+
+/* ===== ロアブック編集画面に追加するセクション ===== */
+.lbe-section {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    align-self: stretch;
+    flex: 0 0 auto;
+
+    margin: 4px 0 0 0;
+    padding: 6px 8px;
+    border: 1px solid var(--SmartThemeBorderColor, #555);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.lbe-label {
+    display: block;
+    width: 100%;
+    font-size: 0.85em;
+    margin-top: 4px;
+    margin-bottom: 2px;
+    opacity: 0.85;
+}
+
+.lbe-section > .lbe-label:first-child {
+    margin-top: 0;
+}
+
+.lbe-img-prompt {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    min-height: 4.5em;
+    box-sizing: border-box;
+    resize: vertical;
+    font-family: inherit;
+    line-height: 1.4;
+}
+
+.lbe-choices-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    align-items: stretch;
+}
+
+.lbe-choice-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.lbe-choice-num {
+    width: 64px;
+    flex: 0 0 auto;
+    text-align: center;
+    font-family: monospace;
+    box-sizing: border-box;
+}
+
+.lbe-choice-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.lbe-choice-del {
+    flex: 0 0 auto;
+    padding: 2px 8px;
+    font-size: 0.85em;
+}
+
+.lbe-choice-add {
+    align-self: flex-start;
+    flex: 0 0 auto;
+    width: auto;
+    max-width: 100%;
+    margin-top: 4px;
+    font-size: 0.85em;
+    white-space: nowrap;
+    writing-mode: horizontal-tb;
+    text-orientation: mixed;
+    word-break: keep-all;
+    line-height: 1.4;
+    height: auto;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.lbe-choices-block {
+    margin-top: 12px;
+    padding-top: 8px;
+    border-top: 1px dashed rgba(200, 200, 200, 0.4);
+}
+
+.lbe-choices-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.lbe-choice-item {
+    font-weight: bold;
+    padding: 2px 0;
+    line-height: 1.5;
+}
+
+/* ============================================================
+ * 詳細設定エリアの折りたたみトグル（スリム化）
+ * ============================================================ */
+
+.lbe-extras-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+
+    /* ★ スリム化: 上下パディングを大幅縮小、フォントも少し小さく */
+    padding: 2px 8px;
+    margin: 4px 0 2px 0;
+
+    cursor: pointer;
+    user-select: none;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--SmartThemeBorderColor, #555);
+    border-radius: 4px;
+    font-size: 0.82em;
+    color: var(--SmartThemeBodyColor, inherit);
+    transition: background-color 0.15s ease;
+    white-space: nowrap;
+    line-height: 1.2;
+    min-height: 0;
+}
+
+.lbe-extras-toggle:hover {
+    background: rgba(255, 255, 255, 0.09);
+}
+
+.lbe-extras-toggle > strong {
+    font-weight: bold;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    line-height: 1.2;
+}
+
+/* ★ 矢印アイコン: スリムな行の中でも視認できるサイズを維持 */
+.lbe-extras-toggle .lbe-extras-icon {
+    margin-left: 8px;
+    flex: 0 0 auto;
+    opacity: 0.9;
+    font-size: 1.25em !important;
+    width: 1.25em;
+    height: 1.25em;
+    line-height: 1.25em;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.15s ease;
+}
+
+.lbe-extras-toggle:hover .lbe-extras-icon {
+    opacity: 1;
+    transform: scale(1.1);
+}
+
+/* 折りたたみ時: マークされた要素を非表示 */
+.world_entry_edit.lbe-extras-collapsed .lbe-collapsible {
+    display: none !important;
+}
