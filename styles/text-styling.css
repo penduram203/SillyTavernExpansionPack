@@ -1,0 +1,346 @@
+:root {
+  /* p タグ（通常テキスト）用変数 */
+  --p-font-size: 100%;
+  --p-font-weight: 400;
+  --p-line-height: 1.5;
+  --p-letter-spacing: 0px;
+  --p-bottom-margin: 0px;
+  --p-text-rgb: 221, 221, 221;
+  --p-text-opacity: 1;
+  --p-outline-width: 1px;
+  --p-outline-rgb: 0, 0, 0;
+
+  /* q タグ（セリフ）用変数 */
+  --q-font-size: 100%;
+  --q-font-weight: 400;
+  --q-line-height: 1.5;
+  --q-letter-spacing: 0px;
+  --q-bottom-margin: 0px;
+  --q-text-rgb: 221, 221, 221;
+  --q-text-opacity: 1;
+  --q-outline-width: 1px;
+  --q-outline-rgb: 0, 0, 0;
+
+  /* チャットウィンドウ用変数 */
+  --chat-opacity: 1;
+  --chat-bg-rgb: 0, 0, 0;
+}
+
+#text-styling-panel {
+  position: fixed;
+  top: 370px;    /* ★ 旧: 350px → 370px（20px 下げ） */
+  left: 5px;     /* ★ 旧: 10px → 5px（5px 左へ） */
+  width: 480px;
+  min-height: 200px;
+  border: 1px solid #444;
+  background-color: #222;
+  border-radius: 5px;
+  overflow: hidden;
+  z-index: 15;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  padding: 15px;
+  box-sizing: border-box;
+}
+
+#text-styling-panel.hidden {
+  display: none !important;
+}
+
+#text-styling-header {
+  height: 30px;
+  background-color: #333;
+  color: #fff;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  user-select: none;
+  margin: -15px -15px 15px -15px;
+}
+
+.tab-container {
+  margin-bottom: 15px;
+}
+
+.tab-buttons {
+  display: flex;
+  border-bottom: 1px solid #444;
+}
+
+.tab-button {
+  padding: 8px 12px;
+  cursor: pointer;
+  background-color: #2a2a2a;
+  border: none;
+  color: #aaa;
+  border-top-left-radius: 4px;
+  border-top-right-radius: 4px;
+  font-size: 13px;
+  margin-right: 2px;
+}
+
+.tab-button.active {
+  background-color: #3a3a3a;
+  color: #fff;
+  font-weight: bold;
+}
+
+.tab-content {
+  display: none;
+  padding: 15px;
+  border: 1px solid #444;
+  border-top: none;
+  background-color: #333;
+  border-bottom-left-radius: 4px;
+  border-bottom-right-radius: 4px;
+}
+
+.tab-content.active {
+  display: block;
+}
+
+.tab-content.disabled .columns-container {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.enable-styling-toggle {
+  display: flex;
+  align-items: center;
+  margin-bottom: 15px;
+  background-color: #2a2a2a;
+  padding: 8px;
+  border-radius: 4px;
+}
+
+.enable-styling-toggle label {
+  margin: 0 0 0 8px;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.columns-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+}
+
+.column {
+  flex: 1;
+  min-width: 200px;
+}
+
+.text-styling-control-group {
+  margin-bottom: 12px;
+}
+
+.text-styling-control-group:last-child {
+  margin-bottom: 0;
+}
+
+.text-styling-control-group label {
+  display: block;
+  margin-bottom: 6px;
+  color: #ddd;
+  font-size: 12px;
+}
+
+.text-styling-control-group input[type="color"],
+.text-styling-control-group input[type="range"] {
+  width: 100%;
+}
+
+.text-styling-value-display {
+  display: inline-block;
+  width: 40px;
+  text-align: right;
+  margin-left: 10px;
+  color: #bbb;
+  font-size: 11px;
+}
+
+#restore-panel-button {
+  position: fixed;
+  left: 10px;
+  bottom: 3px;
+  width: 40px;
+  height: 40px;
+  background-color: #000;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif !important;
+  font-size: 24px !important;
+  font-weight: 900 !important;
+  line-height: 1 !important;
+  letter-spacing: 0 !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6) !important;
+
+  z-index: 15;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+  opacity: 0.1;
+  transition: opacity 0.0s;
+}
+
+#restore-panel-button:hover {
+  opacity: 1;
+  background-color: #444;
+}
+
+/* ============================================================
+   ▼ 通常テキスト (P) の視覚スタイル：.mes_text 全体に継承
+   ============================================================ */
+#chat .mes_text.style-p-enabled {
+  color: rgba(var(--p-text-rgb), var(--p-text-opacity)) !important;
+  font-size: var(--p-font-size) !important;
+  font-weight: var(--p-font-weight) !important;
+  line-height: var(--p-line-height) !important;
+  letter-spacing: var(--p-letter-spacing) !important;
+  -webkit-text-stroke-width: var(--p-outline-width);
+  -webkit-text-stroke-color: rgba(var(--p-outline-rgb), var(--p-text-opacity));
+  paint-order: stroke fill;
+}
+
+#chat .mes_text.style-p-enabled * {
+  color: rgba(var(--p-text-rgb), var(--p-text-opacity)) !important;
+  font-size: 1em !important;
+  font-weight: var(--p-font-weight) !important;
+  line-height: inherit !important;
+  letter-spacing: inherit !important;
+  -webkit-text-stroke-width: var(--p-outline-width);
+  -webkit-text-stroke-color: rgba(var(--p-outline-rgb), var(--p-text-opacity));
+  paint-order: stroke fill;
+}
+
+/* ============================================================
+   ▼ 通常テキストセグメント（P余白）
+   ============================================================ */
+#chat .mes_text.style-p-enabled .stj-normal-text {
+  display: block !important;
+  margin: 0 0 var(--p-bottom-margin) 0 !important;
+  padding: 0;
+}
+
+/* ============================================================
+   ▼ セリフ (Q) の視覚スタイル
+   ============================================================ */
+#chat .mes_text.style-q-enabled q,
+#chat .mes_text.style-q-enabled .stj-dialogue {
+  display: block;
+  color: rgba(var(--q-text-rgb), var(--q-text-opacity)) !important;
+  font-size: var(--q-font-size) !important;
+  font-weight: var(--q-font-weight) !important;
+  line-height: var(--q-line-height) !important;
+  letter-spacing: var(--q-letter-spacing) !important;
+  margin: 0 0 var(--q-bottom-margin) 0 !important;
+  padding: 0;
+  -webkit-text-stroke-width: var(--q-outline-width);
+  -webkit-text-stroke-color: rgba(var(--q-outline-rgb), var(--q-text-opacity));
+  paint-order: stroke fill;
+}
+
+#chat .mes_text.style-q-enabled q *,
+#chat .mes_text.style-q-enabled .stj-dialogue * {
+  color: rgba(var(--q-text-rgb), var(--q-text-opacity)) !important;
+  font-size: 1em !important;
+  font-weight: var(--q-font-weight) !important;
+  line-height: inherit !important;
+  letter-spacing: inherit !important;
+  -webkit-text-stroke-width: var(--q-outline-width);
+  -webkit-text-stroke-color: rgba(var(--q-outline-rgb), var(--q-text-opacity));
+  paint-order: stroke fill;
+}
+
+/* ============================================================
+   ▼ <p> の P余白
+   ============================================================ */
+#chat .mes_text.style-p-enabled p {
+  margin-bottom: var(--p-bottom-margin) !important;
+}
+#chat .mes_text.style-p-enabled p.stj-has-segment {
+  margin-bottom: 0 !important;
+}
+
+#chat .mes_text.style-p-enabled.stj-empty-text {
+  margin-bottom: var(--p-bottom-margin) !important;
+}
+
+/* ============================================================
+   ▼ チャットウィンドウ透過（スライダー連動）
+   #chat（本文）と #send_form（テキスト入力欄）の親のみに適用。
+   子要素には透過を適用しない（#nonQRFormItems 等を常に透明に
+   保つため）。
+   ============================================================ */
+#chat,
+#send_form {
+  background-color: rgba(var(--chat-bg-rgb), var(--chat-opacity)) !important;
+}
+
+#sheldheader {
+  font-size: 2em !important;
+  right: 50px !important;
+  opacity: 1.0 !important;
+  background-color: #000000 !important;
+}
+
+#window-control-buttons {
+  position: fixed;
+  bottom: 3px;
+  left: 73px;
+  z-index: 15;
+  display: flex;
+  gap: 5px;
+}
+
+.window-control-button {
+  padding: 10px;
+  background-color: #222;
+  color: white;
+  border: 1px solid #555;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: bold;
+  opacity: 0.1;
+  transition: opacity 0.0s ease-in-out, background-color 0.0s;
+  user-select: none;
+}
+
+.window-control-button:hover {
+  opacity: 1;
+  background-color: #444;
+}
+
+/* ============================================================
+   ▼ チャットウィンドウ透過率スライダー（--chat-opacity）との連動
+   ============================================================ */
+
+/* ★ #top-bar は常に非透過。テーマのブラー用色で固定する。 */
+html body.no-blur #top-bar {
+  background-color: var(--SmartThemeBlurTintColor, #1a1a1a) !important;
+}
+
+/* ★ #send_form は スライダー値（--chat-opacity）を alpha として使用 */
+html body.no-blur #send_form {
+  background-color: rgba(0, 0, 0, var(--chat-opacity, 1)) !important;
+}
+
+/* no-blur が付いていない環境にも念のため対応 */
+html body #send_form.compact {
+  background-color: rgba(0, 0, 0, var(--chat-opacity, 1)) !important;
+}
+
+/* ★ #nonQRFormItems は常に完全透明で固定。
+      詳細度を (2,0,0,2) まで引き上げ、他の !important に
+      打ち勝てるようにしている。 */
+html body #send_form #nonQRFormItems,
+html body.no-blur #send_form #nonQRFormItems {
+  background-color: rgba(0, 0, 0, 0) !important;
+}
