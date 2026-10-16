@@ -12,8 +12,10 @@
 /* ---- STJ Editor ---- */
 @import url('./styles/stj_editor.css');
 
+/* ---- Text Styling ---- */
+@import url('./styles/text-styling.css');
+
 /* ---- 今後追加する拡張はここに追記 ---- */
 /* @import url('./styles/image_display.css'); */
 /* @import url('./styles/gic.css'); */
-/* @import url('./styles/text-styling.css'); */
 /* @import url('./styles/Lorebook_Expansion.css'); */
