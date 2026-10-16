@@ -3,10 +3,9 @@
     const MODULE_NAME = 'stj_editor';
 
     // ★ メディア存在チェックのキャッシュ
-    //    成功(true)は永続、失敗(false)は TTL 付き（一過性の失敗を永続化しない）
     const mediaCache = new Map();
-    const MEDIA_CACHE_FALSE_TTL_MS = 3000;   // 失敗キャッシュの有効期間
-    const MEDIA_CHECK_TIMEOUT_MS = 5000;     // 存在チェックのタイムアウト
+    const MEDIA_CACHE_FALSE_TTL_MS = 3000;
+    const MEDIA_CHECK_TIMEOUT_MS = 5000;
 
     let stjModalEl = null;
     let stjButtonEl = null;
@@ -77,10 +76,7 @@
         return null;
     }
 
-    // ===== ★ メディア存在チェック（改善版） =====
-    //   - 成功は永続キャッシュ
-    //   - 失敗は短いTTLでキャッシュ（一過性の失敗を永続化しない）
-    //   - タイムアウトで無限待ちを防ぐ
+    // ===== メディア存在チェック =====
     function checkMediaExists(mediaUrl) {
         if (!mediaUrl || typeof mediaUrl !== 'string' || !mediaUrl.trim()) {
             return Promise.resolve(false);
@@ -92,7 +88,6 @@
             if (cached.exists === true) {
                 return Promise.resolve(true);
             }
-            // 失敗キャッシュはTTL内のみ有効
             if (Date.now() - cached.timestamp < MEDIA_CACHE_FALSE_TTL_MS) {
                 return Promise.resolve(false);
             }
@@ -865,7 +860,7 @@
                     <li>
                         <code>!(犬,猫,鳥),ペット</code>
                         <div class="stj-op-ex">
-                            「犬」「猫」「鳥」のいずも含まず、「ペット」を含む時にマッチします
+                            「犬」「猫」「鳥」のいずれも含まず、「ペット」を含む時にマッチします
                         </div>
                     </li>
                     <li>
@@ -1476,12 +1471,10 @@
         updatePreview();
     }
 
-    // ★ 並列実行に変更（逐次awaitをやめる）
     function updatePreview() {
         const nameEl = document.getElementById('stj_char_name_display');
         if (!nameEl) return;
         const charName = nameEl.textContent;
-        // 各プレビューを並列で更新（awaitしない）
         updateImagePreview('stj_preview_default', charName, document.getElementById('stj_default_image')?.value);
         updateImagePreview('stj_preview_thumbnail', charName, document.getElementById('stj_thumbnail_image')?.value);
         const keywordItems = document.querySelectorAll('.stj-keyword-item');
@@ -1513,10 +1506,8 @@
         btn.addEventListener('dblclick', stopAll);
     }
 
-    // ★ ナビゲーションボタン生成をヘルパー化
     function addPreviewNavButtons(previewEl, imageNames, currentIndex, previewId, charName, rawValue) {
-        // 既存ナビボタンを削除
-        previewEl.querySelectorAll('.stj-preview-nav-btn, .stj-preview-index-display').forEach(el => el.remove());
+        previewEl.querySelectorAll(':scope > .stj-preview-nav-btn, :scope > .stj-preview-index-display').forEach(el => el.remove());
 
         if (imageNames.length <= 1) return;
 
@@ -1589,27 +1580,72 @@
         previewEl.appendChild(indexDisplay);
     }
 
-    // ★ 世代カウンタで連続クリック時のレースを防止
+    // ★ 世代カウンタ（連続クリック時のレース防止）
     const _previewLoadGen = new WeakMap();
 
-    // ===== プレビュー更新（改善版） =====
-    //   - 画像: Image.decode() を待ってから DOM に挿入（ロード完了まで表示が消えない）
-    //   - 動画: canplay を待ってから表示（黒背景を回避）
-    //   - 同じパスが既に表示されていれば何もしない
-    //   - ローディングインジケータを重ねる
+    // =========================================================================
+    // ★ プレビュー更新（3状態を明示管理）
+    //    状態A: 入力空欄 → 通常プレースホルダを表示
+    //    状態B: ファイル不存在 → エラープレースホルダを表示
+    //    状態C: メディア表示成功 → プレースホルダを非表示、メディアを表示
+    // =========================================================================
     async function updateImagePreview(previewId, charName, rawValue, targetIndex = 0) {
         const previewEl = document.getElementById(previewId);
         if (!previewEl) return;
 
         previewEl.style.position = 'relative';
 
-        // 世代カウンタを更新
+        // --- 世代カウンタ ---
         const myGen = (_previewLoadGen.get(previewEl) || 0) + 1;
         _previewLoadGen.set(previewEl, myGen);
 
+        // --- プレースホルダ要素を確保（元テキストを保存） ---
+        let placeholder = previewEl.querySelector(':scope > .stj-preview-text');
+        if (!placeholder) {
+            placeholder = document.createElement('div');
+            placeholder.className = 'stj-preview-text';
+            placeholder.textContent = 'プレビュー';
+            previewEl.insertBefore(placeholder, previewEl.firstChild);
+        }
+        if (!placeholder.dataset.originalText) {
+            placeholder.dataset.originalText = (placeholder.textContent || 'プレビュー').trim() || 'プレビュー';
+        }
+
+        // --- ヘルパー ---
+        const removeMedia = () => {
+            previewEl.querySelectorAll(':scope > img, :scope > video').forEach(el => el.remove());
+        };
+        const removeNav = () => {
+            previewEl.querySelectorAll(':scope > .stj-preview-nav-btn, :scope > .stj-preview-index-display').forEach(el => el.remove());
+        };
+        const removeLoading = () => {
+            previewEl.querySelectorAll(':scope > .stj-preview-loading').forEach(el => el.remove());
+        };
+        const placeholderShowNormal = () => {
+            placeholder.textContent = placeholder.dataset.originalText;
+            placeholder.classList.remove('stj-preview-error');
+            placeholder.style.removeProperty('display');
+        };
+        const placeholderShowError = () => {
+            placeholder.textContent = 'ファイルが見つかりません';
+            placeholder.classList.add('stj-preview-error');
+            placeholder.style.removeProperty('display');
+        };
+        const placeholderHide = () => {
+            placeholder.style.setProperty('display', 'none', 'important');
+            placeholder.classList.remove('stj-preview-error');
+        };
+
         const imageNames = parseImageNames(rawValue);
+
+        // =====================================================
+        // 状態A: 空欄 → 通常プレースホルダを表示
+        // =====================================================
         if (!charName || imageNames.length === 0) {
-            previewEl.innerHTML = '<div class="stj-preview-text">プレビュー</div>';
+            removeMedia();
+            removeNav();
+            removeLoading();
+            placeholderShowNormal();
             delete previewEl.dataset.currentIndex;
             delete previewEl.dataset.currentPath;
             return;
@@ -1623,51 +1659,58 @@
         const fileName = extractFileNameFromPath(imageNames[currentIndex]);
         const fullPath = await detectImageExtension(charName, fileName);
 
-        // 世代チェック
         if (_previewLoadGen.get(previewEl) !== myGen) return;
 
+        // =====================================================
+        // 状態B: ファイルが見つからない → エラープレースホルダ
+        // =====================================================
         if (fullPath === null) {
-            if (previewEl.dataset.currentPath === '__missing__') return;
+            removeMedia();
+            removeNav();
+            removeLoading();
+            placeholderShowError();
             previewEl.dataset.currentPath = '__missing__';
-            previewEl.innerHTML = '<div class="stj-preview-text stj-preview-error">ファイルが見つかりません</div>';
             return;
         }
 
-        // 同じパスが既に表示済みならナビボタンだけ更新
+        // =====================================================
+        // 状態C-1: 同じパスが既に表示済み → ナビだけ更新
+        // =====================================================
         if (previewEl.dataset.currentPath === fullPath) {
+            placeholderHide();
             addPreviewNavButtons(previewEl, imageNames, currentIndex, previewId, charName, rawValue);
             return;
         }
 
-        // ★ ローディング表示（既存コンテンツを保持したまま重ねる）
-        let loadingEl = previewEl.querySelector(':scope > .stj-preview-loading');
-        if (!loadingEl) {
-            loadingEl = document.createElement('div');
-            loadingEl.className = 'stj-preview-loading';
-            loadingEl.textContent = '読み込み中...';
-            Object.assign(loadingEl.style, {
-                position: 'absolute',
-                top: '50%',
-                left: '50%',
-                transform: 'translate(-50%, -50%)',
-                color: '#e2e8f0',
-                fontSize: '13px',
-                fontWeight: 'bold',
-                padding: '6px 12px',
-                background: 'rgba(0,0,0,0.65)',
-                borderRadius: '4px',
-                pointerEvents: 'none',
-                zIndex: '20',
-            });
-            previewEl.appendChild(loadingEl);
-        }
+        // =====================================================
+        // 状態C-2: これからメディアをロード
+        //   ローディング中はプレースホルダを隠す（黒や旧テキストの残像回避）
+        // =====================================================
+        removeMedia();
+        removeNav();
+        removeLoading();
+        placeholderHide();
 
-        const cleanupLoading = () => {
-            if (loadingEl && loadingEl.parentNode) loadingEl.remove();
-        };
+        const loadingEl = document.createElement('div');
+        loadingEl.className = 'stj-preview-loading';
+        loadingEl.textContent = '読み込み中...';
+        Object.assign(loadingEl.style, {
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            color: '#e2e8f0',
+            fontSize: '13px',
+            fontWeight: 'bold',
+            padding: '6px 12px',
+            background: 'rgba(0,0,0,0.65)',
+            borderRadius: '4px',
+            pointerEvents: 'none',
+            zIndex: '20',
+        });
+        previewEl.appendChild(loadingEl);
 
         if (isVideoUrl(fullPath)) {
-            // ★ 動画: 新しい video 要素で canplay を待つ
             const video = document.createElement('video');
             video.muted = true;
             video.loop = true;
@@ -1677,71 +1720,67 @@
 
             await new Promise((resolve) => {
                 let done = false;
-                const finish = () => {
-                    if (done) return;
-                    done = true;
-                    resolve();
-                };
+                const finish = () => { if (done) return; done = true; resolve(); };
                 video.addEventListener('loadeddata', finish, { once: true });
                 video.addEventListener('canplay', finish, { once: true });
                 video.addEventListener('error', finish, { once: true });
-                // タイムアウト2.5秒で強制表示（大動画対策）
                 setTimeout(finish, 2500);
             });
 
-            // 世代チェック
-            if (_previewLoadGen.get(previewEl) !== myGen) {
-                cleanupLoading();
+            if (_previewLoadGen.get(previewEl) !== myGen) { removeLoading(); return; }
+
+            // ロード失敗の可能性 → 念のため readyState を確認
+            if (video.readyState === 0) {
+                // データが読めていない → エラー扱い
+                removeLoading();
+                placeholderShowError();
+                previewEl.dataset.currentPath = '__missing__';
                 return;
             }
-
-            // 既存メディアを削除
-            previewEl.querySelectorAll(':scope > img, :scope > video').forEach(el => el.remove());
 
             video.autoplay = true;
             video.style.width = '100%';
             video.style.height = '100%';
             video.style.objectFit = 'contain';
             video.style.display = 'block';
-            // ★ 黒背景を透明化（ロード中の黒を回避）
             video.style.backgroundColor = 'transparent';
 
             previewEl.appendChild(video);
             video.play().catch(() => {});
 
             previewEl.dataset.currentPath = fullPath;
-            cleanupLoading();
-
+            removeLoading();
+            placeholderHide();
             addPreviewNavButtons(previewEl, imageNames, currentIndex, previewId, charName, rawValue);
         } else {
-            // ★ 画像: Image.decode() を待ってから表示
             const img = new Image();
             img.src = fullPath;
             img.alt = fileName;
 
+            let decodeOk = false;
             try {
                 if (typeof img.decode === 'function') {
                     await img.decode();
+                    decodeOk = true;
                 } else {
                     await new Promise((resolve, reject) => {
-                        img.onload = () => resolve();
+                        img.onload = () => { decodeOk = true; resolve(); };
                         img.onerror = () => reject(new Error('load failed'));
                     });
                 }
             } catch (e) {
-                cleanupLoading();
-                // デコード失敗 → 既存表示を保持（黒にならない）
-                return;
+                decodeOk = false;
             }
 
-            // 世代チェック
-            if (_previewLoadGen.get(previewEl) !== myGen) {
-                cleanupLoading();
+            if (_previewLoadGen.get(previewEl) !== myGen) { removeLoading(); return; }
+
+            if (!decodeOk) {
+                // デコード失敗 → エラープレースホルダ
+                removeLoading();
+                placeholderShowError();
+                previewEl.dataset.currentPath = '__missing__';
                 return;
             }
-
-            // 既存メディアを削除
-            previewEl.querySelectorAll(':scope > img, :scope > video').forEach(el => el.remove());
 
             img.style.width = '100%';
             img.style.height = '100%';
@@ -1751,8 +1790,8 @@
             previewEl.appendChild(img);
 
             previewEl.dataset.currentPath = fullPath;
-            cleanupLoading();
-
+            removeLoading();
+            placeholderHide();
             addPreviewNavButtons(previewEl, imageNames, currentIndex, previewId, charName, rawValue);
         }
     }
@@ -1887,8 +1926,6 @@
                     addKeywordRowWithData(container, index, kw);
                 });
             }
-            // ★ setTimeout(updatePreview, 100) は削除
-            //    （setupPreviewListeners が updatePreview を呼ぶため重複していた）
         } catch (e) {
             console.error('保存データの読み込みに失敗しました', e);
         }
