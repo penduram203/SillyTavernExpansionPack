@@ -1,5 +1,11 @@
 // gic_lorebook.js
 // ロアブック駆動で画像生成プロンプトを切り替えるモジュール。
+//
+// ★ v3 修正:
+//   - SlashCommandParser/SlashCommand のインポートを複数パス試行
+//   - window グローバルからのフォールバック参照
+//   - APP_READY 待機
+//   - エラー時の安全なフォールバック（機能停止させない）
 
 import { eventSource, event_types, getRequestHeaders } from '../../../../../script.js';
 import { getContext } from '../../../../extensions.js';
@@ -20,8 +26,26 @@ let settings = { ...DEFAULT_SETTINGS };
 
 // ===== 二重実行防止 =====
 let processInFlight = false;
-let lastProcessedMsgIdx = -1;      // 最後に処理したユーザーメッセージ idx
-let listenersInstalled = false;    // リスナー多重登録防止
+let lastProcessedMsgIdx = -1;
+let listenersInstalled = false;
+
+// ===== SlashCommand モジュールキャッシュ =====
+let _slashParserModule = null;
+let _slashCommandModule = null;
+let _slashModulesResolved = false;
+
+// ===== インポートパス候補（SillyTavern のバージョン差を吸収） =====
+const SLASH_PARSER_PATHS = [
+    '../../../slash-commands/SlashCommandParser.js',
+    '../../../../scripts/extensions/slash-commands/SlashCommandParser.js',
+    '../../../../../scripts/extensions/slash-commands/SlashCommandParser.js',
+];
+
+const SLASH_COMMAND_PATHS = [
+    '../../../slash-commands/SlashCommand.js',
+    '../../../../scripts/extensions/slash-commands/SlashCommand.js',
+    '../../../../../scripts/extensions/slash-commands/SlashCommand.js',
+];
 
 function loadSettings() {
     const ctx = getContext();
@@ -75,15 +99,7 @@ function cleanPrompt(prompt) {
         .trim();
 }
 
-/**
- * ★ LEX (Lorebook_Expansion) ストアから img_prompt を取得する。
- *   優先順位:
- *     1) extension_settings.lorebook_expansion.data[worldName][uid].img_prompt
- *     2) entry.extensions.lorebook_expansion.img_prompt
- *     3) entry.extensions.gic_prompt
- */
 function getLexImgPrompt(worldName, uid, entry) {
-    // 1) 一次ストア (extension_settings)
     try {
         const ctx = getContext();
         const lex = ctx?.extensionSettings?.lorebook_expansion;
@@ -100,7 +116,6 @@ function getLexImgPrompt(worldName, uid, entry) {
         console.warn('[GIC-Lore] LEXストア読み込み失敗:', e);
     }
 
-    // 2) entry.extensions.lorebook_expansion (二次 / ミラー)
     if (entry && entry.extensions && typeof entry.extensions === 'object') {
         const lexExt = entry.extensions.lorebook_expansion;
         if (lexExt && typeof lexExt.img_prompt === 'string' && lexExt.img_prompt.trim()) {
@@ -108,7 +123,6 @@ function getLexImgPrompt(worldName, uid, entry) {
         }
     }
 
-    // 3) 旧形式
     if (entry && entry.extensions && typeof entry.extensions === 'object') {
         const ext = entry.extensions;
         if (ext.gic_prompt && typeof ext.gic_prompt === 'string' && ext.gic_prompt.trim()) {
@@ -119,23 +133,16 @@ function getLexImgPrompt(worldName, uid, entry) {
     return null;
 }
 
-/**
- * エントリからプロンプトを抽出する。
- * worldName を渡すことで LEX ストアからの読み込みも行う。
- */
 function extractPromptFromEntry(entry, worldName) {
     if (!entry) return null;
 
-    // ★ 1) LEX (Lorebook_Expansion) を最優先
     const lexPrompt = getLexImgPrompt(worldName, entry.uid, entry);
     if (lexPrompt) return lexPrompt;
 
-    // 2) entry.prompt (旧形式)
     if (entry.prompt && typeof entry.prompt === 'string') {
         return cleanPrompt(entry.prompt);
     }
 
-    // 3) entry.content 内の [GIC_IMG: ...] / [IMG: ...]
     if (entry.content && typeof entry.content === 'string') {
         for (const pat of CONTENT_PROMPT_PATTERNS) {
             const m = entry.content.match(pat);
@@ -179,20 +186,27 @@ async function loadWorldInfoEntries(worldName) {
         }
     } catch (e) { /* ignore */ }
 
-    try {
-        const resp = await fetch('/api/worldinfo/get', {
-            method: 'POST',
-            headers: getRequestHeaders(),
-            body: JSON.stringify({ name: worldName }),
-        });
-        if (resp.ok) {
-            const data = await resp.json();
-            if (data && data.entries) return Object.values(data.entries);
+    // ★ リトライ付き fetch
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+            const resp = await fetch('/api/worldinfo/get', {
+                method: 'POST',
+                headers: getRequestHeaders(),
+                body: JSON.stringify({ name: worldName }),
+            });
+            if (resp.ok) {
+                const data = await resp.json();
+                if (data && data.entries) return Object.values(data.entries);
+            }
+        } catch (e) {
+            if (settings.verbose) {
+                console.debug(`[GIC-Lore] /api/worldinfo/get 試行 ${attempt}/3 失敗: ${e.message || e}`);
+            }
         }
-    } catch (e) {
-        console.warn('[GIC-Lore] /api/worldinfo/get 失敗:', e);
+        if (attempt < 3) await new Promise(r => setTimeout(r, 500 * attempt));
     }
 
+    console.warn('[GIC-Lore] ロアブックのエントリを取得できませんでした:', worldName);
     return [];
 }
 
@@ -281,6 +295,58 @@ function stripGicImgFromDom() {
     });
 }
 
+// ===== SlashCommand モジュールの安全なロード =====
+async function loadSlashModules() {
+    if (_slashModulesResolved) {
+        return { parser: _slashParserModule, command: _slashCommandModule };
+    }
+    _slashModulesResolved = true;
+
+    // Parser を試行
+    for (const path of SLASH_PARSER_PATHS) {
+        try {
+            const mod = await import(path);
+            _slashParserModule = mod?.SlashCommandParser || mod?.default || null;
+            if (_slashParserModule) {
+                if (settings.verbose) console.log(`[GIC-Lore] SlashCommandParser 読み込み成功: ${path}`);
+                break;
+            }
+        } catch (e) {
+            // 次のパスへ
+        }
+    }
+
+    // Command を試行
+    for (const path of SLASH_COMMAND_PATHS) {
+        try {
+            const mod = await import(path);
+            _slashCommandModule = mod?.SlashCommand || null;
+            if (_slashCommandModule) {
+                if (settings.verbose) console.log(`[GIC-Lore] SlashCommand 読み込み成功: ${path}`);
+                break;
+            }
+        } catch (e) {
+            // 次のパスへ
+        }
+    }
+
+    // ★ window グローバルからのフォールバック
+    if (!_slashParserModule && typeof window !== 'undefined') {
+        _slashParserModule = window.SlashCommandParser || null;
+        if (_slashParserModule && settings.verbose) {
+            console.log('[GIC-Lore] SlashCommandParser を window から取得');
+        }
+    }
+    if (!_slashCommandModule && typeof window !== 'undefined') {
+        _slashCommandModule = window.SlashCommand || null;
+        if (_slashCommandModule && settings.verbose) {
+            console.log('[GIC-Lore] SlashCommand を window から取得');
+        }
+    }
+
+    return { parser: _slashParserModule, command: _slashCommandModule };
+}
+
 // ===== /sd 実行 =====
 async function executeSd(prompt) {
     const rawPrompt = cleanPrompt(prompt).replace(/[\r\n]+/g, ' ');
@@ -291,6 +357,7 @@ async function executeSd(prompt) {
 
     console.log(`[GIC-Lore] /sd 実行試行: ${cmd.slice(0, 120)}${cmd.length > 120 ? '...' : ''}`);
 
+    // 方式1: script.js の executeSlashCommandsWithOptions
     try {
         const mod = await import('../../../../script.js');
         if (typeof mod.executeSlashCommandsWithOptions === 'function') {
@@ -302,6 +369,7 @@ async function executeSd(prompt) {
         console.warn('[GIC-Lore] 方式1 失敗:', e?.message || e);
     }
 
+    // 方式2: window グローバル
     try {
         if (typeof window.executeSlashCommandsWithOptions === 'function') {
             await window.executeSlashCommandsWithOptions(cmd);
@@ -312,9 +380,10 @@ async function executeSd(prompt) {
         console.warn('[GIC-Lore] 方式2 失敗:', e?.message || e);
     }
 
+    // 方式3: SlashCommandParser 経由（複数パスを試行済み）
     try {
-        const { SlashCommandParser } = await import('../../../slash-commands/SlashCommandParser.js');
-        const sdCmd = SlashCommandParser?.commands?.['sd'];
+        const { parser } = await loadSlashModules();
+        const sdCmd = parser?.commands?.['sd'];
         if (sdCmd && typeof sdCmd.callback === 'function') {
             const namedArgs = settings.quiet ? { quiet: 'true' } : {};
             const unnamedArgs = rawPrompt;
@@ -339,7 +408,6 @@ async function executeSd(prompt) {
 }
 
 // ===== メイン処理 =====
-// force=true のときは重複チェックをバイパス（手動実行用）
 async function processChoice(force = false) {
     if (!settings.enabled) return;
 
@@ -354,7 +422,6 @@ async function processChoice(force = false) {
         return;
     }
 
-    // ★ 同じユーザーメッセージには時間制限なく1回だけ処理（force時は除く）
     if (!force && msgIdx === lastProcessedMsgIdx) {
         if (settings.verbose) {
             console.log(`[GIC-Lore] 同一メッセージ (idx=${msgIdx}) への重複呼び出しをスキップ`);
@@ -362,7 +429,6 @@ async function processChoice(force = false) {
         return;
     }
 
-    // ★ 処理開始と同時にマーク（失敗時の再試行も防ぐ）
     lastProcessedMsgIdx = msgIdx;
     processInFlight = true;
 
@@ -416,12 +482,10 @@ async function processChoice(force = false) {
             console.log(`[GIC-Lore] エントリ採用: uid=${entry.uid}, comment="${entry.comment || ''}"`);
         }
 
-        // ★ worldName を渡して LEX ストアからも読み込む
         const prompt = extractPromptFromEntry(entry, worldName);
         if (!prompt) {
             console.warn('[GIC-Lore] プロンプトが抽出できませんでした');
             if (settings.verbose) {
-                // デバッグ: LEX ストアの中身を確認
                 try {
                     const ctx = getContext();
                     const lex = ctx?.extensionSettings?.lorebook_expansion?.data;
@@ -447,28 +511,13 @@ async function processChoice(force = false) {
 
 // ===== スラッシュコマンド登録 =====
 async function registerSlashCommand() {
-    let Parser = null;
-    let Command = null;
-
-    try {
-        const parserMod = await import('../../../slash-commands/SlashCommandParser.js');
-        Parser = parserMod.SlashCommandParser || parserMod.default;
-    } catch (e) {
-        console.warn('[GIC-Lore] SlashCommandParser import 失敗:', e);
-    }
-    try {
-        const cmdMod = await import('../../../slash-commands/SlashCommand.js');
-        Command = cmdMod.SlashCommand;
-    } catch (e) {
-        console.warn('[GIC-Lore] SlashCommand import 失敗:', e);
-    }
+    const { parser: Parser, command: Command } = await loadSlashModules();
 
     if (!Parser || typeof Parser.addCommandObject !== 'function') {
-        console.error('[GIC-Lore] SlashCommandParser が利用できません');
+        console.warn('[GIC-Lore] SlashCommandParser が利用できません。スラッシュコマンド登録をスキップします（他の機能は動作します）');
         return;
     }
 
-    // /gic-sd は手動実行なので force=true
     const callbackFn = async () => {
         try { await processChoice(true); } catch (e) { console.error('[GIC-Lore] /gic-sd エラー:', e); }
         return '';
@@ -496,7 +545,6 @@ async function registerSlashCommand() {
                         console.log('6) 抽出プロンプト:', extractPromptFromEntry(found, wn));
                     }
                 }
-                // ★ LEX ストアのダンプ
                 try {
                     const ctx = getContext();
                     const lex = ctx?.extensionSettings?.lorebook_expansion?.data;
@@ -601,11 +649,29 @@ async function initialize() {
     console.log('[GIC-Lore] 初期化完了');
 }
 
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initialize);
-} else {
-    initialize();
+// ★ APP_READY を待ってから初期化（SlashCommandParser が利用可能になるのを待つ）
+function bootstrap() {
+    let started = false;
+    const startOnce = () => {
+        if (started) return;
+        started = true;
+        initialize().catch(e => console.error('[GIC-Lore] 初期化中に例外:', e));
+    };
+
+    if (eventSource && event_types && event_types.APP_READY) {
+        eventSource.on(event_types.APP_READY, startOnce);
+        // フォールバック
+        setTimeout(startOnce, 5000);
+    } else {
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', startOnce);
+        } else {
+            startOnce();
+        }
+    }
 }
+
+bootstrap();
 
 // ===== 公開 API =====
 window.GicLorebook = {
@@ -627,6 +693,15 @@ window.GicLorebook = {
     resetDedup: () => {
         lastProcessedMsgIdx = -1;
         console.log('[GIC-Lore] 重複防止状態をリセット');
+    },
+    // ★ デバッグ用: SlashCommand モジュールの状態を確認
+    diagnoseSlashModules: () => {
+        return {
+            parserLoaded: !!_slashParserModule,
+            commandLoaded: !!_slashCommandModule,
+            parserFromWindow: typeof window !== 'undefined' ? !!window.SlashCommandParser : false,
+            commandFromWindow: typeof window !== 'undefined' ? !!window.SlashCommand : false,
+        };
     },
 };
 console.log('[GIC-Lore] window.GicLorebook にAPIを公開しました');
