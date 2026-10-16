@@ -6,9 +6,11 @@
 /* ---- Chat Window On/Off ---- */
 @import url('./styles/chat_window_onoff.css');
 
+/* ---- Right Nav Kai ---- */
+@import url('./styles/right_nav_kai.css');
+
 /* ---- 今後追加する拡張はここに追記 ---- */
 /* @import url('./styles/image_display.css'); */
 /* @import url('./styles/gic.css'); */
 /* @import url('./styles/text-styling.css'); */
 /* @import url('./styles/Lorebook_Expansion.css'); */
-/* @import url('./styles/right_nav_kai.css'); */
