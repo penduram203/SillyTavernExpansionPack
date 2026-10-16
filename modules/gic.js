@@ -2789,4 +2789,334 @@ function createReleaseButton() {
         btn.style.backgroundColor = '#444';
     });
 
-   
+    let flashTimer = null;
+    const flashBlue = () => {
+        if (flashTimer) clearTimeout(flashTimer);
+        btn.style.backgroundColor = '#0a84ff';
+        btn.style.opacity = '1';
+        flashTimer = setTimeout(() => {
+            const hovering = btn.matches(':hover');
+            btn.style.backgroundColor = hovering ? '#666' : '#444';
+            btn.style.opacity = hovering ? '1' : '0.12';
+            flashTimer = null;
+        }, 250);
+    };
+
+    let lastActionTime = 0;
+    const triggerAction = (source) => {
+        const now = Date.now();
+        if (now - lastActionTime < 200) return;
+        lastActionTime = now;
+        console.log(`[GIC] トリガー: ${source}`);
+        flashBlue();
+        Promise.resolve(handleButtonAction()).catch(e => {
+            console.error('[GIC] handleButtonAction エラー:', e);
+        });
+    };
+
+    btn.addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        triggerAction('pointerdown');
+    }, true);
+
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        triggerAction('click');
+    }, true);
+
+    document.body.appendChild(btn);
+    console.log('[GIC] ✅ ボタンを画面左端(bottom:10%-10px)に配置しました');
+    setButtonLabel(isOverrideLocal ? LABEL_OVERRIDE : LABEL_NORMAL);
+
+    syncButtonVisibilityForTextStyling();
+
+    requestAnimationFrame(positionGalleryButton);
+}
+
+// ===== ギャラリーボタンの生成 =====
+
+function createGalleryButton() {
+    const existing = document.getElementById(GALLERY_BUTTON_ID);
+    if (existing) existing.remove();
+
+    const btn = document.createElement('button');
+    btn.id = GALLERY_BUTTON_ID;
+    btn.type = 'button';
+    btn.title = 'SillyTavern公式ギャラリーを開く';
+    btn.textContent = '🎨';
+
+    Object.assign(btn.style, {
+        position: 'fixed',
+        left: '-9999px',
+        top: '-9999px',
+        zIndex: '15000',
+        width: '50px',
+        height: '50px',
+        padding: '0',
+        margin: '0',
+        boxSizing: 'border-box',
+        fontSize: '26px',
+        lineHeight: '1',
+        color: '#ffffff',
+        backgroundColor: '#444',
+        border: '1px solid #666',
+        borderRadius: '4px',
+        cursor: 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        opacity: '0.12',
+        transition: 'opacity 0.15s ease, background-color 0.15s ease',
+        userSelect: 'none',
+        outline: 'none',
+        whiteSpace: 'nowrap',
+        pointerEvents: 'auto',
+        touchAction: 'manipulation',
+    });
+
+    btn.classList.add('gic-gallery-loading');
+    btn.disabled = true;
+
+    btn.addEventListener('mouseenter', () => {
+        btn.style.opacity = '1';
+        btn.style.backgroundColor = '#666';
+    });
+    btn.addEventListener('mouseleave', () => {
+        btn.style.opacity = '0.12';
+        btn.style.backgroundColor = '#444';
+    });
+
+    let flashTimer = null;
+    const flashBlue = () => {
+        if (flashTimer) clearTimeout(flashTimer);
+        btn.style.backgroundColor = '#0a84ff';
+        btn.style.opacity = '1';
+        flashTimer = setTimeout(() => {
+            const hovering = btn.matches(':hover');
+            btn.style.backgroundColor = hovering ? '#666' : '#444';
+            btn.style.opacity = hovering ? '1' : '0.12';
+            flashTimer = null;
+        }, 250);
+    };
+
+    let lastActionTime = 0;
+    const triggerAction = (source) => {
+        if (btn.classList.contains('gic-gallery-loading') || btn.disabled) {
+            console.log('[GIC] ギャラリー読み込み中のため、クリックを無視');
+            return;
+        }
+        const now = Date.now();
+        if (now - lastActionTime < 200) return;
+        lastActionTime = now;
+        console.log(`[GIC] ギャラリーボタントリガー: ${source}`);
+
+        if (warmupState === 'running') {
+            warmupState = 'aborted';
+            clearGalleryOpenInFlight();
+            const hs = document.getElementById('gic-gallery-warmup-hide');
+            if (hs) hs.remove();
+            console.log('[GIC] 🔥 ユーザー操作によりウォームアップを中断');
+        }
+
+        if (!isGalleryOpen() && warmupState !== 'running') {
+            clearGalleryOpenInFlight();
+        }
+
+        flashBlue();
+        openGalleryFromGic();
+    };
+
+    btn.addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        triggerAction('pointerdown');
+    }, true);
+
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        triggerAction('click');
+    }, true);
+
+    document.body.appendChild(btn);
+    console.log('[GIC] ✅ ギャラリーボタン(🎨)をDOMに追加しました（ローディング状態で開始）');
+
+    requestAnimationFrame(positionGalleryButton);
+
+    syncGalleryButtonVisibility();
+}
+
+// ===== イベント登録 =====
+
+function setupListeners() {
+    const safeOn = (type, handler) => {
+        if (type && eventSource?.on) eventSource.on(type, handler);
+    };
+    safeOn(event_types.MESSAGE_RECEIVED, scanForGeneratedImages);
+    safeOn(event_types.CHARACTER_MESSAGE_RENDERED, scanForGeneratedImages);
+    safeOn(event_types.USER_MESSAGE_RENDERED, scanForGeneratedImages);
+    if (event_types.MESSAGE_UPDATED) safeOn(event_types.MESSAGE_UPDATED, scanForGeneratedImages);
+    if (event_types.MESSAGE_SWIPED) safeOn(event_types.MESSAGE_SWIPED, scanForGeneratedImages);
+
+    if (event_types.CHAT_CHANGED) {
+        safeOn(event_types.CHAT_CHANGED, () => {
+            scanForGeneratedImages();
+            console.log('[GIC] 🔄 CHAT_CHANGED 検出 → ギャラリー準備をリセット');
+            _galleryPreparedFor = null;
+            _galleryPreloadState = 'idle';
+            setTimeout(() => {
+                prepareGalleryForCharacter().catch(e => {
+                    console.warn('[GIC] ギャラリー準備呼び出しでエラー:', e);
+                });
+            }, 500);
+        });
+    }
+
+    if (event_types.CHARACTER_SELECTED) {
+        safeOn(event_types.CHARACTER_SELECTED, () => {
+            console.log('[GIC] 👤 キャラクター変更検出 → ギャラリー準備をリセット');
+            _galleryPreparedFor = null;
+            _galleryPreloadState = 'idle';
+            setTimeout(() => {
+                prepareGalleryForCharacter().catch(e => {
+                    console.warn('[GIC] ギャラリー準備呼び出しでエラー:', e);
+                });
+            }, 300);
+        });
+    }
+
+    console.log('[GIC] ✅ イベントリスナーを登録しました');
+}
+
+// ===== デバッグ: ギャラリーDOM構造のダンプ =====
+window.GicDumpGallery = function () {
+    const gallery = document.getElementById('gallery');
+    if (!gallery) {
+        console.log('[GicDumpGallery] #gallery が見つかりません');
+        return;
+    }
+
+    const lines = [];
+    const walk = (el, depth) => {
+        if (depth > 6) return;
+        const cls = (el.className || '').toString().split(/\s+/).filter(Boolean).slice(0, 3).join('.');
+        const attrs = [];
+        if (el.id) attrs.push(`#${el.id}`);
+        if (el.hasAttribute('data-ngsrc')) attrs.push('[data-ngsrc]');
+        if (el.hasAttribute('data-src')) attrs.push('[data-src]');
+        const rect = el.getBoundingClientRect();
+        const size = `${Math.round(rect.width)}x${Math.round(rect.height)}`;
+        lines.push(`${'  '.repeat(depth)}${el.tagName.toLowerCase()}${cls ? '.' + cls : ''}${attrs.join('')} ${size}`);
+
+        if (depth < 6) {
+            Array.from(el.children).slice(0, 10).forEach(c => walk(c, depth + 1));
+        }
+    };
+
+    walk(gallery, 0);
+    console.log('[GicDumpGallery] ギャラリーDOM構造:\n' + lines.join('\n'));
+};
+
+// ===== 初期化 =====
+
+function initializeGIC() {
+    console.log('[GIC] 初期化開始');
+
+    loadPersistedState();
+
+    installBulkDeleteDocumentHandlers();
+
+    createReleaseButton();
+    createGalleryButton();
+    setupListeners();
+    setupTextStylingObserver();
+    setupGalleryObserverForGic();
+
+    validatePersistedState().catch(e => {
+        console.warn('[GIC] 永続化状態の検証に失敗:', e);
+    });
+
+    // ★ SDソースの整合性を取る（ComfyUI 未起動時に 500 エラーを抑止）
+    ensureSdSourceConsistency().catch(e => {
+        console.warn('[GIC] SDソース整合性チェックに失敗:', e);
+    });
+
+    setInterval(() => {
+        scanForGeneratedImages();
+        syncButtonVisibilityForTextStyling();
+        syncGalleryButtonVisibility();
+        markGeneratedMessagesInDom();
+        positionGalleryButton();
+        positionStatusMessage();
+        applyGalleryLayout();
+        hideGalleryUploadMessage();
+
+        const pager = document.querySelector('.gic-pagination-pager');
+        if (pager) positionPager(pager);
+    }, 1500);
+
+    scanForGeneratedImages();
+    syncButtonVisibilityForTextStyling();
+    syncGalleryButtonVisibility();
+    applyGalleryLayout();
+}
+
+// ★ APP_READY を待ってから初期化（起動直後の失敗を回避）
+function bootstrapGIC() {
+    let started = false;
+    const startOnce = () => {
+        if (started) return;
+        started = true;
+        try {
+            if (document.body) {
+                initializeGIC();
+            } else {
+                setTimeout(() => {
+                    if (document.body) initializeGIC();
+                    else document.addEventListener('DOMContentLoaded', initializeGIC);
+                }, 100);
+            }
+        } catch (e) {
+            console.error('[GIC] 初期化中に例外:', e);
+        }
+    };
+
+    if (eventSource && event_types && event_types.APP_READY) {
+        eventSource.on(event_types.APP_READY, startOnce);
+        // フォールバック: APP_READY が来ない場合に備える
+        setTimeout(startOnce, 5000);
+    } else {
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', startOnce);
+        } else {
+            startOnce();
+        }
+    }
+}
+
+bootstrapGIC();
+
+// ===== activate フック =====
+
+export async function activate() {
+    console.log('[GIC] activate() が呼ばれました');
+    loadPersistedState();
+    installBulkDeleteDocumentHandlers();
+    createReleaseButton();
+    createGalleryButton();
+    setupGalleryObserverForGic();
+    applyGalleryLayout();
+
+    // ★ activate でも SDソース整合性チェック（activate が先に呼ばれる環境向け）
+    ensureSdSourceConsistency().catch(e => {
+        console.warn('[GIC] SDソース整合性チェックに失敗:', e);
+    });
+
+    validatePersistedState().catch(e => {
+        console.warn('[GIC] 永続化状態の検証に失敗:', e);
+    });
+
+    console.log('[GIC] ✅ Generate Image Controller: アクティベート完了');
+}
