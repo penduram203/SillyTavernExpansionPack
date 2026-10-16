@@ -2337,9 +2337,110 @@ function openGalleryFromGic() {
     return false;
 }
 
+// ============================================================
+// ★ ギャラリー閉じる時に付属UI（ページャー・プレビュー）を
+//    ギャラリー本体と完全に同じタイミングで消す
+// ============================================================
+function hideGalleryAttachmentsImmediately(reason = '') {
+    if (reason) {
+        console.log(`[GIC] 🚪 付属UIを即座に非表示 (${reason})`);
+    }
+
+    // 1. ページャー（番号ボタン群）を即削除
+    const pager = document.querySelector('.gic-pagination-pager');
+    if (pager) {
+        pager.remove();
+        _lastPagerSignature = '';
+    }
+
+    // 2. 拡大プレビュー画像を即座に非表示 + 削除
+    const previews = getAllPreviews();
+    for (const el of previews) {
+        el.style.setProperty('display', 'none', 'important');
+        el.style.setProperty('visibility', 'hidden', 'important');
+        el.style.setProperty('opacity', '0', 'important');
+        try { el.remove(); } catch (e) { /* ignore */ }
+    }
+    currentPreviewEl = null;
+
+    // 3. ステータスメッセージも隠す
+    hideStatusMessage();
+
+    // 4. 一括削除モードなら終了
+    if (_bulkDeleteMode) {
+        document.body.classList.remove('gic-bulk-delete-mode');
+        _bulkDeleteMode = false;
+        _bulkDeleteSelected.clear();
+    }
+
+    // 5. 高さキャッシュをクリア
+    for (const sel of GALLERY_WINDOW_SELECTORS) {
+        const el = document.querySelector(sel);
+        if (el && galleryBaseHeightCache.has(el)) {
+            galleryBaseHeightCache.delete(el);
+        }
+    }
+
+    // 6. ページネーションの状態もリセット
+    _paginationSnapshot = { count: -1, since: 0, stable: false };
+    _paginationWindowStart = 0;
+    _paginationWindowManual = false;
+    _galleryTotalPagesCache = 0;
+}
+
+// ============================================================
+// ★ ギャラリー閉じるボタンの押下をキャプチャフェーズで横取りし、
+//    ST本体がギャラリーを閉じる前に付属UIを同期的に消す。
+// ============================================================
+function installGalleryCloseInterceptor() {
+    if (window.__gicCloseInterceptorInstalled) return;
+    window.__gicCloseInterceptorInstalled = true;
+
+    const isInsideGallery = (el) => {
+        const gallery = document.getElementById('gallery');
+        return gallery && el && gallery.contains(el);
+    };
+
+    const handleClose = (e) => {
+        const target = e.target;
+        if (!target || !target.closest) return;
+
+        // #gallery 内の .dragClose を検知
+        const closeBtn = target.closest('.dragClose');
+        if (!closeBtn) return;
+        if (!isInsideGallery(closeBtn)) return;
+
+        // プレビュー内の閉じるボタンは除外
+        // （プレビュー1枚だけを閉じる操作なので、他は触らない）
+        if (closeBtn.closest('.galleryImageDraggable')) return;
+
+        // ★ ST本体のクリックハンドラより先に実行される（キャプチャフェーズ）
+        hideGalleryAttachmentsImmediately('close button click');
+    };
+
+    // キャプチャフェーズで ST本体より先に検知する
+    document.addEventListener('click', handleClose, true);
+    document.addEventListener('pointerdown', handleClose, true);
+
+    // Escape キーでも ST がギャラリーを閉じるので対応
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        const gallery = document.getElementById('gallery');
+        if (!gallery) return;
+        const style = window.getComputedStyle(gallery);
+        if (style.display === 'none' || style.visibility === 'hidden') return;
+        hideGalleryAttachmentsImmediately('Escape key');
+    }, true);
+
+    console.log('[GIC] 🚪 ギャラリー閉じるインターセプタを設置しました');
+}
+
 // ===== 公式ギャラリーを閉じる（プログラム的） =====
 
 function closeGalleryProgrammatically() {
+    // ★ 閉じる前に付属UIを即座に非表示化
+    hideGalleryAttachmentsImmediately('closeGalleryProgrammatically');
+
     const g = document.getElementById('gallery');
     if (g) {
         const closeBtn = g.querySelector(':scope > .dragClose') ||
@@ -3046,6 +3147,9 @@ function initializeGIC() {
 
     installBulkDeleteDocumentHandlers();
 
+    // ★ ギャラリー閉じるインターセプタを設置
+    installGalleryCloseInterceptor();
+
     createReleaseButton();
     createGalleryButton();
     setupListeners();
@@ -3121,6 +3225,10 @@ export async function activate() {
     console.log('[GIC] activate() が呼ばれました');
     loadPersistedState();
     installBulkDeleteDocumentHandlers();
+
+    // ★ ギャラリー閉じるインターセプタを設置
+    installGalleryCloseInterceptor();
+
     createReleaseButton();
     createGalleryButton();
     setupGalleryObserverForGic();
