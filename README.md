@@ -91,6 +91,33 @@ SillyTavern 拡張機能です。出力された JSON は `image-display` およ
 `public/addchara/default.png` に一度だけ手動で配置してください。
 拡張機能の自動更新ではこのアセットは配置されません。
 
+### Lorebook Expansion
+
+SillyTavern のロアブック編集画面に **Img_prompt** と **choices** の 2 つのカスタム
+フィールドを追加する拡張機能です。
+
+**機能:**
+
+- ロアブックの各エントリに以下を追加:
+  - **Img_prompt** — 画像生成プロンプト (3行分のテキストエリア)
+  - **choices** — 複数の選択肢 (3桁番号 + 文言 のペア、追加/削除可能)
+- ユーザーが選択肢番号を入力して AI が応答すると、
+  その番号に対応するロアブックエントリの choices を
+  **応答本文の末尾に自動で番号と文言を表示**する
+- Img_prompt は別拡張 `generate_image_controller` の `gic_lorebook.js` から
+  読み取られ、画像生成プロンプトとして使用される
+
+**データ保存先:**
+
+データは以下の 2 箇所に保存されます:
+
+- **一次**: `extension_settings.lorebook_expansion.data[worldName][uid]`
+  — ST が自動永続化。ワールド情報の保存サイクルに影響されない
+- **二次**: `entry.extensions.lorebook_expansion` (best effort ミラー)
+  — ロアブック JSON の可搬性のため
+
+読込時は一次を優先し、一次が無ければ二次から移行（マイグレーション）します。
+
 ## インストール方法
 
 1. SillyTavern の拡張機能パネルを開く
