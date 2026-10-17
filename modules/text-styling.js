@@ -570,7 +570,8 @@ function initTextStyling() {
         }
     }
 
-    // ★ 手動モード: テキストは中央配置、画像は通常モード + カスタムウィンドウを開く
+    // ★ 手動モード: テキストは中央配置、画像は通常モード
+    //    カスタムウィンドウの自動オープンは行わない（ボタン経由で開く）
     function applyManualLayout() {
         const sheld = document.getElementById('sheld');
         if (sheld) {
@@ -585,9 +586,7 @@ function initTextStyling() {
             if (window.ImageDisplayExtension?.applyNormalMode) {
                 window.ImageDisplayExtension.applyNormalMode();
             }
-            if (window.ImageDisplayExtension?.openCustomWindow) {
-                window.ImageDisplayExtension.openCustomWindow();
-            }
+            // ★ openCustomWindow の自動呼び出しは行わない
             console.log('[Text Styling] レイアウト: 手動（画像位置・サイズを手動設定）');
         } catch (e) {
             console.warn('[Text Styling] Image Display 連携エラー（手動）:', e);
@@ -596,7 +595,6 @@ function initTextStyling() {
 
     /**
      * ★ レイアウトモードを設定し、ボタンのテキストも同期する。
-     *    ボタンの ID は CSS 互換のため 'center-button' を使用。
      */
     function setLayoutMode(mode, options = {}) {
         const prevMode = currentLayoutMode;
@@ -638,6 +636,16 @@ function initTextStyling() {
             console.warn('[Text Styling] center-button が見つかりません');
         }
 
+        // ★ 「位置・サイズの設定」ボタンの表示/非表示
+        const manualSettingsBtn = document.getElementById('manual-settings-button');
+        if (manualSettingsBtn) {
+            if (currentLayoutMode === 'manual') {
+                manualSettingsBtn.style.removeProperty('display');
+            } else {
+                manualSettingsBtn.style.display = 'none';
+            }
+        }
+
         // モード別のレイアウト適用
         switch (currentLayoutMode) {
             case 'center':
@@ -674,13 +682,32 @@ function initTextStyling() {
         document.body.appendChild(windowControlContainer);
 
         // ★ 統合トグルボタン（中央 ⇄ 左右 ⇄ 手動）
-        //    CSS は #center-button を参照しているため、この ID を使用する
         const layoutToggleButton = document.createElement('button');
         layoutToggleButton.id = 'center-button';
         layoutToggleButton.className = 'window-control-button';
         layoutToggleButton.textContent = '中央';
         layoutToggleButton.title = 'クリックで「左右」に切替';
         windowControlContainer.appendChild(layoutToggleButton);
+
+        // ★ 「位置・サイズの設定」ボタン（手動モード専用）
+        //    初期状態は非表示。手動モード時のみ表示する。
+        const manualSettingsButton = document.createElement('button');
+        manualSettingsButton.id = 'manual-settings-button';
+        manualSettingsButton.className = 'window-control-button';
+        manualSettingsButton.textContent = '位置・サイズの設定';
+        manualSettingsButton.title = '背景画像ウィンドウの位置とサイズを設定';
+        manualSettingsButton.style.display = 'none';
+        manualSettingsButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            try {
+                if (window.ImageDisplayExtension?.openCustomWindow) {
+                    window.ImageDisplayExtension.openCustomWindow();
+                }
+            } catch (err) {
+                console.warn('[Text Styling] openCustomWindow エラー:', err);
+            }
+        });
+        windowControlContainer.appendChild(manualSettingsButton);
 
         const sheld = document.getElementById('sheld');
         const sheldheader = document.getElementById('sheldheader');
@@ -710,7 +737,6 @@ function initTextStyling() {
         setupObservers();
 
         // ★ 保存されたレイアウトモードを適用（保存はしない）
-        //    保存モードが 'manual' だった場合、カスタムウィンドウも復元される
         setLayoutMode(currentLayoutMode, { skipSave: true });
     }, 500);
 }
