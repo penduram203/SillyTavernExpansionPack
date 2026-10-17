@@ -40,7 +40,6 @@
     const Z_INDEX_HEADER_DEFAULT = '15000';
     const HEADER_HEIGHT = 30;
 
-    // ★ ヘッダー表示状態（状態ベースで管理）
     let headerVisible = false;
 
     function getTextSignature(text) {
@@ -195,9 +194,6 @@
         });
     }
 
-    // ============================================================
-    // CSS（ヘッダーはデフォルト非表示、.idp-visible で表示）
-    // ============================================================
     (function injectHeaderExtraCSS() {
         if (document.getElementById('image-display-header-extra-css')) return;
         const style = document.createElement('style');
@@ -225,7 +221,6 @@
                 border-bottom: 1px solid #555 !important;
                 cursor: grab;
                 user-select: none !important;
-                /* デフォルト非表示 */
                 opacity: 0 !important;
                 pointer-events: none !important;
                 transition: opacity 0.15s ease !important;
@@ -308,9 +303,6 @@
         document.head.appendChild(style);
     })();
 
-    // ============================================================
-    // UI要素の作成
-    // ============================================================
     const imageContainer = document.createElement('div');
     imageContainer.id = 'image-display-container';
     imageContainer.style.setProperty('z-index', Z_INDEX_BODY, 'important');
@@ -404,9 +396,6 @@
     `;
     document.body.appendChild(customWindow);
 
-    // ============================================================
-    // #top-bar z-index 参照
-    // ============================================================
     function getTopBarZIndex() {
         const topBar = document.getElementById('top-bar');
         if (!topBar) return NaN;
@@ -430,11 +419,12 @@
     }
 
     // ============================================================
-    // ★ ヘッダー表示制御（状態ベース）
-    //    条件: 手動モード かつ 位置・サイズの設定ウインドウが開いている
+    // ★ ヘッダー表示制御
+    //    条件: 位置・サイズの設定ウインドウが開いている
+    //    （モードは問わない → 最大化中でも表示）
     // ============================================================
     function shouldShowHeader() {
-        return currentMode === 'normal' && isCustomWindowOpen === true;
+        return isCustomWindowOpen === true;
     }
 
     function setHeaderVisible(visible) {
@@ -448,9 +438,6 @@
         setHeaderVisible(shouldShowHeader());
     }
 
-    // ============================================================
-    // ヘッダー位置の同期
-    // ============================================================
     function syncHeaderPosition() {
         if (!imageContainer || !header) return;
 
@@ -485,9 +472,6 @@
         applyHeaderZIndex();
     }
 
-    // ============================================================
-    // 条件評価・キーワードロジック
-    // ============================================================
     function normalizeConditionExpression(expr) {
         if (!expr || typeof expr !== 'string') return '';
         return expr
@@ -1057,14 +1041,12 @@
         document.getElementById('custom-top').value = parseInt(imageContainer.style.top) || DEFAULT_TOP;
         customWindow.style.display = 'block';
         isCustomWindowOpen = true;
-        // ★ ウインドウを開いた → ヘッダー表示
         syncHeaderVisibility();
     }
 
     function closeCustomWindow() {
         customWindow.style.display = 'none';
         isCustomWindowOpen = false;
-        // ★ ウインドウを閉じた → ヘッダー非表示
         syncHeaderVisibility();
     }
 
@@ -1237,9 +1219,6 @@
         }
     }
 
-    // ============================================================
-    // モード別レイアウト適用
-    // ============================================================
     function applyNormalMode() {
         imageContainer.style.width = `${preNormalState.width}px`;
         imageContainer.style.height = `${preNormalState.height}px`;
@@ -1395,8 +1374,7 @@
     header.addEventListener('mousedown', (e) => {
         if (isOnHeaderControl(e)) return;
         if (currentMode !== 'normal') return;
-        // ヘッダーは位置・サイズウインドウが開いている時のみ表示されるため、
-        // ここに来る時点で isCustomWindowOpen === true
+
         isDragging = true;
         offsetX = e.clientX - imageContainer.getBoundingClientRect().left;
         offsetY = e.clientY - imageContainer.getBoundingClientRect().top;
