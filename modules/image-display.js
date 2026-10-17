@@ -36,9 +36,13 @@
 
     let isSendInterceptionInstalled = false;
 
-    // ★ 画像本体は常に背面（チャットテキストの下）、ヘッダーだけ前面
+    // ★ 画像本体は常に背面、ヘッダーだけ前面、#top-bar はそのさらに上
     const Z_INDEX_BODY = '0';
     const Z_INDEX_HEADER = '15000';
+    const Z_INDEX_TOP_BAR = '20000';
+
+    // ★ ヘッダー高さ定数
+    const HEADER_HEIGHT = 30;
 
     function getTextSignature(text) {
         if (!text || typeof text !== 'string') return '';
@@ -194,6 +198,9 @@
 
     // ============================================================
     // ★ 追加CSS
+    //    - 画像本体は常に背面（z-index 0）
+    //    - ヘッダーは前面（z-index 15000）
+    //    - #top-bar は最前面（z-index 20000）
     // ============================================================
     (function injectHeaderExtraCSS() {
         if (document.getElementById('image-display-header-extra-css')) return;
@@ -213,9 +220,9 @@
                 gap: 6px !important;
                 padding: 0 8px !important;
                 box-sizing: border-box !important;
-                height: 30px !important;
-                min-height: 30px !important;
-                max-height: 30px !important;
+                height: ${HEADER_HEIGHT}px !important;
+                min-height: ${HEADER_HEIGHT}px !important;
+                max-height: ${HEADER_HEIGHT}px !important;
                 overflow: visible !important;
                 position: fixed !important;
                 z-index: ${Z_INDEX_HEADER} !important;
@@ -296,6 +303,10 @@
                 cursor: not-allowed !important;
                 pointer-events: none !important;
             }
+            /* ★ #top-bar は常にヘッダーより上に */
+            html body #top-bar {
+                z-index: ${Z_INDEX_TOP_BAR} !important;
+            }
         `;
         document.head.appendChild(style);
     })();
@@ -351,7 +362,7 @@
     const mediaContainer = document.createElement('div');
     mediaContainer.id = 'media-element-container';
     mediaContainer.style.width = '100%';
-    mediaContainer.style.height = 'calc(100% - 30px)';
+    mediaContainer.style.height = `calc(100% - ${HEADER_HEIGHT}px)`;
     imageContainer.appendChild(mediaContainer);
 
     const resizeHandle = document.createElement('div');
@@ -398,18 +409,71 @@
     document.body.appendChild(customWindow);
 
     // ============================================================
-    // ★ ヘッダー位置を imageContainer に同期する
+    // ★ #top-bar を常に最前面に保つ
+    // ============================================================
+    function ensureTopBarAboveHeader() {
+        const topBar = document.getElementById('top-bar');
+        if (!topBar) return;
+        try {
+            const cs = window.getComputedStyle(topBar);
+            if (cs.position === 'static') {
+                topBar.style.setProperty('position', 'relative', 'important');
+            }
+            topBar.style.setProperty('z-index', Z_INDEX_TOP_BAR, 'important');
+        } catch (e) { /* ignore */ }
+    }
+
+    // ============================================================
+    // ★ #top-bar の現在の高さを取得
+    // ============================================================
+    function getTopBarHeight() {
+        const topBar = document.getElementById('top-bar');
+        if (!topBar) return 0;
+        try {
+            const rect = topBar.getBoundingClientRect();
+            return rect.height > 0 ? Math.round(rect.height) : 0;
+        } catch (e) {
+            return 0;
+        }
+    }
+
+    // ============================================================
+    // ★ ヘッダー位置の同期
+    //    最大化/左右モード時は「top-barの下」に配置し、
+    //    画像本体はさらにその下（ヘッダー高さ分ずらす）
     // ============================================================
     function syncHeaderPosition() {
         if (!imageContainer || !header) return;
+
+        if (currentMode === 'maximized') {
+            const topBarH = getTopBarHeight();
+            header.style.setProperty('left', '0', 'important');
+            header.style.setProperty('top', topBarH + 'px', 'important');
+            header.style.setProperty('width', window.innerWidth + 'px', 'important');
+            header.style.setProperty('height', HEADER_HEIGHT + 'px', 'important');
+            header.style.setProperty('position', 'fixed', 'important');
+            header.style.setProperty('z-index', Z_INDEX_HEADER, 'important');
+            return;
+        }
+
+        if (currentMode === 'halfMaximized') {
+            const topBarH = getTopBarHeight();
+            header.style.setProperty('left', '0', 'important');
+            header.style.setProperty('top', topBarH + 'px', 'important');
+            header.style.setProperty('width', Math.round(window.innerWidth / 2) + 'px', 'important');
+            header.style.setProperty('height', HEADER_HEIGHT + 'px', 'important');
+            header.style.setProperty('position', 'fixed', 'important');
+            header.style.setProperty('z-index', Z_INDEX_HEADER, 'important');
+            return;
+        }
+
+        // normal モード: コンテナの上端にヘッダーを重ねる（従来通り）
         const rect = imageContainer.getBoundingClientRect();
         if (rect.width <= 0 || rect.height <= 0) return;
-
-        // ヘッダーの高さは 30px 固定
         header.style.setProperty('left', Math.round(rect.left) + 'px', 'important');
         header.style.setProperty('top', Math.round(rect.top) + 'px', 'important');
         header.style.setProperty('width', Math.round(rect.width) + 'px', 'important');
-        header.style.setProperty('height', '30px', 'important');
+        header.style.setProperty('height', HEADER_HEIGHT + 'px', 'important');
         header.style.setProperty('position', 'fixed', 'important');
         header.style.setProperty('z-index', Z_INDEX_HEADER, 'important');
     }
@@ -1167,7 +1231,8 @@
 
     // ============================================================
     // ★ モード別レイアウト適用
-    //    画像本体は常に背面（z-index 0）、ヘッダーだけ前面
+    //    - 画像本体は常に背面
+    //    - 最大化/左右時は #top-bar とヘッダーの下に画像を配置
     // ============================================================
     function applyNormalMode() {
         imageContainer.style.width = `${preNormalState.width}px`;
@@ -1188,18 +1253,23 @@
         currentMode = 'normal';
         updateSizeButtons();
         syncHeaderPosition();
+        ensureTopBarAboveHeader();
     }
 
     function applyMaximizeMode() {
         if (currentMode === 'normal') {
             updatePreNormalStateFromDOM();
         }
+        const topBarH = getTopBarHeight();
+        const topOffset = topBarH + HEADER_HEIGHT;
+
         imageContainer.style.width = '100%';
-        imageContainer.style.height = '100%';
+        imageContainer.style.height = `calc(100% - ${topOffset}px)`;
         imageContainer.style.left = '0';
-        imageContainer.style.top = '0';
+        imageContainer.style.top = `${topOffset}px`;
         imageContainer.style.position = 'fixed';
         imageContainer.style.setProperty('z-index', Z_INDEX_BODY, 'important');
+
         resizeHandle.style.display = 'none';
         header.style.cursor = 'default';
         imageContainer.classList.remove('half-maximized');
@@ -1212,18 +1282,23 @@
         currentMode = 'maximized';
         updateSizeButtons();
         syncHeaderPosition();
+        ensureTopBarAboveHeader();
     }
 
     function applyHalfMaximizeMode() {
         if (currentMode === 'normal') {
             updatePreNormalStateFromDOM();
         }
+        const topBarH = getTopBarHeight();
+        const topOffset = topBarH + HEADER_HEIGHT;
+
         imageContainer.style.width = '50vw';
-        imageContainer.style.height = '100vh';
+        imageContainer.style.height = `calc(100vh - ${topOffset}px)`;
         imageContainer.style.left = '0';
-        imageContainer.style.top = '0';
+        imageContainer.style.top = `${topOffset}px`;
         imageContainer.style.position = 'fixed';
         imageContainer.style.setProperty('z-index', Z_INDEX_BODY, 'important');
+
         resizeHandle.style.display = 'none';
         header.style.cursor = 'default';
         imageContainer.classList.add('half-maximized');
@@ -1236,6 +1311,7 @@
         currentMode = 'halfMaximized';
         updateSizeButtons();
         syncHeaderPosition();
+        ensureTopBarAboveHeader();
     }
 
     restoreDisplayState();
@@ -1388,17 +1464,24 @@
 
     window.addEventListener('resize', () => {
         if (currentMode === 'maximized') {
+            const topBarH = getTopBarHeight();
+            const topOffset = topBarH + HEADER_HEIGHT;
             imageContainer.style.width = '100%';
-            imageContainer.style.height = '100%';
+            imageContainer.style.height = `calc(100% - ${topOffset}px)`;
+            imageContainer.style.top = `${topOffset}px`;
         } else if (currentMode === 'halfMaximized') {
+            const topBarH = getTopBarHeight();
+            const topOffset = topBarH + HEADER_HEIGHT;
             imageContainer.style.width = '50vw';
-            imageContainer.style.height = '100vh';
+            imageContainer.style.height = `calc(100vh - ${topOffset}px)`;
+            imageContainer.style.top = `${topOffset}px`;
         }
         syncHeaderPosition();
     });
 
-    // ★ ヘッダー位置を定期的に同期（他の拡張がウインドウを動かす場合への保険）
+    // ★ ヘッダー位置と #top-bar の z-index を定期的に同期
     setInterval(() => {
+        ensureTopBarAboveHeader();
         syncHeaderPosition();
     }, 500);
 
@@ -1599,6 +1682,9 @@
 
     requestAnimationFrame(positionTextModeButton);
 
+    // ★ 初期化時に #top-bar の z-index を一度強制
+    ensureTopBarAboveHeader();
+
     window.ImageDisplayExtension = {
         setOverrideImage: async function (url) {
             const cleanUrl = (url && typeof url === 'string') ? url.trim() : '';
@@ -1686,6 +1772,7 @@
             return isCustomWindowOpen;
         },
         syncHeaderPosition: syncHeaderPosition,
+        ensureTopBarAboveHeader: ensureTopBarAboveHeader,
     };
     console.log("✅ Image Display Extension API を window.ImageDisplayExtension に公開しました");
 })();
