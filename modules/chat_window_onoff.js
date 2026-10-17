@@ -84,7 +84,7 @@ function injectExtraStyle() {
             cursor: default !important;
         }
 
-        /* ギャラリー表示中は 💡 を非表示・クリック無効・hover無効 */
+        /* ギャラリー表示中は 💡 を非表示・クリック無効 */
         html body.gallery-open #toggle-chat-button {
             display: none !important;
             pointer-events: none !important;
@@ -92,7 +92,7 @@ function injectExtraStyle() {
             cursor: default !important;
         }
 
-        /* JSON編集画面表示中は画面左下の全ボタンを非表示・クリック無効 */
+        /* JSON編集画面表示中は画面左下の全ボタンを非表示 */
         html body.stj-editor-open #toggle-chat-button,
         html body.stj-editor-open #gic-open-gallery-button,
         html body.stj-editor-open #gic-release-override-button,
@@ -112,14 +112,25 @@ function injectExtraStyle() {
             cursor: default !important;
         }
 
-        /* ★ NEW: gic-buttons-wake 時に 💡/🎨 も他のボタンと同時に表示 */
-        html body.gic-buttons-wake #toggle-chat-button,
+        /* 💡 は普段非表示（マウスが近づいた時のみ表示） */
+        html body #toggle-chat-button {
+            opacity: 0 !important;
+            transition: opacity 0.15s ease !important;
+        }
+
+        /* 🎨 は wake 時のみ半透明表示（従来通り） */
         html body.gic-buttons-wake #gic-open-gallery-button {
             opacity: 0.3 !important;
             background-color: #444 !important;
         }
 
-        /* ボタン直接 hover 時は完全不透明（既存挙動維持） */
+        /* 💡 は近接時のみ半透明表示 */
+        html body.chat-bulb-hover #toggle-chat-button {
+            opacity: 0.3 !important;
+            background-color: #444 !important;
+        }
+
+        /* ボタン直接 hover 時は完全不透明 */
         html body #toggle-chat-button:hover,
         html body #gic-open-gallery-button:hover {
             opacity: 1 !important;
@@ -303,26 +314,27 @@ function applyToggleChatButtonLayout() {
     const btn = document.getElementById('toggle-chat-button');
     if (!btn) return;
 
-    const gicBtn = document.getElementById('gic-release-override-button');
-    if (!gicBtn) return;
+    // ★ send_form に追従（無ければ form_sheld / send_textarea にフォールバック）
+    const anchor = document.getElementById('send_form') ||
+                   document.getElementById('form_sheld') ||
+                   document.getElementById('send_textarea');
+    if (!anchor) return;
 
-    const gicRect = gicBtn.getBoundingClientRect();
-    if (gicRect.width <= 0 || gicRect.height <= 0) return;
+    const rect = anchor.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
 
     const gap = 5;
     const btnW = btn.offsetWidth || 50;
     const btnH = btn.offsetHeight || 50;
 
-    // 💡: 前回位置 (50, gicRect.top - btnH - gap - 50) から
-    //     左に 55px、下に 50px 移動 → (-5, gicRect.top - btnH - gap)
-    let left = btnW + gap - 5 - 55;          // 50 - 55 = -5
-    let top  = gicRect.top - btnH - gap;     // 前回の -50 を打ち消す（+50 下）
+    // send_form の左隣
+    let left = rect.left - btnW - gap;
+    let top  = rect.top + (rect.height - btnH) / 2;
 
     const margin = 4;
-    const minLeft = -10;
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    if (left < minLeft) left = minLeft;
+    if (left < margin) left = margin;
     if (left + btnW > vw - margin) left = vw - margin - btnW;
     if (top < margin) top = margin;
     if (top + btnH > vh - margin) top = vh - margin - btnH;
@@ -463,6 +475,74 @@ function setupAuxButtonHover() {
 }
 
 setupAuxButtonHover();
+
+// ============================================================
+// 💡 ボタン近接表示
+// ============================================================
+function setupBulbHover() {
+    const BULB_HOVER_MARGIN = 30;
+    let _bulbIsInZone = false;
+    let _lastX = -1, _lastY = -1;
+
+    function update(x, y) {
+        const btn = document.getElementById('toggle-chat-button');
+        if (!btn) return;
+
+        if (document.body.classList.contains('tsp-open') ||
+            document.body.classList.contains('gallery-open') ||
+            document.body.classList.contains('stj-editor-open')) {
+            if (_bulbIsInZone) {
+                _bulbIsInZone = false;
+                document.body.classList.remove('chat-bulb-hover');
+            }
+            return;
+        }
+
+        if (x < 0 || y < 0) {
+            if (_bulbIsInZone) {
+                _bulbIsInZone = false;
+                document.body.classList.remove('chat-bulb-hover');
+            }
+            return;
+        }
+
+        const rect = btn.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return;
+
+        const inside =
+            x >= rect.left - BULB_HOVER_MARGIN && x <= rect.right + BULB_HOVER_MARGIN &&
+            y >= rect.top - BULB_HOVER_MARGIN && y <= rect.bottom + BULB_HOVER_MARGIN;
+
+        if (inside === _bulbIsInZone) return;
+        _bulbIsInZone = inside;
+        document.body.classList.toggle('chat-bulb-hover', inside);
+    }
+
+    document.addEventListener('mousemove', (e) => {
+        _lastX = e.clientX;
+        _lastY = e.clientY;
+        update(_lastX, _lastY);
+    }, { passive: true });
+
+    document.addEventListener('mouseleave', () => {
+        _lastX = -1; _lastY = -1;
+        update(-1, -1);
+    });
+
+    window.addEventListener('blur', () => {
+        _lastX = -1; _lastY = -1;
+        update(-1, -1);
+    });
+
+    // レイアウト変化時に再チェック
+    setInterval(() => {
+        if (_lastX >= 0) update(_lastX, _lastY);
+    }, 300);
+
+    console.log(`[Chat Window On/Off] 💡 近接表示を開始しました (margin=${BULB_HOVER_MARGIN}px)`);
+}
+
+setupBulbHover();
 
 // ============================================================
 // ギャラリー連動
