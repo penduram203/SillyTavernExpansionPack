@@ -877,14 +877,14 @@ function positionGalleryButton() {
     if (bulbBtn) {
         const bRect = bulbBtn.getBoundingClientRect();
         if (bRect.width > 0 && bRect.height > 0) {
-            const gap = 5;   // ★ 0 → 5 に変更
+            const gap = 5;
             const btnW = galleryBtn.offsetWidth || 50;
             const btnH = galleryBtn.offsetHeight || 50;
 
-            // 💡 の左隣に 5px の間隔で配置
-            // 💡 は left=55 に固定されているので、🎨 は left=55-50-5=0（画面左端）になる
-            let left = bRect.left - btnW - gap;
-            let top = bRect.top + (bRect.height - btnH) / 2;
+            // 指示1: 左に5px（💡の左隣の相対位置は維持）
+            // 💡 は上に50px動いたが、🎨 は上に動かさないため +50 で補正
+            let left = bRect.left - btnW - gap - 5;
+            let top  = bRect.top + (bRect.height - btnH) / 2 + 50;
 
             const margin = 4;
             const vw = window.innerWidth;
