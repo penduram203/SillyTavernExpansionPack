@@ -887,7 +887,7 @@ function positionGalleryButton() {
 
             // ★ 50px 左シフト: 💡 の左端から 50px 左 (= -50px)
             let left = bRect.left - 50;
-            let top = bRect.top + (bRect.height - btnH) / 2 - 5;
+            let top = bRect.top + (bRect.height - btnH) / 2;
 
             // ★ 負座標を許可
             const margin = -100;
