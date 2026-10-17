@@ -869,10 +869,6 @@ async function handleButtonAction() {
     savePersistedState();
 }
 
-// ============================================================
-// ★ 🎨 ボタン位置: 💡 の左端から 50px 左
-//    （旧: bRect.left - btnW - gap = 0 だったのを 50px 左シフトして -50 に）
-// ============================================================
 function positionGalleryButton() {
     const galleryBtn = document.getElementById(GALLERY_BUTTON_ID);
     if (!galleryBtn) return;
@@ -881,15 +877,14 @@ function positionGalleryButton() {
     if (bulbBtn) {
         const bRect = bulbBtn.getBoundingClientRect();
         if (bRect.width > 0 && bRect.height > 0) {
+            const gap = 5;   // ★ 0 → 5
             const btnW = galleryBtn.offsetWidth || 50;
             const btnH = galleryBtn.offsetHeight || 50;
 
-            // ★ 50px 左シフト: 💡 の左端から 50px 左 (= -50px)
-            let left = bRect.left - 50;
+            let left = bRect.left - btnW - gap;   // 💡.left - 50 - 5 = 0
             let top = bRect.top + (bRect.height - btnH) / 2;
 
-            // ★ 負座標を許可
-            const margin = -100;
+            const margin = 4;
             const vw = window.innerWidth;
             const vh = window.innerHeight;
             if (left < margin) left = margin;
