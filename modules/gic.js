@@ -873,42 +873,35 @@ function positionGalleryButton() {
     const galleryBtn = document.getElementById(GALLERY_BUTTON_ID);
     if (!galleryBtn) return;
 
-    const bulbBtn = document.getElementById('toggle-chat-button');
-    if (bulbBtn) {
-        const bRect = bulbBtn.getBoundingClientRect();
-        if (bRect.width > 0 && bRect.height > 0) {
-            const gap = 5;   // ★ 0 → 5
-            const btnW = galleryBtn.offsetWidth || 50;
-            const btnH = galleryBtn.offsetHeight || 50;
-
-            let left = bRect.left - btnW - gap;   // 💡.left - 50 - 5 = 0
-            let top = bRect.top + (bRect.height - btnH) / 2;
-
-            const margin = 4;
-            const vw = window.innerWidth;
-            const vh = window.innerHeight;
-            if (left < margin) left = margin;
-            if (left + btnW > vw - margin) left = vw - margin - btnW;
-            if (top < margin) top = margin;
-            if (top + btnH > vh - margin) top = vh - margin - btnH;
-
-            galleryBtn.style.setProperty('position', 'fixed', 'important');
-            galleryBtn.style.setProperty('left', Math.round(left) + 'px', 'important');
-            galleryBtn.style.setProperty('top', Math.round(top) + 'px', 'important');
-            galleryBtn.style.setProperty('right', 'auto', 'important');
-            galleryBtn.style.setProperty('bottom', 'auto', 'important');
-            galleryBtn.style.setProperty('transform', 'none', 'important');
-
-            positionStatusMessage();
-            return;
-        }
-    }
-
     const gicBtn = document.getElementById(BUTTON_ID);
     if (!gicBtn) return;
-    const w = gicBtn.offsetWidth;
-    if (!w) return;
-    galleryBtn.style.left = (w + 4) + 'px';
+
+    const gicRect = gicBtn.getBoundingClientRect();
+    if (gicRect.width === 0 || gicRect.height === 0) return;
+
+    const btnW = galleryBtn.offsetWidth || 50;
+    const btnH = galleryBtn.offsetHeight || 50;
+
+    // ★ 「5px 左」= 前回の 💡基準（left≈4）から左へ 5px → left:0（画面端）
+    //    💡 が送信フォームへ移動したため、🎨 は背景生成ボタン基準で独立配置
+    //    背景生成ボタンの 5px 上、画面左端
+    let left = 0;
+    let top = gicRect.top - btnH - 5;
+
+    const margin = 4;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    // 右・下のみクランプ。左は意図的に 0（画面端）。
+    if (left + btnW > vw - margin) left = vw - margin - btnW;
+    if (top < margin) top = margin;
+    if (top + btnH > vh - margin) top = vh - margin - btnH;
+
+    galleryBtn.style.setProperty('position', 'fixed', 'important');
+    galleryBtn.style.setProperty('left', Math.round(left) + 'px', 'important');
+    galleryBtn.style.setProperty('top', Math.round(top) + 'px', 'important');
+    galleryBtn.style.setProperty('right', 'auto', 'important');
+    galleryBtn.style.setProperty('bottom', 'auto', 'important');
+    galleryBtn.style.setProperty('transform', 'none', 'important');
 
     positionStatusMessage();
 }
