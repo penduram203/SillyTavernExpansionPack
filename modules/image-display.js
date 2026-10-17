@@ -43,13 +43,16 @@
 
     let headerVisible = false;
 
-    // ★ #top-bar / #top-settings-holder 連動 hover 用
+    // top-bar 連動 hover 用
     const TOP_BAR_HOVER_MARGIN = 20;
     let topBarHoverVisible = false;
     let lastMouseX = -1;
     let lastMouseY = -1;
 
-    // ★ チャットウインドウ（#sheld）用
+    // ★ クリックでピン留めする状態
+    let topBarPinned = false;
+
+    // チャットウインドウ用
     let chatPreState = null;
     let chatCurrentMode = 'normal';
     let isDraggingChat = false;
@@ -221,8 +224,7 @@
     }
 
     // ============================================================
-    // ★ #sheldheader 削除（チャットウインドウ右上のグリップ）
-    //    CSS でも念のため非表示化
+    // #sheldheader 削除
     // ============================================================
     (function removeSheldHeader() {
         try {
@@ -243,7 +245,7 @@
     })();
 
     // ============================================================
-    // ★ #top-bar / #top-settings-holder の hover 連動 CSS
+    // top-bar / top-settings-holder の hover + pin 用 CSS
     // ============================================================
     (function injectTopBarCSS() {
         if (document.getElementById('idp-topbar-extra-css')) return;
@@ -266,7 +268,7 @@
     })();
 
     // ============================================================
-    // ★ 画像ヘッダー用 CSS
+    // 画像ヘッダー用 CSS
     // ============================================================
     (function injectHeaderExtraCSS() {
         if (document.getElementById('image-display-header-extra-css')) return;
@@ -363,10 +365,6 @@
             #image-display-maximize-btn:hover {
                 background-color: #666 !important;
             }
-            #image-display-restore-btn:active,
-            #image-display-maximize-btn:active {
-                background-color: #222 !important;
-            }
             #image-display-restore-btn.size-btn-disabled,
             #image-display-maximize-btn.size-btn-disabled {
                 opacity: 0.3 !important;
@@ -378,7 +376,7 @@
     })();
 
     // ============================================================
-    // ★ チャットウインドウヘッダー / リサイズハンドル用 CSS
+    // チャットウインドウヘッダー / リサイズハンドル / 最大化クラス用 CSS
     // ============================================================
     (function injectChatHeaderCSS() {
         if (document.getElementById('idp-chat-header-css')) return;
@@ -495,6 +493,21 @@
             #idp-chat-resize-handle.idp-visible {
                 display: block !important;
             }
+            /* ★ text-styling.js のインラインスタイルを上書きする最大化クラス */
+            #sheld.idp-chat-maximized {
+                position: fixed !important;
+                inset: 0 !important;
+                right: auto !important;
+                bottom: auto !important;
+                left: 0 !important;
+                top: 0 !important;
+                width: 100vw !important;
+                height: 100vh !important;
+                max-width: 100vw !important;
+                max-height: 100vh !important;
+                margin: 0 !important;
+                resize: none !important;
+            }
         `;
         document.head.appendChild(style);
     })();
@@ -593,7 +606,7 @@
     document.body.appendChild(customWindow);
 
     // ============================================================
-    // ★ チャットウインドウ用ヘッダー / リサイズハンドル
+    // チャットウインドウ用ヘッダー / リサイズハンドル
     // ============================================================
     const chatHeader = document.createElement('div');
     chatHeader.id = 'idp-chat-window-header';
@@ -638,9 +651,6 @@
     chatResizeHandle.id = 'idp-chat-resize-handle';
     document.body.appendChild(chatResizeHandle);
 
-    // ============================================================
-    // ヘルパー
-    // ============================================================
     function getTopBarZIndex() {
         const topBar = document.getElementById('top-bar');
         if (!topBar) return NaN;
@@ -656,7 +666,6 @@
         if (!header) return;
         const topBarZ = getTopBarZIndex();
         let headerZ = parseInt(Z_INDEX_HEADER_DEFAULT, 10);
-
         if (Number.isFinite(topBarZ) && topBarZ > 1) {
             headerZ = Math.max(500, topBarZ - 1);
         }
@@ -667,16 +676,12 @@
         if (!chatHeader) return;
         const topBarZ = getTopBarZIndex();
         let headerZ = parseInt(Z_INDEX_HEADER_DEFAULT, 10);
-
         if (Number.isFinite(topBarZ) && topBarZ > 1) {
             headerZ = Math.max(500, topBarZ - 1);
         }
         chatHeader.style.setProperty('z-index', String(headerZ), 'important');
     }
 
-    // ============================================================
-    // 画像ヘッダー表示制御
-    // ============================================================
     function shouldShowHeader() {
         return isCustomWindowOpen === true;
     }
@@ -692,17 +697,14 @@
         setHeaderVisible(shouldShowHeader());
     }
 
-    // ============================================================
-    // チャットヘッダー表示制御（isCustomWindowOpen に連動）
-    // ============================================================
     function syncChatHeaderVisibility() {
         const visible = isCustomWindowOpen === true;
         if (chatHeader) chatHeader.classList.toggle('idp-visible', visible);
-        if (chatResizeHandle) chatResizeHandle.classList.toggle('idp-visible', visible);
+        if (chatResizeHandle) chatResizeHandle.classList.toggle('idp-visible', visible && chatCurrentMode === 'normal');
     }
 
     // ============================================================
-    // #top-bar / #top-settings-holder の hover 表示制御
+    // top-bar の hover + pin 制御
     // ============================================================
     function getTopBar() {
         return document.getElementById('top-bar');
@@ -731,6 +733,12 @@
     }
 
     function updateTopBarVisibility(x, y) {
+        // ★ ピン留め中は常に表示
+        if (topBarPinned) {
+            setTopBarVisible(true);
+            return;
+        }
+
         const topBar = getTopBar();
         const settingsHolder = getTopSettingsHolder();
 
@@ -755,6 +763,34 @@
         setTopBarVisible(inside);
     }
 
+    // ★ クリックでピン留め / 外側クリックで解除
+    document.addEventListener('click', (e) => {
+        const topBar = getTopBar();
+        const settingsHolder = getTopSettingsHolder();
+        const sheld = document.getElementById('sheld');
+
+        const insideTopArea =
+            (topBar && topBar.contains(e.target)) ||
+            (settingsHolder && settingsHolder.contains(e.target));
+        const insideSheld = sheld && sheld.contains(e.target);
+
+        if (insideTopArea) {
+            // top-bar / top-settings-holder 内をクリック → ピン留め
+            topBarPinned = true;
+            setTopBarVisible(true);
+        } else if (insideSheld) {
+            // sheld 内をクリック → ピン状態は維持（既にピン留め中なら解除しない）
+            // ピンされていなければ何もしない
+        } else {
+            // 外側をクリック → ピン解除
+            if (topBarPinned) {
+                topBarPinned = false;
+                // マウス位置に応じて再評価
+                updateTopBarVisibility(lastMouseX, lastMouseY);
+            }
+        }
+    }, true);
+
     document.addEventListener('mousemove', (e) => {
         lastMouseX = e.clientX;
         lastMouseY = e.clientY;
@@ -764,18 +800,18 @@
     document.addEventListener('mouseleave', () => {
         lastMouseX = -1;
         lastMouseY = -1;
-        setTopBarVisible(false);
+        updateTopBarVisibility(-1, -1);
     });
 
     window.addEventListener('blur', () => {
         lastMouseX = -1;
         lastMouseY = -1;
-        setTopBarVisible(false);
+        // blur でもピン留めは維持（alt-tab等で消えないように）
+        if (!topBarPinned) {
+            setTopBarVisible(false);
+        }
     });
 
-    // ============================================================
-    // 画像ヘッダー位置同期
-    // ============================================================
     function syncHeaderPosition() {
         if (!imageContainer || !header) return;
 
@@ -810,9 +846,6 @@
         applyHeaderZIndex();
     }
 
-    // ============================================================
-    // チャットヘッダー / リサイズハンドルの位置同期
-    // ============================================================
     function syncChatHeaderPosition() {
         if (!chatHeader) return;
         const sheld = document.getElementById('sheld');
@@ -839,9 +872,6 @@
         chatResizeHandle.style.setProperty('top', Math.round(rect.bottom - 20) + 'px', 'important');
     }
 
-    // ============================================================
-    // チャットウインドウを fixed + 明示座標に変換する
-    // ============================================================
     function ensureChatExplicitPosition() {
         const sheld = document.getElementById('sheld');
         if (!sheld) return;
@@ -868,9 +898,6 @@
         sheld.dataset.idpChatExplicit = 'true';
     }
 
-    // ============================================================
-    // チャットウインドウのモード切替
-    // ============================================================
     function updateChatSizeButtons() {
         if (!chatRestoreBtn || !chatMaximizeBtn) return;
         chatRestoreBtn.classList.remove('size-btn-disabled');
@@ -885,6 +912,10 @@
     function applyChatNormalState() {
         const sheld = document.getElementById('sheld');
         if (!sheld || !chatPreState) return;
+
+        // ★ 最大化クラスを外す
+        sheld.classList.remove('idp-chat-maximized');
+
         sheld.style.setProperty('position', 'fixed', 'important');
         sheld.style.setProperty('inset', 'auto', 'important');
         sheld.style.setProperty('right', 'auto', 'important');
@@ -893,11 +924,14 @@
         sheld.style.setProperty('top', chatPreState.top + 'px', 'important');
         sheld.style.setProperty('width', chatPreState.width + 'px', 'important');
         sheld.style.setProperty('height', chatPreState.height + 'px', 'important');
-        sheld.dataset.idpChatExplicit = 'true';
+        sheld.style.setProperty('margin', '0', 'important');
+        sheld.style.setProperty('resize', 'none', 'important');
+
         chatCurrentMode = 'normal';
         updateChatSizeButtons();
         syncChatHeaderPosition();
         syncChatResizeHandlePosition();
+        syncChatHeaderVisibility();
         try { window.dispatchEvent(new Event('resize')); } catch (e) { /* ignore */ }
     }
 
@@ -907,24 +941,24 @@
         if (chatCurrentMode === 'normal') {
             ensureChatExplicitPosition();
         }
-        sheld.style.setProperty('position', 'fixed', 'important');
-        sheld.style.setProperty('inset', 'auto', 'important');
-        sheld.style.setProperty('right', 'auto', 'important');
-        sheld.style.setProperty('bottom', 'auto', 'important');
-        sheld.style.setProperty('left', '0', 'important');
-        sheld.style.setProperty('top', '0', 'important');
-        sheld.style.setProperty('width', '100vw', 'important');
-        sheld.style.setProperty('height', '100vh', 'important');
-        sheld.dataset.idpChatExplicit = 'true';
+
+        // ★ text-styling.js のインラインスタイルを除去してから CSS クラスを適用
+        ['width', 'height', 'left', 'top', 'right', 'bottom', 'inset', 'margin', 'resize'].forEach(prop => {
+            sheld.style.removeProperty(prop);
+        });
+
+        sheld.classList.add('idp-chat-maximized');
+
         chatCurrentMode = 'maximized';
         updateChatSizeButtons();
         syncChatHeaderPosition();
         syncChatResizeHandlePosition();
+        syncChatHeaderVisibility();
         try { window.dispatchEvent(new Event('resize')); } catch (e) { /* ignore */ }
     }
 
     // ============================================================
-    // チャットウインドウ：色ピッカー / 復元 / 最大化 / ドラッグ / リサイズ
+    // チャットヘッダー操作
     // ============================================================
     function isOnChatHeaderControl(e) {
         const target = e.target;
@@ -1008,6 +1042,16 @@
         if (isDraggingChat) {
             isDraggingChat = false;
             chatHeader.style.cursor = 'grab';
+            // ★ chatPreState を更新
+            if (chatPreState) {
+                const sheld = document.getElementById('sheld');
+                if (sheld) {
+                    const left = parseInt(sheld.style.left, 10);
+                    const top = parseInt(sheld.style.top, 10);
+                    if (Number.isFinite(left)) chatPreState.left = left;
+                    if (Number.isFinite(top)) chatPreState.top = top;
+                }
+            }
         }
     });
 
@@ -1044,6 +1088,15 @@
     document.addEventListener('mouseup', () => {
         if (isResizingChat) {
             isResizingChat = false;
+            if (chatPreState) {
+                const sheld = document.getElementById('sheld');
+                if (sheld) {
+                    const w = parseInt(sheld.style.width, 10);
+                    const h = parseInt(sheld.style.height, 10);
+                    if (Number.isFinite(w)) chatPreState.width = w;
+                    if (Number.isFinite(h)) chatPreState.height = h;
+                }
+            }
         }
     });
 
@@ -1913,11 +1966,7 @@
     restoreSizeBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         e.preventDefault();
-        console.log(`[Image Display] ❐ 元に戻すボタンがクリックされました (mode=${currentMode})`);
-        if (currentMode === 'normal') {
-            console.log('[Image Display] 既に normal モードのため、何もしません');
-            return;
-        }
+        if (currentMode === 'normal') return;
         applyNormalMode();
         saveDisplayState();
     });
@@ -1925,18 +1974,13 @@
     maximizeSizeBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         e.preventDefault();
-        console.log(`[Image Display] ⛶ 最大化ボタンがクリックされました (mode=${currentMode})`);
-        if (currentMode === 'maximized') {
-            console.log('[Image Display] 既に maximized モードのため、何もしません');
-            return;
-        }
+        if (currentMode === 'maximized') return;
         applyMaximizeMode();
         saveDisplayState();
     });
 
     colorPicker.addEventListener('click', (e) => {
         e.stopPropagation();
-        console.log('[Image Display] 🎨 カラーピッカーがクリックされました');
     });
 
     function isOnHeaderControl(e) {
@@ -2054,7 +2098,9 @@
         syncHeaderPosition();
         syncChatHeaderPosition();
         syncChatResizeHandlePosition();
-        updateTopBarVisibility(lastMouseX, lastMouseY);
+        if (!topBarPinned) {
+            updateTopBarVisibility(lastMouseX, lastMouseY);
+        }
     }, 500);
 
     function setupEventSourceListeners() {
@@ -2140,9 +2186,6 @@
         }
 
         if (textModeBtn.style.display === 'none') {
-            console.log('📋 事前設定モード → UT/AI ボタンを再表示');
-        }
-        if (textModeBtn.style.display === 'none') {
             textModeBtn.style.display = '';
         }
         textModeBtn.style.pointerEvents = '';
@@ -2208,10 +2251,8 @@
 
         if (galleryOpen) {
             controlContainer.style.display = 'none';
-            console.log('📷 ギャラリー表示中 → コントロールボタンを非表示');
         } else {
             controlContainer.style.display = 'flex';
-            console.log('📷 ギャラリー非表示 → コントロールボタンを再表示');
         }
 
         const textModeBtn = document.getElementById('text-mode-button');
@@ -2227,10 +2268,8 @@
         if (gicButton) {
             if (galleryOpen) {
                 gicButton.style.display = 'none';
-                console.log('📷 ギャラリー表示中 → GICトグルボタンを非表示');
             } else {
                 gicButton.style.display = '';
-                console.log('📷 ギャラリー非表示 → GICトグルボタンを再表示');
             }
         }
     }
@@ -2249,7 +2288,6 @@
         setInterval(updateControlContainerVisibility, 300);
 
         updateControlContainerVisibility();
-        console.log('📷 ギャラリー連動監視を開始しました');
     }
 
     setupGalleryObserver();
@@ -2274,10 +2312,8 @@
             isOverrideActive = true;
 
             if (overrideImageUrl) {
-                console.log(`🎯 外部連携: 画像を強制表示 ${overrideImageUrl}`);
                 await updateImageWithUrl(overrideImageUrl);
             } else {
-                console.log(`🎯 外部連携: 強制表示モードON（デフォルト画像）`);
                 const fallback = getRandomImageSource(currentImageMap.default) || currentImageMap.default;
                 if (fallback && typeof fallback === 'string' && fallback.trim()) {
                     await updateImageWithUrl(fallback);
@@ -2292,56 +2328,31 @@
             safeUpdateImage();
         },
 
-        getCurrentImageUrl: function () {
-            return currentImageUrl;
-        },
-
-        isOverride: function () {
-            return isOverrideActive;
-        },
-
-        getOverrideImageUrl: function () {
-            return overrideImageUrl;
-        },
+        getCurrentImageUrl: function () { return currentImageUrl; },
+        isOverride: function () { return isOverrideActive; },
+        getOverrideImageUrl: function () { return overrideImageUrl; },
 
         applyNormalMode: function () {
-            console.log('🎯 API: applyNormalMode を実行');
             applyNormalMode();
             saveDisplayState();
         },
         applyMaximizeMode: function () {
-            console.log('🎯 API: applyMaximizeMode を実行（フル表示）');
             applyMaximizeMode();
             saveDisplayState();
         },
         applyHalfMaximizeMode: function () {
-            console.log('🎯 API: applyHalfMaximizeMode を実行（左半分表示）');
             applyHalfMaximizeMode();
             saveDisplayState();
         },
-        getCurrentMode: function () {
-            return currentMode;
-        },
+        getCurrentMode: function () { return currentMode; },
 
         openCustomWindow: function () {
-            console.log('🎯 API: openCustomWindow を実行');
-            try {
-                openCustomWindow();
-            } catch (e) {
-                console.warn('openCustomWindow エラー:', e);
-            }
+            try { openCustomWindow(); } catch (e) { console.warn(e); }
         },
         closeCustomWindow: function () {
-            console.log('🎯 API: closeCustomWindow を実行');
-            try {
-                closeCustomWindow();
-            } catch (e) {
-                console.warn('closeCustomWindow エラー:', e);
-            }
+            try { closeCustomWindow(); } catch (e) { console.warn(e); }
         },
-        isCustomWindowOpen: function () {
-            return isCustomWindowOpen;
-        },
+        isCustomWindowOpen: function () { return isCustomWindowOpen; },
         syncHeaderPosition: syncHeaderPosition,
         applyHeaderZIndex: applyHeaderZIndex,
         syncHeaderVisibility: syncHeaderVisibility,
@@ -2349,6 +2360,11 @@
         setTopBarVisible: setTopBarVisible,
         syncChatHeaderVisibility: syncChatHeaderVisibility,
         syncChatHeaderPosition: syncChatHeaderPosition,
+        setTopBarPinned: function (pinned) {
+            topBarPinned = !!pinned;
+            if (topBarPinned) setTopBarVisible(true);
+            else updateTopBarVisibility(lastMouseX, lastMouseY);
+        },
     };
     console.log("✅ Image Display Extension API を window.ImageDisplayExtension に公開しました");
 })();
