@@ -36,7 +36,6 @@
 
     let isSendInterceptionInstalled = false;
 
-    // 画像本体は常に背面、ヘッダーだけ前面
     const Z_INDEX_BODY = '0';
     const Z_INDEX_HEADER_DEFAULT = '15000';
     const HEADER_HEIGHT = 30;
@@ -195,7 +194,7 @@
     }
 
     // ============================================================
-    // CSS 追加（#top-bar には一切触らない）
+    // CSS 追加
     // ============================================================
     (function injectHeaderExtraCSS() {
         if (document.getElementById('image-display-header-extra-css')) return;
@@ -347,10 +346,11 @@
         el.addEventListener('pointerdown', (e) => { e.stopPropagation(); });
     });
 
+    // ★ height: 100% に変更（ヘッダーは imageContainer の外にいるため）
     const mediaContainer = document.createElement('div');
     mediaContainer.id = 'media-element-container';
     mediaContainer.style.width = '100%';
-    mediaContainer.style.height = `calc(100% - ${HEADER_HEIGHT}px)`;
+    mediaContainer.style.height = '100%';
     imageContainer.appendChild(mediaContainer);
 
     const resizeHandle = document.createElement('div');
@@ -397,7 +397,7 @@
     document.body.appendChild(customWindow);
 
     // ============================================================
-    // ★ #top-bar は一切触らない（存在確認のみ）
+    // #top-bar 関連（z-index は触らない）
     // ============================================================
     function getTopBarHeight() {
         const topBar = document.getElementById('top-bar');
@@ -422,11 +422,6 @@
         }
     }
 
-    // ============================================================
-    // ★ ヘッダーの z-index を #top-bar より下に設定
-    //    #top-bar の z-index が取得できない/低すぎる場合は
-    //    デフォルトの 15000 をそのまま使う
-    // ============================================================
     function applyHeaderZIndex() {
         if (!header) return;
         const topBarZ = getTopBarZIndex();
@@ -439,9 +434,7 @@
     }
 
     // ============================================================
-    // ★ ヘッダー位置の同期
-    //   - 最大化/左右: #top-bar の下に配置
-    //   - 手動: コンテナの上端に合わせるが #top-bar より下にクランプ
+    // ヘッダー位置の同期
     // ============================================================
     function syncHeaderPosition() {
         if (!imageContainer || !header) return;
@@ -472,7 +465,6 @@
         const rect = imageContainer.getBoundingClientRect();
         if (rect.width <= 0 || rect.height <= 0) return;
 
-        // #top-bar の下にクランプ（ヘッダーが top-bar を覆わないように）
         const clampedTop = Math.max(Math.round(rect.top), topBarH);
 
         header.style.setProperty('left', Math.round(rect.left) + 'px', 'important');
@@ -1091,9 +1083,6 @@
         });
     });
 
-    // ============================================================
-    // 状態の永続化・復元
-    // ============================================================
     function saveDisplayState() {
         const state = {
             preNormalState,
@@ -1236,6 +1225,8 @@
 
     // ============================================================
     // モード別レイアウト適用
+    //   最大化/左右は viewport 単位(100vw/100vh) で明示指定し、
+    //   containing block の影響を回避する
     // ============================================================
     function applyNormalMode() {
         imageContainer.style.width = `${preNormalState.width}px`;
@@ -1265,11 +1256,14 @@
         const topBarH = getTopBarHeight();
         const topOffset = topBarH + HEADER_HEIGHT;
 
-        imageContainer.style.width = '100%';
-        imageContainer.style.height = `calc(100% - ${topOffset}px)`;
-        imageContainer.style.left = '0';
-        imageContainer.style.top = `${topOffset}px`;
-        imageContainer.style.position = 'fixed';
+        // ★ viewport 単位 + !important で containing block 依存を排除
+        imageContainer.style.setProperty('position', 'fixed', 'important');
+        imageContainer.style.setProperty('width', '100vw', 'important');
+        imageContainer.style.setProperty('height', `calc(100vh - ${topOffset}px)`, 'important');
+        imageContainer.style.setProperty('left', '0', 'important');
+        imageContainer.style.setProperty('top', `${topOffset}px`, 'important');
+        imageContainer.style.setProperty('right', 'auto', 'important');
+        imageContainer.style.setProperty('bottom', 'auto', 'important');
         imageContainer.style.setProperty('z-index', Z_INDEX_BODY, 'important');
 
         resizeHandle.style.display = 'none';
@@ -1293,11 +1287,13 @@
         const topBarH = getTopBarHeight();
         const topOffset = topBarH + HEADER_HEIGHT;
 
-        imageContainer.style.width = '50vw';
-        imageContainer.style.height = `calc(100vh - ${topOffset}px)`;
-        imageContainer.style.left = '0';
-        imageContainer.style.top = `${topOffset}px`;
-        imageContainer.style.position = 'fixed';
+        imageContainer.style.setProperty('position', 'fixed', 'important');
+        imageContainer.style.setProperty('width', '50vw', 'important');
+        imageContainer.style.setProperty('height', `calc(100vh - ${topOffset}px)`, 'important');
+        imageContainer.style.setProperty('left', '0', 'important');
+        imageContainer.style.setProperty('top', `${topOffset}px`, 'important');
+        imageContainer.style.setProperty('right', 'auto', 'important');
+        imageContainer.style.setProperty('bottom', 'auto', 'important');
         imageContainer.style.setProperty('z-index', Z_INDEX_BODY, 'important');
 
         resizeHandle.style.display = 'none';
@@ -1318,9 +1314,6 @@
 
     validateRestoredOverride();
 
-    // ============================================================
-    // イベントリスナー
-    // ============================================================
     colorPicker.addEventListener('input', () => {
         imageContainer.style.backgroundColor = colorPicker.value;
         saveDisplayState();
@@ -1466,20 +1459,19 @@
         if (currentMode === 'maximized') {
             const topBarH = getTopBarHeight();
             const topOffset = topBarH + HEADER_HEIGHT;
-            imageContainer.style.width = '100%';
-            imageContainer.style.height = `calc(100% - ${topOffset}px)`;
-            imageContainer.style.top = `${topOffset}px`;
+            imageContainer.style.setProperty('width', '100vw', 'important');
+            imageContainer.style.setProperty('height', `calc(100vh - ${topOffset}px)`, 'important');
+            imageContainer.style.setProperty('top', `${topOffset}px`, 'important');
         } else if (currentMode === 'halfMaximized') {
             const topBarH = getTopBarHeight();
             const topOffset = topBarH + HEADER_HEIGHT;
-            imageContainer.style.width = '50vw';
-            imageContainer.style.height = `calc(100vh - ${topOffset}px)`;
-            imageContainer.style.top = `${topOffset}px`;
+            imageContainer.style.setProperty('width', '50vw', 'important');
+            imageContainer.style.setProperty('height', `calc(100vh - ${topOffset}px)`, 'important');
+            imageContainer.style.setProperty('top', `${topOffset}px`, 'important');
         }
         syncHeaderPosition();
     });
 
-    // ヘッダー位置と z-index を定期的に再同期
     setInterval(() => {
         syncHeaderPosition();
     }, 500);
