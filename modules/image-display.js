@@ -39,7 +39,6 @@
     const Z_INDEX_BODY = '0';
     const Z_INDEX_HEADER_DEFAULT = '15000';
     const HEADER_HEIGHT = 30;
-    const TOP_BAR_FALLBACK_HEIGHT = 40;
 
     function getTextSignature(text) {
         if (!text || typeof text !== 'string') return '';
@@ -346,7 +345,6 @@
         el.addEventListener('pointerdown', (e) => { e.stopPropagation(); });
     });
 
-    // ★ height: 100% に変更（ヘッダーは imageContainer の外にいるため）
     const mediaContainer = document.createElement('div');
     mediaContainer.id = 'media-element-container';
     mediaContainer.style.width = '100%';
@@ -397,20 +395,8 @@
     document.body.appendChild(customWindow);
 
     // ============================================================
-    // #top-bar 関連（z-index は触らない）
+    // #top-bar の z-index のみ参照（位置制御には使わない）
     // ============================================================
-    function getTopBarHeight() {
-        const topBar = document.getElementById('top-bar');
-        if (!topBar) return TOP_BAR_FALLBACK_HEIGHT;
-        try {
-            const rect = topBar.getBoundingClientRect();
-            const h = Math.round(rect.height);
-            return h > 0 ? h : TOP_BAR_FALLBACK_HEIGHT;
-        } catch (e) {
-            return TOP_BAR_FALLBACK_HEIGHT;
-        }
-    }
-
     function getTopBarZIndex() {
         const topBar = document.getElementById('top-bar');
         if (!topBar) return NaN;
@@ -435,16 +421,16 @@
 
     // ============================================================
     // ヘッダー位置の同期
+    //   - 最大化/左右: top: 0（画面最上部）・全幅
+    //   - 手動: コンテナ位置に追従（クランプなし）
     // ============================================================
     function syncHeaderPosition() {
         if (!imageContainer || !header) return;
 
-        const topBarH = getTopBarHeight();
-
         if (currentMode === 'maximized') {
             header.style.setProperty('left', '0', 'important');
-            header.style.setProperty('top', topBarH + 'px', 'important');
-            header.style.setProperty('width', window.innerWidth + 'px', 'important');
+            header.style.setProperty('top', '0', 'important');
+            header.style.setProperty('width', '100vw', 'important');
             header.style.setProperty('height', HEADER_HEIGHT + 'px', 'important');
             header.style.setProperty('position', 'fixed', 'important');
             applyHeaderZIndex();
@@ -453,22 +439,20 @@
 
         if (currentMode === 'halfMaximized') {
             header.style.setProperty('left', '0', 'important');
-            header.style.setProperty('top', topBarH + 'px', 'important');
-            header.style.setProperty('width', Math.round(window.innerWidth / 2) + 'px', 'important');
+            header.style.setProperty('top', '0', 'important');
+            header.style.setProperty('width', '50vw', 'important');
             header.style.setProperty('height', HEADER_HEIGHT + 'px', 'important');
             header.style.setProperty('position', 'fixed', 'important');
             applyHeaderZIndex();
             return;
         }
 
-        // normal モード
+        // normal モード（クランプしない）
         const rect = imageContainer.getBoundingClientRect();
         if (rect.width <= 0 || rect.height <= 0) return;
 
-        const clampedTop = Math.max(Math.round(rect.top), topBarH);
-
         header.style.setProperty('left', Math.round(rect.left) + 'px', 'important');
-        header.style.setProperty('top', clampedTop + 'px', 'important');
+        header.style.setProperty('top', Math.round(rect.top) + 'px', 'important');
         header.style.setProperty('width', Math.round(rect.width) + 'px', 'important');
         header.style.setProperty('height', HEADER_HEIGHT + 'px', 'important');
         header.style.setProperty('position', 'fixed', 'important');
@@ -1224,9 +1208,7 @@
     }
 
     // ============================================================
-    // モード別レイアウト適用
-    //   最大化/左右は viewport 単位(100vw/100vh) で明示指定し、
-    //   containing block の影響を回避する
+    // モード別レイアウト適用（top: 0 で viewport 全体を使用）
     // ============================================================
     function applyNormalMode() {
         imageContainer.style.width = `${preNormalState.width}px`;
@@ -1253,15 +1235,12 @@
         if (currentMode === 'normal') {
             updatePreNormalStateFromDOM();
         }
-        const topBarH = getTopBarHeight();
-        const topOffset = topBarH + HEADER_HEIGHT;
 
-        // ★ viewport 単位 + !important で containing block 依存を排除
         imageContainer.style.setProperty('position', 'fixed', 'important');
         imageContainer.style.setProperty('width', '100vw', 'important');
-        imageContainer.style.setProperty('height', `calc(100vh - ${topOffset}px)`, 'important');
+        imageContainer.style.setProperty('height', '100vh', 'important');
         imageContainer.style.setProperty('left', '0', 'important');
-        imageContainer.style.setProperty('top', `${topOffset}px`, 'important');
+        imageContainer.style.setProperty('top', '0', 'important');
         imageContainer.style.setProperty('right', 'auto', 'important');
         imageContainer.style.setProperty('bottom', 'auto', 'important');
         imageContainer.style.setProperty('z-index', Z_INDEX_BODY, 'important');
@@ -1284,14 +1263,12 @@
         if (currentMode === 'normal') {
             updatePreNormalStateFromDOM();
         }
-        const topBarH = getTopBarHeight();
-        const topOffset = topBarH + HEADER_HEIGHT;
 
         imageContainer.style.setProperty('position', 'fixed', 'important');
         imageContainer.style.setProperty('width', '50vw', 'important');
-        imageContainer.style.setProperty('height', `calc(100vh - ${topOffset}px)`, 'important');
+        imageContainer.style.setProperty('height', '100vh', 'important');
         imageContainer.style.setProperty('left', '0', 'important');
-        imageContainer.style.setProperty('top', `${topOffset}px`, 'important');
+        imageContainer.style.setProperty('top', '0', 'important');
         imageContainer.style.setProperty('right', 'auto', 'important');
         imageContainer.style.setProperty('bottom', 'auto', 'important');
         imageContainer.style.setProperty('z-index', Z_INDEX_BODY, 'important');
@@ -1457,17 +1434,13 @@
 
     window.addEventListener('resize', () => {
         if (currentMode === 'maximized') {
-            const topBarH = getTopBarHeight();
-            const topOffset = topBarH + HEADER_HEIGHT;
             imageContainer.style.setProperty('width', '100vw', 'important');
-            imageContainer.style.setProperty('height', `calc(100vh - ${topOffset}px)`, 'important');
-            imageContainer.style.setProperty('top', `${topOffset}px`, 'important');
+            imageContainer.style.setProperty('height', '100vh', 'important');
+            imageContainer.style.setProperty('top', '0', 'important');
         } else if (currentMode === 'halfMaximized') {
-            const topBarH = getTopBarHeight();
-            const topOffset = topBarH + HEADER_HEIGHT;
             imageContainer.style.setProperty('width', '50vw', 'important');
-            imageContainer.style.setProperty('height', `calc(100vh - ${topOffset}px)`, 'important');
-            imageContainer.style.setProperty('top', `${topOffset}px`, 'important');
+            imageContainer.style.setProperty('height', '100vh', 'important');
+            imageContainer.style.setProperty('top', '0', 'important');
         }
         syncHeaderPosition();
     });
