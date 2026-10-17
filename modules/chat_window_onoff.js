@@ -320,8 +320,12 @@ function applyToggleChatButtonLayout() {
     const btnW = btn.offsetWidth || 50;
     const btnH = btn.offsetHeight || 50;
 
-    let left = rect.left - btnW - gap;
-    let top = rect.top + (rect.height - btnH) / 2;
+    // ★ 追加オフセット: 上75px、右50px
+    const OFFSET_UP = 75;
+    const OFFSET_RIGHT = 50;
+
+    let left = rect.left - btnW - gap + OFFSET_RIGHT;
+    let top = rect.top + (rect.height - btnH) / 2 - OFFSET_UP;
 
     const margin = 4;
     const vw = window.innerWidth;
