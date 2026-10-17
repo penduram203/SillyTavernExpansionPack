@@ -874,6 +874,10 @@ function positionGalleryButton() {
     const galleryBtn = document.getElementById(GALLERY_BUTTON_ID);
     if (!galleryBtn) return;
 
+    // ★ 💡ボタン基準からさらに上50px、右50px
+    const EXTRA_UP = 50;
+    const EXTRA_RIGHT = 50;
+
     const bulbBtn = document.getElementById('toggle-chat-button');
     if (bulbBtn) {
         const bRect = bulbBtn.getBoundingClientRect();
@@ -882,8 +886,8 @@ function positionGalleryButton() {
             const btnW = galleryBtn.offsetWidth || 50;
             const btnH = galleryBtn.offsetHeight || 50;
 
-            let left = bRect.left - btnW - gap;
-            let top = bRect.top + (bRect.height - btnH) / 2;
+            let left = bRect.left - btnW - gap + EXTRA_RIGHT;
+            let top = bRect.top + (bRect.height - btnH) / 2 - EXTRA_UP;
 
             const margin = 4;
             const vw = window.innerWidth;
@@ -905,11 +909,12 @@ function positionGalleryButton() {
         }
     }
 
+    // フォールバック（💡ボタンが無い場合）
     const gicBtn = document.getElementById(BUTTON_ID);
     if (!gicBtn) return;
     const w = gicBtn.offsetWidth;
     if (!w) return;
-    galleryBtn.style.left = (w + 4) + 'px';
+    galleryBtn.style.left = (w + 4 + EXTRA_RIGHT) + 'px';
 
     positionStatusMessage();
 }
