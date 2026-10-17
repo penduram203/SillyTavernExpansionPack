@@ -36,22 +36,9 @@
 
     let isSendInterceptionInstalled = false;
 
-    // ============================================================
-    // ★ モード別 z-index
-    //    - 手動モード(normal): 前面（チャットより上）で操作可能
-    //    - 最大化/左右: 背面（チャットより下）でテキスト可読
-    // ============================================================
-    const Z_INDEX_FOREGROUND = '15000';
-    const Z_INDEX_BACKGROUND = '0';
-
-    function applyZIndexForMode() {
-        if (!imageContainer) return;
-        if (currentMode === 'normal') {
-            imageContainer.style.setProperty('z-index', Z_INDEX_FOREGROUND, 'important');
-        } else {
-            imageContainer.style.setProperty('z-index', Z_INDEX_BACKGROUND, 'important');
-        }
-    }
+    // ★ 画像本体は常に背面（チャットテキストの下）、ヘッダーだけ前面
+    const Z_INDEX_BODY = '0';
+    const Z_INDEX_HEADER = '15000';
 
     function getTextSignature(text) {
         if (!text || typeof text !== 'string') return '';
@@ -206,18 +193,19 @@
     }
 
     // ============================================================
-    // ★ ヘッダー用追加CSS
-    //    z-index は JS 側（applyZIndexForMode）でモード別に制御するため
-    //    CSS では固定しない
+    // ★ 追加CSS
     // ============================================================
     (function injectHeaderExtraCSS() {
         if (document.getElementById('image-display-header-extra-css')) return;
         const style = document.createElement('style');
         style.id = 'image-display-header-extra-css';
         style.textContent = `
+            /* 画像本体は常に背面 */
             #image-display-container {
                 position: absolute;
+                z-index: ${Z_INDEX_BODY} !important;
             }
+            /* ヘッダー（操作バー）は document.body 直下で常に前面 */
             #image-display-header {
                 display: flex !important;
                 align-items: center !important;
@@ -229,8 +217,13 @@
                 min-height: 30px !important;
                 max-height: 30px !important;
                 overflow: visible !important;
-                position: relative !important;
-                z-index: 3 !important;
+                position: fixed !important;
+                z-index: ${Z_INDEX_HEADER} !important;
+                background-color: #333 !important;
+                color: #fff !important;
+                border-bottom: 1px solid #555 !important;
+                cursor: grab;
+                user-select: none !important;
                 pointer-events: auto !important;
             }
             #image-display-title {
@@ -240,6 +233,8 @@
                 white-space: nowrap !important;
                 min-width: 0 !important;
                 pointer-events: none !important;
+                font-size: 13px !important;
+                font-weight: bold !important;
             }
             #image-display-header-controls {
                 flex: 0 0 auto !important;
@@ -310,12 +305,13 @@
     // ============================================================
     const imageContainer = document.createElement('div');
     imageContainer.id = 'image-display-container';
-    imageContainer.style.setProperty('z-index', Z_INDEX_FOREGROUND, 'important');
+    imageContainer.style.setProperty('z-index', Z_INDEX_BODY, 'important');
     document.body.appendChild(imageContainer);
 
+    // ★ ヘッダーは imageContainer の外（document.body 直下）に置く
     const header = document.createElement('div');
     header.id = 'image-display-header';
-    imageContainer.appendChild(header);
+    document.body.appendChild(header);
 
     const titleSpan = document.createElement('span');
     titleSpan.id = 'image-display-title';
@@ -400,6 +396,23 @@
         <button class="close-button" id="close-custom-window">閉じる</button>
     `;
     document.body.appendChild(customWindow);
+
+    // ============================================================
+    // ★ ヘッダー位置を imageContainer に同期する
+    // ============================================================
+    function syncHeaderPosition() {
+        if (!imageContainer || !header) return;
+        const rect = imageContainer.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return;
+
+        // ヘッダーの高さは 30px 固定
+        header.style.setProperty('left', Math.round(rect.left) + 'px', 'important');
+        header.style.setProperty('top', Math.round(rect.top) + 'px', 'important');
+        header.style.setProperty('width', Math.round(rect.width) + 'px', 'important');
+        header.style.setProperty('height', '30px', 'important');
+        header.style.setProperty('position', 'fixed', 'important');
+        header.style.setProperty('z-index', Z_INDEX_HEADER, 'important');
+    }
 
     // ============================================================
     // 条件評価・キーワードロジック
@@ -1004,6 +1017,7 @@
             imageContainer.style.left = `${l}px`;
             imageContainer.style.top = `${t}px`;
             preNormalState = { width: w, height: h, left: l, top: t };
+            syncHeaderPosition();
             saveDisplayState();
         });
     });
@@ -1153,7 +1167,7 @@
 
     // ============================================================
     // ★ モード別レイアウト適用
-    //    z-index もモードに応じて切り替える
+    //    画像本体は常に背面（z-index 0）、ヘッダーだけ前面
     // ============================================================
     function applyNormalMode() {
         imageContainer.style.width = `${preNormalState.width}px`;
@@ -1161,6 +1175,7 @@
         imageContainer.style.left = `${preNormalState.left}px`;
         imageContainer.style.top = `${preNormalState.top}px`;
         imageContainer.style.position = 'absolute';
+        imageContainer.style.setProperty('z-index', Z_INDEX_BODY, 'important');
         resizeHandle.style.display = 'block';
         header.style.cursor = 'grab';
         imageContainer.classList.remove('half-maximized');
@@ -1172,8 +1187,7 @@
         customButton.classList.add('enabled');
         currentMode = 'normal';
         updateSizeButtons();
-        // ★ 手動モード: チャットより前面（操作可能）
-        applyZIndexForMode();
+        syncHeaderPosition();
     }
 
     function applyMaximizeMode() {
@@ -1185,6 +1199,7 @@
         imageContainer.style.left = '0';
         imageContainer.style.top = '0';
         imageContainer.style.position = 'fixed';
+        imageContainer.style.setProperty('z-index', Z_INDEX_BODY, 'important');
         resizeHandle.style.display = 'none';
         header.style.cursor = 'default';
         imageContainer.classList.remove('half-maximized');
@@ -1196,8 +1211,7 @@
         customButton.classList.add('enabled');
         currentMode = 'maximized';
         updateSizeButtons();
-        // ★ 最大化: チャットより背面（テキスト可読・背景画像）
-        applyZIndexForMode();
+        syncHeaderPosition();
     }
 
     function applyHalfMaximizeMode() {
@@ -1209,6 +1223,7 @@
         imageContainer.style.left = '0';
         imageContainer.style.top = '0';
         imageContainer.style.position = 'fixed';
+        imageContainer.style.setProperty('z-index', Z_INDEX_BODY, 'important');
         resizeHandle.style.display = 'none';
         header.style.cursor = 'default';
         imageContainer.classList.add('half-maximized');
@@ -1220,8 +1235,7 @@
         customButton.classList.add('enabled');
         currentMode = 'halfMaximized';
         updateSizeButtons();
-        // ★ 左右: チャットより背面（テキスト可読）
-        applyZIndexForMode();
+        syncHeaderPosition();
     }
 
     restoreDisplayState();
@@ -1315,6 +1329,7 @@
         if (isDragging && currentMode === 'normal') {
             imageContainer.style.left = `${e.clientX - offsetX}px`;
             imageContainer.style.top = `${e.clientY - offsetY}px`;
+            syncHeaderPosition();
             if (isCustomWindowOpen) updateCustomWindow();
         }
     });
@@ -1327,6 +1342,7 @@
             if (currentMode === 'normal') {
                 updatePreNormalStateFromDOM();
             }
+            syncHeaderPosition();
             saveDisplayState();
         }
     });
@@ -1347,6 +1363,7 @@
                 const newHeight = Math.max(100, startHeight + (e.clientY - startY));
                 imageContainer.style.width = `${newWidth}px`;
                 imageContainer.style.height = `${newHeight}px`;
+                syncHeaderPosition();
                 if (isCustomWindowOpen) updateCustomWindow();
             }
         }
@@ -1358,6 +1375,7 @@
                 if (currentMode === 'normal') {
                     updatePreNormalStateFromDOM();
                 }
+                syncHeaderPosition();
                 saveDisplayState();
                 document.removeEventListener('mousemove', handleResize);
                 document.removeEventListener('mouseup', stopResize);
@@ -1376,7 +1394,13 @@
             imageContainer.style.width = '50vw';
             imageContainer.style.height = '100vh';
         }
+        syncHeaderPosition();
     });
+
+    // ★ ヘッダー位置を定期的に同期（他の拡張がウインドウを動かす場合への保険）
+    setInterval(() => {
+        syncHeaderPosition();
+    }, 500);
 
     function setupEventSourceListeners() {
         if (typeof SillyTavern !== 'undefined' && SillyTavern.getContext) {
@@ -1419,9 +1443,6 @@
     setupSendInterception();
     loadCharacterData(true);
     setupChatDomObserver();
-
-    // ★ モードが外部から変更された場合への対策（念のため）
-    setInterval(applyZIndexForMode, 1000);
 
     let pollCount = 0;
     const initialPoll = setInterval(() => {
@@ -1664,6 +1685,7 @@
         isCustomWindowOpen: function () {
             return isCustomWindowOpen;
         },
+        syncHeaderPosition: syncHeaderPosition,
     };
     console.log("✅ Image Display Extension API を window.ImageDisplayExtension に公開しました");
 })();
