@@ -6,15 +6,12 @@
 //
 // ★ データ保存先:
 //   一次: extension_settings.lorebook_expansion.data[worldName][uid]
-//         → ST が自動永続化。ワールド情報の保存サイクルに影響されない。
 //   二次: entry.extensions.lorebook_expansion (best effort ミラー)
-//         → ロアブック JSON の可搬性のため。ST が保持すれば生き残る。
 //   読込時は一次を優先。一次が無ければ二次から移行（マイグレーション）。
 //
-// ★ v4 修正:
-//   - APP_READY 待機で初期化（NetworkError 回避）
-//   - /api/worldinfo/get のリトライ処理
-//   - 安全な初期化ラッパー
+// ★ v5 修正:
+//   - ST起動時のWIドロワー自動オープン問題への対策を追加
+//     (ST本体が RossAscends-mods.js 経由で自動クリックする挙動を抑止)
 
 import {
     extension_settings,
@@ -248,10 +245,6 @@ function getCurrentWorldName() {
     return null;
 }
 
-/**
- * ★ /api/worldinfo/get をリトライ付きで叩く。
- *   NetworkError（ST起動直後のレース）を吸収する。
- */
 async function fetchWorldInfoWithRetry(worldName, maxRetries = WORLDIINFO_FETCH_MAX_RETRIES) {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
@@ -289,7 +282,6 @@ async function loadWorldInfoEntriesByName(worldName) {
         }
     } catch (e) { /* ignore */ }
 
-    // ★ リトライ付き fetch
     const entries = await fetchWorldInfoWithRetry(worldName);
     if (entries) return entries;
 
@@ -692,7 +684,6 @@ async function injectExpansionSections() {
 
     const entries = await loadWorldInfoEntriesByName(worldName);
     if (!entries) {
-        // ★ リトライ後も失敗した場合のみ警告（起動直後の一時的失敗を抑制）
         debugLog(`inject: world "${worldName}" のエントリ取得失敗（リトライ後）`);
         return;
     }
@@ -845,7 +836,6 @@ async function init() {
     setupObserver();
     registerEventListeners();
 
-    // ★ APP_READY 後に DOM 注入を試みる（worldinfo が確実に利用可能になるまで待つ）
     setTimeout(() => {
         injectExpansionSections().catch(() => {});
     }, 1000);
@@ -853,7 +843,6 @@ async function init() {
     console.log(LOG, '初期化完了');
 }
 
-// ★ APP_READY を待ってから init を実行（起動直後の NetworkError を回避）
 function bootstrap() {
     let started = false;
     const startOnce = () => {
@@ -864,13 +853,104 @@ function bootstrap() {
 
     if (eventSource && event_types && event_types.APP_READY) {
         eventSource.on(event_types.APP_READY, startOnce);
-        // フォールバック: 万一 APP_READY が来ない場合に備えて遅延起動
         setTimeout(startOnce, 5000);
     } else {
-        // eventSource が使えない環境では即時起動
         startOnce();
     }
 }
+
+// ============================================================
+// ★ ST起動時のWIドロワー自動オープン問題への対策
+//   ST本体は起動時、キャラクターに紐付くロアブックがあると
+//   RossAscends-mods.js 経由で WI ドロワー（#WorldInfo）を
+//   自動で開く。これが「起動直後からロアブック設定ウインドウが
+//   開いた状態になっている」問題の原因。
+//
+//   対策:
+//     1. 初期化中の WIドロワートグルクリックをキャプチャフェーズで
+//        抑止する（ST本体の自動クリックを防ぐ）
+//     2. APP_READY 後、まだ開いていたら強制クローズする
+//        （保存状態から復元されたケースに対応）
+//     3. APP_READY + 800ms でブロックを解除
+//        （ユーザーの意図的なクリックを妨げない）
+// ============================================================
+(function setupWIDrawerAutoOpenBlocker() {
+    let blocking = true;
+    let released = false;
+    let forceClosed = false;
+
+    const isWIDrawerToggle = (el) => {
+        if (!el || !el.closest) return false;
+        const toggle = el.closest('.drawer-toggle.drawer-header');
+        if (!toggle) return false;
+        // WIドロワー（#WorldInfo）内のトグルかを確認
+        return !!toggle.closest('#WorldInfo');
+    };
+
+    // --- 1. キャプチャフェーズでWIドロワートグルクリックを抑止 ---
+    document.addEventListener('click', (e) => {
+        if (!blocking) return;
+        if (!isWIDrawerToggle(e.target)) return;
+
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        console.log(`${LOG} 🚫 起動時のWIドロワー自動オープンをブロックしました`);
+    }, true);
+
+    // --- 2. ブロック解除 + 念のための強制クローズ ---
+    function releaseBlocking() {
+        if (released) return;
+        released = true;
+
+        // 先にブロックを解除（自前のtoggle.click()がブロックされないように）
+        blocking = false;
+
+        // まだ開いていたら強制的に閉じる
+        if (!forceClosed) {
+            forceClosed = true;
+            try {
+                const wiDrawer = document.getElementById('WorldInfo');
+                if (wiDrawer) {
+                    const isOpen = wiDrawer.classList.contains('openDrawer');
+                    if (isOpen) {
+                        const toggle = wiDrawer.querySelector('.drawer-toggle.drawer-header');
+                        if (toggle && typeof toggle.click === 'function') {
+                            toggle.click();
+                            console.log(`${LOG} 🚪 WIドロワーを強制クローズしました`);
+                        }
+                    }
+                }
+            } catch (err) {
+                console.warn(LOG, 'WIドロワー強制クローズに失敗:', err);
+            }
+        }
+
+        console.log(`${LOG} 🔓 WIドロワー自動オープンブロックを解除しました`);
+    }
+
+    // --- 3. APP_READY 待機（フォールバック付き） ---
+    let releaseScheduled = false;
+    const scheduleRelease = () => {
+        if (releaseScheduled) return;
+        releaseScheduled = true;
+        // ST本体の自動クリックが済むのを待ってから解除
+        setTimeout(releaseBlocking, 800);
+    };
+
+    if (eventSource && event_types && event_types.APP_READY) {
+        eventSource.on(event_types.APP_READY, scheduleRelease);
+        // フォールバック: APP_READYが来なかった場合
+        setTimeout(scheduleRelease, 8000);
+    } else {
+        // eventSourceが取れない環境向けフォールバック
+        try {
+            jQuery(() => {
+                setTimeout(releaseBlocking, 800);
+            });
+        } catch (e) { /* ignore */ }
+        setTimeout(scheduleRelease, 8000);
+    }
+})();
 
 jQuery(async () => {
     bootstrap();
