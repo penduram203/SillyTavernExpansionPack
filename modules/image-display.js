@@ -17,7 +17,7 @@
     let isDragging = false, isResizing = false, offsetX, offsetY, isCustomWindowOpen = false;
     const imageMapCache = new Map();
     let isDefaultImageFailed = false;
-    let currentTextMode = 'user'; // 'user' または 'ai'
+    let currentTextMode = 'user';
     let streamingTimer = null;
     let lastStreamingText = '';
     const STREAMING_DELAY = 500;
@@ -27,26 +27,23 @@
     let isOverrideActive = false;
     let overrideImageUrl = null;
 
-    // --- マッチキャッシュ（二重発火によるちらつき防止） ---
+    // --- マッチキャッシュ ---
     let lastMatchCache = { signature: null, url: null, timestamp: 0 };
-    const MATCH_CACHE_TTL = 1500; // ms
+    const MATCH_CACHE_TTL = 1500;
 
-    // --- 条件式 AST パースキャッシュ（毎回パースしない） ---
+    // --- 条件式 AST パースキャッシュ ---
     const parsedConditionCache = new Map();
 
-    // --- ソート済みキーワードエントリキャッシュ（毎回ソートしない） ---
+    // --- ソート済みキーワードエントリキャッシュ ---
     let sortedKeywordEntriesCache = null;
     let sortedKeywordEntriesCacheSource = null;
 
-    // --- findLastKeywordImage の探索上限（最新N件のみ走査） ---
     const MAX_MESSAGE_SCAN = 20;
 
-    // --- 送信傍受の多重登録防止フラグ ---
     let isSendInterceptionInstalled = false;
 
     function getTextSignature(text) {
         if (!text || typeof text !== 'string') return '';
-        // 末尾200文字をシグネチャとして使用
         return text.slice(-200);
     }
 
@@ -59,9 +56,6 @@
         sortedKeywordEntriesCacheSource = null;
     }
 
-    /**
-     * ★ override 状態を解除する。
-     */
     function clearOverrideState(options = {}) {
         const { save = true, reason = '' } = options;
         const wasActive = isOverrideActive;
@@ -77,7 +71,6 @@
         }
     }
 
-    // デバウンス処理
     function debounce(func, wait) {
         let timeout;
         return function executedFunction(...args) {
@@ -86,7 +79,6 @@
         };
     }
 
-    // --- 拡張子自動検出関数（動画・画像対応） ---
     const ALLOWED_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif', 'bmp', 'mp4', 'webm'];
 
     function isVideoUrl(url) {
@@ -114,7 +106,6 @@
         return null;
     }
 
-    // 高速チェック＆キャッシュ付きメディア確認
     function checkMediaExists(mediaUrl) {
         if (!mediaUrl || typeof mediaUrl !== 'string' || !mediaUrl.trim()) {
             return Promise.resolve(false);
@@ -176,7 +167,6 @@
         return detectedMap;
     }
 
-    // キャラクターの全メディアをプリロード（初回表示のラグ低減）
     function preloadCharacterImages(imageMap) {
         if (!imageMap) return;
         const urls = new Set();
@@ -204,24 +194,133 @@
         });
     }
 
-    // --- UI要素の作成 ---
+    // ============================================================
+    // ★ ヘッダー用追加CSS（新ボタン・レイアウト）
+    // ============================================================
+    (function injectHeaderExtraCSS() {
+        if (document.getElementById('image-display-header-extra-css')) return;
+        const style = document.createElement('style');
+        style.id = 'image-display-header-extra-css';
+        style.textContent = `
+            #image-display-header {
+                display: flex !important;
+                align-items: center !important;
+                justify-content: space-between !important;
+                gap: 6px !important;
+                padding: 0 8px !important;
+                box-sizing: border-box !important;
+            }
+            #image-display-title {
+                flex: 1 1 auto !important;
+                overflow: hidden !important;
+                text-overflow: ellipsis !important;
+                white-space: nowrap !important;
+                min-width: 0 !important;
+            }
+            #image-display-header-controls {
+                flex: 0 0 auto !important;
+                display: flex !important;
+                align-items: center !important;
+                gap: 4px !important;
+            }
+            #bg-color-picker {
+                position: static !important;
+                top: auto !important;
+                right: auto !important;
+                width: 22px !important;
+                height: 22px !important;
+                padding: 0 !important;
+                border: 1px solid #888 !important;
+                border-radius: 3px !important;
+                cursor: pointer !important;
+                box-sizing: border-box !important;
+                flex: 0 0 auto !important;
+            }
+            #image-display-restore-btn,
+            #image-display-maximize-btn {
+                width: 22px !important;
+                height: 22px !important;
+                padding: 0 !important;
+                background-color: #444 !important;
+                color: #fff !important;
+                border: 1px solid #666 !important;
+                border-radius: 3px !important;
+                cursor: pointer !important;
+                font-size: 13px !important;
+                line-height: 1 !important;
+                display: flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                box-sizing: border-box !important;
+                flex: 0 0 auto !important;
+                user-select: none !important;
+            }
+            #image-display-restore-btn:hover,
+            #image-display-maximize-btn:hover {
+                background-color: #666 !important;
+            }
+            #image-display-restore-btn:active,
+            #image-display-maximize-btn:active {
+                background-color: #222 !important;
+            }
+            #image-display-restore-btn.size-btn-disabled,
+            #image-display-maximize-btn.size-btn-disabled {
+                opacity: 0.3 !important;
+                cursor: not-allowed !important;
+                pointer-events: none !important;
+            }
+        `;
+        document.head.appendChild(style);
+    })();
+
+    // ============================================================
+    // UI要素の作成
+    // ============================================================
     const imageContainer = document.createElement('div');
     imageContainer.id = 'image-display-container';
     document.body.appendChild(imageContainer);
 
     const header = document.createElement('div');
     header.id = 'image-display-header';
-    header.textContent = 'メディア表示エリア (ドラッグで移動)';
     imageContainer.appendChild(header);
+
+    const titleSpan = document.createElement('span');
+    titleSpan.id = 'image-display-title';
+    titleSpan.textContent = 'メディア表示エリア (ドラッグで移動)';
+    header.appendChild(titleSpan);
+
+    const headerControls = document.createElement('div');
+    headerControls.id = 'image-display-header-controls';
+    header.appendChild(headerControls);
 
     const colorPicker = document.createElement('input');
     colorPicker.type = 'color';
     colorPicker.id = 'bg-color-picker';
     colorPicker.value = DEFAULT_BG_COLOR;
     colorPicker.title = '背景色を変更';
-    header.appendChild(colorPicker);
+    headerControls.appendChild(colorPicker);
 
-    // メディア表示用コンテナ
+    const restoreSizeBtn = document.createElement('button');
+    restoreSizeBtn.id = 'image-display-restore-btn';
+    restoreSizeBtn.type = 'button';
+    restoreSizeBtn.textContent = '❐';
+    restoreSizeBtn.title = '元のサイズと位置に戻す';
+    headerControls.appendChild(restoreSizeBtn);
+
+    const maximizeSizeBtn = document.createElement('button');
+    maximizeSizeBtn.id = 'image-display-maximize-btn';
+    maximizeSizeBtn.type = 'button';
+    maximizeSizeBtn.textContent = '⛶';
+    maximizeSizeBtn.title = '最大化';
+    headerControls.appendChild(maximizeSizeBtn);
+
+    // ★ コントロール群の mousedown/pointerdown は伝播を止める
+    //   （ヘッダーのドラッグ開始を防ぐ。カラーピッカーのネイティブダイアログを確実に開く）
+    [headerControls, colorPicker, restoreSizeBtn, maximizeSizeBtn].forEach(el => {
+        el.addEventListener('mousedown', (e) => { e.stopPropagation(); });
+        el.addEventListener('pointerdown', (e) => { e.stopPropagation(); });
+    });
+
     const mediaContainer = document.createElement('div');
     mediaContainer.id = 'media-element-container';
     mediaContainer.style.width = '100%';
@@ -232,27 +331,21 @@
     resizeHandle.id = 'resize-handle';
     imageContainer.appendChild(resizeHandle);
 
-    // コントロールボタンコンテナ（手動のみ）
     const controlContainer = document.createElement('div');
     controlContainer.id = 'image-control-container';
     document.body.appendChild(controlContainer);
 
-    // ★ UT/AI 切り替えボタンは独立させ、GIC ボタンの右隣に動的配置するため
-    //    controlContainer ではなく body に直接追加する
     const textModeButton = document.createElement('button');
     textModeButton.id = 'text-mode-button';
     textModeButton.textContent = 'UT';
     textModeButton.title = 'クリックでテキストモード切り替え（現在: ユーザー）';
     document.body.appendChild(textModeButton);
 
-    // ★ 手動ボタン: Text_styling の「手動」モードに統合したため DOM に追加しない
     const customButton = document.createElement('button');
     customButton.id = 'custom-button';
     customButton.textContent = '手動';
     customButton.title = '位置とサイズを手動設定';
 
-    // ★ Text_styling 側のボタンに統合したため、maximizeButton と
-    //    halfMaximizeButton も DOM に追加しない。
     const maximizeButton = document.createElement('button');
     maximizeButton.id = 'maximize-button';
     maximizeButton.textContent = 'フル';
@@ -265,7 +358,6 @@
     halfMaximizeButton.title = '左半分モードに切替';
     halfMaximizeButton.classList.add('enabled');
 
-    // カスタム設定ウィンドウ
     const customWindow = document.createElement('div');
     customWindow.id = 'custom-window';
     customWindow.innerHTML = `
@@ -278,8 +370,9 @@
     `;
     document.body.appendChild(customWindow);
 
-    // --- 条件評価・キーワードロジック (カッコ / NOT / AND / OR 対応) ---
-
+    // ============================================================
+    // 条件評価・キーワードロジック
+    // ============================================================
     function normalizeConditionExpression(expr) {
         if (!expr || typeof expr !== 'string') return '';
         return expr
@@ -294,23 +387,16 @@
         const len = expr.length;
         while (i < len) {
             const ch = expr[i];
-            if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
-                i++;
-                continue;
-            }
+            if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') { i++; continue; }
             if (ch === '(' || ch === ')' || ch === '!' || ch === '+' || ch === ',') {
                 tokens.push({ type: ch, value: ch });
                 i++;
                 continue;
             }
             let j = i;
-            while (j < len && !'()!+,'.includes(expr[j])) {
-                j++;
-            }
+            while (j < len && !'()!+,'.includes(expr[j])) j++;
             const raw = expr.slice(i, j).trim();
-            if (raw) {
-                tokens.push({ type: 'KEYWORD', value: raw });
-            }
+            if (raw) tokens.push({ type: 'KEYWORD', value: raw });
             i = j > i ? j : i + 1;
         }
         return tokens;
@@ -334,7 +420,6 @@
             }
             return node;
         }
-
         function parseAnd() {
             let node = parseUnary();
             while (peek() && peek().type === '+') {
@@ -344,16 +429,13 @@
             }
             return node;
         }
-
         function parseUnary() {
             if (peek() && peek().type === '!') {
                 consume('!');
-                const operand = parseUnary();
-                return { type: 'NOT', operand };
+                return { type: 'NOT', operand: parseUnary() };
             }
             return parsePrimary();
         }
-
         function parsePrimary() {
             const t = peek();
             if (!t) return null;
@@ -369,7 +451,6 @@
             }
             return null;
         }
-
         return parseOr();
     }
 
@@ -379,11 +460,9 @@
             case 'KEYWORD':
                 return lowerText.includes(node.value.toLowerCase());
             case 'AND':
-                return evaluateConditionNode(node.left, lowerText)
-                    && evaluateConditionNode(node.right, lowerText);
+                return evaluateConditionNode(node.left, lowerText) && evaluateConditionNode(node.right, lowerText);
             case 'OR':
-                return evaluateConditionNode(node.left, lowerText)
-                    || evaluateConditionNode(node.right, lowerText);
+                return evaluateConditionNode(node.left, lowerText) || evaluateConditionNode(node.right, lowerText);
             case 'NOT':
                 return !evaluateConditionNode(node.operand, lowerText);
             default:
@@ -504,7 +583,6 @@
         return null;
     }
 
-    // --- 指定URLでの即時メディア更新 ---
     async function updateImageWithUrl(targetUrl) {
         if (isDefaultImageFailed) return;
 
@@ -572,11 +650,9 @@
         }
     }
 
-    // --- DOM基準のメディア表示更新処理 ---
     async function updateImage() {
         if (isDefaultImageFailed) return;
 
-        // ★ 外部連携による強制表示（override）モード
         if (isOverrideActive) {
             if (overrideImageUrl) {
                 if (currentImageUrl !== overrideImageUrl) {
@@ -593,7 +669,6 @@
             return;
         }
 
-        // 通常モード: キーワードマッチ
         const keywordMedia = findLastKeywordImage();
         let newUrl = keywordMedia || getRandomImageSource(currentImageMap.default) || currentImageMap.default;
 
@@ -603,7 +678,6 @@
         await updateImageWithUrl(newUrl);
     }
 
-    // 重複発火を抑止するデバウンス付き安全更新関数（高頻度イベント用）
     const safeUpdateImage = debounce(() => {
         updateImage();
     }, 50);
@@ -647,7 +721,6 @@
         }
     }
 
-    // --- 送信操作のキャプチャフェーズ傍受 ---
     function setupSendInterception() {
         if (isSendInterceptionInstalled) return;
         isSendInterceptionInstalled = true;
@@ -688,7 +761,6 @@
         console.log("✅ 送信操作のキャプチャ傍受をインストールしました。");
     }
 
-    // --- テキストモード切り替え ---
     function toggleTextMode() {
         currentTextMode = currentTextMode === 'user' ? 'ai' : 'user';
         textModeButton.textContent = currentTextMode === 'user' ? 'UT' : 'AI';
@@ -700,7 +772,6 @@
     }
     textModeButton.addEventListener('click', toggleTextMode);
 
-    // --- ストリーミング監視 ---
     function handleStreamingUpdate() {
         if (currentTextMode !== 'ai') return;
         const lastAiMessage = document.querySelector('.mes[is_user="false"]:last-child .mes_text');
@@ -737,7 +808,6 @@
         });
     }
 
-    // --- キャラクターデータの読み込み ---
     function findImageMapInData(data) {
         if (data === null || typeof data !== 'object') return null;
         if (data.hasOwnProperty('image_display_extension')) {
@@ -853,7 +923,6 @@
         safeUpdateImage();
     }
 
-    // --- カスタムウィンドウの制御 ---
     function toggleCustomWindow() {
         if (isCustomWindowOpen) {
             closeCustomWindow();
@@ -888,7 +957,6 @@
         document.getElementById('custom-top').value = parseInt(imageContainer.style.top) || 0;
     }
 
-    // ★ customButton は DOM に追加していないが、リスナー登録は無害
     customButton.addEventListener('click', toggleCustomWindow);
     document.getElementById('close-custom-window').addEventListener('click', closeCustomWindow);
 
@@ -909,7 +977,9 @@
         });
     });
 
-    // --- 状態の永続化・復元 ---
+    // ============================================================
+    // 状態の永続化・復元
+    // ============================================================
     function saveDisplayState() {
         const state = {
             preNormalState,
@@ -952,7 +1022,6 @@
 
         if (state) {
             try {
-                // ★ preNormalState のサニティチェック（0 を保持しつつデフォルト補完）
                 if (state.preNormalState) {
                     const pns = state.preNormalState;
                     const w = Number(pns.width);
@@ -1008,9 +1077,6 @@
         }
     }
 
-    /**
-     * ★ 復元された override URL が実際に存在するか非同期で検証する。
-     */
     async function validateRestoredOverride() {
         if (!isOverrideActive) return;
         if (!overrideImageUrl) {
@@ -1039,6 +1105,24 @@
         applyNormalMode();
     }
 
+    // ============================================================
+    // ★ サイズボタンの状態更新
+    // ============================================================
+    function updateSizeButtons() {
+        const restoreBtn = document.getElementById('image-display-restore-btn');
+        const maximizeBtn = document.getElementById('image-display-maximize-btn');
+        if (!restoreBtn || !maximizeBtn) return;
+
+        restoreBtn.classList.remove('size-btn-disabled');
+        maximizeBtn.classList.remove('size-btn-disabled');
+
+        if (currentMode === 'normal') {
+            restoreBtn.classList.add('size-btn-disabled');
+        } else if (currentMode === 'maximized') {
+            maximizeBtn.classList.add('size-btn-disabled');
+        }
+    }
+
     function applyNormalMode() {
         imageContainer.style.width = `${preNormalState.width}px`;
         imageContainer.style.height = `${preNormalState.height}px`;
@@ -1055,16 +1139,13 @@
         customButton.classList.remove('disabled');
         customButton.classList.add('enabled');
         currentMode = 'normal';
+        updateSizeButtons();
     }
 
     function applyMaximizeMode() {
         if (currentMode === 'normal') {
-            preNormalState = {
-                width: imageContainer.offsetWidth,
-                height: imageContainer.offsetHeight,
-                left: parseInt(imageContainer.style.left) || DEFAULT_LEFT,
-                top: parseInt(imageContainer.style.top) || DEFAULT_TOP
-            };
+            // ★ 位置0のバグを避けるためupdatePreNormalStateFromDOMを使う
+            updatePreNormalStateFromDOM();
         }
         imageContainer.style.width = '100%';
         imageContainer.style.height = '100%';
@@ -1081,16 +1162,12 @@
         customButton.classList.remove('disabled');
         customButton.classList.add('enabled');
         currentMode = 'maximized';
+        updateSizeButtons();
     }
 
     function applyHalfMaximizeMode() {
         if (currentMode === 'normal') {
-            preNormalState = {
-                width: imageContainer.offsetWidth,
-                height: imageContainer.offsetHeight,
-                left: parseInt(imageContainer.style.left) || DEFAULT_LEFT,
-                top: parseInt(imageContainer.style.top) || DEFAULT_TOP
-            };
+            updatePreNormalStateFromDOM();
         }
         imageContainer.style.width = '50vw';
         imageContainer.style.height = '100vh';
@@ -1107,25 +1184,23 @@
         customButton.classList.remove('disabled');
         customButton.classList.add('enabled');
         currentMode = 'halfMaximized';
+        updateSizeButtons();
     }
 
     restoreDisplayState();
 
-    // ★ 復元直後に override URL の存在を非同期検証（404ループ防止）
     validateRestoredOverride();
 
-    // --- イベントリスナー設定 ---
+    // ============================================================
+    // イベントリスナー
+    // ============================================================
     colorPicker.addEventListener('input', () => {
         imageContainer.style.backgroundColor = colorPicker.value;
         saveDisplayState();
     });
 
-    // ★ maximizeButton / halfMaximizeButton は DOM に追加していないため、
-    //    click リスナーは登録しない（API 経由で呼ばれる）
-
     // ============================================================
     // ★ preNormalState を現在のインラインスタイルから更新するヘルパー
-    //    （ドラッグ/リサイズ後の値を保存するために必要）
     // ============================================================
     function updatePreNormalStateFromDOM() {
         const leftVal = parseInt(imageContainer.style.left, 10);
@@ -1140,8 +1215,48 @@
         };
     }
 
+    // ============================================================
+    // ★ サイズボタンのクリックハンドラ
+    // ============================================================
+    restoreSizeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        if (currentMode === 'normal') return;
+        console.log('[Image Display] 元に戻すボタンがクリックされました');
+        applyNormalMode();
+        saveDisplayState();
+    });
+
+    maximizeSizeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        if (currentMode === 'maximized') return;
+        console.log('[Image Display] 最大化ボタンがクリックされました');
+        applyMaximizeMode();
+        saveDisplayState();
+    });
+
+    // ============================================================
+    // ★ ヘッダーのドラッグハンドラ
+    //   - コントロール群のクリックは composedPath で確実に検出してスキップ
+    // ============================================================
     header.addEventListener('mousedown', (e) => {
-        if (e.target === colorPicker || currentMode !== 'normal') return;
+        const path = e.composedPath ? e.composedPath() : [];
+        const isOnControl = path.some(el =>
+            el === headerControls ||
+            el === colorPicker ||
+            el === restoreSizeBtn ||
+            el === maximizeSizeBtn ||
+            (el && el.id && [
+                'image-display-header-controls',
+                'bg-color-picker',
+                'image-display-restore-btn',
+                'image-display-maximize-btn'
+            ].includes(el.id))
+        );
+        if (isOnControl) return;
+        if (currentMode !== 'normal') return;
+
         isDragging = true;
         offsetX = e.clientX - imageContainer.getBoundingClientRect().left;
         offsetY = e.clientY - imageContainer.getBoundingClientRect().top;
@@ -1163,7 +1278,6 @@
             isDragging = false;
             imageContainer.classList.remove('dragging');
             if (currentMode === 'normal') header.style.cursor = 'grab';
-            // ★ preNormalState を現在値で更新してから保存
             if (currentMode === 'normal') {
                 updatePreNormalStateFromDOM();
             }
@@ -1195,7 +1309,6 @@
             if (isResizing) {
                 isResizing = false;
                 imageContainer.classList.remove('resizing');
-                // ★ preNormalState を現在値で更新してから保存
                 if (currentMode === 'normal') {
                     updatePreNormalStateFromDOM();
                 }
@@ -1219,7 +1332,9 @@
         }
     });
 
-    // --- EventSource 安全監視 ---
+    // ============================================================
+    // EventSource 安全監視
+    // ============================================================
     function setupEventSourceListeners() {
         if (typeof SillyTavern !== 'undefined' && SillyTavern.getContext) {
             const context = SillyTavern.getContext();
@@ -1257,7 +1372,6 @@
         }
     }
 
-    // --- 初期ロードとポーリング ---
     setupEventSourceListeners();
     setupSendInterception();
     loadCharacterData(true);
@@ -1271,13 +1385,12 @@
     }, 1000);
 
     // ===================================================================
-    // ===== ★ UT/AIボタンをGICボタン（背景生成/事前設定）の右隣に配置 =====
+    // ===== UT/AIボタンをGICボタン（背景生成/事前設定）の右隣に配置 =====
     // ===================================================================
     function positionTextModeButton() {
         const textModeBtn = document.getElementById('text-mode-button');
         if (!textModeBtn) return;
 
-        // ★ 背景生成（override）モード中は UT/AI ボタンを非表示・クリック不能にする
         if (isOverrideActive) {
             if (textModeBtn.style.display !== 'none') {
                 console.log('🎨 背景生成モード → UT/AI ボタンを非表示化');
@@ -1341,9 +1454,8 @@
     window.addEventListener('resize', positionTextModeButton);
 
     // ===================================================================
-    // ===== Gallery連動：公式ギャラリー表示中はコントロールボタンを非表示 =====
+    // ===== Gallery連動 =====
     // ===================================================================
-
     function isGalleryOpen() {
         const candidates = document.querySelectorAll([
             '#gallery_container',
@@ -1427,7 +1539,7 @@
     requestAnimationFrame(positionTextModeButton);
 
     // ===================================================================
-    // ===== 外部連携用API（Generate Image Controller などから呼び出す） =====
+    // ===== 外部連携用API =====
     // ===================================================================
     window.ImageDisplayExtension = {
         setOverrideImage: async function (url) {
@@ -1477,9 +1589,6 @@
             return overrideImageUrl;
         },
 
-        // ============================================================
-        // ★ Text_styling 統合用 API
-        // ============================================================
         applyNormalMode: function () {
             console.log('🎯 API: applyNormalMode を実行');
             applyNormalMode();
@@ -1499,9 +1608,6 @@
             return currentMode;
         },
 
-        // ============================================================
-        // ★ Text_styling 統合用 API（手動モード）
-        // ============================================================
         openCustomWindow: function () {
             console.log('🎯 API: openCustomWindow を実行');
             try {
