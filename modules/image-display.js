@@ -40,11 +40,8 @@
     const Z_INDEX_HEADER_DEFAULT = '15000';
     const HEADER_HEIGHT = 30;
 
-    // ヘッダー hover 表示用
-    const HEADER_HOVER_MARGIN = 20;
-    let headerHoverVisible = false;
-    let lastMouseX = -1;
-    let lastMouseY = -1;
+    // ★ ヘッダー表示状態（状態ベースで管理）
+    let headerVisible = false;
 
     function getTextSignature(text) {
         if (!text || typeof text !== 'string') return '';
@@ -199,7 +196,7 @@
     }
 
     // ============================================================
-    // CSS 追加（ヘッダーは通常非表示、.idp-visible で表示）
+    // CSS（ヘッダーはデフォルト非表示、.idp-visible で表示）
     // ============================================================
     (function injectHeaderExtraCSS() {
         if (document.getElementById('image-display-header-extra-css')) return;
@@ -228,6 +225,7 @@
                 border-bottom: 1px solid #555 !important;
                 cursor: grab;
                 user-select: none !important;
+                /* デフォルト非表示 */
                 opacity: 0 !important;
                 pointer-events: none !important;
                 transition: opacity 0.15s ease !important;
@@ -432,77 +430,23 @@
     }
 
     // ============================================================
-    // ★ ヘッダー表示制御
-    //   手動モード + カスタムウインドウが開いている時のみ
-    //   マウス位置で表示/非表示を切り替える。
-    //   それ以外の状態では常に非表示。
+    // ★ ヘッダー表示制御（状態ベース）
+    //    条件: 手動モード かつ 位置・サイズの設定ウインドウが開いている
     // ============================================================
-    function isHeaderAutoShowEnabled() {
+    function shouldShowHeader() {
         return currentMode === 'normal' && isCustomWindowOpen === true;
     }
 
     function setHeaderVisible(visible) {
         if (!header) return;
-        if (headerHoverVisible === visible) return;
-        headerHoverVisible = visible;
+        if (headerVisible === visible) return;
+        headerVisible = visible;
         header.classList.toggle('idp-visible', visible);
     }
 
-    function updateHeaderVisibility(x, y) {
-        if (!header) return;
-
-        // 手動モード + カスタムウインドウ開 でなければ常に非表示
-        if (!isHeaderAutoShowEnabled()) {
-            setHeaderVisible(false);
-            return;
-        }
-
-        // ドラッグ中は常時表示
-        if (isDragging) {
-            setHeaderVisible(true);
-            return;
-        }
-
-        if (x < 0 || y < 0) {
-            setHeaderVisible(false);
-            return;
-        }
-
-        const rect = header.getBoundingClientRect();
-        if (rect.width <= 0 || rect.height <= 0) {
-            setHeaderVisible(false);
-            return;
-        }
-
-        const inside =
-            x >= rect.left - HEADER_HOVER_MARGIN &&
-            x <= rect.right + HEADER_HOVER_MARGIN &&
-            y >= rect.top - HEADER_HOVER_MARGIN &&
-            y <= rect.bottom + HEADER_HOVER_MARGIN;
-
-        setHeaderVisible(inside);
+    function syncHeaderVisibility() {
+        setHeaderVisible(shouldShowHeader());
     }
-
-    // 初期状態は非表示
-    setHeaderVisible(false);
-
-    document.addEventListener('mousemove', (e) => {
-        lastMouseX = e.clientX;
-        lastMouseY = e.clientY;
-        updateHeaderVisibility(e.clientX, e.clientY);
-    }, { passive: true });
-
-    document.addEventListener('mouseleave', () => {
-        lastMouseX = -1;
-        lastMouseY = -1;
-        setHeaderVisible(false);
-    });
-
-    window.addEventListener('blur', () => {
-        lastMouseX = -1;
-        lastMouseY = -1;
-        setHeaderVisible(false);
-    });
 
     // ============================================================
     // ヘッダー位置の同期
@@ -1102,7 +1046,6 @@
         }
     }
 
-    // ★ カスタムウインドウを開いた時、ヘッダー表示をマウス位置から再判定
     function openCustomWindow() {
         if (currentMode !== 'normal') {
             applyNormalMode();
@@ -1114,17 +1057,15 @@
         document.getElementById('custom-top').value = parseInt(imageContainer.style.top) || DEFAULT_TOP;
         customWindow.style.display = 'block';
         isCustomWindowOpen = true;
-
-        // ヘッダー表示を再評価
-        updateHeaderVisibility(lastMouseX, lastMouseY);
+        // ★ ウインドウを開いた → ヘッダー表示
+        syncHeaderVisibility();
     }
 
-    // ★ カスタムウインドウを閉じた時、ヘッダーを強制非表示
     function closeCustomWindow() {
         customWindow.style.display = 'none';
         isCustomWindowOpen = false;
-
-        setHeaderVisible(false);
+        // ★ ウインドウを閉じた → ヘッダー非表示
+        syncHeaderVisibility();
     }
 
     function updateCustomWindow() {
@@ -1318,7 +1259,7 @@
         currentMode = 'normal';
         updateSizeButtons();
         syncHeaderPosition();
-        updateHeaderVisibility(lastMouseX, lastMouseY);
+        syncHeaderVisibility();
     }
 
     function applyMaximizeMode() {
@@ -1347,7 +1288,7 @@
         currentMode = 'maximized';
         updateSizeButtons();
         syncHeaderPosition();
-        updateHeaderVisibility(lastMouseX, lastMouseY);
+        syncHeaderVisibility();
     }
 
     function applyHalfMaximizeMode() {
@@ -1376,7 +1317,7 @@
         currentMode = 'halfMaximized';
         updateSizeButtons();
         syncHeaderPosition();
-        updateHeaderVisibility(lastMouseX, lastMouseY);
+        syncHeaderVisibility();
     }
 
     restoreDisplayState();
@@ -1454,12 +1395,9 @@
     header.addEventListener('mousedown', (e) => {
         if (isOnHeaderControl(e)) return;
         if (currentMode !== 'normal') return;
-
-        // ★ ヘッダー自動表示条件を満たさない場合はドラッグ開始しない
-        if (!isHeaderAutoShowEnabled()) return;
-
+        // ヘッダーは位置・サイズウインドウが開いている時のみ表示されるため、
+        // ここに来る時点で isCustomWindowOpen === true
         isDragging = true;
-        setHeaderVisible(true);
         offsetX = e.clientX - imageContainer.getBoundingClientRect().left;
         offsetY = e.clientY - imageContainer.getBoundingClientRect().top;
         imageContainer.classList.add('dragging');
@@ -1486,7 +1424,6 @@
             }
             syncHeaderPosition();
             saveDisplayState();
-            updateHeaderVisibility(lastMouseX, lastMouseY);
         }
     });
 
@@ -1540,7 +1477,7 @@
             imageContainer.style.setProperty('top', '0', 'important');
         }
         syncHeaderPosition();
-        updateHeaderVisibility(lastMouseX, lastMouseY);
+        syncHeaderVisibility();
     });
 
     setInterval(() => {
@@ -1832,8 +1769,7 @@
         },
         syncHeaderPosition: syncHeaderPosition,
         applyHeaderZIndex: applyHeaderZIndex,
-        setHeaderVisible: setHeaderVisible,
-        isHeaderAutoShowEnabled: isHeaderAutoShowEnabled,
+        syncHeaderVisibility: syncHeaderVisibility,
     };
     console.log("✅ Image Display Extension API を window.ImageDisplayExtension に公開しました");
 })();
