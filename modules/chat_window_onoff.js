@@ -401,10 +401,10 @@ function setupChatPaddingClickThrough() {
 setupChatPaddingClickThrough();
 
 // ============================================================
-// ★ 💡 ボタン近接表示（🎨 とは独立、周囲 10px）
+// ★ 💡 ボタン近接表示（🎨 とは独立、周囲 20px）
 // ============================================================
 function setupBulbHover() {
-    const BULB_HOVER_MARGIN = 10;
+    const BULB_HOVER_MARGIN = 20;   // ★ 10 → 20 に拡張
     let _bulbIsInZone = false;
     let _lastX = -1, _lastY = -1;
 
