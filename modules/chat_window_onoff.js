@@ -1,4 +1,5 @@
 // このファイルは SillyTavern の公式拡張機能ローダー（動的 import）経由で読み込まれる前提。
+// classic <script> タグでの直接読み込みは行わないこと（export構文が構文エラーになるため）。
 
 const MODULE_NAME = 'chat_window_onoff';
 const OLD_STORAGE_KEY = 'chatWindowHiddenState';
@@ -20,9 +21,6 @@ const BUTTON_WAKE_WIDTH = 110;
 const BUTTON_WAKE_HEIGHT = 150;
 
 const MANUAL_SETTINGS_EXTRA_W = 160;
-
-const AUX_HOVER_BUTTON_IDS = ['toggle-chat-button', 'gic-open-gallery-button'];
-const AUX_HOVER_MARGIN = 30;
 
 function getSettings() {
     const context = SillyTavern.getContext();
@@ -112,19 +110,19 @@ function injectExtraStyle() {
             cursor: default !important;
         }
 
-        /* 💡 は普段非表示（マウスが近づいた時のみ表示） */
+        /* 普段は 💡 非表示 */
         html body #toggle-chat-button {
             opacity: 0 !important;
             transition: opacity 0.15s ease !important;
         }
 
-        /* 🎨 は wake 時のみ半透明表示（従来通り） */
-        html body.gic-buttons-wake #gic-open-gallery-button {
+        /* ★ 🎨 は wake 時のみ表示（💡 近接中は除外して独立化） */
+        html body.gic-buttons-wake:not(.chat-bulb-hover) #gic-open-gallery-button {
             opacity: 0.3 !important;
             background-color: #444 !important;
         }
 
-        /* 💡 は近接時のみ半透明表示 */
+        /* ★ 💡 は近接時のみ表示（🎨 とは独立） */
         html body.chat-bulb-hover #toggle-chat-button {
             opacity: 0.3 !important;
             background-color: #444 !important;
@@ -307,14 +305,12 @@ function applyChatLayout() {
 }
 
 // ============================================================
-// ★ 💡 ボタン位置: 背景生成ボタンの 5px 上（チャット位置と無関係）
-//    横並び: 🎨 が left:0、💡 が left:btnW+gap
+// ★ 💡 ボタン位置: send_form の左隣に追従
 // ============================================================
 function applyToggleChatButtonLayout() {
     const btn = document.getElementById('toggle-chat-button');
     if (!btn) return;
 
-    // ★ send_form に追従（無ければ form_sheld / send_textarea にフォールバック）
     const anchor = document.getElementById('send_form') ||
                    document.getElementById('form_sheld') ||
                    document.getElementById('send_textarea');
@@ -327,7 +323,7 @@ function applyToggleChatButtonLayout() {
     const btnW = btn.offsetWidth || 50;
     const btnH = btn.offsetHeight || 50;
 
-    // send_form の左隣
+    // send_form の左隣、縦中央
     let left = rect.left - btnW - gap;
     let top  = rect.top + (rect.height - btnH) / 2;
 
@@ -405,82 +401,10 @@ function setupChatPaddingClickThrough() {
 setupChatPaddingClickThrough();
 
 // ============================================================
-// 統合 hover 判定（💡/🎨 の hover → lbe-aux-hover）
-// ============================================================
-function setupAuxButtonHover() {
-    function getAuxButtonsRect() {
-        const btns = AUX_HOVER_BUTTON_IDS
-            .map(id => document.getElementById(id))
-            .filter(el => {
-                if (!el) return false;
-                if (el.style.display === 'none') return false;
-                if (window.getComputedStyle(el).display === 'none') return false;
-                return true;
-            });
-        if (btns.length === 0) return null;
-
-        let minL = Infinity, minT = Infinity, maxR = -Infinity, maxB = -Infinity;
-        let anyValid = false;
-        for (const b of btns) {
-            const r = b.getBoundingClientRect();
-            if (r.width === 0 || r.height === 0) continue;
-            anyValid = true;
-            if (r.left < minL) minL = r.left;
-            if (r.top < minT) minT = r.top;
-            if (r.right > maxR) maxR = r.right;
-            if (r.bottom > maxB) maxB = r.bottom;
-        }
-        if (!anyValid) return null;
-        return { left: minL, top: minT, right: maxR, bottom: maxB };
-    }
-
-    let isInZone = false;
-
-    function isAnyOverlayActive() {
-        return document.body.classList.contains('tsp-open') ||
-               document.body.classList.contains('gallery-open') ||
-               document.body.classList.contains('stj-editor-open');
-    }
-
-    function update(x, y) {
-        if (isAnyOverlayActive()) {
-            if (isInZone) { isInZone = false; document.body.classList.remove('lbe-aux-hover'); }
-            return;
-        }
-        const r = getAuxButtonsRect();
-        if (!r) {
-            if (isInZone) { isInZone = false; document.body.classList.remove('lbe-aux-hover'); }
-            return;
-        }
-        const inside =
-            x >= r.left - AUX_HOVER_MARGIN && x <= r.right + AUX_HOVER_MARGIN &&
-            y >= r.top - AUX_HOVER_MARGIN && y <= r.bottom + AUX_HOVER_MARGIN;
-        if (inside === isInZone) return;
-        isInZone = inside;
-        document.body.classList.toggle('lbe-aux-hover', inside);
-    }
-
-    document.addEventListener('mousemove', (e) => update(e.clientX, e.clientY), { passive: true });
-    document.addEventListener('mouseleave', () => update(-1, -1));
-    window.addEventListener('blur', () => update(-1, -1));
-
-    setInterval(() => {
-        if (isAnyOverlayActive() && isInZone) {
-            isInZone = false;
-            document.body.classList.remove('lbe-aux-hover');
-        }
-    }, 200);
-
-    console.log(`[Chat Window On/Off] 🎯 統合 hover 判定を開始しました (💡 + 🎨, margin=${AUX_HOVER_MARGIN}px)`);
-}
-
-setupAuxButtonHover();
-
-// ============================================================
-// 💡 ボタン近接表示
+// ★ 💡 ボタン近接表示（🎨 とは独立、周囲 10px）
 // ============================================================
 function setupBulbHover() {
-    const BULB_HOVER_MARGIN = 30;
+    const BULB_HOVER_MARGIN = 10;
     let _bulbIsInZone = false;
     let _lastX = -1, _lastY = -1;
 
@@ -534,7 +458,6 @@ function setupBulbHover() {
         update(-1, -1);
     });
 
-    // レイアウト変化時に再チェック
     setInterval(() => {
         if (_lastX >= 0) update(_lastX, _lastY);
     }, 300);
@@ -641,7 +564,7 @@ function setupGalleryButtonObserver() {
 setupGalleryButtonObserver();
 
 // ============================================================
-// 左下のボタン起動領域（hover 統合）
+// 左下のボタン起動領域（🎨 用 wake ゾーン）
 // ============================================================
 function setupButtonWakeZone() {
     const BASE_WAKE_W = BUTTON_WAKE_WIDTH;   // 110
@@ -720,6 +643,9 @@ setupButtonWakeZone();
         }
         if (document.body.classList.contains('gic-buttons-wake')) {
             document.body.classList.remove('gic-buttons-wake');
+        }
+        if (document.body.classList.contains('chat-bulb-hover')) {
+            document.body.classList.remove('chat-bulb-hover');
         }
     };
     if (document.readyState === 'loading') {
