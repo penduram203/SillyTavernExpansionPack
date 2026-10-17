@@ -16,35 +16,32 @@ const GALLERY_HIDDEN_SELECTORS = [
 ];
 
 const BUTTON_WAKE_WIDTH = 110;
-// ★ 💡/🎨 が背景生成ボタンの上に来るので、wake ゾーンを拡張
 const BUTTON_WAKE_HEIGHT = 150;
-
 const MANUAL_SETTINGS_EXTRA_W = 160;
 
-const AUX_HOVER_BUTTON_IDS = ['toggle-chat-button', 'gic-open-gallery-button'];
+const AUX_HOVER_BUTTON_IDS = ['gic-open-gallery-button'];
 const AUX_HOVER_MARGIN = 30;
+
+// 💡 のコンパクトサイズ（#options_button 相当）
+const COMPACT_BTN_SIZE = 22;
 
 function getSettings() {
     const context = SillyTavern.getContext();
-
     if (!context.extensionSettings[MODULE_NAME]) {
         context.extensionSettings[MODULE_NAME] = { isHidden: false };
     }
-
     const settings = context.extensionSettings[MODULE_NAME];
-
     try {
         const oldState = localStorage.getItem(OLD_STORAGE_KEY);
         if (oldState !== null) {
             settings.isHidden = (oldState === 'true');
             context.saveSettingsDebounced();
             localStorage.removeItem(OLD_STORAGE_KEY);
-            console.log('[Chat Window On/Off] 旧localStorageからextensionSettingsへの移行を完了しました。');
+            console.log('[Chat Window On/Off] 旧localStorageからextensionSettingsへの移行完了');
         }
     } catch (e) {
-        console.error('[Chat Window On/Off] localStorageからのデータ移行中にエラー:', e);
+        console.error('[Chat Window On/Off] localStorage移行エラー:', e);
     }
-
     return settings;
 }
 
@@ -54,12 +51,12 @@ function saveSettings(settings) {
         context.extensionSettings[MODULE_NAME] = settings;
         context.saveSettingsDebounced();
     } catch (e) {
-        console.error('[Chat Window On/Off] 設定の保存に失敗:', e);
+        console.error('[Chat Window On/Off] 設定保存失敗:', e);
     }
 }
 
 export async function onInstall() {
-    console.log('[Chat Window On/Off] onInstall フックが呼び出されました。初回セットアップを行います。');
+    console.log('[Chat Window On/Off] onInstall フック呼び出し');
     try { getSettings(); } catch (e) { console.error(e); }
     if (typeof toastr !== 'undefined') {
         toastr.success('Chat Window On/Off 拡張機能がインストールされました。');
@@ -68,6 +65,8 @@ export async function onInstall() {
 
 // ============================================================
 // 追加スタイル注入
+//   ★ #toggle-chat-button は送信フォーム内で CSS 制御するため、
+//      ここでは hover 無効化用のみ指定
 // ============================================================
 function injectExtraStyle() {
     const styleId = 'chat-window-onoff-extra-style';
@@ -76,24 +75,21 @@ function injectExtraStyle() {
     const style = document.createElement('style');
     style.id = styleId;
     style.textContent = `
-        /* Tパネル表示中は 💡/🎨 を完全無効化 */
-        html body.tsp-open #toggle-chat-button,
+        /* Tパネル表示中は 🎨 を無効化 */
         html body.tsp-open #gic-open-gallery-button {
             pointer-events: none !important;
             opacity: 0 !important;
             cursor: default !important;
         }
 
-        /* ギャラリー表示中は 💡 を非表示・クリック無効・hover無効 */
-        html body.gallery-open #toggle-chat-button {
+        /* ギャラリー表示中は 🎨 を非表示 */
+        html body.gallery-open #gic-open-gallery-button {
             display: none !important;
             pointer-events: none !important;
             opacity: 0 !important;
-            cursor: default !important;
         }
 
-        /* JSON編集画面表示中は画面左下の全ボタンを非表示・クリック無効 */
-        html body.stj-editor-open #toggle-chat-button,
+        /* JSON編集画面表示中は画面左下の全ボタンを非表示 */
         html body.stj-editor-open #gic-open-gallery-button,
         html body.stj-editor-open #gic-release-override-button,
         html body.stj-editor-open #text-mode-button,
@@ -109,18 +105,13 @@ function injectExtraStyle() {
             display: none !important;
             pointer-events: none !important;
             opacity: 0 !important;
-            cursor: default !important;
         }
 
-        /* ★ NEW: gic-buttons-wake 時に 💡/🎨 も他のボタンと同時に表示 */
-        html body.gic-buttons-wake #toggle-chat-button,
+        /* wake 時に 🎨 を他ボタンと同時表示 */
         html body.gic-buttons-wake #gic-open-gallery-button {
             opacity: 0.3 !important;
             background-color: #444 !important;
         }
-
-        /* ボタン直接 hover 時は完全不透明（既存挙動維持） */
-        html body #toggle-chat-button:hover,
         html body #gic-open-gallery-button:hover {
             opacity: 1 !important;
         }
@@ -148,14 +139,13 @@ function syncTspOpenClass() {
     const isOpen = isTextStylingPanelOpen();
     if (isOpen === lastTspState) return;
     lastTspState = isOpen;
-
     if (isOpen) {
         document.body.classList.add('tsp-open');
         document.body.classList.remove('lbe-aux-hover');
-        console.log('[Chat Window On/Off] 🔒 Tパネル表示中 → 💡/🎨 を完全無効化');
+        console.log('[Chat Window On/Off] 🔒 Tパネル表示中 → 🎨 を無効化');
     } else {
         document.body.classList.remove('tsp-open');
-        console.log('[Chat Window On/Off] 🔓 Tパネル非表示 → 💡/🎨 を有効化');
+        console.log('[Chat Window On/Off] 🔓 Tパネル非表示 → 🎨 を有効化');
     }
 }
 
@@ -168,18 +158,117 @@ function setupTspObserver() {
         const mo = new MutationObserver(() => syncTspOpenClass());
         mo.observe(panel, { attributes: true, attributeFilter: ['class', 'style'] });
     };
-
     const bodyMo = new MutationObserver(() => {
         observePanel();
         syncTspOpenClass();
     });
     bodyMo.observe(document.body, { childList: true, subtree: false });
-
     observePanel();
     setInterval(() => { observePanel(); syncTspOpenClass(); }, 300);
-
     syncTspOpenClass();
     console.log('[Chat Window On/Off] 🎨 Tパネル監視を開始しました');
+}
+
+// ============================================================
+// ★ 💡 を #leftSendForm 内の #options_button 左隣へ移動・コンパクト化
+// ============================================================
+function applyCompactToggleStyle(btn, isHidden) {
+    btn.style.cssText = `
+        position: static !important;
+        left: auto !important;
+        top: auto !important;
+        right: auto !important;
+        bottom: auto !important;
+        transform: none !important;
+        width: ${COMPACT_BTN_SIZE}px !important;
+        height: ${COMPACT_BTN_SIZE}px !important;
+        min-width: ${COMPACT_BTN_SIZE}px !important;
+        max-width: ${COMPACT_BTN_SIZE}px !important;
+        min-height: ${COMPACT_BTN_SIZE}px !important;
+        max-height: ${COMPACT_BTN_SIZE}px !important;
+        padding: 0 !important;
+        margin: 0 4px 0 0 !important;
+        font-size: 14px !important;
+        line-height: 1 !important;
+        background: transparent !important;
+        background-color: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        color: #000 !important;
+        filter: grayscale(1) contrast(1.4) ${isHidden ? 'brightness(0.7)' : 'brightness(1.1)'} !important;
+        opacity: ${isHidden ? '1' : '0.7'} !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        cursor: pointer !important;
+        user-select: none !important;
+        vertical-align: middle !important;
+        flex: 0 0 auto !important;
+    `;
+    // hover ハンドラ（多重登録防止）
+    if (btn.dataset.idpHoverBound !== 'true') {
+        btn.dataset.idpHoverBound = 'true';
+        btn.addEventListener('mouseenter', () => {
+            btn.style.setProperty('opacity', '1', 'important');
+        });
+        btn.addEventListener('mouseleave', () => {
+            const hidden = document.body.classList.contains('chat-window-is-hidden');
+            btn.style.setProperty('opacity', hidden ? '1' : '0.7', 'important');
+        });
+    }
+}
+
+function updateToggleVisibilityState() {
+    const btn = document.getElementById('toggle-chat-button');
+    if (!btn) return;
+    const inSendForm = btn.parentElement && btn.parentElement.id === 'leftSendForm';
+    if (!inSendForm) return;
+
+    let hide = false;
+    if (document.body.classList.contains('tsp-open')) hide = true;
+    if (document.body.classList.contains('gallery-open')) hide = true;
+    if (document.body.classList.contains('stj-editor-open')) hide = true;
+
+    if (hide) {
+        btn.style.setProperty('display', 'none', 'important');
+    } else {
+        btn.style.setProperty('display', 'inline-flex', 'important');
+    }
+}
+
+function ensureToggleInSendForm() {
+    const btn = document.getElementById('toggle-chat-button');
+    if (!btn) return;
+
+    const leftSendForm = document.getElementById('leftSendForm');
+    if (!leftSendForm) return;
+
+    const optionsButton = document.getElementById('options_button');
+
+    // 送信フォーム内に移動（未移動の場合）
+    if (btn.parentElement !== leftSendForm) {
+        try {
+            if (optionsButton && optionsButton.parentElement === leftSendForm) {
+                leftSendForm.insertBefore(btn, optionsButton);
+            } else {
+                leftSendForm.appendChild(btn);
+            }
+            console.log('[Chat Window On/Off] 💡 を #leftSendForm 内 #options_button の左隣に移動');
+        } catch (e) {
+            console.warn('[Chat Window On/Off] 💡 の移動失敗:', e);
+            return;
+        }
+    }
+
+    // コンパクトスタイルを適用（初回のみ）
+    if (btn.dataset.idpCompact !== 'true') {
+        btn.dataset.idpCompact = 'true';
+        const isHidden = document.body.classList.contains('chat-window-is-hidden');
+        applyCompactToggleStyle(btn, isHidden);
+    }
+
+    // 表示状態を更新
+    updateToggleVisibilityState();
 }
 
 function initChatWindowToggle() {
@@ -210,10 +299,20 @@ function initChatWindowToggle() {
         toggleButton.classList.toggle('active', isHidden);
         settings.isHidden = isHidden;
         saveSettings(settings);
+
+        // コンパクトスタイルの見た目を再適用
+        if (toggleButton.dataset.idpCompact === 'true') {
+            applyCompactToggleStyle(toggleButton, isHidden);
+        }
         console.log(`💡 チャットウィンドウ: ${isHidden ? '透過' : '不透過'}`);
     });
 
-    requestAnimationFrame(() => applyToggleChatButtonLayout());
+    // すぐに移動を試み、失敗したらリトライ
+    ensureToggleInSendForm();
+    requestAnimationFrame(() => {
+        ensureToggleInSendForm();
+        applyToggleChatButtonLayout();
+    });
 }
 
 if (document.readyState === 'loading') {
@@ -223,7 +322,7 @@ if (document.readyState === 'loading') {
 }
 
 // ============================================================
-// #chat レイアウト
+// #chat レイアウト（image-display の explicit モード中は触らない）
 // ============================================================
 function applyChatLayout() {
     const chat = document.getElementById('chat');
@@ -231,7 +330,6 @@ function applyChatLayout() {
     const form = document.getElementById('form_sheld');
     if (!chat || !sheld) return;
 
-    // ★ image-display の explicit モード中は触らない（干渉防止）
     if (sheld.classList.contains('idp-chat-explicit') || sheld.classList.contains('idp-chat-maximized')) {
         return;
     }
@@ -245,17 +343,13 @@ function applyChatLayout() {
     const sheldRect = sheld.getBoundingClientRect();
     const winW = window.innerWidth;
     const contentWidth = 900;
-
     const sheldCenterX = sheldRect.left + sheldRect.width / 2;
     const paddingLeft = Math.max(0, sheldCenterX - contentWidth / 2);
     const paddingRight = Math.max(0, winW - sheldCenterX - contentWidth / 2);
-
     const chatTop = sheldRect.top;
     const chatBottom = window.innerHeight - sheldRect.bottom;
-
     const formRect = form ? form.getBoundingClientRect() : null;
     const formHeight = formRect ? formRect.height : 40;
-
     const prevScroll = chat.scrollTop;
 
     chat.style.position = 'fixed';
@@ -296,16 +390,18 @@ function applyChatLayout() {
 }
 
 // ============================================================
-// ★ 💡 ボタン位置: 背景生成ボタンの 5px 上（チャット位置と無関係）
-//    横並び: 🎨 が left:0、💡 が left:btnW+gap
+// 💡 フォールバック配置（送信フォーム未検出時のみ）
 // ============================================================
 function applyToggleChatButtonLayout() {
     const btn = document.getElementById('toggle-chat-button');
     if (!btn) return;
 
+    // 送信フォーム内にいる場合は何もしない
+    if (btn.parentElement && btn.parentElement.id === 'leftSendForm') return;
+
+    // フォールバック: 背景生成ボタンの 5px 上（🎨 の右隣）
     const gicBtn = document.getElementById('gic-release-override-button');
     if (!gicBtn) return;
-
     const gicRect = gicBtn.getBoundingClientRect();
     if (gicRect.width <= 0 || gicRect.height <= 0) return;
 
@@ -313,9 +409,7 @@ function applyToggleChatButtonLayout() {
     const btnW = btn.offsetWidth || 50;
     const btnH = btn.offsetHeight || 50;
 
-    // 💡 の left は 🎨 の幅 + gap 分右（🎨 が left:0 に収まる）
     let left = btnW + gap;
-    // 背景生成ボタンの上端から 5px 上
     let top = gicRect.top - btnH - gap;
 
     const margin = 4;
@@ -335,27 +429,22 @@ function applyToggleChatButtonLayout() {
 }
 
 setInterval(() => {
+    ensureToggleInSendForm();
     applyChatLayout();
     applyToggleChatButtonLayout();
 }, 500);
 
 window.addEventListener('resize', () => {
+    ensureToggleInSendForm();
     applyChatLayout();
     applyToggleChatButtonLayout();
 });
 
 setTimeout(() => {
+    ensureToggleInSendForm();
     applyChatLayout();
     applyToggleChatButtonLayout();
 }, 100);
-
-try {
-    const sendFormEl = document.getElementById('send_form');
-    if (sendFormEl && typeof ResizeObserver !== 'undefined') {
-        const ro = new ResizeObserver(() => applyToggleChatButtonLayout());
-        ro.observe(sendFormEl);
-    }
-} catch (e) { /* ignore */ }
 
 // ============================================================
 // パディング領域のクリック透過
@@ -392,7 +481,7 @@ function setupChatPaddingClickThrough() {
 setupChatPaddingClickThrough();
 
 // ============================================================
-// 統合 hover 判定（💡/🎨 の hover → lbe-aux-hover）
+// 🎨 の hover（💡 は送信フォーム内で独立して hover）
 // ============================================================
 function setupAuxButtonHover() {
     function getAuxButtonsRect() {
@@ -458,13 +547,13 @@ function setupAuxButtonHover() {
         }
     }, 200);
 
-    console.log(`[Chat Window On/Off] 🎯 統合 hover 判定を開始しました (💡 + 🎨, margin=${AUX_HOVER_MARGIN}px)`);
+    console.log(`[Chat Window On/Off] 🎯 🎨 hover 判定を開始 (margin=${AUX_HOVER_MARGIN}px)`);
 }
 
 setupAuxButtonHover();
 
 // ============================================================
-// ギャラリー連動
+// ギャラリー連動 / 状態クラス
 // ============================================================
 let _galleryOpenCache = { value: false, timestamp: 0 };
 const GALLERY_OPEN_CACHE_TTL = 100;
@@ -532,6 +621,9 @@ function syncBodyStateClasses() {
         }
     }
 
+    // 💡 の表示状態を再評価
+    updateToggleVisibilityState();
+
     return { galleryOpen, stjOpen };
 }
 
@@ -544,7 +636,6 @@ function syncButtonsVisibilityForGallery() {
 
     const selector = GALLERY_HIDDEN_SELECTORS.join(',');
     const targets = document.querySelectorAll(selector);
-
     targets.forEach(el => {
         if (galleryOpen) el.style.setProperty('display', 'none', 'important');
         else el.style.removeProperty('display');
@@ -554,7 +645,7 @@ function syncButtonsVisibilityForGallery() {
 function setupGalleryButtonObserver() {
     setInterval(syncButtonsVisibilityForGallery, 300);
     syncButtonsVisibilityForGallery();
-    console.log('[Chat Window On/Off] 📷 ギャラリー連動監視を開始しました（ポーリング方式）');
+    console.log('[Chat Window On/Off] 📷 ギャラリー連動監視を開始しました');
 }
 
 setupGalleryButtonObserver();
@@ -563,13 +654,12 @@ setupGalleryButtonObserver();
 // 左下のボタン起動領域（hover 統合）
 // ============================================================
 function setupButtonWakeZone() {
-    const BASE_WAKE_W = BUTTON_WAKE_WIDTH;   // 110
-    const WAKE_H = BUTTON_WAKE_HEIGHT;       // 150
-    const EXTRA_W = MANUAL_SETTINGS_EXTRA_W; // 160
+    const BASE_WAKE_W = BUTTON_WAKE_WIDTH;
+    const WAKE_H = BUTTON_WAKE_HEIGHT;
+    const EXTRA_W = MANUAL_SETTINGS_EXTRA_W;
 
     let isInZone = false;
-    let lastX = -1;
-    let lastY = -1;
+    let lastX = -1, lastY = -1;
 
     function isManualSettingsVisible() {
         const btn = document.getElementById('manual-settings-button');
@@ -618,7 +708,7 @@ function setupButtonWakeZone() {
     setInterval(applyState, 200);
 
     document.body.classList.remove('gic-buttons-wake');
-    console.log(`[Chat Window On/Off] 🖱 ボタン起動領域を設定: ${BASE_WAKE_W}px × ${WAKE_H}px (左下、手動モード時 +${EXTRA_W}px)`);
+    console.log(`[Chat Window On/Off] 🖱 ボタン起動領域: ${BASE_WAKE_W}px × ${WAKE_H}px (手動モード時 +${EXTRA_W}px)`);
 }
 
 setupButtonWakeZone();
