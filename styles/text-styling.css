@@ -28,8 +28,8 @@
 
 #text-styling-panel {
   position: fixed;
-  top: 370px;    /* ★ 旧: 350px → 370px（20px 下げ） */
-  left: 5px;     /* ★ 旧: 10px → 5px（5px 左へ） */
+  top: 370px;
+  left: 5px;
   width: 480px;
   min-height: 200px;
   border: 1px solid #444;
@@ -274,9 +274,6 @@
 
 /* ============================================================
    ▼ チャットウィンドウ透過（スライダー連動）
-   #chat（本文）と #send_form（テキスト入力欄）の親のみに適用。
-   子要素には透過を適用しない（#nonQRFormItems 等を常に透明に
-   保つため）。
    ============================================================ */
 #chat,
 #send_form {
@@ -322,25 +319,149 @@
    ▼ チャットウィンドウ透過率スライダー（--chat-opacity）との連動
    ============================================================ */
 
-/* ★ #top-bar は常に非透過。テーマのブラー用色で固定する。 */
 html body.no-blur #top-bar {
   background-color: var(--SmartThemeBlurTintColor, #1a1a1a) !important;
 }
 
-/* ★ #send_form は スライダー値（--chat-opacity）を alpha として使用 */
 html body.no-blur #send_form {
   background-color: rgba(0, 0, 0, var(--chat-opacity, 1)) !important;
 }
 
-/* no-blur が付いていない環境にも念のため対応 */
 html body #send_form.compact {
   background-color: rgba(0, 0, 0, var(--chat-opacity, 1)) !important;
 }
 
-/* ★ #nonQRFormItems は常に完全透明で固定。
-      詳細度を (2,0,0,2) まで引き上げ、他の !important に
-      打ち勝てるようにしている。 */
 html body #send_form #nonQRFormItems,
 html body.no-blur #send_form #nonQRFormItems {
   background-color: rgba(0, 0, 0, 0) !important;
+}
+
+/* ============================================================
+   ▼ 左下のボタン群: 通常透明 / 起動領域で半透明
+   ★ #manual-settings-button を追加
+   ============================================================ */
+#center-button,
+#right-half-button,
+#manual-settings-button {
+  transform: translate(-35px, -8px) !important;
+}
+
+#image-control-container,
+#window-control-buttons {
+  opacity: 1 !important;
+}
+
+#text-mode-button,
+#custom-button,
+#maximize-button,
+#half-maximize-button,
+#gic-release-override-button,
+#center-button,
+#right-half-button,
+#manual-settings-button,
+#restore-panel-button {
+  opacity: 0 !important;
+  transition: opacity 0.15s ease !important;
+}
+
+body.gic-buttons-wake #text-mode-button,
+body.gic-buttons-wake #custom-button,
+body.gic-buttons-wake #maximize-button,
+body.gic-buttons-wake #half-maximize-button,
+body.gic-buttons-wake #gic-release-override-button,
+body.gic-buttons-wake #center-button,
+body.gic-buttons-wake #right-half-button,
+body.gic-buttons-wake #manual-settings-button,
+body.gic-buttons-wake #restore-panel-button {
+  opacity: 0.3 !important;
+}
+
+body.gic-buttons-wake #text-mode-button:hover,
+body.gic-buttons-wake #custom-button:hover,
+body.gic-buttons-wake #maximize-button:hover,
+body.gic-buttons-wake #half-maximize-button:hover,
+body.gic-buttons-wake #gic-release-override-button:hover,
+body.gic-buttons-wake #center-button:hover,
+body.gic-buttons-wake #right-half-button:hover,
+body.gic-buttons-wake #manual-settings-button:hover,
+body.gic-buttons-wake #restore-panel-button:hover {
+  opacity: 1 !important;
+}
+
+/* ============================================================
+   ▼ 左下ボタンの外観統一
+   ★ #manual-settings-button を追加
+   ============================================================ */
+#text-mode-button,
+#custom-button,
+#maximize-button,
+#half-maximize-button,
+#center-button,
+#right-half-button,
+#manual-settings-button {
+  background-color: #444 !important;
+  background-image: none !important;
+  color: #ffffff !important;
+  border: 1px solid #666 !important;
+  padding: 6px 12px !important;
+  font-size: 12px !important;
+  font-family: inherit !important;
+  font-weight: normal !important;
+  border-radius: 4px !important;
+  text-shadow: none !important;
+  box-shadow: none !important;
+  line-height: normal !important;
+  text-align: center !important;
+  white-space: nowrap !important;
+  box-sizing: content-box !important;
+}
+
+#maximize-button.disabled {
+  background-color: #444 !important;
+  color: #ffffff !important;
+  border: 1px solid #666 !important;
+  cursor: not-allowed !important;
+}
+
+body.gic-buttons-wake #text-mode-button:hover,
+body.gic-buttons-wake #custom-button:hover,
+body.gic-buttons-wake #maximize-button:hover,
+body.gic-buttons-wake #half-maximize-button:hover,
+body.gic-buttons-wake #center-button:hover,
+body.gic-buttons-wake #right-half-button:hover,
+body.gic-buttons-wake #manual-settings-button:hover {
+  background-color: #666 !important;
+}
+
+/* ============================================================
+   ▼ Text_styling T アイコン
+   ============================================================ */
+#restore-panel-button {
+  width: 32px !important;
+  height: 32px !important;
+  background-color: #444 !important;
+  background-image: none !important;
+  color: #ffffff !important;
+  border: 1px solid #666 !important;
+  border-radius: 4px !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.5) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 18px !important;
+  padding: 0 !important;
+  box-sizing: border-box !important;
+  text-shadow: none !important;
+  transform: translate(-9px, -8px) !important;
+}
+
+#restore-panel-button:hover {
+  background-color: #444 !important;
+  color: #ffffff !important;
+}
+
+#restore-panel-button.active,
+#restore-panel-button.selected {
+  background-color: #444 !important;
+  color: #ffffff !important;
 }
