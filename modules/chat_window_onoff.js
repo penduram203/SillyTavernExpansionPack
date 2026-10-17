@@ -22,6 +22,9 @@ const GALLERY_HIDDEN_SELECTORS = [
 const BUTTON_WAKE_WIDTH = 110;
 const BUTTON_WAKE_HEIGHT = 80;
 
+// ★ 手動モード時に右方向へ追加で広げる量
+const MANUAL_SETTINGS_EXTRA_W = 160;
+
 const AUX_HOVER_BUTTON_IDS = ['toggle-chat-button', 'gic-open-gallery-button'];
 const AUX_HOVER_MARGIN = 30;
 
@@ -111,6 +114,7 @@ function injectExtraStyle() {
         html body.stj-editor-open #custom-button,
         html body.stj-editor-open #maximize-button,
         html body.stj-editor-open #half-maximize-button,
+        html body.stj-editor-open #manual-settings-button,
         html body.stj-editor-open #window-control-buttons,
         html body.stj-editor-open #image-control-container {
             display: none !important;
@@ -587,7 +591,6 @@ function syncBodyStateClasses() {
     }
 
     // ★ #toggle-chat-button に inline の display: none が残っていたら除去
-    //    （ギャラリーも STJ エディタも開いていないときのみ）
     if (!galleryOpen && !stjOpen) {
         const toggleBtn = document.getElementById('toggle-chat-button');
         if (toggleBtn && toggleBtn.style.display === 'none') {
@@ -602,7 +605,6 @@ function syncBodyStateClasses() {
 let lastGalleryStateForButtons = null;
 
 function syncButtonsVisibilityForGallery() {
-    // まず body クラスを同期（不整合を常に解消）
     const { galleryOpen } = syncBodyStateClasses();
 
     if (galleryOpen === lastGalleryStateForButtons) return;
@@ -636,16 +638,40 @@ setupGalleryButtonObserver();
 
 // ============================================================
 // 左下のボタン起動領域
-//   ★ gallery-open / stj-editor-open でも完全に無効化する
+//   ★ 手動モード時（#manual-settings-button 表示中）のみ
+//      右方向に MANUAL_SETTINGS_EXTRA_W px 拡張する
+//   ★ gallery-open / stj-editor-open では完全に無効化する
 // ============================================================
 
 function setupButtonWakeZone() {
-    const WAKE_W = BUTTON_WAKE_WIDTH;
-    const WAKE_H = BUTTON_WAKE_HEIGHT;
+    const BASE_WAKE_W = BUTTON_WAKE_WIDTH;              // 110
+    const WAKE_H = BUTTON_WAKE_HEIGHT;                  // 80
+    const EXTRA_W = MANUAL_SETTINGS_EXTRA_W;            // 160
+
     let isInZone = false;
+    // ★ マウスが動かなくても手動モード切替に追従できるよう位置を記録
+    let lastX = -1;
+    let lastY = -1;
+
+    function isManualSettingsVisible() {
+        const btn = document.getElementById('manual-settings-button');
+        if (!btn) return false;
+        // inline の display:none を最優先でチェック
+        if (btn.style.display === 'none') return false;
+        const cs = window.getComputedStyle(btn);
+        if (cs.display === 'none') return false;
+        if (cs.visibility === 'hidden') return false;
+        if (parseFloat(cs.opacity) === 0) return false;
+        return true;
+    }
+
+    function getWakeWidth() {
+        return BASE_WAKE_W + (isManualSettingsVisible() ? EXTRA_W : 0);
+    }
 
     function isInside(x, y) {
-        return x >= 0 && x <= WAKE_W &&
+        const wakeW = getWakeWidth();
+        return x >= 0 && x <= wakeW &&
                y >= window.innerHeight - WAKE_H && y <= window.innerHeight;
     }
 
@@ -654,7 +680,7 @@ function setupButtonWakeZone() {
                document.body.classList.contains('stj-editor-open');
     }
 
-    function update(x, y) {
+    function applyState() {
         if (isAnyOverlayActive()) {
             if (isInZone) {
                 isInZone = false;
@@ -663,10 +689,16 @@ function setupButtonWakeZone() {
             return;
         }
 
-        const inside = isInside(x, y);
+        const inside = isInside(lastX, lastY);
         if (inside === isInZone) return;
         isInZone = inside;
         document.body.classList.toggle('gic-buttons-wake', inside);
+    }
+
+    function update(x, y) {
+        lastX = x;
+        lastY = y;
+        applyState();
     }
 
     document.addEventListener('mousemove', (e) => {
@@ -680,15 +712,11 @@ function setupButtonWakeZone() {
         update(-1, -1);
     });
 
-    setInterval(() => {
-        if (isAnyOverlayActive() && isInZone) {
-            isInZone = false;
-            document.body.classList.remove('gic-buttons-wake');
-        }
-    }, 200);
+    // ★ マウス静止中でも手動モード切替に追従するための定期再評価
+    setInterval(applyState, 200);
 
     document.body.classList.remove('gic-buttons-wake');
-    console.log(`[Chat Window On/Off] 🖱 ボタン起動領域を設定: ${WAKE_W}px × ${WAKE_H}px (左下)`);
+    console.log(`[Chat Window On/Off] 🖱 ボタン起動領域を設定: ${BASE_WAKE_W}px × ${WAKE_H}px (左下、手動モード時 +${EXTRA_W}px)`);
 }
 
 setupButtonWakeZone();
@@ -698,8 +726,6 @@ setupButtonWakeZone();
 // ============================================================
 (function cleanupBodyClassesOnInit() {
     const cleanup = () => {
-        // ページロード直後は gallery も stj editor も開いていないので、
-        // 残留していれば削除
         if (!isGalleryOpen() && document.body.classList.contains('gallery-open')) {
             document.body.classList.remove('gallery-open');
             console.log('[Chat Window On/Off] 🧹 残留 gallery-open を除去');
