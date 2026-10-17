@@ -3,10 +3,8 @@
     const MODULE_NAME = 'image_display';
     const OLD_STORAGE_KEY = 'imageDisplayState';
 
-    // メディアの存在確認・読み込み用キャッシュマップ
     const mediaExistsCache = new Map();
 
-    // --- デフォルト値とグローバル変数の定義 ---
     const DEFAULT_WIDTH = 300, DEFAULT_HEIGHT = 200, DEFAULT_LEFT = 100, DEFAULT_TOP = 100, DEFAULT_BG_COLOR = '#000000';
     const defaultImageMap = { "default": "addchara/default" };
     let currentCharacter = null;
@@ -23,18 +21,14 @@
     const STREAMING_DELAY = 500;
     let chatDomObserver = null;
 
-    // --- 外部連携用：強制表示（override）状態 ---
     let isOverrideActive = false;
     let overrideImageUrl = null;
 
-    // --- マッチキャッシュ ---
     let lastMatchCache = { signature: null, url: null, timestamp: 0 };
     const MATCH_CACHE_TTL = 1500;
 
-    // --- 条件式 AST パースキャッシュ ---
     const parsedConditionCache = new Map();
 
-    // --- ソート済みキーワードエントリキャッシュ ---
     let sortedKeywordEntriesCache = null;
     let sortedKeywordEntriesCacheSource = null;
 
@@ -196,6 +190,8 @@
 
     // ============================================================
     // ★ ヘッダー用追加CSS（新ボタン・レイアウト）
+    //    pointer-events / z-index を強制して、他要素に覆われても
+    //    クリックが通るようにする
     // ============================================================
     (function injectHeaderExtraCSS() {
         if (document.getElementById('image-display-header-extra-css')) return;
@@ -209,6 +205,12 @@
                 gap: 6px !important;
                 padding: 0 8px !important;
                 box-sizing: border-box !important;
+                height: 30px !important;
+                min-height: 30px !important;
+                max-height: 30px !important;
+                overflow: visible !important;
+                position: relative !important;
+                z-index: 3 !important;
             }
             #image-display-title {
                 flex: 1 1 auto !important;
@@ -216,17 +218,25 @@
                 text-overflow: ellipsis !important;
                 white-space: nowrap !important;
                 min-width: 0 !important;
+                pointer-events: none !important;
             }
             #image-display-header-controls {
                 flex: 0 0 auto !important;
                 display: flex !important;
                 align-items: center !important;
                 gap: 4px !important;
+                pointer-events: auto !important;
+                z-index: 4 !important;
+                position: relative !important;
+            }
+            #bg-color-picker,
+            #image-display-restore-btn,
+            #image-display-maximize-btn {
+                pointer-events: auto !important;
+                z-index: 5 !important;
+                position: relative !important;
             }
             #bg-color-picker {
-                position: static !important;
-                top: auto !important;
-                right: auto !important;
                 width: 22px !important;
                 height: 22px !important;
                 padding: 0 !important;
@@ -235,6 +245,7 @@
                 cursor: pointer !important;
                 box-sizing: border-box !important;
                 flex: 0 0 auto !important;
+                background-color: transparent !important;
             }
             #image-display-restore-btn,
             #image-display-maximize-btn {
@@ -314,8 +325,7 @@
     maximizeSizeBtn.title = '最大化';
     headerControls.appendChild(maximizeSizeBtn);
 
-    // ★ コントロール群の mousedown/pointerdown は伝播を止める
-    //   （ヘッダーのドラッグ開始を防ぐ。カラーピッカーのネイティブダイアログを確実に開く）
+    // ★ コントロール群の mousedown/pointerdown/click は伝播を止める
     [headerControls, colorPicker, restoreSizeBtn, maximizeSizeBtn].forEach(el => {
         el.addEventListener('mousedown', (e) => { e.stopPropagation(); });
         el.addEventListener('pointerdown', (e) => { e.stopPropagation(); });
@@ -1105,9 +1115,6 @@
         applyNormalMode();
     }
 
-    // ============================================================
-    // ★ サイズボタンの状態更新
-    // ============================================================
     function updateSizeButtons() {
         const restoreBtn = document.getElementById('image-display-restore-btn');
         const maximizeBtn = document.getElementById('image-display-maximize-btn');
@@ -1144,7 +1151,6 @@
 
     function applyMaximizeMode() {
         if (currentMode === 'normal') {
-            // ★ 位置0のバグを避けるためupdatePreNormalStateFromDOMを使う
             updatePreNormalStateFromDOM();
         }
         imageContainer.style.width = '100%';
@@ -1199,9 +1205,6 @@
         saveDisplayState();
     });
 
-    // ============================================================
-    // ★ preNormalState を現在のインラインスタイルから更新するヘルパー
-    // ============================================================
     function updatePreNormalStateFromDOM() {
         const leftVal = parseInt(imageContainer.style.left, 10);
         const topVal = parseInt(imageContainer.style.top, 10);
@@ -1216,13 +1219,17 @@
     }
 
     // ============================================================
-    // ★ サイズボタンのクリックハンドラ
+    // ★ 各ボタンのクリックハンドラ
+    //   ログを if の前に置き、クリック到達の有無を必ずログに出す
     // ============================================================
     restoreSizeBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         e.preventDefault();
-        if (currentMode === 'normal') return;
-        console.log('[Image Display] 元に戻すボタンがクリックされました');
+        console.log(`[Image Display] ❐ 元に戻すボタンがクリックされました (mode=${currentMode})`);
+        if (currentMode === 'normal') {
+            console.log('[Image Display] 既に normal モードのため、何もしません');
+            return;
+        }
         applyNormalMode();
         saveDisplayState();
     });
@@ -1230,31 +1237,75 @@
     maximizeSizeBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         e.preventDefault();
-        if (currentMode === 'maximized') return;
-        console.log('[Image Display] 最大化ボタンがクリックされました');
+        console.log(`[Image Display] ⛶ 最大化ボタンがクリックされました (mode=${currentMode})`);
+        if (currentMode === 'maximized') {
+            console.log('[Image Display] 既に maximized モードのため、何もしません');
+            return;
+        }
         applyMaximizeMode();
         saveDisplayState();
     });
 
+    // カラーピッカー: ネイティブのダイアログが開くはず。念のためクリックもログ
+    colorPicker.addEventListener('click', (e) => {
+        e.stopPropagation();
+        console.log('[Image Display] 🎨 カラーピッカーがクリックされました');
+    });
+
     // ============================================================
-    // ★ ヘッダーのドラッグハンドラ
-    //   - コントロール群のクリックは composedPath で確実に検出してスキップ
+    // ★ ヘッダー全体のクリックデバッグリスナ（原因切り分け用）
+    //   stopPropagation はしない（子要素のハンドラを活かす）
     // ============================================================
-    header.addEventListener('mousedown', (e) => {
+    header.addEventListener('click', (e) => {
+        const target = e.target;
         const path = e.composedPath ? e.composedPath() : [];
-        const isOnControl = path.some(el =>
-            el === headerControls ||
-            el === colorPicker ||
-            el === restoreSizeBtn ||
-            el === maximizeSizeBtn ||
-            (el && el.id && [
+        let closestControl = null;
+        if (target && target.closest) {
+            closestControl = target.closest('#image-display-header-controls, #bg-color-picker, #image-display-restore-btn, #image-display-maximize-btn');
+        }
+        const pathHasControl = path.some(el =>
+            el && el.id && [
                 'image-display-header-controls',
                 'bg-color-picker',
                 'image-display-restore-btn',
                 'image-display-maximize-btn'
-            ].includes(el.id))
+            ].includes(el.id)
         );
-        if (isOnControl) return;
+        console.log('[Image Display] ヘッダー内クリック検出:', {
+            targetTag: target && target.tagName,
+            targetId: target && target.id,
+            closestControlId: closestControl && closestControl.id,
+            pathHasControl,
+        });
+    }, true);
+
+    // ============================================================
+    // ヘッダーのドラッグハンドラ
+    //   composedPath / closest の両方でコントロール判定
+    // ============================================================
+    function isOnHeaderControl(e) {
+        const target = e.target;
+        if (target && target.closest) {
+            if (target.closest('#image-display-header-controls') ||
+                target.closest('#bg-color-picker') ||
+                target.closest('#image-display-restore-btn') ||
+                target.closest('#image-display-maximize-btn')) {
+                return true;
+            }
+        }
+        const path = e.composedPath ? e.composedPath() : [];
+        return path.some(el =>
+            el && el.id && [
+                'image-display-header-controls',
+                'bg-color-picker',
+                'image-display-restore-btn',
+                'image-display-maximize-btn'
+            ].includes(el.id)
+        );
+    }
+
+    header.addEventListener('mousedown', (e) => {
+        if (isOnHeaderControl(e)) return;
         if (currentMode !== 'normal') return;
 
         isDragging = true;
