@@ -653,15 +653,17 @@ function setupButtonWakeZone() {
     let lastX = -1;
     let lastY = -1;
 
+    // ★ 重要: opacity はチェックしない。
+    //   wakeクラス自体がボタンの opacity を制御しているため、
+    //   opacity を条件にすると「マウス進入時は狭い判定、退出時は広い判定」という
+    //   非対称な挙動（循環参照）になる。
+    //   display のみで「手動モードかどうか」を判定する。
     function isManualSettingsVisible() {
         const btn = document.getElementById('manual-settings-button');
         if (!btn) return false;
-        // inline の display:none を最優先でチェック
-        if (btn.style.display === 'none') return false;
         const cs = window.getComputedStyle(btn);
         if (cs.display === 'none') return false;
         if (cs.visibility === 'hidden') return false;
-        if (parseFloat(cs.opacity) === 0) return false;
         return true;
     }
 
