@@ -303,20 +303,20 @@ function applyToggleChatButtonLayout() {
     const btn = document.getElementById('toggle-chat-button');
     if (!btn) return;
 
-    const gicBtn = document.getElementById('gic-release-override-button');
-    if (!gicBtn) return;
+    // ★ チャットウインドウ（#sheld）の左隣、最下部から125px上
+    const sheld = document.getElementById('sheld');
+    if (!sheld) return;
 
-    const gicRect = gicBtn.getBoundingClientRect();
-    if (gicRect.width <= 0 || gicRect.height <= 0) return;
+    const sheldRect = sheld.getBoundingClientRect();
+    if (sheldRect.width <= 0 || sheldRect.height <= 0) return;
 
-    const gap = 5;
     const btnW = btn.offsetWidth || 50;
     const btnH = btn.offsetHeight || 50;
 
-    // 💡 の left は 🎨 の幅 + gap 分右（🎨 が left:0 に収まる）
-    let left = btnW + gap;
-    // 背景生成ボタンの上端から 5px 上
-    let top = gicRect.top - btnH - gap;
+    // チャットウインドウの左隣（左端）
+    let left = sheldRect.left - btnW;
+    // チャットウインドウ最下部から125px上方向（ボタンの下端が125px上）
+    let top = sheldRect.bottom - btnH - 125;
 
     const margin = 4;
     const vw = window.innerWidth;
@@ -337,7 +337,7 @@ function applyToggleChatButtonLayout() {
 setInterval(() => {
     applyChatLayout();
     applyToggleChatButtonLayout();
-}, 500);
+}, 100);
 
 window.addEventListener('resize', () => {
     applyChatLayout();
