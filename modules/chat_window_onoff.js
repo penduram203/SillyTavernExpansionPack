@@ -309,7 +309,7 @@ function applyToggleChatButtonLayout() {
     const gicRect = gicBtn.getBoundingClientRect();
     if (gicRect.width <= 0 || gicRect.height <= 0) return;
 
-    const gap = 5;
+    const gap = 10;
     const btnW = btn.offsetWidth || 50;
     const btnH = btn.offsetHeight || 50;
 
