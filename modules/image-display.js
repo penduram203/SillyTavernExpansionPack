@@ -46,11 +46,9 @@
     let lastMouseY = -1;
     let topBarPinned = false;
 
-    // ★ 画像の「手動モード時のモード」を別途保持
-    let imageManualMode = 'normal';   // 'normal' | 'maximized' | 'halfMaximized'
+    let imageManualMode = 'normal';
     let savedCustomWindowOpen = false;
 
-    // チャットウインドウ用
     let chatPreState = null;
     let chatCurrentMode = 'normal';
     let isDraggingChat = false;
@@ -100,7 +98,6 @@
         return `${parseInt(m[1], 16)}, ${parseInt(m[2], 16)}, ${parseInt(m[3], 16)}`;
     }
 
-    // ★ text-styling.js の現在のレイアウトモードを取得
     function getTextStylingLayoutMode() {
         try {
             const context = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
@@ -179,7 +176,6 @@
         });
     }
 
-    // #sheldheader 削除
     (function removeSheldHeader() {
         try {
             const sh = document.getElementById('sheldheader');
@@ -243,13 +239,12 @@
         document.head.appendChild(style);
     })();
 
-    // ★ チャットヘッダー / #sheld flex レイアウト用 CSS
+    // ★ チャットヘッダー / #sheld flex レイアウト / #form_sheld 幅上限
     (function injectChatHeaderCSS() {
         if (document.getElementById('idp-chat-header-css')) return;
         const style = document.createElement('style');
         style.id = 'idp-chat-header-css';
         style.textContent = `
-            /* #sheld を flex レイアウトに。ヘッダー分の padding-top */
             #sheld.idp-chat-explicit,
             #sheld.idp-chat-maximized {
                 display: flex !important;
@@ -277,7 +272,6 @@
                 margin: 0 !important; resize: none !important;
                 max-width: none !important; max-height: none !important;
             }
-            /* #chat は flex:1 で #sheld 幅いっぱいに。inline padding (510px) を完全無効化 */
             #sheld.idp-chat-explicit #chat,
             #sheld.idp-chat-maximized #chat {
                 flex: 1 1 auto !important;
@@ -295,8 +289,8 @@
                 box-sizing: border-box !important;
                 z-index: 1 !important;
             }
-            #sheld.idp-chat-explicit #form_sheld,
-            #sheld.idp-chat-maximized #form_sheld {
+            /* 通常の explicit モード: #form_sheld は #sheld 幅 100%（縮むのは許容） */
+            #sheld.idp-chat-explicit #form_sheld {
                 flex: 0 0 auto !important;
                 position: static !important;
                 inset: auto !important;
@@ -307,6 +301,21 @@
                 margin: 0 !important;
                 box-sizing: border-box !important;
                 z-index: 2 !important;
+            }
+            /* ★ 最大化時: 手動モード時の幅 (= --idp-form-max-width) を上限に固定し、横に伸ばさない */
+            #sheld.idp-chat-maximized #form_sheld {
+                flex: 0 0 auto !important;
+                position: static !important;
+                inset: auto !important;
+                width: 100% !important;
+                max-width: var(--idp-form-max-width, 100%) !important;
+                min-width: 0 !important;
+                padding-left: 0 !important;
+                padding-right: 0 !important;
+                margin: 0 auto !important;
+                box-sizing: border-box !important;
+                z-index: 2 !important;
+                align-self: center !important;
             }
 
             #idp-chat-window-header {
@@ -610,7 +619,6 @@
         applyHeaderZIndex();
     }
 
-    // チャットヘッダー位置は #chat の矩形基準
     function syncChatHeaderPosition() {
         if (!chatHeader) return;
         const sheld = document.getElementById('sheld');
@@ -682,6 +690,8 @@
         const sheld = document.getElementById('sheld');
         if (!sheld || !chatPreState) return;
         sheld.classList.remove('idp-chat-maximized');
+        // ★ 最大化用の幅上限をリセット
+        sheld.style.removeProperty('--idp-form-max-width');
         sheld.style.setProperty('--idp-chat-left', Math.round(chatPreState.left) + 'px');
         sheld.style.setProperty('--idp-chat-top', Math.round(chatPreState.top) + 'px');
         sheld.style.setProperty('--idp-chat-width', Math.round(chatPreState.width) + 'px');
@@ -695,10 +705,23 @@
         try { window.dispatchEvent(new Event('resize')); } catch (e) { /* ignore */ }
     }
 
+    // ★ applyChatMaximizedState: 最大化前に #form_sheld の現在幅を CSS 変数へ保存
     function applyChatMaximizedState() {
         const sheld = document.getElementById('sheld');
         if (!sheld) return;
         if (chatCurrentMode === 'normal') ensureChatExplicitPosition();
+
+        // #form_sheld の現在幅を取得して --idp-form-max-width に保存
+        const formSheld = document.getElementById('form_sheld');
+        if (formSheld) {
+            const w = Math.round(formSheld.getBoundingClientRect().width);
+            if (w > 0) {
+                sheld.style.setProperty('--idp-form-max-width', w + 'px');
+            } else if (chatPreState) {
+                sheld.style.setProperty('--idp-form-max-width', Math.round(chatPreState.width) + 'px');
+            }
+        }
+
         sheld.classList.remove('idp-chat-explicit');
         sheld.classList.add('idp-chat-maximized');
         chatCurrentMode = 'maximized';
@@ -737,7 +760,6 @@
         } catch (e) { /* ignore */ }
     });
 
-    // ★ チャットヘッダーボタン: 操作後に saveDisplayState を呼ぶ
     chatRestoreBtn.addEventListener('click', (e) => {
         e.stopPropagation(); e.preventDefault();
         if (chatCurrentMode === 'normal') return;
@@ -752,7 +774,6 @@
         saveDisplayState();
     });
 
-    // チャットドラッグ
     function startChatDrag(e) {
         if (isDraggingChat) return;
         if (e.button !== undefined && e.button !== 0) return;
@@ -801,7 +822,7 @@
                 if (Number.isFinite(t)) chatPreState.top = t;
             }
         }
-        saveDisplayState();  // ★ 保存
+        saveDisplayState();
     }
 
     document.addEventListener('pointermove', handleChatDragMove);
@@ -809,7 +830,6 @@
     document.addEventListener('mousemove', handleChatDragMove);
     document.addEventListener('mouseup', stopChatDrag);
 
-    // チャットリサイズ
     chatResizeHandle.addEventListener('mousedown', (e) => {
         if (chatCurrentMode !== 'normal') return;
         e.stopPropagation(); e.preventDefault();
@@ -848,7 +868,7 @@
                 if (Number.isFinite(h)) chatPreState.height = h;
             }
         }
-        saveDisplayState();  // ★ 保存
+        saveDisplayState();
     });
 
     // 条件評価・キーワードロジック
@@ -1197,7 +1217,6 @@
 
     function toggleCustomWindow() { if (isCustomWindowOpen) closeCustomWindow(); else openCustomWindow(); }
 
-    // ★ openCustomWindow: applyNormalMode のリセットを削除（imageManualMode を保持）
     function openCustomWindow(options = {}) {
         const { skipSave = false } = options;
         ensureChatExplicitPosition();
@@ -1252,7 +1271,6 @@
         });
     });
 
-    // ★ saveDisplayState: imageManualMode / chat 状態 / customWindow 開閉状態も保存
     function saveDisplayState() {
         const state = {
             preNormalState,
@@ -1262,10 +1280,10 @@
             isOverrideActive,
             overrideImageUrl,
             chatBgColor: chatColorPicker.value,
-            imageManualMode,                              // ★ 追加
-            chatCurrentMode,                              // ★ 追加
-            chatPreState: chatPreState ? { ...chatPreState } : null,  // ★ 追加
-            isCustomWindowOpen: isCustomWindowOpen === true,          // ★ 追加
+            imageManualMode,
+            chatCurrentMode,
+            chatPreState: chatPreState ? { ...chatPreState } : null,
+            isCustomWindowOpen: isCustomWindowOpen === true,
         };
         const context = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
         if (context && context.extensionSettings) {
@@ -1311,7 +1329,6 @@
                     const rgb = hexToRgbString(state.chatBgColor);
                     document.documentElement.style.setProperty('--chat-bg-rgb', rgb);
                 }
-                // ★ 新規状態の復元
                 if (state.imageManualMode) imageManualMode = state.imageManualMode;
                 if (state.chatCurrentMode) chatCurrentMode = state.chatCurrentMode;
                 if (state.chatPreState) chatPreState = { ...state.chatPreState };
@@ -1357,7 +1374,6 @@
         else if (currentMode === 'maximized') maximizeBtn.classList.add('size-btn-disabled');
     }
 
-    // ★ internal applyNormalMode: チャットには触らない
     function applyNormalMode() {
         imageContainer.style.width = `${preNormalState.width}px`;
         imageContainer.style.height = `${preNormalState.height}px`;
@@ -1377,7 +1393,6 @@
         syncHeaderVisibility();
     }
 
-    // ★ internal applyMaximizeMode: チャットには触らない
     function applyMaximizeMode() {
         if (currentMode === 'normal') updatePreNormalStateFromDOM();
         imageContainer.style.setProperty('position', 'fixed', 'important');
@@ -1400,7 +1415,6 @@
         syncHeaderVisibility();
     }
 
-    // ★ internal applyHalfMaximizeMode: チャットには触らない
     function applyHalfMaximizeMode() {
         if (currentMode === 'normal') updatePreNormalStateFromDOM();
         imageContainer.style.setProperty('position', 'fixed', 'important');
@@ -1444,7 +1458,6 @@
         };
     }
 
-    // ★ 画像ヘッダーボタン: imageManualMode を更新してから適用・保存
     restoreSizeBtn.addEventListener('click', (e) => {
         e.stopPropagation(); e.preventDefault();
         if (currentMode === 'normal') return;
@@ -1672,29 +1685,19 @@
     setupGalleryObserver();
     requestAnimationFrame(positionTextModeButton);
 
-    // ★ 遅延復元: text-styling.js の初期化(500ms)後に、保存された手動モード状態を適用
     setTimeout(() => {
         try {
             const lm = getTextStylingLayoutMode();
             if (lm === 'manual' && savedCustomWindowOpen) {
-                if (!isCustomWindowOpen) {
-                    openCustomWindow({ skipSave: true });
-                }
-                // 画像の手動モード時の状態を復元
-                if (imageManualMode === 'maximized') {
-                    applyMaximizeMode();
-                } else if (imageManualMode === 'halfMaximized') {
-                    applyHalfMaximizeMode();
-                }
-                // チャット状態を復元
+                if (!isCustomWindowOpen) openCustomWindow({ skipSave: true });
+                if (imageManualMode === 'maximized') applyMaximizeMode();
+                else if (imageManualMode === 'halfMaximized') applyHalfMaximizeMode();
                 if (chatPreState) {
                     ensureChatExplicitPosition();
                     if (chatCurrentMode === 'maximized') applyChatMaximizedState();
                     else applyChatNormalState();
                 }
-                console.log('[ImageDisplay] 手動モード状態を復元しました', {
-                    imageManualMode, chatCurrentMode, hasChatPreState: !!chatPreState,
-                });
+                console.log('[ImageDisplay] 手動モード状態を復元しました', { imageManualMode, chatCurrentMode, hasChatPreState: !!chatPreState });
             }
         } catch (e) {
             console.warn('[ImageDisplay] delayed restore failed:', e);
@@ -1723,12 +1726,10 @@
         isOverride: function () { return isOverrideActive; },
         getOverrideImageUrl: function () { return overrideImageUrl; },
 
-        // ★ text-styling からの API: imageManualMode に応じて復元 + チャット復元
         applyNormalMode: function () {
             if (imageManualMode === 'maximized') applyMaximizeMode();
             else if (imageManualMode === 'halfMaximized') applyHalfMaximizeMode();
             else applyNormalMode();
-            // チャット状態の復元
             if (chatPreState) {
                 ensureChatExplicitPosition();
                 if (chatCurrentMode === 'maximized') applyChatMaximizedState();
@@ -1737,14 +1738,12 @@
             saveDisplayState();
         },
         applyMaximizeMode: function () {
-            // text-styling の center モード: チャットは text-styling が管理
             const sheld = document.getElementById('sheld');
             if (sheld) sheld.classList.remove('idp-chat-explicit', 'idp-chat-maximized');
             applyMaximizeMode();
             saveDisplayState();
         },
         applyHalfMaximizeMode: function () {
-            // text-styling の split モード
             const sheld = document.getElementById('sheld');
             if (sheld) sheld.classList.remove('idp-chat-explicit', 'idp-chat-maximized');
             applyHalfMaximizeMode();
