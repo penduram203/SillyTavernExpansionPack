@@ -881,12 +881,14 @@ function positionGalleryButton() {
             const btnW = galleryBtn.offsetWidth || 50;
             const btnH = galleryBtn.offsetHeight || 50;
 
-            // 🎨 は 💡 の左隣に gap 5px で配置
-            let left = bRect.left - btnW - gap;   // 50 - 50 - 5 = -5
-            let top  = bRect.top + (bRect.height - btnH) / 2;
+            // 💡 が (-55, +50) 動いたので、🎨 は元の位置を維持するため逆補正
+            //   left: 💡.left から 55 を引いて元の -5 に戻す
+            //   top:  💡.top から 50 を引いて元の位置に戻す
+            let left = bRect.left - btnW - gap + 55;
+            let top  = bRect.top + (bRect.height - btnH) / 2 - 50;
 
             const margin = 4;
-            const minLeft = -10;   // ★ 負数を許可（左端で部分表示）
+            const minLeft = -10;   // ★ 💡 と同様に負数を許可
             const vw = window.innerWidth;
             const vh = window.innerHeight;
             if (left < minLeft) left = minLeft;
