@@ -36,8 +36,22 @@
 
     let isSendInterceptionInstalled = false;
 
-    // ★ image-display を最前面に固定するための z-index
-    const TOP_Z_INDEX = '2147483646';
+    // ============================================================
+    // ★ モード別 z-index
+    //    - 手動モード(normal): 前面（チャットより上）で操作可能
+    //    - 最大化/左右: 背面（チャットより下）でテキスト可読
+    // ============================================================
+    const Z_INDEX_FOREGROUND = '15000';
+    const Z_INDEX_BACKGROUND = '0';
+
+    function applyZIndexForMode() {
+        if (!imageContainer) return;
+        if (currentMode === 'normal') {
+            imageContainer.style.setProperty('z-index', Z_INDEX_FOREGROUND, 'important');
+        } else {
+            imageContainer.style.setProperty('z-index', Z_INDEX_BACKGROUND, 'important');
+        }
+    }
 
     function getTextSignature(text) {
         if (!text || typeof text !== 'string') return '';
@@ -193,17 +207,15 @@
 
     // ============================================================
     // ★ ヘッダー用追加CSS
-    //    image-display-container を最前面に固定するため、
-    //    z-index を MAX 値近くに強制する
+    //    z-index は JS 側（applyZIndexForMode）でモード別に制御するため
+    //    CSS では固定しない
     // ============================================================
     (function injectHeaderExtraCSS() {
         if (document.getElementById('image-display-header-extra-css')) return;
         const style = document.createElement('style');
         style.id = 'image-display-header-extra-css';
         style.textContent = `
-            /* ★ image-display-container を常に最前面に固定 */
             #image-display-container {
-                z-index: ${TOP_Z_INDEX} !important;
                 position: absolute;
             }
             #image-display-header {
@@ -289,39 +301,16 @@
                 cursor: not-allowed !important;
                 pointer-events: none !important;
             }
-            /* ★ ST本体のシェルド系が上に来ないよう、念のため下げる */
-            #sheld, #chat, #form_sheld, #sheldheader {
-                /* 既存の z-index を上書きしすぎないよう、最小限の指定 */
-            }
         `;
         document.head.appendChild(style);
     })();
-
-    // ============================================================
-    // ★ image-display を最前面に保つためのヘルパー
-    //    SillyTavern 本体が動的に z-index を変えることがあるため、
-    //    定期的に強制再設定する
-    // ============================================================
-    function enforceTopZIndex() {
-        if (!imageContainer) return;
-        imageContainer.style.setProperty('z-index', TOP_Z_INDEX, 'important');
-        // position が static だと z-index が効かないので保証
-        const pos = window.getComputedStyle(imageContainer).position;
-        if (pos === 'static') {
-            if (currentMode === 'normal') {
-                imageContainer.style.setProperty('position', 'absolute', 'important');
-            } else {
-                imageContainer.style.setProperty('position', 'fixed', 'important');
-            }
-        }
-    }
 
     // ============================================================
     // UI要素の作成
     // ============================================================
     const imageContainer = document.createElement('div');
     imageContainer.id = 'image-display-container';
-    imageContainer.style.setProperty('z-index', TOP_Z_INDEX, 'important');
+    imageContainer.style.setProperty('z-index', Z_INDEX_FOREGROUND, 'important');
     document.body.appendChild(imageContainer);
 
     const header = document.createElement('div');
@@ -358,7 +347,6 @@
     maximizeSizeBtn.title = '最大化';
     headerControls.appendChild(maximizeSizeBtn);
 
-    // コントロール群の mousedown/pointerdown は伝播を止める
     [headerControls, colorPicker, restoreSizeBtn, maximizeSizeBtn].forEach(el => {
         el.addEventListener('mousedown', (e) => { e.stopPropagation(); });
         el.addEventListener('pointerdown', (e) => { e.stopPropagation(); });
@@ -1163,13 +1151,16 @@
         }
     }
 
+    // ============================================================
+    // ★ モード別レイアウト適用
+    //    z-index もモードに応じて切り替える
+    // ============================================================
     function applyNormalMode() {
         imageContainer.style.width = `${preNormalState.width}px`;
         imageContainer.style.height = `${preNormalState.height}px`;
         imageContainer.style.left = `${preNormalState.left}px`;
         imageContainer.style.top = `${preNormalState.top}px`;
         imageContainer.style.position = 'absolute';
-        imageContainer.style.setProperty('z-index', TOP_Z_INDEX, 'important');
         resizeHandle.style.display = 'block';
         header.style.cursor = 'grab';
         imageContainer.classList.remove('half-maximized');
@@ -1181,7 +1172,8 @@
         customButton.classList.add('enabled');
         currentMode = 'normal';
         updateSizeButtons();
-        enforceTopZIndex();
+        // ★ 手動モード: チャットより前面（操作可能）
+        applyZIndexForMode();
     }
 
     function applyMaximizeMode() {
@@ -1193,7 +1185,6 @@
         imageContainer.style.left = '0';
         imageContainer.style.top = '0';
         imageContainer.style.position = 'fixed';
-        imageContainer.style.setProperty('z-index', TOP_Z_INDEX, 'important');
         resizeHandle.style.display = 'none';
         header.style.cursor = 'default';
         imageContainer.classList.remove('half-maximized');
@@ -1205,7 +1196,8 @@
         customButton.classList.add('enabled');
         currentMode = 'maximized';
         updateSizeButtons();
-        enforceTopZIndex();
+        // ★ 最大化: チャットより背面（テキスト可読・背景画像）
+        applyZIndexForMode();
     }
 
     function applyHalfMaximizeMode() {
@@ -1217,7 +1209,6 @@
         imageContainer.style.left = '0';
         imageContainer.style.top = '0';
         imageContainer.style.position = 'fixed';
-        imageContainer.style.setProperty('z-index', TOP_Z_INDEX, 'important');
         resizeHandle.style.display = 'none';
         header.style.cursor = 'default';
         imageContainer.classList.add('half-maximized');
@@ -1229,7 +1220,8 @@
         customButton.classList.add('enabled');
         currentMode = 'halfMaximized';
         updateSizeButtons();
-        enforceTopZIndex();
+        // ★ 左右: チャットより背面（テキスト可読）
+        applyZIndexForMode();
     }
 
     restoreDisplayState();
@@ -1257,9 +1249,6 @@
         };
     }
 
-    // ============================================================
-    // ★ 各ボタンのクリックハンドラ
-    // ============================================================
     restoreSizeBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         e.preventDefault();
@@ -1289,9 +1278,6 @@
         console.log('[Image Display] 🎨 カラーピッカーがクリックされました');
     });
 
-    // ============================================================
-    // ★ ヘッダーのドラッグハンドラ
-    // ============================================================
     function isOnHeaderControl(e) {
         const target = e.target;
         if (target && target.closest) {
@@ -1392,9 +1378,6 @@
         }
     });
 
-    // ============================================================
-    // EventSource 安全監視
-    // ============================================================
     function setupEventSourceListeners() {
         if (typeof SillyTavern !== 'undefined' && SillyTavern.getContext) {
             const context = SillyTavern.getContext();
@@ -1437,8 +1420,8 @@
     loadCharacterData(true);
     setupChatDomObserver();
 
-    // ★ z-index を定期的に再適用（ST本体が動的に変更する場合への対策）
-    setInterval(enforceTopZIndex, 1000);
+    // ★ モードが外部から変更された場合への対策（念のため）
+    setInterval(applyZIndexForMode, 1000);
 
     let pollCount = 0;
     const initialPoll = setInterval(() => {
@@ -1447,9 +1430,6 @@
         if (pollCount > 10) clearInterval(initialPoll);
     }, 1000);
 
-    // ===================================================================
-    // ===== UT/AIボタンをGICボタン（背景生成/事前設定）の右隣に配置 =====
-    // ===================================================================
     function positionTextModeButton() {
         const textModeBtn = document.getElementById('text-mode-button');
         if (!textModeBtn) return;
@@ -1516,9 +1496,6 @@
     setInterval(positionTextModeButton, 200);
     window.addEventListener('resize', positionTextModeButton);
 
-    // ===================================================================
-    // ===== Gallery連動 =====
-    // ===================================================================
     function isGalleryOpen() {
         const candidates = document.querySelectorAll([
             '#gallery_container',
@@ -1601,9 +1578,6 @@
 
     requestAnimationFrame(positionTextModeButton);
 
-    // ===================================================================
-    // ===== 外部連携用API =====
-    // ===================================================================
     window.ImageDisplayExtension = {
         setOverrideImage: async function (url) {
             const cleanUrl = (url && typeof url === 'string') ? url.trim() : '';
@@ -1690,7 +1664,6 @@
         isCustomWindowOpen: function () {
             return isCustomWindowOpen;
         },
-        enforceTopZIndex: enforceTopZIndex,
     };
     console.log("✅ Image Display Extension API を window.ImageDisplayExtension に公開しました");
 })();
