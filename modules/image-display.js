@@ -43,13 +43,12 @@
 
     let headerVisible = false;
 
-    // top-bar 連動 hover 用
     const TOP_BAR_HOVER_MARGIN = 20;
     let topBarHoverVisible = false;
     let lastMouseX = -1;
     let lastMouseY = -1;
 
-    // ★ クリックでピン留めする状態
+    // クリックでピン留めする状態
     let topBarPinned = false;
 
     // チャットウインドウ用
@@ -223,30 +222,21 @@
         });
     }
 
-    // ============================================================
     // #sheldheader 削除
-    // ============================================================
     (function removeSheldHeader() {
         try {
             const sh = document.getElementById('sheldheader');
-            if (sh && sh.parentNode) {
-                sh.parentNode.removeChild(sh);
-            }
+            if (sh && sh.parentNode) sh.parentNode.removeChild(sh);
         } catch (e) { /* ignore */ }
-
         if (!document.getElementById('idp-hide-sheldheader-css')) {
             const style = document.createElement('style');
             style.id = 'idp-hide-sheldheader-css';
-            style.textContent = `
-                #sheldheader { display: none !important; }
-            `;
+            style.textContent = `#sheldheader { display: none !important; }`;
             document.head.appendChild(style);
         }
     })();
 
-    // ============================================================
-    // top-bar / top-settings-holder の hover + pin 用 CSS
-    // ============================================================
+    // top-bar / top-settings-holder の hover+pin CSS
     (function injectTopBarCSS() {
         if (document.getElementById('idp-topbar-extra-css')) return;
         const style = document.createElement('style');
@@ -267,9 +257,7 @@
         document.head.appendChild(style);
     })();
 
-    // ============================================================
     // 画像ヘッダー用 CSS
-    // ============================================================
     (function injectHeaderExtraCSS() {
         if (document.getElementById('image-display-header-extra-css')) return;
         const style = document.createElement('style');
@@ -375,14 +363,54 @@
         document.head.appendChild(style);
     })();
 
-    // ============================================================
-    // チャットウインドウヘッダー / リサイズハンドル / 最大化クラス用 CSS
-    // ============================================================
+    // チャットヘッダー / リサイズハンドル / CSS変数ベースの explicit 配置
     (function injectChatHeaderCSS() {
         if (document.getElementById('idp-chat-header-css')) return;
         const style = document.createElement('style');
         style.id = 'idp-chat-header-css';
         style.textContent = `
+            /* ★ explicit モード: CSS変数 + !important で text-styling.js の inline を完全に上書き */
+            #sheld.idp-chat-explicit {
+                position: fixed !important;
+                inset: auto !important;
+                left: var(--idp-chat-left, 100px) !important;
+                top: var(--idp-chat-top, 100px) !important;
+                right: auto !important;
+                bottom: auto !important;
+                width: var(--idp-chat-width, 50vw) !important;
+                height: var(--idp-chat-height, 100vh) !important;
+                margin: 0 !important;
+                resize: none !important;
+                max-width: none !important;
+                max-height: none !important;
+            }
+            /* ★ 最大化: viewport全体 */
+            #sheld.idp-chat-maximized {
+                position: fixed !important;
+                inset: auto !important;
+                left: 0 !important;
+                top: 0 !important;
+                right: auto !important;
+                bottom: auto !important;
+                width: 100vw !important;
+                height: 100vh !important;
+                margin: 0 !important;
+                resize: none !important;
+                max-width: none !important;
+                max-height: none !important;
+            }
+            /* ★ 最大化時にチャット本文の左右パディングを 0 に（chat_window_onoff.js の inline を !important で上書き） */
+            #sheld.idp-chat-maximized #chat {
+                padding-left: 0 !important;
+                padding-right: 0 !important;
+                max-width: 100vw !important;
+                width: 100vw !important;
+            }
+            #sheld.idp-chat-maximized #form_sheld {
+                padding-left: 0 !important;
+                padding-right: 0 !important;
+            }
+
             #idp-chat-window-header {
                 display: flex !important;
                 align-items: center !important;
@@ -404,6 +432,9 @@
                 pointer-events: none !important;
                 transition: opacity 0.15s ease !important;
                 z-index: ${Z_INDEX_HEADER_DEFAULT} !important;
+                -webkit-user-drag: none !important;
+                user-drag: none !important;
+                touch-action: none !important;
             }
             #idp-chat-window-header.idp-visible {
                 opacity: 1 !important;
@@ -469,10 +500,6 @@
             #idp-chat-maximize-btn:hover {
                 background-color: #666 !important;
             }
-            #idp-chat-restore-btn:active,
-            #idp-chat-maximize-btn:active {
-                background-color: #222 !important;
-            }
             #idp-chat-restore-btn.size-btn-disabled,
             #idp-chat-maximize-btn.size-btn-disabled {
                 opacity: 0.3 !important;
@@ -489,24 +516,10 @@
                 z-index: 14999 !important;
                 display: none !important;
                 box-shadow: -1px -1px 2px rgba(0,0,0,0.2) !important;
+                touch-action: none !important;
             }
             #idp-chat-resize-handle.idp-visible {
                 display: block !important;
-            }
-            /* ★ text-styling.js のインラインスタイルを上書きする最大化クラス */
-            #sheld.idp-chat-maximized {
-                position: fixed !important;
-                inset: 0 !important;
-                right: auto !important;
-                bottom: auto !important;
-                left: 0 !important;
-                top: 0 !important;
-                width: 100vw !important;
-                height: 100vh !important;
-                max-width: 100vw !important;
-                max-height: 100vh !important;
-                margin: 0 !important;
-                resize: none !important;
             }
         `;
         document.head.appendChild(style);
@@ -605,11 +618,10 @@
     `;
     document.body.appendChild(customWindow);
 
-    // ============================================================
-    // チャットウインドウ用ヘッダー / リサイズハンドル
-    // ============================================================
+    // チャットウインドウ用ヘッダー
     const chatHeader = document.createElement('div');
     chatHeader.id = 'idp-chat-window-header';
+    chatHeader.setAttribute('draggable', 'false');
     document.body.appendChild(chatHeader);
 
     const chatTitle = document.createElement('span');
@@ -703,9 +715,7 @@
         if (chatResizeHandle) chatResizeHandle.classList.toggle('idp-visible', visible && chatCurrentMode === 'normal');
     }
 
-    // ============================================================
-    // top-bar の hover + pin 制御
-    // ============================================================
+    // top-bar / top-settings-holder の hover + pin
     function getTopBar() {
         return document.getElementById('top-bar');
     }
@@ -733,7 +743,6 @@
     }
 
     function updateTopBarVisibility(x, y) {
-        // ★ ピン留め中は常に表示
         if (topBarPinned) {
             setTopBarVisible(true);
             return;
@@ -764,28 +773,21 @@
     }
 
     // ★ クリックでピン留め / 外側クリックで解除
+    //    sheld 内のクリックも「外側」とみなして解除する（バグ修正）
     document.addEventListener('click', (e) => {
         const topBar = getTopBar();
         const settingsHolder = getTopSettingsHolder();
-        const sheld = document.getElementById('sheld');
 
         const insideTopArea =
             (topBar && topBar.contains(e.target)) ||
             (settingsHolder && settingsHolder.contains(e.target));
-        const insideSheld = sheld && sheld.contains(e.target);
 
         if (insideTopArea) {
-            // top-bar / top-settings-holder 内をクリック → ピン留め
             topBarPinned = true;
             setTopBarVisible(true);
-        } else if (insideSheld) {
-            // sheld 内をクリック → ピン状態は維持（既にピン留め中なら解除しない）
-            // ピンされていなければ何もしない
         } else {
-            // 外側をクリック → ピン解除
             if (topBarPinned) {
                 topBarPinned = false;
-                // マウス位置に応じて再評価
                 updateTopBarVisibility(lastMouseX, lastMouseY);
             }
         }
@@ -806,10 +808,7 @@
     window.addEventListener('blur', () => {
         lastMouseX = -1;
         lastMouseY = -1;
-        // blur でもピン留めは維持（alt-tab等で消えないように）
-        if (!topBarPinned) {
-            setTopBarVisible(false);
-        }
+        if (!topBarPinned) setTopBarVisible(false);
     });
 
     function syncHeaderPosition() {
@@ -872,29 +871,39 @@
         chatResizeHandle.style.setProperty('top', Math.round(rect.bottom - 20) + 'px', 'important');
     }
 
+    // ★ CSS 変数 + クラス方式で explicit モードへ移行（text-styling.js の inline を完全に上書き）
     function ensureChatExplicitPosition() {
         const sheld = document.getElementById('sheld');
         if (!sheld) return;
-        if (sheld.dataset.idpChatExplicit === 'true') return;
 
-        const rect = sheld.getBoundingClientRect();
-        chatPreState = {
-            width: rect.width,
-            height: rect.height,
-            left: rect.left,
-            top: rect.top,
-        };
+        // 初回のみ chatPreState を保存
+        if (!chatPreState) {
+            const rect = sheld.getBoundingClientRect();
+            chatPreState = {
+                width: rect.width,
+                height: rect.height,
+                left: rect.left,
+                top: rect.top,
+            };
+        }
 
-        sheld.style.setProperty('position', 'fixed', 'important');
-        sheld.style.setProperty('inset', 'auto', 'important');
-        sheld.style.setProperty('right', 'auto', 'important');
-        sheld.style.setProperty('bottom', 'auto', 'important');
-        sheld.style.setProperty('left', rect.left + 'px', 'important');
-        sheld.style.setProperty('top', rect.top + 'px', 'important');
-        sheld.style.setProperty('width', rect.width + 'px', 'important');
-        sheld.style.setProperty('height', rect.height + 'px', 'important');
-        sheld.style.setProperty('margin', '0', 'important');
-        sheld.style.setProperty('resize', 'none', 'important');
+        // CSS 変数が未設定なら現在の矩形から初期化
+        const hasVars =
+            sheld.style.getPropertyValue('--idp-chat-left') &&
+            sheld.style.getPropertyValue('--idp-chat-top') &&
+            sheld.style.getPropertyValue('--idp-chat-width') &&
+            sheld.style.getPropertyValue('--idp-chat-height');
+
+        if (!hasVars && !sheld.classList.contains('idp-chat-maximized')) {
+            const rect = sheld.getBoundingClientRect();
+            sheld.style.setProperty('--idp-chat-left', Math.round(rect.left) + 'px');
+            sheld.style.setProperty('--idp-chat-top', Math.round(rect.top) + 'px');
+            sheld.style.setProperty('--idp-chat-width', Math.round(rect.width) + 'px');
+            sheld.style.setProperty('--idp-chat-height', Math.round(rect.height) + 'px');
+        }
+
+        sheld.classList.remove('idp-chat-maximized');
+        sheld.classList.add('idp-chat-explicit');
         sheld.dataset.idpChatExplicit = 'true';
     }
 
@@ -913,19 +922,13 @@
         const sheld = document.getElementById('sheld');
         if (!sheld || !chatPreState) return;
 
-        // ★ 最大化クラスを外す
         sheld.classList.remove('idp-chat-maximized');
-
-        sheld.style.setProperty('position', 'fixed', 'important');
-        sheld.style.setProperty('inset', 'auto', 'important');
-        sheld.style.setProperty('right', 'auto', 'important');
-        sheld.style.setProperty('bottom', 'auto', 'important');
-        sheld.style.setProperty('left', chatPreState.left + 'px', 'important');
-        sheld.style.setProperty('top', chatPreState.top + 'px', 'important');
-        sheld.style.setProperty('width', chatPreState.width + 'px', 'important');
-        sheld.style.setProperty('height', chatPreState.height + 'px', 'important');
-        sheld.style.setProperty('margin', '0', 'important');
-        sheld.style.setProperty('resize', 'none', 'important');
+        sheld.style.setProperty('--idp-chat-left', Math.round(chatPreState.left) + 'px');
+        sheld.style.setProperty('--idp-chat-top', Math.round(chatPreState.top) + 'px');
+        sheld.style.setProperty('--idp-chat-width', Math.round(chatPreState.width) + 'px');
+        sheld.style.setProperty('--idp-chat-height', Math.round(chatPreState.height) + 'px');
+        sheld.classList.add('idp-chat-explicit');
+        sheld.dataset.idpChatExplicit = 'true';
 
         chatCurrentMode = 'normal';
         updateChatSizeButtons();
@@ -941,14 +944,8 @@
         if (chatCurrentMode === 'normal') {
             ensureChatExplicitPosition();
         }
-
-        // ★ text-styling.js のインラインスタイルを除去してから CSS クラスを適用
-        ['width', 'height', 'left', 'top', 'right', 'bottom', 'inset', 'margin', 'resize'].forEach(prop => {
-            sheld.style.removeProperty(prop);
-        });
-
+        sheld.classList.remove('idp-chat-explicit');
         sheld.classList.add('idp-chat-maximized');
-
         chatCurrentMode = 'maximized';
         updateChatSizeButtons();
         syncChatHeaderPosition();
@@ -957,9 +954,6 @@
         try { window.dispatchEvent(new Event('resize')); } catch (e) { /* ignore */ }
     }
 
-    // ============================================================
-    // チャットヘッダー操作
-    // ============================================================
     function isOnChatHeaderControl(e) {
         const target = e.target;
         if (target && target.closest) {
@@ -1010,7 +1004,10 @@
         applyChatMaximizedState();
     });
 
-    chatHeader.addEventListener('mousedown', (e) => {
+    // ★ ドラッグ: pointer events + setPointerCapture で堅牢化
+    function startChatDrag(e) {
+        if (isDraggingChat) return;
+        if (e.button !== undefined && e.button !== 0) return;
         if (isOnChatHeaderControl(e)) return;
         if (chatCurrentMode !== 'normal') return;
 
@@ -1024,47 +1021,90 @@
         chatDragOffsetX = e.clientX - rect.left;
         chatDragOffsetY = e.clientY - rect.top;
         chatHeader.style.cursor = 'grabbing';
-        e.preventDefault();
+
+        try {
+            if (e.pointerId !== undefined && chatHeader.setPointerCapture) {
+                chatHeader.setPointerCapture(e.pointerId);
+            }
+        } catch (err) { /* ignore */ }
+    }
+
+    chatHeader.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) return;
+        startChatDrag(e);
     });
 
+    chatHeader.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        startChatDrag(e);
+    });
+
+    document.addEventListener('pointermove', (e) => {
+        if (!isDraggingChat) return;
+        const sheld = document.getElementById('sheld');
+        if (!sheld) return;
+        sheld.style.setProperty('--idp-chat-left', Math.round(e.clientX - chatDragOffsetX) + 'px');
+        sheld.style.setProperty('--idp-chat-top', Math.round(e.clientY - chatDragOffsetY) + 'px');
+        syncChatHeaderPosition();
+        syncChatResizeHandlePosition();
+        try { window.dispatchEvent(new Event('resize')); } catch (err) { /* ignore */ }
+    });
+
+    document.addEventListener('pointerup', (e) => {
+        if (!isDraggingChat) return;
+        isDraggingChat = false;
+        chatHeader.style.cursor = 'grab';
+        try {
+            if (e.pointerId !== undefined && chatHeader.releasePointerCapture) {
+                chatHeader.releasePointerCapture(e.pointerId);
+            }
+        } catch (err) { /* ignore */ }
+        if (chatPreState) {
+            const sheld = document.getElementById('sheld');
+            if (sheld) {
+                const l = parseInt(sheld.style.getPropertyValue('--idp-chat-left'), 10);
+                const t = parseInt(sheld.style.getPropertyValue('--idp-chat-top'), 10);
+                if (Number.isFinite(l)) chatPreState.left = l;
+                if (Number.isFinite(t)) chatPreState.top = t;
+            }
+        }
+    });
+
+    // フォールバック: mousemove/mouseup でも処理
     document.addEventListener('mousemove', (e) => {
         if (!isDraggingChat) return;
         const sheld = document.getElementById('sheld');
         if (!sheld) return;
-        sheld.style.setProperty('left', Math.round(e.clientX - chatDragOffsetX) + 'px', 'important');
-        sheld.style.setProperty('top', Math.round(e.clientY - chatDragOffsetY) + 'px', 'important');
+        sheld.style.setProperty('--idp-chat-left', Math.round(e.clientX - chatDragOffsetX) + 'px');
+        sheld.style.setProperty('--idp-chat-top', Math.round(e.clientY - chatDragOffsetY) + 'px');
         syncChatHeaderPosition();
         syncChatResizeHandlePosition();
         try { window.dispatchEvent(new Event('resize')); } catch (err) { /* ignore */ }
     });
 
     document.addEventListener('mouseup', () => {
-        if (isDraggingChat) {
-            isDraggingChat = false;
-            chatHeader.style.cursor = 'grab';
-            // ★ chatPreState を更新
-            if (chatPreState) {
-                const sheld = document.getElementById('sheld');
-                if (sheld) {
-                    const left = parseInt(sheld.style.left, 10);
-                    const top = parseInt(sheld.style.top, 10);
-                    if (Number.isFinite(left)) chatPreState.left = left;
-                    if (Number.isFinite(top)) chatPreState.top = top;
-                }
+        if (!isDraggingChat) return;
+        isDraggingChat = false;
+        chatHeader.style.cursor = 'grab';
+        if (chatPreState) {
+            const sheld = document.getElementById('sheld');
+            if (sheld) {
+                const l = parseInt(sheld.style.getPropertyValue('--idp-chat-left'), 10);
+                const t = parseInt(sheld.style.getPropertyValue('--idp-chat-top'), 10);
+                if (Number.isFinite(l)) chatPreState.left = l;
+                if (Number.isFinite(t)) chatPreState.top = t;
             }
         }
     });
 
+    // ★ リサイズ: CSS変数方式に変更
     chatResizeHandle.addEventListener('mousedown', (e) => {
         if (chatCurrentMode !== 'normal') return;
         e.stopPropagation();
         e.preventDefault();
-
         ensureChatExplicitPosition();
-
         const sheld = document.getElementById('sheld');
         if (!sheld) return;
-
         isResizingChat = true;
         chatResizeStartX = e.clientX;
         chatResizeStartY = e.clientY;
@@ -1078,37 +1118,31 @@
         if (!sheld) return;
         const newW = Math.max(200, chatResizeStartW + (e.clientX - chatResizeStartX));
         const newH = Math.max(150, chatResizeStartH + (e.clientY - chatResizeStartY));
-        sheld.style.setProperty('width', newW + 'px', 'important');
-        sheld.style.setProperty('height', newH + 'px', 'important');
+        sheld.style.setProperty('--idp-chat-width', newW + 'px');
+        sheld.style.setProperty('--idp-chat-height', newH + 'px');
         syncChatHeaderPosition();
         syncChatResizeHandlePosition();
         try { window.dispatchEvent(new Event('resize')); } catch (err) { /* ignore */ }
     });
 
     document.addEventListener('mouseup', () => {
-        if (isResizingChat) {
-            isResizingChat = false;
-            if (chatPreState) {
-                const sheld = document.getElementById('sheld');
-                if (sheld) {
-                    const w = parseInt(sheld.style.width, 10);
-                    const h = parseInt(sheld.style.height, 10);
-                    if (Number.isFinite(w)) chatPreState.width = w;
-                    if (Number.isFinite(h)) chatPreState.height = h;
-                }
+        if (!isResizingChat) return;
+        isResizingChat = false;
+        if (chatPreState) {
+            const sheld = document.getElementById('sheld');
+            if (sheld) {
+                const w = parseInt(sheld.style.getPropertyValue('--idp-chat-width'), 10);
+                const h = parseInt(sheld.style.getPropertyValue('--idp-chat-height'), 10);
+                if (Number.isFinite(w)) chatPreState.width = w;
+                if (Number.isFinite(h)) chatPreState.height = h;
             }
         }
     });
 
-    // ============================================================
-    // 条件評価・キーワードロジック
-    // ============================================================
+    // 以下、条件評価・キーワードロジック（既存のまま）
     function normalizeConditionExpression(expr) {
         if (!expr || typeof expr !== 'string') return '';
-        return expr
-            .replace(/\band\b/gi, '+')
-            .replace(/\bor\b/gi, ',')
-            .replace(/\bnot\b/gi, '!');
+        return expr.replace(/\band\b/gi, '+').replace(/\bor\b/gi, ',').replace(/\bnot\b/gi, '!');
     }
 
     function tokenizeCondition(expr) {
@@ -1140,7 +1174,6 @@
             if (t && t.type === type) { pos++; return t; }
             return null;
         };
-
         function parseOr() {
             let node = parseAnd();
             while (peek() && peek().type === ',') {
@@ -1187,16 +1220,11 @@
     function evaluateConditionNode(node, lowerText) {
         if (!node) return false;
         switch (node.type) {
-            case 'KEYWORD':
-                return lowerText.includes(node.value.toLowerCase());
-            case 'AND':
-                return evaluateConditionNode(node.left, lowerText) && evaluateConditionNode(node.right, lowerText);
-            case 'OR':
-                return evaluateConditionNode(node.left, lowerText) || evaluateConditionNode(node.right, lowerText);
-            case 'NOT':
-                return !evaluateConditionNode(node.operand, lowerText);
-            default:
-                return false;
+            case 'KEYWORD': return lowerText.includes(node.value.toLowerCase());
+            case 'AND': return evaluateConditionNode(node.left, lowerText) && evaluateConditionNode(node.right, lowerText);
+            case 'OR': return evaluateConditionNode(node.left, lowerText) || evaluateConditionNode(node.right, lowerText);
+            case 'NOT': return !evaluateConditionNode(node.operand, lowerText);
+            default: return false;
         }
     }
 
@@ -1207,10 +1235,7 @@
         try {
             const normalized = normalizeConditionExpression(condStr);
             const tokens = tokenizeCondition(normalized);
-            if (tokens.length === 0) {
-                parsedConditionCache.set(condStr, null);
-                return null;
-            }
+            if (tokens.length === 0) { parsedConditionCache.set(condStr, null); return null; }
             ast = parseConditionTokens(tokens);
             parsedConditionCache.set(condStr, ast);
             return ast;
@@ -1271,17 +1296,12 @@
 
     function findMatchingImageUrl(text) {
         if (!text || !currentImageMap) return null;
-
         const signature = getTextSignature(text);
         const now = Date.now();
-
-        if (lastMatchCache.signature === signature &&
-            (now - lastMatchCache.timestamp) < MATCH_CACHE_TTL) {
+        if (lastMatchCache.signature === signature && (now - lastMatchCache.timestamp) < MATCH_CACHE_TTL) {
             return lastMatchCache.url;
         }
-
         const keywordEntries = getSortedKeywordEntries();
-
         for (const entry of keywordEntries) {
             try {
                 if (evaluateCondition(entry.condition, text)) {
@@ -1295,7 +1315,6 @@
                 console.error(`❌ 条件評価エラー "${entry.condition}":`, error);
             }
         }
-
         lastMatchCache = { signature, url: null, timestamp: now };
         return null;
     }
@@ -1315,35 +1334,22 @@
 
     async function updateImageWithUrl(targetUrl) {
         if (isDefaultImageFailed) return;
-
         if (!targetUrl || typeof targetUrl !== 'string' || !targetUrl.trim()) {
-            console.warn("⚠ 空または不正なメディアURLのため、デフォルト画像へ安全にフォールバックします。");
             const fallback = getRandomImageSource(currentImageMap.default) || currentImageMap.default;
             if (fallback && fallback !== targetUrl && typeof fallback === 'string' && fallback.trim()) {
                 await updateImageWithUrl(fallback);
             }
             return;
         }
-
         let newUrl = targetUrl.trim();
-
         if (!newUrl.match(/\.(png|jpg|jpeg|webp|gif|avif|bmp|mp4|webm)$/i)) {
             const detected = await detectImageExtension(newUrl);
-            if (detected) {
-                newUrl = detected;
-            } else {
-                console.warn(`⚠ メディア拡張子の補完に失敗しました: ${newUrl}`);
-                return;
-            }
+            if (detected) newUrl = detected;
+            else return;
         }
-
-        if (currentImageUrl === newUrl && mediaContainer.children.length > 0) {
-            return;
-        }
-
+        if (currentImageUrl === newUrl && mediaContainer.children.length > 0) return;
         console.log(`🖼 メディアを更新: ${newUrl}`);
         currentImageUrl = newUrl;
-
         if (isVideoUrl(newUrl)) {
             const videoElement = document.createElement('video');
             videoElement.src = newUrl;
@@ -1364,7 +1370,6 @@
             imgElement.style.width = '100%';
             imgElement.style.height = '100%';
             imgElement.style.objectFit = 'contain';
-
             imgElement.onload = () => {
                 if (currentImageUrl === newUrl) {
                     mediaContainer.innerHTML = '';
@@ -1373,80 +1378,54 @@
             };
             imgElement.onerror = () => handleMediaError(imgElement, newUrl);
             imgElement.src = newUrl;
-
-            if (typeof imgElement.decode === 'function') {
-                imgElement.decode().catch(() => {});
-            }
+            if (typeof imgElement.decode === 'function') imgElement.decode().catch(() => {});
         }
     }
 
     async function updateImage() {
         if (isDefaultImageFailed) return;
-
         if (isOverrideActive) {
             if (overrideImageUrl) {
-                if (currentImageUrl !== overrideImageUrl) {
-                    await updateImageWithUrl(overrideImageUrl);
-                }
+                if (currentImageUrl !== overrideImageUrl) await updateImageWithUrl(overrideImageUrl);
             } else {
                 const fallback = getRandomImageSource(currentImageMap.default) || currentImageMap.default;
                 if (fallback && typeof fallback === 'string' && fallback.trim()) {
-                    if (currentImageUrl !== fallback) {
-                        await updateImageWithUrl(fallback);
-                    }
+                    if (currentImageUrl !== fallback) await updateImageWithUrl(fallback);
                 }
             }
             return;
         }
-
         const keywordMedia = findLastKeywordImage();
         let newUrl = keywordMedia || getRandomImageSource(currentImageMap.default) || currentImageMap.default;
-
-        if (!newUrl || typeof newUrl !== 'string' || !newUrl.trim()) {
-            return;
-        }
+        if (!newUrl || typeof newUrl !== 'string' || !newUrl.trim()) return;
         await updateImageWithUrl(newUrl);
     }
 
-    const safeUpdateImage = debounce(() => {
-        updateImage();
-    }, 50);
+    const safeUpdateImage = debounce(() => { updateImage(); }, 50);
 
     async function handleMediaError(element, src) {
         console.error("メディアの読み込みに失敗しました:", src);
-
-        if (isOverrideActive && overrideImageUrl &&
-            typeof src === 'string' && src === overrideImageUrl) {
-            console.warn(`⚠ override画像の読み込みに失敗したため、override状態を自動解除します: ${src}`);
+        if (isOverrideActive && overrideImageUrl && typeof src === 'string' && src === overrideImageUrl) {
             clearOverrideState({ save: true, reason: 'override画像の読み込み失敗' });
-
-            setTimeout(() => {
-                safeUpdateImage();
-            }, 100);
+            setTimeout(() => { safeUpdateImage(); }, 100);
             return;
         }
-
         if (src && typeof src === 'string' && !src.match(/\.(png|jpg|jpeg|webp|gif|avif|bmp|mp4|webm)$/i)) {
             const detectedPath = await detectImageExtension(src);
             if (detectedPath) {
                 element.src = detectedPath;
-                if (isVideoUrl(detectedPath) && element.tagName.toLowerCase() === 'video') {
-                    element.play().catch(() => {});
-                }
+                if (isVideoUrl(detectedPath) && element.tagName.toLowerCase() === 'video') element.play().catch(() => {});
                 return;
             }
         }
         if (src && (src.match(/default\.(png|jpg|jpeg|webp|gif|avif|bmp|mp4|webm)$/i) || src.endsWith('/default'))) {
             isDefaultImageFailed = true;
-            console.warn("⚠ デフォルトメディアが見つかりません。表示を無効化します");
             mediaContainer.style.display = 'none';
         } else {
             const fallback = getRandomImageSource(currentImageMap.default) || currentImageMap.default;
             if (fallback && fallback !== src && typeof fallback === 'string' && fallback.trim()) {
                 element.src = fallback.trim();
-                if (isVideoUrl(fallback) && element.tagName.toLowerCase() === 'video') {
-                    element.play().catch(() => {});
-                }
+                if (isVideoUrl(fallback) && element.tagName.toLowerCase() === 'video') element.play().catch(() => {});
             }
         }
     }
@@ -1454,48 +1433,33 @@
     function setupSendInterception() {
         if (isSendInterceptionInstalled) return;
         isSendInterceptionInstalled = true;
-
         document.addEventListener('keydown', (e) => {
             if (e.key !== 'Enter' || e.shiftKey) return;
             const target = e.target;
             if (!target || target.id !== 'send_textarea') return;
             if (currentTextMode !== 'user') return;
-
             const text = target.value;
             if (!text || !text.trim()) return;
-
             const matchedUrl = findMatchingImageUrl(text);
-            if (matchedUrl) {
-                console.log(`⌨️ Enter 傍受: "${text.slice(0, 40)}..." → ${matchedUrl}`);
-                updateImageWithUrl(matchedUrl);
-            }
+            if (matchedUrl) updateImageWithUrl(matchedUrl);
         }, true);
-
         document.addEventListener('click', (e) => {
             const btn = e.target && e.target.closest ? e.target.closest('#send_but') : null;
             if (!btn) return;
             if (currentTextMode !== 'user') return;
-
             const textarea = document.querySelector('#send_textarea');
             if (!textarea) return;
             const text = textarea.value;
             if (!text || !text.trim()) return;
-
             const matchedUrl = findMatchingImageUrl(text);
-            if (matchedUrl) {
-                console.log(`🖱 送信ボタン傍受: "${text.slice(0, 40)}..." → ${matchedUrl}`);
-                updateImageWithUrl(matchedUrl);
-            }
+            if (matchedUrl) updateImageWithUrl(matchedUrl);
         }, true);
-
-        console.log("✅ 送信操作のキャプチャ傍受をインストールしました。");
     }
 
     function toggleTextMode() {
         currentTextMode = currentTextMode === 'user' ? 'ai' : 'user';
         textModeButton.textContent = currentTextMode === 'user' ? 'UT' : 'AI';
         textModeButton.title = `クリックでテキストモード切り替え（現在: ${currentTextMode === 'user' ? 'ユーザー' : 'AI'}）`;
-        console.log(`🔄 テキストモード切替: ${currentTextMode}`);
         invalidateMatchCache();
         saveDisplayState();
         safeUpdateImage();
@@ -1506,45 +1470,27 @@
         if (currentTextMode !== 'ai') return;
         const lastAiMessage = document.querySelector('.mes[is_user="false"]:last-child .mes_text');
         if (!lastAiMessage) return;
-
         const currentText = lastAiMessage.textContent;
         if (currentText === lastStreamingText) return;
         lastStreamingText = currentText;
-
         if (streamingTimer) clearTimeout(streamingTimer);
-        streamingTimer = setTimeout(() => {
-            safeUpdateImage();
-        }, STREAMING_DELAY);
+        streamingTimer = setTimeout(() => { safeUpdateImage(); }, STREAMING_DELAY);
     }
 
     function setupChatDomObserver() {
         const chatContainer = document.querySelector('#chat');
         if (!chatContainer) return;
         if (chatDomObserver) chatDomObserver.disconnect();
-
-        const debouncedUpdate = debounce(() => {
-            handleStreamingUpdate();
-            safeUpdateImage();
-        }, 150);
-
-        chatDomObserver = new MutationObserver((mutations) => {
-            debouncedUpdate();
-        });
-
-        chatDomObserver.observe(chatContainer, {
-            childList: true,
-            subtree: true,
-            characterData: true
-        });
+        const debouncedUpdate = debounce(() => { handleStreamingUpdate(); safeUpdateImage(); }, 150);
+        chatDomObserver = new MutationObserver(() => { debouncedUpdate(); });
+        chatDomObserver.observe(chatContainer, { childList: true, subtree: true, characterData: true });
     }
 
     function findImageMapInData(data) {
         if (data === null || typeof data !== 'object') return null;
         if (data.hasOwnProperty('image_display_extension')) {
             const potentialMap = data.image_display_extension;
-            if (typeof potentialMap === 'object' && potentialMap !== null) {
-                return potentialMap;
-            }
+            if (typeof potentialMap === 'object' && potentialMap !== null) return potentialMap;
         }
         for (const key in data) {
             if (data.hasOwnProperty(key)) {
@@ -1558,34 +1504,21 @@
     function getCharacterNameFromDOM() {
         const context = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
         const userName = (context && (context.name1 || context.user_name)) || 'ユーザー';
-
-        if (context && context.character && context.character.name && context.character.name !== userName) {
-            return context.character.name;
-        }
-
+        if (context && context.character && context.character.name && context.character.name !== userName) return context.character.name;
         if (context && context.characters && typeof context.characterId !== 'undefined' && context.characters[context.characterId]) {
             const cName = context.characters[context.characterId].name;
             if (cName && cName !== userName) return cName;
         }
-
         const selectedOption = document.querySelector('#character_select option:checked, select[name="character"] option:checked');
         if (selectedOption && selectedOption.textContent.trim()) {
             const val = selectedOption.textContent.trim();
             if (val !== userName) return val;
         }
-
         const nameEl = document.querySelector('#character_name_holder, #character_name_id, .character_name, .ch_name');
         if (nameEl && nameEl.textContent.trim()) {
             const val = nameEl.textContent.trim();
             if (val !== userName) return val;
         }
-
-        const navBlock = document.querySelector('.right-nav-char-block[data-name]');
-        if (navBlock && navBlock.dataset && navBlock.dataset.name) {
-            const val = navBlock.dataset.name;
-            if (val !== userName) return val;
-        }
-
         return null;
     }
 
@@ -1596,7 +1529,6 @@
 
     async function loadCharacterData(forceRefresh = false) {
         const charName = getCharacterNameFromDOM();
-
         if (!charName) {
             if (currentImageMap === defaultImageMap) {
                 currentImageMap = await detectImageMapExtensions(defaultImageMap);
@@ -1605,14 +1537,9 @@
             }
             return;
         }
-
-        if (!forceRefresh && currentCharacter === charName && currentImageMap !== defaultImageMap) {
-            return;
-        }
-
+        if (!forceRefresh && currentCharacter === charName && currentImageMap !== defaultImageMap) return;
         currentCharacter = charName;
         console.log(`👤 キャラクター検出: ${charName}`);
-
         if (!forceRefresh && imageMapCache.has(charName)) {
             currentImageMap = imageMapCache.get(charName);
             invalidateAllCaches();
@@ -1620,45 +1547,34 @@
             safeUpdateImage();
             return;
         }
-
         let loadedMap = null;
         try {
-            const extPath = `addchara/${charName}/${charName}_ext.json`;
-            const resp = await fetch(extPath);
+            const resp = await fetch(`addchara/${charName}/${charName}_ext.json`);
             if (resp.ok) {
                 const data = await resp.json();
                 loadedMap = findImageMapInData(data);
             }
-        } catch (e) {
-            console.warn(`[Image Display] ${charName}_ext.json の読み込みをスキップ:`, e);
-        }
-
+        } catch (e) { /* ignore */ }
         const context = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
         if (!loadedMap && context && context.character && context.character.data) {
             loadedMap = findImageMapInData(context.character.data);
         }
-
         if (loadedMap) {
             const detectedMap = await detectImageMapExtensions(loadedMap);
             currentImageMap = detectedMap;
             imageMapCache.set(charName, detectedMap);
             console.log(`✅ キャラクター設定マップをロードしました (${charName}):`, currentImageMap);
         } else {
-            console.warn(`⚠ ${charName} の拡張設定が見つかりませんでした。デフォルト画像を使用します。`);
             currentImageMap = await detectImageMapExtensions(defaultImageMap);
         }
-
         invalidateAllCaches();
         preloadCharacterImages(currentImageMap);
         safeUpdateImage();
     }
 
     function toggleCustomWindow() {
-        if (isCustomWindowOpen) {
-            closeCustomWindow();
-        } else {
-            openCustomWindow();
-        }
+        if (isCustomWindowOpen) closeCustomWindow();
+        else openCustomWindow();
     }
 
     function openCustomWindow() {
@@ -1704,7 +1620,6 @@
             const h = parseInt(document.getElementById('custom-height').value) || DEFAULT_HEIGHT;
             const l = parseInt(document.getElementById('custom-left').value) || DEFAULT_LEFT;
             const t = parseInt(document.getElementById('custom-top').value) || DEFAULT_TOP;
-
             imageContainer.style.width = `${w}px`;
             imageContainer.style.height = `${h}px`;
             imageContainer.style.left = `${l}px`;
@@ -1736,7 +1651,6 @@
     function restoreDisplayState() {
         const context = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
         let state = context && context.extensionSettings ? context.extensionSettings[MODULE_NAME] : null;
-
         if (!state) {
             const oldSaved = localStorage.getItem(OLD_STORAGE_KEY);
             if (oldSaved) {
@@ -1744,25 +1658,18 @@
                     state = JSON.parse(oldSaved);
                     if (context && context.extensionSettings) {
                         context.extensionSettings[MODULE_NAME] = state;
-                        if (typeof context.saveSettingsDebounced === 'function') {
-                            context.saveSettingsDebounced();
-                        }
+                        if (typeof context.saveSettingsDebounced === 'function') context.saveSettingsDebounced();
                         localStorage.removeItem(OLD_STORAGE_KEY);
                     }
-                } catch (e) {
-                    console.error('[Image Display] 旧データの移行に失敗しました:', e);
-                }
+                } catch (e) { /* ignore */ }
             }
         }
-
         if (state) {
             try {
                 if (state.preNormalState) {
                     const pns = state.preNormalState;
-                    const w = Number(pns.width);
-                    const h = Number(pns.height);
-                    const l = Number(pns.left);
-                    const t = Number(pns.top);
+                    const w = Number(pns.width), h = Number(pns.height);
+                    const l = Number(pns.left), t = Number(pns.top);
                     preNormalState = {
                         width: Number.isFinite(w) && w > 0 ? w : DEFAULT_WIDTH,
                         height: Number.isFinite(h) && h > 0 ? h : DEFAULT_HEIGHT,
@@ -1770,73 +1677,44 @@
                         top: Number.isFinite(t) ? t : DEFAULT_TOP,
                     };
                 }
-                if (state.bgColor) {
-                    imageContainer.style.backgroundColor = state.bgColor;
-                    colorPicker.value = state.bgColor;
-                }
+                if (state.bgColor) { imageContainer.style.backgroundColor = state.bgColor; colorPicker.value = state.bgColor; }
                 currentMode = state.currentMode || 'normal';
                 if (state.textMode) {
                     currentTextMode = state.textMode;
                     textModeButton.textContent = currentTextMode === 'user' ? 'UT' : 'AI';
-                    textModeButton.title = `クリックでテキストモード切り替え（現在: ${currentTextMode === 'user' ? 'ユーザー' : 'AI'}）`;
                 }
-
                 if (state.chatBgColor) {
                     chatColorPicker.value = state.chatBgColor;
                     const rgb = hexToRgbString(state.chatBgColor);
                     document.documentElement.style.setProperty('--chat-bg-rgb', rgb);
                 }
-
                 if (state.isOverrideActive) {
                     isOverrideActive = true;
-                    overrideImageUrl = (typeof state.overrideImageUrl === 'string' && state.overrideImageUrl.trim())
-                        ? state.overrideImageUrl.trim()
-                        : null;
-                    console.log(`[Image Display] override状態を復元: ${overrideImageUrl || '(デフォルト)'}`);
+                    overrideImageUrl = (typeof state.overrideImageUrl === 'string' && state.overrideImageUrl.trim()) ? state.overrideImageUrl.trim() : null;
                 } else {
                     isOverrideActive = false;
                     overrideImageUrl = null;
                 }
-
                 switch (currentMode) {
-                    case 'maximized':
-                        applyMaximizeMode();
-                        break;
-                    case 'halfMaximized':
-                        applyHalfMaximizeMode();
-                        break;
-                    default:
-                        applyNormalMode();
-                        break;
+                    case 'maximized': applyMaximizeMode(); break;
+                    case 'halfMaximized': applyHalfMaximizeMode(); break;
+                    default: applyNormalMode(); break;
                 }
-            } catch (e) {
-                console.error('状態復元エラー:', e);
-                setDefaultDisplayState();
-            }
+            } catch (e) { setDefaultDisplayState(); }
         } else {
             setDefaultDisplayState();
         }
     }
 
     async function validateRestoredOverride() {
-        if (!isOverrideActive) return;
-        if (!overrideImageUrl) {
-            console.log('ℹ override状態（URL未指定）を確認しました（デフォルト画像を使用）');
-            return;
-        }
-
+        if (!isOverrideActive || !overrideImageUrl) return;
         try {
             const exists = await checkMediaExists(overrideImageUrl);
             if (!exists) {
-                console.warn(`⚠ 復元された override画像が存在しません。override状態を解除します: ${overrideImageUrl}`);
                 clearOverrideState({ save: true, reason: '復元時の存在確認失敗' });
                 safeUpdateImage();
-            } else {
-                console.log(`✅ 復元された override画像の存在を確認: ${overrideImageUrl}`);
             }
-        } catch (e) {
-            console.error('[Image Display] override画像の存在確認でエラー:', e);
-        }
+        } catch (e) { /* ignore */ }
     }
 
     function setDefaultDisplayState() {
@@ -1850,15 +1728,10 @@
         const restoreBtn = document.getElementById('image-display-restore-btn');
         const maximizeBtn = document.getElementById('image-display-maximize-btn');
         if (!restoreBtn || !maximizeBtn) return;
-
         restoreBtn.classList.remove('size-btn-disabled');
         maximizeBtn.classList.remove('size-btn-disabled');
-
-        if (currentMode === 'normal') {
-            restoreBtn.classList.add('size-btn-disabled');
-        } else if (currentMode === 'maximized') {
-            maximizeBtn.classList.add('size-btn-disabled');
-        }
+        if (currentMode === 'normal') restoreBtn.classList.add('size-btn-disabled');
+        else if (currentMode === 'maximized') maximizeBtn.classList.add('size-btn-disabled');
     }
 
     function applyNormalMode() {
@@ -1884,10 +1757,7 @@
     }
 
     function applyMaximizeMode() {
-        if (currentMode === 'normal') {
-            updatePreNormalStateFromDOM();
-        }
-
+        if (currentMode === 'normal') updatePreNormalStateFromDOM();
         imageContainer.style.setProperty('position', 'fixed', 'important');
         imageContainer.style.setProperty('width', '100vw', 'important');
         imageContainer.style.setProperty('height', '100vh', 'important');
@@ -1896,7 +1766,6 @@
         imageContainer.style.setProperty('right', 'auto', 'important');
         imageContainer.style.setProperty('bottom', 'auto', 'important');
         imageContainer.style.setProperty('z-index', Z_INDEX_BODY, 'important');
-
         resizeHandle.style.display = 'none';
         header.style.cursor = 'default';
         imageContainer.classList.remove('half-maximized');
@@ -1913,10 +1782,7 @@
     }
 
     function applyHalfMaximizeMode() {
-        if (currentMode === 'normal') {
-            updatePreNormalStateFromDOM();
-        }
-
+        if (currentMode === 'normal') updatePreNormalStateFromDOM();
         imageContainer.style.setProperty('position', 'fixed', 'important');
         imageContainer.style.setProperty('width', '50vw', 'important');
         imageContainer.style.setProperty('height', '100vh', 'important');
@@ -1925,7 +1791,6 @@
         imageContainer.style.setProperty('right', 'auto', 'important');
         imageContainer.style.setProperty('bottom', 'auto', 'important');
         imageContainer.style.setProperty('z-index', Z_INDEX_BODY, 'important');
-
         resizeHandle.style.display = 'none';
         header.style.cursor = 'default';
         imageContainer.classList.add('half-maximized');
@@ -1942,7 +1807,6 @@
     }
 
     restoreDisplayState();
-
     validateRestoredOverride();
 
     colorPicker.addEventListener('input', () => {
@@ -1964,24 +1828,20 @@
     }
 
     restoreSizeBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        e.preventDefault();
+        e.stopPropagation(); e.preventDefault();
         if (currentMode === 'normal') return;
         applyNormalMode();
         saveDisplayState();
     });
 
     maximizeSizeBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        e.preventDefault();
+        e.stopPropagation(); e.preventDefault();
         if (currentMode === 'maximized') return;
         applyMaximizeMode();
         saveDisplayState();
     });
 
-    colorPicker.addEventListener('click', (e) => {
-        e.stopPropagation();
-    });
+    colorPicker.addEventListener('click', (e) => { e.stopPropagation(); });
 
     function isOnHeaderControl(e) {
         const target = e.target;
@@ -1989,25 +1849,18 @@
             if (target.closest('#image-display-header-controls') ||
                 target.closest('#bg-color-picker') ||
                 target.closest('#image-display-restore-btn') ||
-                target.closest('#image-display-maximize-btn')) {
-                return true;
-            }
+                target.closest('#image-display-maximize-btn')) return true;
         }
         const path = e.composedPath ? e.composedPath() : [];
-        return path.some(el =>
-            el && el.id && [
-                'image-display-header-controls',
-                'bg-color-picker',
-                'image-display-restore-btn',
-                'image-display-maximize-btn'
-            ].includes(el.id)
-        );
+        return path.some(el => el && el.id && [
+            'image-display-header-controls', 'bg-color-picker',
+            'image-display-restore-btn', 'image-display-maximize-btn'
+        ].includes(el.id));
     }
 
     header.addEventListener('mousedown', (e) => {
         if (isOnHeaderControl(e)) return;
         if (currentMode !== 'normal') return;
-
         isDragging = true;
         offsetX = e.clientX - imageContainer.getBoundingClientRect().left;
         offsetY = e.clientY - imageContainer.getBoundingClientRect().top;
@@ -2017,25 +1870,23 @@
     });
 
     document.addEventListener('mousemove', (e) => {
-        if (isDragging && currentMode === 'normal') {
-            imageContainer.style.left = `${e.clientX - offsetX}px`;
-            imageContainer.style.top = `${e.clientY - offsetY}px`;
-            syncHeaderPosition();
-            if (isCustomWindowOpen) updateCustomWindow();
-        }
+        if (!isDragging || currentMode !== 'normal') return;
+        imageContainer.style.left = `${e.clientX - offsetX}px`;
+        imageContainer.style.top = `${e.clientY - offsetY}px`;
+        syncHeaderPosition();
+        if (isCustomWindowOpen) updateCustomWindow();
     });
 
     document.addEventListener('mouseup', () => {
-        if (isDragging) {
-            isDragging = false;
-            imageContainer.classList.remove('dragging');
-            if (currentMode === 'normal') header.style.cursor = 'grab';
-            if (currentMode === 'normal') {
-                updatePreNormalStateFromDOM();
-            }
-            syncHeaderPosition();
-            saveDisplayState();
+        if (!isDragging) return;
+        isDragging = false;
+        imageContainer.classList.remove('dragging');
+        if (currentMode === 'normal') {
+            header.style.cursor = 'grab';
+            updatePreNormalStateFromDOM();
         }
+        syncHeaderPosition();
+        saveDisplayState();
     });
 
     resizeHandle.addEventListener('mousedown', (e) => {
@@ -2043,36 +1894,27 @@
         e.stopPropagation();
         isResizing = true;
         imageContainer.classList.add('resizing');
-        const startX = e.clientX;
-        const startY = e.clientY;
-        const startWidth = imageContainer.offsetWidth;
-        const startHeight = imageContainer.offsetHeight;
-
-        function handleResize(e) {
-            if (isResizing) {
-                const newWidth = Math.max(100, startWidth + (e.clientX - startX));
-                const newHeight = Math.max(100, startHeight + (e.clientY - startY));
-                imageContainer.style.width = `${newWidth}px`;
-                imageContainer.style.height = `${newHeight}px`;
-                syncHeaderPosition();
-                if (isCustomWindowOpen) updateCustomWindow();
-            }
+        const startX = e.clientX, startY = e.clientY;
+        const startWidth = imageContainer.offsetWidth, startHeight = imageContainer.offsetHeight;
+        function handleResize(ev) {
+            if (!isResizing) return;
+            const newWidth = Math.max(100, startWidth + (ev.clientX - startX));
+            const newHeight = Math.max(100, startHeight + (ev.clientY - startY));
+            imageContainer.style.width = `${newWidth}px`;
+            imageContainer.style.height = `${newHeight}px`;
+            syncHeaderPosition();
+            if (isCustomWindowOpen) updateCustomWindow();
         }
-
         function stopResize() {
-            if (isResizing) {
-                isResizing = false;
-                imageContainer.classList.remove('resizing');
-                if (currentMode === 'normal') {
-                    updatePreNormalStateFromDOM();
-                }
-                syncHeaderPosition();
-                saveDisplayState();
-                document.removeEventListener('mousemove', handleResize);
-                document.removeEventListener('mouseup', stopResize);
-            }
+            if (!isResizing) return;
+            isResizing = false;
+            imageContainer.classList.remove('resizing');
+            if (currentMode === 'normal') updatePreNormalStateFromDOM();
+            syncHeaderPosition();
+            saveDisplayState();
+            document.removeEventListener('mousemove', handleResize);
+            document.removeEventListener('mouseup', stopResize);
         }
-
         document.addEventListener('mousemove', handleResize);
         document.addEventListener('mouseup', stopResize);
     });
@@ -2098,9 +1940,7 @@
         syncHeaderPosition();
         syncChatHeaderPosition();
         syncChatResizeHandlePosition();
-        if (!topBarPinned) {
-            updateTopBarVisibility(lastMouseX, lastMouseY);
-        }
+        if (!topBarPinned) updateTopBarVisibility(lastMouseX, lastMouseY);
     }, 500);
 
     function setupEventSourceListeners() {
@@ -2108,34 +1948,19 @@
             const context = SillyTavern.getContext();
             if (context && context.eventSource && context.eventTypes) {
                 const { eventSource, eventTypes } = context;
-
                 const safeOn = (eventType, handler) => {
-                    if (eventType && typeof eventSource.on === 'function') {
-                        eventSource.on(eventType, handler);
-                    }
+                    if (eventType && typeof eventSource.on === 'function') eventSource.on(eventType, handler);
                 };
-
                 safeOn(eventTypes.STREAM_TOKEN_RECEIVED, handleStreamingUpdate);
-
-                const immediateUpdate = () => {
-                    updateImage();
-                };
-
+                const immediateUpdate = () => { updateImage(); };
                 safeOn(eventTypes.CHARACTER_MESSAGE_RENDERED, immediateUpdate);
                 safeOn(eventTypes.USER_MESSAGE_RENDERED, immediateUpdate);
-
                 if (eventTypes.MESSAGE_DELETED) safeOn(eventTypes.MESSAGE_DELETED, immediateUpdate);
                 if (eventTypes.MESSAGE_EDITED) safeOn(eventTypes.MESSAGE_EDITED, immediateUpdate);
                 if (eventTypes.CHAT_LOADED) safeOn(eventTypes.CHAT_LOADED, immediateUpdate);
-
-                const onCharacterOrChatChanged = () => {
-                    loadCharacterData(true);
-                };
-
+                const onCharacterOrChatChanged = () => { loadCharacterData(true); };
                 safeOn(eventTypes.CHAT_CHANGED, onCharacterOrChatChanged);
                 safeOn(eventTypes.CHARACTER_SELECTED, onCharacterOrChatChanged);
-
-                console.log("✅ SillyTavern EventSource による監視を開始しました。");
             }
         }
     }
@@ -2144,7 +1969,6 @@
     setupSendInterception();
     loadCharacterData(true);
     setupChatDomObserver();
-
     updateTopBarVisibility(-1, -1);
 
     let pollCount = 0;
@@ -2157,54 +1981,28 @@
     function positionTextModeButton() {
         const textModeBtn = document.getElementById('text-mode-button');
         if (!textModeBtn) return;
-
         if (isOverrideActive) {
-            if (textModeBtn.style.display !== 'none') {
-                console.log('🎨 背景生成モード → UT/AI ボタンを非表示化');
-            }
             textModeBtn.style.display = 'none';
             textModeBtn.style.pointerEvents = 'none';
             return;
         }
-
         const gicBtn = document.getElementById('gic-release-override-button');
-
-        if (!gicBtn) {
-            textModeBtn.style.display = 'none';
-            return;
-        }
-        const gicDisplay = window.getComputedStyle(gicBtn).display;
-        if (gicDisplay === 'none') {
-            textModeBtn.style.display = 'none';
-            return;
-        }
-
+        if (!gicBtn) { textModeBtn.style.display = 'none'; return; }
+        if (window.getComputedStyle(gicBtn).display === 'none') { textModeBtn.style.display = 'none'; return; }
         const gicRect = gicBtn.getBoundingClientRect();
-        if (gicRect.width === 0 || gicRect.height === 0) {
-            textModeBtn.style.display = 'none';
-            return;
-        }
-
-        if (textModeBtn.style.display === 'none') {
-            textModeBtn.style.display = '';
-        }
+        if (gicRect.width === 0 || gicRect.height === 0) { textModeBtn.style.display = 'none'; return; }
+        if (textModeBtn.style.display === 'none') textModeBtn.style.display = '';
         textModeBtn.style.pointerEvents = '';
-
         const gap = 5;
-        const btnW = textModeBtn.offsetWidth  || 40;
+        const btnW = textModeBtn.offsetWidth || 40;
         const btnH = textModeBtn.offsetHeight || 30;
-
         let left = gicRect.right + gap;
-        let top  = gicRect.top + (gicRect.height - btnH) / 2;
-
-        const margin = 4;
-        const vw = window.innerWidth;
-        const vh = window.innerHeight;
+        let top = gicRect.top + (gicRect.height - btnH) / 2;
+        const margin = 4, vw = window.innerWidth, vh = window.innerHeight;
         if (left < margin) left = margin;
         if (left + btnW > vw - margin) left = vw - margin - btnW;
-        if (top  < margin) top  = margin;
+        if (top < margin) top = margin;
         if (top + btnH > vh - margin) top = vh - margin - btnH;
-
         textModeBtn.style.setProperty('z-index', '15000', 'important');
         textModeBtn.style.setProperty('position', 'fixed', 'important');
         textModeBtn.style.setProperty('left', Math.round(left) + 'px', 'important');
@@ -2219,16 +2017,9 @@
 
     function isGalleryOpen() {
         const candidates = document.querySelectorAll([
-            '#gallery_container',
-            '.gallery-container',
-            '.gallery_container',
-            '#gallery',
-            '.gallery',
-            '[data-gallery-container]',
-            '.gallery-grid',
-            '#gallery-grid',
+            '#gallery_container', '.gallery-container', '.gallery_container',
+            '#gallery', '.gallery', '[data-gallery-container]', '.gallery-grid', '#gallery-grid'
         ].join(','));
-
         for (const el of candidates) {
             if (!el) continue;
             const style = window.getComputedStyle(el);
@@ -2248,110 +2039,57 @@
         const galleryOpen = isGalleryOpen();
         if (galleryOpen === lastGalleryState) return;
         lastGalleryState = galleryOpen;
-
-        if (galleryOpen) {
-            controlContainer.style.display = 'none';
-        } else {
-            controlContainer.style.display = 'flex';
-        }
-
+        controlContainer.style.display = galleryOpen ? 'none' : 'flex';
         const textModeBtn = document.getElementById('text-mode-button');
-        if (textModeBtn) {
-            if (galleryOpen) {
-                textModeBtn.style.display = 'none';
-            } else {
-                textModeBtn.style.display = '';
-            }
-        }
-
+        if (textModeBtn) textModeBtn.style.display = galleryOpen ? 'none' : '';
         const gicButton = document.getElementById('gic-release-override-button');
-        if (gicButton) {
-            if (galleryOpen) {
-                gicButton.style.display = 'none';
-            } else {
-                gicButton.style.display = '';
-            }
-        }
+        if (gicButton) gicButton.style.display = galleryOpen ? 'none' : '';
     }
 
     function setupGalleryObserver() {
-        const galleryObserver = new MutationObserver(() => {
-            updateControlContainerVisibility();
-        });
+        const galleryObserver = new MutationObserver(() => { updateControlContainerVisibility(); });
         galleryObserver.observe(document.body, {
-            childList: true,
-            subtree: true,
-            attributes: true,
-            attributeFilter: ['style', 'class'],
+            childList: true, subtree: true,
+            attributes: true, attributeFilter: ['style', 'class'],
         });
-
         setInterval(updateControlContainerVisibility, 300);
-
         updateControlContainerVisibility();
     }
 
     setupGalleryObserver();
-
     requestAnimationFrame(positionTextModeButton);
 
     window.ImageDisplayExtension = {
         setOverrideImage: async function (url) {
             const cleanUrl = (url && typeof url === 'string') ? url.trim() : '';
-
             if (cleanUrl) {
                 const exists = await checkMediaExists(cleanUrl);
                 if (!exists) {
-                    console.warn(`⚠ 指定されたURLが存在しないため、override画像を設定できません: ${cleanUrl}`);
                     clearOverrideState({ save: true, reason: 'setOverrideImage: URL存在確認失敗' });
                     safeUpdateImage();
                     return false;
                 }
             }
-
             overrideImageUrl = cleanUrl || null;
             isOverrideActive = true;
-
-            if (overrideImageUrl) {
-                await updateImageWithUrl(overrideImageUrl);
-            } else {
+            if (overrideImageUrl) await updateImageWithUrl(overrideImageUrl);
+            else {
                 const fallback = getRandomImageSource(currentImageMap.default) || currentImageMap.default;
-                if (fallback && typeof fallback === 'string' && fallback.trim()) {
-                    await updateImageWithUrl(fallback);
-                }
+                if (fallback && typeof fallback === 'string' && fallback.trim()) await updateImageWithUrl(fallback);
             }
             saveDisplayState();
             return true;
         },
-
-        clearOverrideImage: function () {
-            clearOverrideState({ save: true, reason: 'API clearOverrideImage' });
-            safeUpdateImage();
-        },
-
+        clearOverrideImage: function () { clearOverrideState({ save: true, reason: 'API clearOverrideImage' }); safeUpdateImage(); },
         getCurrentImageUrl: function () { return currentImageUrl; },
         isOverride: function () { return isOverrideActive; },
         getOverrideImageUrl: function () { return overrideImageUrl; },
-
-        applyNormalMode: function () {
-            applyNormalMode();
-            saveDisplayState();
-        },
-        applyMaximizeMode: function () {
-            applyMaximizeMode();
-            saveDisplayState();
-        },
-        applyHalfMaximizeMode: function () {
-            applyHalfMaximizeMode();
-            saveDisplayState();
-        },
+        applyNormalMode: function () { applyNormalMode(); saveDisplayState(); },
+        applyMaximizeMode: function () { applyMaximizeMode(); saveDisplayState(); },
+        applyHalfMaximizeMode: function () { applyHalfMaximizeMode(); saveDisplayState(); },
         getCurrentMode: function () { return currentMode; },
-
-        openCustomWindow: function () {
-            try { openCustomWindow(); } catch (e) { console.warn(e); }
-        },
-        closeCustomWindow: function () {
-            try { closeCustomWindow(); } catch (e) { console.warn(e); }
-        },
+        openCustomWindow: function () { try { openCustomWindow(); } catch (e) { console.warn(e); } },
+        closeCustomWindow: function () { try { closeCustomWindow(); } catch (e) { console.warn(e); } },
         isCustomWindowOpen: function () { return isCustomWindowOpen; },
         syncHeaderPosition: syncHeaderPosition,
         applyHeaderZIndex: applyHeaderZIndex,
