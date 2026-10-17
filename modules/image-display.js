@@ -40,7 +40,7 @@
     const Z_INDEX_HEADER_DEFAULT = '15000';
     const HEADER_HEIGHT = 30;
 
-    // ★ ヘッダー hover 表示用
+    // ヘッダー hover 表示用
     const HEADER_HOVER_MARGIN = 20;
     let headerHoverVisible = false;
     let lastMouseX = -1;
@@ -228,12 +228,10 @@
                 border-bottom: 1px solid #555 !important;
                 cursor: grab;
                 user-select: none !important;
-                /* ★ 普段は非表示 */
                 opacity: 0 !important;
                 pointer-events: none !important;
                 transition: opacity 0.15s ease !important;
             }
-            /* ★ マウスが近づいた時のみ表示 */
             #image-display-header.idp-visible {
                 opacity: 1 !important;
                 pointer-events: auto !important;
@@ -434,8 +432,15 @@
     }
 
     // ============================================================
-    // ★ ヘッダー hover 表示制御
+    // ★ ヘッダー表示制御
+    //   手動モード + カスタムウインドウが開いている時のみ
+    //   マウス位置で表示/非表示を切り替える。
+    //   それ以外の状態では常に非表示。
     // ============================================================
+    function isHeaderAutoShowEnabled() {
+        return currentMode === 'normal' && isCustomWindowOpen === true;
+    }
+
     function setHeaderVisible(visible) {
         if (!header) return;
         if (headerHoverVisible === visible) return;
@@ -446,7 +451,13 @@
     function updateHeaderVisibility(x, y) {
         if (!header) return;
 
-        // ドラッグ中は常に表示
+        // 手動モード + カスタムウインドウ開 でなければ常に非表示
+        if (!isHeaderAutoShowEnabled()) {
+            setHeaderVisible(false);
+            return;
+        }
+
+        // ドラッグ中は常時表示
         if (isDragging) {
             setHeaderVisible(true);
             return;
@@ -471,6 +482,9 @@
 
         setHeaderVisible(inside);
     }
+
+    // 初期状態は非表示
+    setHeaderVisible(false);
 
     document.addEventListener('mousemove', (e) => {
         lastMouseX = e.clientX;
@@ -1088,6 +1102,7 @@
         }
     }
 
+    // ★ カスタムウインドウを開いた時、ヘッダー表示をマウス位置から再判定
     function openCustomWindow() {
         if (currentMode !== 'normal') {
             applyNormalMode();
@@ -1099,11 +1114,17 @@
         document.getElementById('custom-top').value = parseInt(imageContainer.style.top) || DEFAULT_TOP;
         customWindow.style.display = 'block';
         isCustomWindowOpen = true;
+
+        // ヘッダー表示を再評価
+        updateHeaderVisibility(lastMouseX, lastMouseY);
     }
 
+    // ★ カスタムウインドウを閉じた時、ヘッダーを強制非表示
     function closeCustomWindow() {
         customWindow.style.display = 'none';
         isCustomWindowOpen = false;
+
+        setHeaderVisible(false);
     }
 
     function updateCustomWindow() {
@@ -1297,7 +1318,6 @@
         currentMode = 'normal';
         updateSizeButtons();
         syncHeaderPosition();
-        // モード切替直後に最後のマウス位置で再判定
         updateHeaderVisibility(lastMouseX, lastMouseY);
     }
 
@@ -1435,8 +1455,10 @@
         if (isOnHeaderControl(e)) return;
         if (currentMode !== 'normal') return;
 
+        // ★ ヘッダー自動表示条件を満たさない場合はドラッグ開始しない
+        if (!isHeaderAutoShowEnabled()) return;
+
         isDragging = true;
-        // ドラッグ開始時は強制表示
         setHeaderVisible(true);
         offsetX = e.clientX - imageContainer.getBoundingClientRect().left;
         offsetY = e.clientY - imageContainer.getBoundingClientRect().top;
@@ -1464,7 +1486,6 @@
             }
             syncHeaderPosition();
             saveDisplayState();
-            // ドラッグ終了後に最後のマウス位置で再判定
             updateHeaderVisibility(lastMouseX, lastMouseY);
         }
     });
@@ -1812,6 +1833,7 @@
         syncHeaderPosition: syncHeaderPosition,
         applyHeaderZIndex: applyHeaderZIndex,
         setHeaderVisible: setHeaderVisible,
+        isHeaderAutoShowEnabled: isHeaderAutoShowEnabled,
     };
     console.log("✅ Image Display Extension API を window.ImageDisplayExtension に公開しました");
 })();
