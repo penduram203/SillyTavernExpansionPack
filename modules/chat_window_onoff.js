@@ -1,12 +1,8 @@
 // このファイルは SillyTavern の公式拡張機能ローダー（動的 import）経由で読み込まれる前提。
-// classic <script> タグでの直接読み込みは行わないこと（export構文が構文エラーになるため）。
 
 const MODULE_NAME = 'chat_window_onoff';
 const OLD_STORAGE_KEY = 'chatWindowHiddenState';
 
-// ★ #toggle-chat-button は除外。
-//    CSS クラス body.gallery-open / body.stj-editor-open で非表示化する。
-//    JS で inline style を当てると解除漏れの原因になるため。
 const GALLERY_HIDDEN_SELECTORS = [
     '#window-control-buttons',
     '#restore-panel-button',
@@ -20,9 +16,9 @@ const GALLERY_HIDDEN_SELECTORS = [
 ];
 
 const BUTTON_WAKE_WIDTH = 110;
-const BUTTON_WAKE_HEIGHT = 80;
+// ★ 💡/🎨 が背景生成ボタンの上に来るので、wake ゾーンを拡張
+const BUTTON_WAKE_HEIGHT = 150;
 
-// ★ 手動モード時に右方向へ追加で広げる量
 const MANUAL_SETTINGS_EXTRA_W = 160;
 
 const AUX_HOVER_BUTTON_IDS = ['toggle-chat-button', 'gic-open-gallery-button'];
@@ -32,9 +28,7 @@ function getSettings() {
     const context = SillyTavern.getContext();
 
     if (!context.extensionSettings[MODULE_NAME]) {
-        context.extensionSettings[MODULE_NAME] = {
-            isHidden: false,
-        };
+        context.extensionSettings[MODULE_NAME] = { isHidden: false };
     }
 
     const settings = context.extensionSettings[MODULE_NAME];
@@ -48,7 +42,7 @@ function getSettings() {
             console.log('[Chat Window On/Off] 旧localStorageからextensionSettingsへの移行を完了しました。');
         }
     } catch (e) {
-        console.error('[Chat Window On/Off] localStorageからのデータ移行中にエラーが発生しました:', e);
+        console.error('[Chat Window On/Off] localStorageからのデータ移行中にエラー:', e);
     }
 
     return settings;
@@ -60,24 +54,20 @@ function saveSettings(settings) {
         context.extensionSettings[MODULE_NAME] = settings;
         context.saveSettingsDebounced();
     } catch (e) {
-        console.error('[Chat Window On/Off] 設定の保存に失敗しました:', e);
+        console.error('[Chat Window On/Off] 設定の保存に失敗:', e);
     }
 }
 
 export async function onInstall() {
     console.log('[Chat Window On/Off] onInstall フックが呼び出されました。初回セットアップを行います。');
-    try {
-        getSettings();
-    } catch (e) {
-        console.error('[Chat Window On/Off] onInstall中の初期化に失敗しました:', e);
-    }
+    try { getSettings(); } catch (e) { console.error(e); }
     if (typeof toastr !== 'undefined') {
         toastr.success('Chat Window On/Off 拡張機能がインストールされました。');
     }
 }
 
 // ============================================================
-// CSS ファイル依存を回避するための <style> 注入
+// 追加スタイル注入
 // ============================================================
 function injectExtraStyle() {
     const styleId = 'chat-window-onoff-extra-style';
@@ -94,7 +84,7 @@ function injectExtraStyle() {
             cursor: default !important;
         }
 
-        /* ★ ギャラリー表示中は 💡 を非表示・クリック無効・hover無効 */
+        /* ギャラリー表示中は 💡 を非表示・クリック無効・hover無効 */
         html body.gallery-open #toggle-chat-button {
             display: none !important;
             pointer-events: none !important;
@@ -102,8 +92,7 @@ function injectExtraStyle() {
             cursor: default !important;
         }
 
-        /* ★ JSON編集画面（stj_export_modal）表示中は
-             画面左下の全ボタンを非表示・クリック無効・hover無効 */
+        /* JSON編集画面表示中は画面左下の全ボタンを非表示・クリック無効 */
         html body.stj-editor-open #toggle-chat-button,
         html body.stj-editor-open #gic-open-gallery-button,
         html body.stj-editor-open #gic-release-override-button,
@@ -122,13 +111,26 @@ function injectExtraStyle() {
             opacity: 0 !important;
             cursor: default !important;
         }
+
+        /* ★ NEW: gic-buttons-wake 時に 💡/🎨 も他のボタンと同時に表示 */
+        html body.gic-buttons-wake #toggle-chat-button,
+        html body.gic-buttons-wake #gic-open-gallery-button {
+            opacity: 0.3 !important;
+            background-color: #444 !important;
+        }
+
+        /* ボタン直接 hover 時は完全不透明（既存挙動維持） */
+        html body #toggle-chat-button:hover,
+        html body #gic-open-gallery-button:hover {
+            opacity: 1 !important;
+        }
     `;
     document.head.appendChild(style);
     console.log('[Chat Window On/Off] 追加スタイルを注入しました');
 }
 
 // ============================================================
-// Text_styling パネルの開閉を監視
+// Tパネル監視
 // ============================================================
 function isTextStylingPanelOpen() {
     const panel = document.getElementById('text-styling-panel');
@@ -163,14 +165,8 @@ function setupTspObserver() {
         if (!panel) return;
         if (panel.dataset.tspObserved === 'true') return;
         panel.dataset.tspObserved = 'true';
-
-        const mo = new MutationObserver(() => {
-            syncTspOpenClass();
-        });
-        mo.observe(panel, {
-            attributes: true,
-            attributeFilter: ['class', 'style'],
-        });
+        const mo = new MutationObserver(() => syncTspOpenClass());
+        mo.observe(panel, { attributes: true, attributeFilter: ['class', 'style'] });
     };
 
     const bodyMo = new MutationObserver(() => {
@@ -180,10 +176,7 @@ function setupTspObserver() {
     bodyMo.observe(document.body, { childList: true, subtree: false });
 
     observePanel();
-    setInterval(() => {
-        observePanel();
-        syncTspOpenClass();
-    }, 300);
+    setInterval(() => { observePanel(); syncTspOpenClass(); }, 300);
 
     syncTspOpenClass();
     console.log('[Chat Window On/Off] 🎨 Tパネル監視を開始しました');
@@ -191,13 +184,9 @@ function setupTspObserver() {
 
 function initChatWindowToggle() {
     console.log('チャットウィンドウ透過切り替え拡張機能: 初期化開始');
-
-    if (document.getElementById('toggle-chat-button')) {
-        return;
-    }
+    if (document.getElementById('toggle-chat-button')) return;
 
     const settings = getSettings();
-
     injectExtraStyle();
 
     const toggleButton = document.createElement('button');
@@ -219,7 +208,6 @@ function initChatWindowToggle() {
         document.body.classList.toggle('chat-window-is-hidden');
         const isHidden = document.body.classList.contains('chat-window-is-hidden');
         toggleButton.classList.toggle('active', isHidden);
-
         settings.isHidden = isHidden;
         saveSettings(settings);
         console.log(`💡 チャットウィンドウ: ${isHidden ? '透過' : '不透過'}`);
@@ -234,14 +222,19 @@ if (document.readyState === 'loading') {
     initChatWindowToggle();
 }
 
-/**
- * #chatを画面に固定する
- */
+// ============================================================
+// #chat レイアウト
+// ============================================================
 function applyChatLayout() {
     const chat = document.getElementById('chat');
     const sheld = document.getElementById('sheld');
     const form = document.getElementById('form_sheld');
     if (!chat || !sheld) return;
+
+    // ★ image-display の explicit モード中は触らない（干渉防止）
+    if (sheld.classList.contains('idp-chat-explicit') || sheld.classList.contains('idp-chat-maximized')) {
+        return;
+    }
 
     if (window.innerWidth < 1001) {
         chat.style.cssText = '';
@@ -302,30 +295,28 @@ function applyChatLayout() {
     chat.scrollTop = prevScroll;
 }
 
+// ============================================================
+// ★ 💡 ボタン位置: 背景生成ボタンの 5px 上（チャット位置と無関係）
+//    横並び: 🎨 が left:0、💡 が left:btnW+gap
+// ============================================================
 function applyToggleChatButtonLayout() {
     const btn = document.getElementById('toggle-chat-button');
     if (!btn) return;
 
-    const anchor =
-        document.getElementById('send_form') ||
-        document.getElementById('form_sheld') ||
-        document.getElementById('send_textarea');
+    const gicBtn = document.getElementById('gic-release-override-button');
+    if (!gicBtn) return;
 
-    if (!anchor) return;
+    const gicRect = gicBtn.getBoundingClientRect();
+    if (gicRect.width <= 0 || gicRect.height <= 0) return;
 
-    const rect = anchor.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
-
-    const gap = 0;
+    const gap = 5;
     const btnW = btn.offsetWidth || 50;
     const btnH = btn.offsetHeight || 50;
 
-    // ★ 追加オフセット: 上75px、右50px
-    const OFFSET_UP = 85;
-    const OFFSET_RIGHT = 50;
-
-    let left = rect.left - btnW - gap + OFFSET_RIGHT;
-    let top = rect.top + (rect.height - btnH) / 2 - OFFSET_UP;
+    // 💡 の left は 🎨 の幅 + gap 分右（🎨 が left:0 に収まる）
+    let left = btnW + gap;
+    // 背景生成ボタンの上端から 5px 上
+    let top = gicRect.top - btnH - gap;
 
     const margin = 4;
     const vw = window.innerWidth;
@@ -361,61 +352,47 @@ setTimeout(() => {
 try {
     const sendFormEl = document.getElementById('send_form');
     if (sendFormEl && typeof ResizeObserver !== 'undefined') {
-        const ro = new ResizeObserver(() => {
-            applyToggleChatButtonLayout();
-        });
+        const ro = new ResizeObserver(() => applyToggleChatButtonLayout());
         ro.observe(sendFormEl);
     }
 } catch (e) { /* ignore */ }
 
+// ============================================================
+// パディング領域のクリック透過
+// ============================================================
 function setupChatPaddingClickThrough() {
     const chat = document.getElementById('chat');
-    if (!chat) {
-        console.log('[Chat Window On/Off] #chat が見つかりません');
-        return;
-    }
-
+    if (!chat) return;
     if (chat.dataset.paddingClickThroughInstalled === 'true') return;
     chat.dataset.paddingClickThroughInstalled = 'true';
 
     chat.addEventListener('mousedown', (e) => {
         if (e.target !== chat) return;
-
         const rect = chat.getBoundingClientRect();
         const scrollbarWidth = chat.offsetWidth - chat.clientWidth;
         const isOnScrollbar = scrollbarWidth > 0 && e.clientX >= rect.right - scrollbarWidth;
-
         if (isOnScrollbar) return;
-
         e.preventDefault();
         e.stopPropagation();
-
         chat.style.pointerEvents = 'none';
         const below = document.elementFromPoint(e.clientX, e.clientY);
         chat.style.pointerEvents = '';
-
         if (below && below !== chat && !chat.contains(below)) {
             const forwarded = new MouseEvent('mousedown', {
-                bubbles: true,
-                cancelable: true,
-                view: window,
-                clientX: e.clientX,
-                clientY: e.clientY,
-                button: e.button,
-                buttons: e.buttons,
+                bubbles: true, cancelable: true, view: window,
+                clientX: e.clientX, clientY: e.clientY,
+                button: e.button, buttons: e.buttons,
             });
             below.dispatchEvent(forwarded);
         }
     }, true);
-
     console.log('[Chat Window On/Off] パディング領域のクリック透過を設定しました');
 }
 
 setupChatPaddingClickThrough();
 
 // ============================================================
-// 統合 hover 判定
-//   ★ gallery-open / stj-editor-open でも完全に無効化する
+// 統合 hover 判定（💡/🎨 の hover → lbe-aux-hover）
 // ============================================================
 function setupAuxButtonHover() {
     function getAuxButtonsRect() {
@@ -427,7 +404,6 @@ function setupAuxButtonHover() {
                 if (window.getComputedStyle(el).display === 'none') return false;
                 return true;
             });
-
         if (btns.length === 0) return null;
 
         let minL = Infinity, minT = Infinity, maxR = -Infinity, maxB = -Infinity;
@@ -455,43 +431,25 @@ function setupAuxButtonHover() {
 
     function update(x, y) {
         if (isAnyOverlayActive()) {
-            if (isInZone) {
-                isInZone = false;
-                document.body.classList.remove('lbe-aux-hover');
-            }
+            if (isInZone) { isInZone = false; document.body.classList.remove('lbe-aux-hover'); }
             return;
         }
-
         const r = getAuxButtonsRect();
         if (!r) {
-            if (isInZone) {
-                isInZone = false;
-                document.body.classList.remove('lbe-aux-hover');
-            }
+            if (isInZone) { isInZone = false; document.body.classList.remove('lbe-aux-hover'); }
             return;
         }
-
         const inside =
-            x >= r.left - AUX_HOVER_MARGIN &&
-            x <= r.right + AUX_HOVER_MARGIN &&
-            y >= r.top - AUX_HOVER_MARGIN &&
-            y <= r.bottom + AUX_HOVER_MARGIN;
-
+            x >= r.left - AUX_HOVER_MARGIN && x <= r.right + AUX_HOVER_MARGIN &&
+            y >= r.top - AUX_HOVER_MARGIN && y <= r.bottom + AUX_HOVER_MARGIN;
         if (inside === isInZone) return;
         isInZone = inside;
         document.body.classList.toggle('lbe-aux-hover', inside);
     }
 
-    document.addEventListener('mousemove', (e) => {
-        update(e.clientX, e.clientY);
-    }, { passive: true });
-
-    document.addEventListener('mouseleave', () => {
-        update(-1, -1);
-    });
-    window.addEventListener('blur', () => {
-        update(-1, -1);
-    });
+    document.addEventListener('mousemove', (e) => update(e.clientX, e.clientY), { passive: true });
+    document.addEventListener('mouseleave', () => update(-1, -1));
+    window.addEventListener('blur', () => update(-1, -1));
 
     setInterval(() => {
         if (isAnyOverlayActive() && isInZone) {
@@ -508,7 +466,6 @@ setupAuxButtonHover();
 // ============================================================
 // ギャラリー連動
 // ============================================================
-
 let _galleryOpenCache = { value: false, timestamp: 0 };
 const GALLERY_OPEN_CACHE_TTL = 100;
 
@@ -517,31 +474,19 @@ function isGalleryOpen() {
     if (now - _galleryOpenCache.timestamp < GALLERY_OPEN_CACHE_TTL) {
         return _galleryOpenCache.value;
     }
-
     let result = false;
-
     const primary = document.getElementById('gallery');
     if (primary) {
         const style = window.getComputedStyle(primary);
-        if (style.display !== 'none' &&
-            style.visibility !== 'hidden' &&
-            parseFloat(style.opacity) !== 0) {
+        if (style.display !== 'none' && style.visibility !== 'hidden' && parseFloat(style.opacity) !== 0) {
             const rect = primary.getBoundingClientRect();
-            if (rect.width > 0 && rect.height > 0) {
-                result = true;
-            }
+            if (rect.width > 0 && rect.height > 0) result = true;
         }
     }
-
     if (!result) {
         const candidates = document.querySelectorAll([
-            '#gallery_container',
-            '.gallery-container',
-            '.gallery_container',
-            '.gallery',
-            '[data-gallery-container]',
-            '.gallery-grid',
-            '#gallery-grid',
+            '#gallery_container', '.gallery-container', '.gallery_container',
+            '.gallery', '[data-gallery-container]', '.gallery-grid', '#gallery-grid'
         ].join(','));
         for (const el of candidates) {
             if (!el) continue;
@@ -556,12 +501,10 @@ function isGalleryOpen() {
             break;
         }
     }
-
     _galleryOpenCache = { value: result, timestamp: now };
     return result;
 }
 
-// ★ ギャラリー / STJエディタの実態を確認する
 function isStjEditorOpen() {
     const modal = document.getElementById('stj_export_modal');
     if (!modal) return false;
@@ -570,36 +513,22 @@ function isStjEditorOpen() {
     return cs.display !== 'none' && cs.visibility !== 'hidden' && parseFloat(cs.opacity) !== 0;
 }
 
-// ============================================================
-// ★ body クラスの一元管理
-//   実態と乖離したクラスを強制的に除去する
-// ============================================================
 function syncBodyStateClasses() {
     const galleryOpen = isGalleryOpen();
     const stjOpen = isStjEditorOpen();
 
-    // gallery-open
     const hasGalleryClass = document.body.classList.contains('gallery-open');
-    if (galleryOpen && !hasGalleryClass) {
-        document.body.classList.add('gallery-open');
-    } else if (!galleryOpen && hasGalleryClass) {
-        document.body.classList.remove('gallery-open');
-    }
+    if (galleryOpen && !hasGalleryClass) document.body.classList.add('gallery-open');
+    else if (!galleryOpen && hasGalleryClass) document.body.classList.remove('gallery-open');
 
-    // stj-editor-open
     const hasStjClass = document.body.classList.contains('stj-editor-open');
-    if (stjOpen && !hasStjClass) {
-        document.body.classList.add('stj-editor-open');
-    } else if (!stjOpen && hasStjClass) {
-        document.body.classList.remove('stj-editor-open');
-    }
+    if (stjOpen && !hasStjClass) document.body.classList.add('stj-editor-open');
+    else if (!stjOpen && hasStjClass) document.body.classList.remove('stj-editor-open');
 
-    // ★ #toggle-chat-button に inline の display: none が残っていたら除去
     if (!galleryOpen && !stjOpen) {
         const toggleBtn = document.getElementById('toggle-chat-button');
         if (toggleBtn && toggleBtn.style.display === 'none') {
             toggleBtn.style.removeProperty('display');
-            console.log('[Chat Window On/Off] 🧹 #toggle-chat-button の残留 display:none を除去');
         }
     }
 
@@ -610,7 +539,6 @@ let lastGalleryStateForButtons = null;
 
 function syncButtonsVisibilityForGallery() {
     const { galleryOpen } = syncBodyStateClasses();
-
     if (galleryOpen === lastGalleryStateForButtons) return;
     lastGalleryStateForButtons = galleryOpen;
 
@@ -618,18 +546,9 @@ function syncButtonsVisibilityForGallery() {
     const targets = document.querySelectorAll(selector);
 
     targets.forEach(el => {
-        if (galleryOpen) {
-            el.style.setProperty('display', 'none', 'important');
-        } else {
-            el.style.removeProperty('display');
-        }
+        if (galleryOpen) el.style.setProperty('display', 'none', 'important');
+        else el.style.removeProperty('display');
     });
-
-    if (galleryOpen) {
-        console.log(`[Chat Window On/Off] 📷 ギャラリー表示中 → ${targets.length} 個の対象要素を非表示`);
-    } else {
-        console.log(`[Chat Window On/Off] 📷 ギャラリー非表示 → ${targets.length} 個の対象要素を再表示`);
-    }
 }
 
 function setupGalleryButtonObserver() {
@@ -641,27 +560,17 @@ function setupGalleryButtonObserver() {
 setupGalleryButtonObserver();
 
 // ============================================================
-// 左下のボタン起動領域
-//   ★ 手動モード時（#manual-settings-button 表示中）のみ
-//      右方向に MANUAL_SETTINGS_EXTRA_W px 拡張する
-//   ★ gallery-open / stj-editor-open では完全に無効化する
+// 左下のボタン起動領域（hover 統合）
 // ============================================================
-
 function setupButtonWakeZone() {
-    const BASE_WAKE_W = BUTTON_WAKE_WIDTH;              // 110
-    const WAKE_H = BUTTON_WAKE_HEIGHT;                  // 80
-    const EXTRA_W = MANUAL_SETTINGS_EXTRA_W;            // 160
+    const BASE_WAKE_W = BUTTON_WAKE_WIDTH;   // 110
+    const WAKE_H = BUTTON_WAKE_HEIGHT;       // 150
+    const EXTRA_W = MANUAL_SETTINGS_EXTRA_W; // 160
 
     let isInZone = false;
-    // ★ マウスが動かなくても手動モード切替に追従できるよう位置を記録
     let lastX = -1;
     let lastY = -1;
 
-    // ★ 重要: opacity はチェックしない。
-    //   wakeクラス自体がボタンの opacity を制御しているため、
-    //   opacity を条件にすると「マウス進入時は狭い判定、退出時は広い判定」という
-    //   非対称な挙動（循環参照）になる。
-    //   display のみで「手動モードかどうか」を判定する。
     function isManualSettingsVisible() {
         const btn = document.getElementById('manual-settings-button');
         if (!btn) return false;
@@ -694,31 +603,18 @@ function setupButtonWakeZone() {
             }
             return;
         }
-
         const inside = isInside(lastX, lastY);
         if (inside === isInZone) return;
         isInZone = inside;
         document.body.classList.toggle('gic-buttons-wake', inside);
     }
 
-    function update(x, y) {
-        lastX = x;
-        lastY = y;
-        applyState();
-    }
+    function update(x, y) { lastX = x; lastY = y; applyState(); }
 
-    document.addEventListener('mousemove', (e) => {
-        update(e.clientX, e.clientY);
-    }, { passive: true });
+    document.addEventListener('mousemove', (e) => update(e.clientX, e.clientY), { passive: true });
+    document.addEventListener('mouseleave', () => update(-1, -1));
+    window.addEventListener('blur', () => update(-1, -1));
 
-    document.addEventListener('mouseleave', () => {
-        update(-1, -1);
-    });
-    window.addEventListener('blur', () => {
-        update(-1, -1);
-    });
-
-    // ★ マウス静止中でも手動モード切替に追従するための定期再評価
     setInterval(applyState, 200);
 
     document.body.classList.remove('gic-buttons-wake');
@@ -728,28 +624,23 @@ function setupButtonWakeZone() {
 setupButtonWakeZone();
 
 // ============================================================
-// ★ 初期化時に残留 body クラスを一掃
+// 初期化時の残留クラス一掃
 // ============================================================
 (function cleanupBodyClassesOnInit() {
     const cleanup = () => {
         if (!isGalleryOpen() && document.body.classList.contains('gallery-open')) {
             document.body.classList.remove('gallery-open');
-            console.log('[Chat Window On/Off] 🧹 残留 gallery-open を除去');
         }
         if (!isStjEditorOpen() && document.body.classList.contains('stj-editor-open')) {
             document.body.classList.remove('stj-editor-open');
-            console.log('[Chat Window On/Off] 🧹 残留 stj-editor-open を除去');
         }
         if (document.body.classList.contains('lbe-aux-hover')) {
             document.body.classList.remove('lbe-aux-hover');
-            console.log('[Chat Window On/Off] 🧹 残留 lbe-aux-hover を除去');
         }
         if (document.body.classList.contains('gic-buttons-wake')) {
             document.body.classList.remove('gic-buttons-wake');
-            console.log('[Chat Window On/Off] 🧹 残留 gic-buttons-wake を除去');
         }
     };
-
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', cleanup);
     } else {
