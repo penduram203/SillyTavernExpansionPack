@@ -873,35 +873,44 @@ function positionGalleryButton() {
     const galleryBtn = document.getElementById(GALLERY_BUTTON_ID);
     if (!galleryBtn) return;
 
+    const bulbBtn = document.getElementById('toggle-chat-button');
+    if (bulbBtn) {
+        const bRect = bulbBtn.getBoundingClientRect();
+        if (bRect.width > 0 && bRect.height > 0) {
+            const gap = 5;   // ★ 0 → 5 に変更
+            const btnW = galleryBtn.offsetWidth || 50;
+            const btnH = galleryBtn.offsetHeight || 50;
+
+            // 💡 の左隣に 5px の間隔で配置
+            // 💡 は left=55 に固定されているので、🎨 は left=55-50-5=0（画面左端）になる
+            let left = bRect.left - btnW - gap;
+            let top = bRect.top + (bRect.height - btnH) / 2;
+
+            const margin = 4;
+            const vw = window.innerWidth;
+            const vh = window.innerHeight;
+            if (left < margin) left = margin;
+            if (left + btnW > vw - margin) left = vw - margin - btnW;
+            if (top < margin) top = margin;
+            if (top + btnH > vh - margin) top = vh - margin - btnH;
+
+            galleryBtn.style.setProperty('position', 'fixed', 'important');
+            galleryBtn.style.setProperty('left', Math.round(left) + 'px', 'important');
+            galleryBtn.style.setProperty('top', Math.round(top) + 'px', 'important');
+            galleryBtn.style.setProperty('right', 'auto', 'important');
+            galleryBtn.style.setProperty('bottom', 'auto', 'important');
+            galleryBtn.style.setProperty('transform', 'none', 'important');
+
+            positionStatusMessage();
+            return;
+        }
+    }
+
     const gicBtn = document.getElementById(BUTTON_ID);
     if (!gicBtn) return;
-
-    const gicRect = gicBtn.getBoundingClientRect();
-    if (gicRect.width <= 0 || gicRect.height <= 0) return;
-
-    const btnH = galleryBtn.offsetHeight || 50;
-    const gap = 5;
-
-    // ★ 左端から 5px さらに左（マージンクランプは右端のみ適用）
-    let left = -5;
-    let top = gicRect.top - btnH - gap;
-
-    const margin = 4;
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    // 右端クランプのみ残す（左端は負の値を許可）
-    if (left + (galleryBtn.offsetWidth || 50) > vw - margin) {
-        left = vw - margin - (galleryBtn.offsetWidth || 50);
-    }
-    if (top < margin) top = margin;
-    if (top + btnH > vh - margin) top = vh - margin - btnH;
-
-    galleryBtn.style.setProperty('position', 'fixed', 'important');
-    galleryBtn.style.setProperty('left', Math.round(left) + 'px', 'important');
-    galleryBtn.style.setProperty('top', Math.round(top) + 'px', 'important');
-    galleryBtn.style.setProperty('right', 'auto', 'important');
-    galleryBtn.style.setProperty('bottom', 'auto', 'important');
-    galleryBtn.style.setProperty('transform', 'none', 'important');
+    const w = gicBtn.offsetWidth;
+    if (!w) return;
+    galleryBtn.style.left = (w + 4) + 'px';
 
     positionStatusMessage();
 }
