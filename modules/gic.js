@@ -870,26 +870,27 @@ async function handleButtonAction() {
 }
 
 // ===== ギャラリーボタンの位置制御 =====
+// ============================================================
+// ★ 🎨 ボタン位置: 💡 の左端から 50px 左
+//    （旧: bRect.left - btnW - gap = 0 だったのを 50px 左シフトして -50 に）
+// ============================================================
 function positionGalleryButton() {
     const galleryBtn = document.getElementById(GALLERY_BUTTON_ID);
     if (!galleryBtn) return;
-
-    // ★ 💡ボタン基準からさらに上50px、右50px
-    const EXTRA_UP = 50;
-    const EXTRA_RIGHT = 50;
 
     const bulbBtn = document.getElementById('toggle-chat-button');
     if (bulbBtn) {
         const bRect = bulbBtn.getBoundingClientRect();
         if (bRect.width > 0 && bRect.height > 0) {
-            const gap = 5;
             const btnW = galleryBtn.offsetWidth || 50;
             const btnH = galleryBtn.offsetHeight || 50;
 
-            let left = bRect.left - btnW - gap + EXTRA_RIGHT;
-            let top = bRect.top + (bRect.height - btnH) / 2 - EXTRA_UP;
+            // ★ 50px 左シフト: 💡 の左端から 50px 左 (= -50px)
+            let left = bRect.left - 50;
+            let top = bRect.top + (bRect.height - btnH) / 2;
 
-            const margin = 4;
+            // ★ 負座標を許可
+            const margin = -100;
             const vw = window.innerWidth;
             const vh = window.innerHeight;
             if (left < margin) left = margin;
@@ -909,12 +910,11 @@ function positionGalleryButton() {
         }
     }
 
-    // フォールバック（💡ボタンが無い場合）
     const gicBtn = document.getElementById(BUTTON_ID);
     if (!gicBtn) return;
     const w = gicBtn.offsetWidth;
     if (!w) return;
-    galleryBtn.style.left = (w + 4 + EXTRA_RIGHT) + 'px';
+    galleryBtn.style.left = (w + 4) + 'px';
 
     positionStatusMessage();
 }
