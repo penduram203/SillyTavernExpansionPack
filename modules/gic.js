@@ -882,7 +882,7 @@ function positionGalleryButton() {
     if (bulbBtn) {
         const bRect = bulbBtn.getBoundingClientRect();
         if (bRect.width > 0 && bRect.height > 0) {
-            const gap = 0;
+            const gap = 5;
             const btnW = galleryBtn.offsetWidth || 50;
             const btnH = galleryBtn.offsetHeight || 50;
 
