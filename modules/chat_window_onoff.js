@@ -313,15 +313,15 @@ function applyToggleChatButtonLayout() {
     const btnW = btn.offsetWidth || 50;
     const btnH = btn.offsetHeight || 50;
 
-    // 指示1: 両方左に5px、指示2: 💡 はさらに左に50px・上に50px
-    // → 💡 は累積で左に55px、上に50px
-    let left = btnW + gap - 55;                      // 55 - 55 = 0
-    let top  = gicRect.top - btnH - gap - 50;        // 元の top からさらに 50px 上
+    // 💡 は背景生成ボタンの真上、左に 5px（🎨 と横並びでさらに左へ）
+    let left = btnW + gap - 5;   // 50 + 5 - 5 = 50
+    let top  = gicRect.top - btnH - gap - 50;
 
     const margin = 4;
+    const minLeft = -10;   // ★ 負数を許可（🎨 側もこの値までなら部分表示）
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    if (left < margin) left = margin;
+    if (left < minLeft) left = minLeft;
     if (left + btnW > vw - margin) left = vw - margin - btnW;
     if (top < margin) top = margin;
     if (top + btnH > vh - margin) top = vh - margin - btnH;
