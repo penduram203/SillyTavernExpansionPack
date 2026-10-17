@@ -46,6 +46,11 @@
     let lastMouseY = -1;
     let topBarPinned = false;
 
+    // ★ 画像の「手動モード時のモード」を別途保持
+    let imageManualMode = 'normal';   // 'normal' | 'maximized' | 'halfMaximized'
+    let savedCustomWindowOpen = false;
+
+    // チャットウインドウ用
     let chatPreState = null;
     let chatCurrentMode = 'normal';
     let isDraggingChat = false;
@@ -95,6 +100,15 @@
         return `${parseInt(m[1], 16)}, ${parseInt(m[2], 16)}, ${parseInt(m[3], 16)}`;
     }
 
+    // ★ text-styling.js の現在のレイアウトモードを取得
+    function getTextStylingLayoutMode() {
+        try {
+            const context = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+            const ts = context?.extensionSettings?.text_styling;
+            return ts?.layoutMode || null;
+        } catch (e) { return null; }
+    }
+
     const ALLOWED_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif', 'bmp', 'mp4', 'webm'];
 
     function isVideoUrl(url) {
@@ -139,17 +153,12 @@
         for (const [key, value] of Object.entries(imageMap)) {
             if (Array.isArray(value)) {
                 const arr = [];
-                for (const p of value) {
-                    const d = await detectImageExtension(p);
-                    if (d) arr.push(d);
-                }
+                for (const p of value) { const d = await detectImageExtension(p); if (d) arr.push(d); }
                 detectedMap[key] = arr.length > 0 ? arr : value;
             } else if (typeof value === 'string') {
                 const d = await detectImageExtension(value);
                 detectedMap[key] = d || value;
-            } else {
-                detectedMap[key] = value;
-            }
+            } else { detectedMap[key] = value; }
         }
         return detectedMap;
     }
@@ -165,17 +174,12 @@
         urls.forEach(url => {
             if (isVideoUrl(url)) {
                 const v = document.createElement('video');
-                v.preload = 'auto';
-                v.muted = true;
-                v.playsInline = true;
-                v.src = url;
-            } else {
-                const img = new Image();
-                img.src = url;
-            }
+                v.preload = 'auto'; v.muted = true; v.playsInline = true; v.src = url;
+            } else { const img = new Image(); img.src = url; }
         });
     }
 
+    // #sheldheader 削除
     (function removeSheldHeader() {
         try {
             const sh = document.getElementById('sheldheader');
@@ -194,14 +198,12 @@
         const style = document.createElement('style');
         style.id = 'idp-topbar-extra-css';
         style.textContent = `
-            #top-bar,
-            #top-settings-holder {
+            #top-bar, #top-settings-holder {
                 opacity: 0 !important;
                 pointer-events: none !important;
                 transition: opacity 0.15s ease !important;
             }
-            #top-bar.idp-topbar-visible,
-            #top-settings-holder.idp-topbar-visible {
+            #top-bar.idp-topbar-visible, #top-settings-holder.idp-topbar-visible {
                 opacity: 1 !important;
                 pointer-events: auto !important;
             }
@@ -214,116 +216,40 @@
         const style = document.createElement('style');
         style.id = 'image-display-header-extra-css';
         style.textContent = `
-            #image-display-container {
-                position: absolute;
-                z-index: ${Z_INDEX_BODY} !important;
-            }
+            #image-display-container { position: absolute; z-index: ${Z_INDEX_BODY} !important; }
             #image-display-header {
-                display: flex !important;
-                align-items: center !important;
-                justify-content: space-between !important;
-                gap: 6px !important;
-                padding: 0 8px !important;
-                box-sizing: border-box !important;
-                height: ${HEADER_HEIGHT}px !important;
-                min-height: ${HEADER_HEIGHT}px !important;
-                max-height: ${HEADER_HEIGHT}px !important;
-                overflow: visible !important;
-                position: fixed !important;
-                z-index: ${Z_INDEX_HEADER_DEFAULT} !important;
-                background-color: #333 !important;
-                color: #fff !important;
-                border-bottom: 1px solid #555 !important;
-                cursor: grab;
-                user-select: none !important;
-                opacity: 0 !important;
-                pointer-events: none !important;
+                display: flex !important; align-items: center !important; justify-content: space-between !important;
+                gap: 6px !important; padding: 0 8px !important; box-sizing: border-box !important;
+                height: ${HEADER_HEIGHT}px !important; min-height: ${HEADER_HEIGHT}px !important; max-height: ${HEADER_HEIGHT}px !important;
+                overflow: visible !important; position: fixed !important; z-index: ${Z_INDEX_HEADER_DEFAULT} !important;
+                background-color: #333 !important; color: #fff !important; border-bottom: 1px solid #555 !important;
+                cursor: grab; user-select: none !important; opacity: 0 !important; pointer-events: none !important;
                 transition: opacity 0.15s ease !important;
             }
-            #image-display-header.idp-visible {
-                opacity: 1 !important;
-                pointer-events: auto !important;
+            #image-display-header.idp-visible { opacity: 1 !important; pointer-events: auto !important; }
+            #image-display-title { flex: 1 1 auto !important; overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important; min-width: 0 !important; pointer-events: none !important; font-size: 13px !important; font-weight: bold !important; }
+            #image-display-header-controls { flex: 0 0 auto !important; display: flex !important; align-items: center !important; gap: 4px !important; pointer-events: auto !important; z-index: 4 !important; position: relative !important; }
+            #bg-color-picker, #image-display-restore-btn, #image-display-maximize-btn { pointer-events: auto !important; z-index: 5 !important; position: relative !important; }
+            #bg-color-picker { width: 22px !important; height: 22px !important; padding: 0 !important; border: 1px solid #888 !important; border-radius: 3px !important; cursor: pointer !important; box-sizing: border-box !important; flex: 0 0 auto !important; background-color: transparent !important; }
+            #image-display-restore-btn, #image-display-maximize-btn {
+                width: 22px !important; height: 22px !important; padding: 0 !important; background-color: #444 !important;
+                color: #fff !important; border: 1px solid #666 !important; border-radius: 3px !important; cursor: pointer !important;
+                font-size: 13px !important; line-height: 1 !important; display: flex !important; align-items: center !important;
+                justify-content: center !important; box-sizing: border-box !important; flex: 0 0 auto !important; user-select: none !important;
             }
-            #image-display-title {
-                flex: 1 1 auto !important;
-                overflow: hidden !important;
-                text-overflow: ellipsis !important;
-                white-space: nowrap !important;
-                min-width: 0 !important;
-                pointer-events: none !important;
-                font-size: 13px !important;
-                font-weight: bold !important;
-            }
-            #image-display-header-controls {
-                flex: 0 0 auto !important;
-                display: flex !important;
-                align-items: center !important;
-                gap: 4px !important;
-                pointer-events: auto !important;
-                z-index: 4 !important;
-                position: relative !important;
-            }
-            #bg-color-picker,
-            #image-display-restore-btn,
-            #image-display-maximize-btn {
-                pointer-events: auto !important;
-                z-index: 5 !important;
-                position: relative !important;
-            }
-            #bg-color-picker {
-                width: 22px !important;
-                height: 22px !important;
-                padding: 0 !important;
-                border: 1px solid #888 !important;
-                border-radius: 3px !important;
-                cursor: pointer !important;
-                box-sizing: border-box !important;
-                flex: 0 0 auto !important;
-                background-color: transparent !important;
-            }
-            #image-display-restore-btn,
-            #image-display-maximize-btn {
-                width: 22px !important;
-                height: 22px !important;
-                padding: 0 !important;
-                background-color: #444 !important;
-                color: #fff !important;
-                border: 1px solid #666 !important;
-                border-radius: 3px !important;
-                cursor: pointer !important;
-                font-size: 13px !important;
-                line-height: 1 !important;
-                display: flex !important;
-                align-items: center !important;
-                justify-content: center !important;
-                box-sizing: border-box !important;
-                flex: 0 0 auto !important;
-                user-select: none !important;
-            }
-            #image-display-restore-btn:hover,
-            #image-display-maximize-btn:hover {
-                background-color: #666 !important;
-            }
-            #image-display-restore-btn.size-btn-disabled,
-            #image-display-maximize-btn.size-btn-disabled {
-                opacity: 0.3 !important;
-                cursor: not-allowed !important;
-                pointer-events: none !important;
-            }
+            #image-display-restore-btn:hover, #image-display-maximize-btn:hover { background-color: #666 !important; }
+            #image-display-restore-btn.size-btn-disabled, #image-display-maximize-btn.size-btn-disabled { opacity: 0.3 !important; cursor: not-allowed !important; pointer-events: none !important; }
         `;
         document.head.appendChild(style);
     })();
 
-    // ★ チャットヘッダー / チャット本文の CSS
-    //    - #sheld を flex レイアウトにして #chat と #form_sheld を縦に配置
-    //    - #chat の inline padding (chat_window_onoff の 510px) を完全に無効化
-    //    - #chat は #sheld 幅いっぱいに広がる → リサイズに追従
+    // ★ チャットヘッダー / #sheld flex レイアウト用 CSS
     (function injectChatHeaderCSS() {
         if (document.getElementById('idp-chat-header-css')) return;
         const style = document.createElement('style');
         style.id = 'idp-chat-header-css';
         style.textContent = `
-            /* ★ #sheld は flex レイアウト。padding-top でヘッダー分を確保 */
+            /* #sheld を flex レイアウトに。ヘッダー分の padding-top */
             #sheld.idp-chat-explicit,
             #sheld.idp-chat-maximized {
                 display: flex !important;
@@ -336,45 +262,39 @@
                 inset: auto !important;
                 left: var(--idp-chat-left, 100px) !important;
                 top: var(--idp-chat-top, 100px) !important;
-                right: auto !important;
-                bottom: auto !important;
+                right: auto !important; bottom: auto !important;
                 width: var(--idp-chat-width, 50vw) !important;
                 height: var(--idp-chat-height, 100vh) !important;
-                margin: 0 !important;
-                resize: none !important;
-                max-width: none !important;
-                max-height: none !important;
+                margin: 0 !important; resize: none !important;
+                max-width: none !important; max-height: none !important;
             }
             #sheld.idp-chat-maximized {
                 position: fixed !important;
                 inset: auto !important;
-                left: 0 !important;
-                top: 0 !important;
-                right: auto !important;
-                bottom: auto !important;
-                width: 100vw !important;
-                height: 100vh !important;
-                margin: 0 !important;
-                resize: none !important;
-                max-width: none !important;
-                max-height: none !important;
+                left: 0 !important; top: 0 !important;
+                right: auto !important; bottom: auto !important;
+                width: 100vw !important; height: 100vh !important;
+                margin: 0 !important; resize: none !important;
+                max-width: none !important; max-height: none !important;
             }
-            /* ★ #chat は flex:1 で #sheld 幅いっぱい。padding を 0 に */
+            /* #chat は flex:1 で #sheld 幅いっぱいに。inline padding (510px) を完全無効化 */
             #sheld.idp-chat-explicit #chat,
             #sheld.idp-chat-maximized #chat {
                 flex: 1 1 auto !important;
                 min-height: 0 !important;
+                min-width: 0 !important;
                 position: static !important;
                 inset: auto !important;
                 width: 100% !important;
                 max-width: none !important;
                 padding: 0 !important;
+                padding-left: 0 !important;
+                padding-right: 0 !important;
                 margin: 0 !important;
                 overflow-y: auto !important;
                 box-sizing: border-box !important;
                 z-index: 1 !important;
             }
-            /* ★ #form_sheld は下部に自然な高さで固定 */
             #sheld.idp-chat-explicit #form_sheld,
             #sheld.idp-chat-maximized #form_sheld {
                 flex: 0 0 auto !important;
@@ -390,114 +310,34 @@
             }
 
             #idp-chat-window-header {
-                display: flex !important;
-                align-items: center !important;
-                justify-content: space-between !important;
-                gap: 6px !important;
-                padding: 0 8px !important;
-                box-sizing: border-box !important;
-                height: ${CHAT_HEADER_HEIGHT}px !important;
-                min-height: ${CHAT_HEADER_HEIGHT}px !important;
-                max-height: ${CHAT_HEADER_HEIGHT}px !important;
-                overflow: visible !important;
-                position: fixed !important;
-                background-color: #333 !important;
-                color: #fff !important;
-                border-bottom: 1px solid #555 !important;
-                cursor: grab;
-                user-select: none !important;
-                opacity: 0 !important;
-                pointer-events: none !important;
-                transition: opacity 0.15s ease !important;
-                z-index: ${Z_INDEX_HEADER_DEFAULT} !important;
-                -webkit-user-drag: none !important;
-                touch-action: none !important;
+                display: flex !important; align-items: center !important; justify-content: space-between !important;
+                gap: 6px !important; padding: 0 8px !important; box-sizing: border-box !important;
+                height: ${CHAT_HEADER_HEIGHT}px !important; min-height: ${CHAT_HEADER_HEIGHT}px !important; max-height: ${CHAT_HEADER_HEIGHT}px !important;
+                overflow: visible !important; position: fixed !important;
+                background-color: #333 !important; color: #fff !important; border-bottom: 1px solid #555 !important;
+                cursor: grab; user-select: none !important; opacity: 0 !important; pointer-events: none !important;
+                transition: opacity 0.15s ease !important; z-index: ${Z_INDEX_HEADER_DEFAULT} !important;
+                -webkit-user-drag: none !important; touch-action: none !important;
             }
-            #idp-chat-window-header.idp-visible {
-                opacity: 1 !important;
-                pointer-events: auto !important;
+            #idp-chat-window-header.idp-visible { opacity: 1 !important; pointer-events: auto !important; }
+            #idp-chat-window-title { flex: 1 1 auto !important; overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important; min-width: 0 !important; pointer-events: none !important; font-size: 13px !important; font-weight: bold !important; }
+            #idp-chat-window-controls { flex: 0 0 auto !important; display: flex !important; align-items: center !important; gap: 4px !important; pointer-events: auto !important; z-index: 4 !important; position: relative !important; }
+            #idp-chat-color-picker, #idp-chat-restore-btn, #idp-chat-maximize-btn { pointer-events: auto !important; z-index: 5 !important; position: relative !important; }
+            #idp-chat-color-picker { width: 22px !important; height: 22px !important; padding: 0 !important; border: 1px solid #888 !important; border-radius: 3px !important; cursor: pointer !important; box-sizing: border-box !important; flex: 0 0 auto !important; background-color: transparent !important; }
+            #idp-chat-restore-btn, #idp-chat-maximize-btn {
+                width: 22px !important; height: 22px !important; padding: 0 !important; background-color: #444 !important;
+                color: #fff !important; border: 1px solid #666 !important; border-radius: 3px !important; cursor: pointer !important;
+                font-size: 13px !important; line-height: 1 !important; display: flex !important; align-items: center !important;
+                justify-content: center !important; box-sizing: border-box !important; flex: 0 0 auto !important; user-select: none !important;
             }
-            #idp-chat-window-title {
-                flex: 1 1 auto !important;
-                overflow: hidden !important;
-                text-overflow: ellipsis !important;
-                white-space: nowrap !important;
-                min-width: 0 !important;
-                pointer-events: none !important;
-                font-size: 13px !important;
-                font-weight: bold !important;
-            }
-            #idp-chat-window-controls {
-                flex: 0 0 auto !important;
-                display: flex !important;
-                align-items: center !important;
-                gap: 4px !important;
-                pointer-events: auto !important;
-                z-index: 4 !important;
-                position: relative !important;
-            }
-            #idp-chat-color-picker,
-            #idp-chat-restore-btn,
-            #idp-chat-maximize-btn {
-                pointer-events: auto !important;
-                z-index: 5 !important;
-                position: relative !important;
-            }
-            #idp-chat-color-picker {
-                width: 22px !important;
-                height: 22px !important;
-                padding: 0 !important;
-                border: 1px solid #888 !important;
-                border-radius: 3px !important;
-                cursor: pointer !important;
-                box-sizing: border-box !important;
-                flex: 0 0 auto !important;
-                background-color: transparent !important;
-            }
-            #idp-chat-restore-btn,
-            #idp-chat-maximize-btn {
-                width: 22px !important;
-                height: 22px !important;
-                padding: 0 !important;
-                background-color: #444 !important;
-                color: #fff !important;
-                border: 1px solid #666 !important;
-                border-radius: 3px !important;
-                cursor: pointer !important;
-                font-size: 13px !important;
-                line-height: 1 !important;
-                display: flex !important;
-                align-items: center !important;
-                justify-content: center !important;
-                box-sizing: border-box !important;
-                flex: 0 0 auto !important;
-                user-select: none !important;
-            }
-            #idp-chat-restore-btn:hover,
-            #idp-chat-maximize-btn:hover {
-                background-color: #666 !important;
-            }
-            #idp-chat-restore-btn.size-btn-disabled,
-            #idp-chat-maximize-btn.size-btn-disabled {
-                opacity: 0.3 !important;
-                cursor: not-allowed !important;
-                pointer-events: none !important;
-            }
+            #idp-chat-restore-btn:hover, #idp-chat-maximize-btn:hover { background-color: #666 !important; }
+            #idp-chat-restore-btn.size-btn-disabled, #idp-chat-maximize-btn.size-btn-disabled { opacity: 0.3 !important; cursor: not-allowed !important; pointer-events: none !important; }
             #idp-chat-resize-handle {
-                position: fixed !important;
-                width: 20px !important;
-                height: 20px !important;
-                background: #666 !important;
-                cursor: nwse-resize !important;
-                border-radius: 3px 0 0 0 !important;
-                z-index: 14999 !important;
-                display: none !important;
-                box-shadow: -1px -1px 2px rgba(0,0,0,0.2) !important;
-                touch-action: none !important;
+                position: fixed !important; width: 20px !important; height: 20px !important; background: #666 !important;
+                cursor: nwse-resize !important; border-radius: 3px 0 0 0 !important; z-index: 14999 !important;
+                display: none !important; box-shadow: -1px -1px 2px rgba(0,0,0,0.2) !important; touch-action: none !important;
             }
-            #idp-chat-resize-handle.idp-visible {
-                display: block !important;
-            }
+            #idp-chat-resize-handle.idp-visible { display: block !important; }
         `;
         document.head.appendChild(style);
     })();
@@ -770,9 +610,7 @@
         applyHeaderZIndex();
     }
 
-    // ★ チャットヘッダー位置は #chat の矩形基準
-    //    - explicit/maximized モード時: #chat の top - 30, 幅 = #chat 幅
-    //    - それ以外: #sheld の top, 幅 = #sheld 幅
+    // チャットヘッダー位置は #chat の矩形基準
     function syncChatHeaderPosition() {
         if (!chatHeader) return;
         const sheld = document.getElementById('sheld');
@@ -793,15 +631,11 @@
                 }
             }
         }
-
         if (left === undefined) {
             const sheldRect = sheld.getBoundingClientRect();
             if (sheldRect.width <= 0 || sheldRect.height <= 0) return;
-            left = sheldRect.left;
-            top = sheldRect.top;
-            width = sheldRect.width;
+            left = sheldRect.left; top = sheldRect.top; width = sheldRect.width;
         }
-
         chatHeader.style.setProperty('left', Math.round(left) + 'px', 'important');
         chatHeader.style.setProperty('top', Math.round(top) + 'px', 'important');
         chatHeader.style.setProperty('width', Math.round(width) + 'px', 'important');
@@ -820,7 +654,6 @@
         chatResizeHandle.style.setProperty('top', Math.round(rect.bottom - 20) + 'px', 'important');
     }
 
-    // ★ chatPreState を CSS 変数に常に反映してから explicit クラスを付ける
     function ensureChatExplicitPosition() {
         const sheld = document.getElementById('sheld');
         if (!sheld) return;
@@ -904,18 +737,22 @@
         } catch (e) { /* ignore */ }
     });
 
+    // ★ チャットヘッダーボタン: 操作後に saveDisplayState を呼ぶ
     chatRestoreBtn.addEventListener('click', (e) => {
         e.stopPropagation(); e.preventDefault();
         if (chatCurrentMode === 'normal') return;
         applyChatNormalState();
+        saveDisplayState();
     });
 
     chatMaximizeBtn.addEventListener('click', (e) => {
         e.stopPropagation(); e.preventDefault();
         if (chatCurrentMode === 'maximized') return;
         applyChatMaximizedState();
+        saveDisplayState();
     });
 
+    // チャットドラッグ
     function startChatDrag(e) {
         if (isDraggingChat) return;
         if (e.button !== undefined && e.button !== 0) return;
@@ -937,7 +774,7 @@
     chatHeader.addEventListener('pointerdown', (e) => { if (e.button === 0) startChatDrag(e); });
     chatHeader.addEventListener('mousedown', (e) => { if (e.button === 0) startChatDrag(e); });
 
-    document.addEventListener('pointermove', (e) => {
+    function handleChatDragMove(e) {
         if (!isDraggingChat) return;
         const sheld = document.getElementById('sheld');
         if (!sheld) return;
@@ -946,14 +783,14 @@
         syncChatHeaderPosition();
         syncChatResizeHandlePosition();
         try { window.dispatchEvent(new Event('resize')); } catch (err) { /* ignore */ }
-    });
+    }
 
-    document.addEventListener('pointerup', (e) => {
+    function stopChatDrag(e) {
         if (!isDraggingChat) return;
         isDraggingChat = false;
         chatHeader.style.cursor = 'grab';
         try {
-            if (e.pointerId !== undefined && chatHeader.releasePointerCapture) chatHeader.releasePointerCapture(e.pointerId);
+            if (e && e.pointerId !== undefined && chatHeader.releasePointerCapture) chatHeader.releasePointerCapture(e.pointerId);
         } catch (err) { /* ignore */ }
         if (chatPreState) {
             const sheld = document.getElementById('sheld');
@@ -964,34 +801,15 @@
                 if (Number.isFinite(t)) chatPreState.top = t;
             }
         }
-    });
+        saveDisplayState();  // ★ 保存
+    }
 
-    document.addEventListener('mousemove', (e) => {
-        if (!isDraggingChat) return;
-        const sheld = document.getElementById('sheld');
-        if (!sheld) return;
-        sheld.style.setProperty('--idp-chat-left', Math.round(e.clientX - chatDragOffsetX) + 'px');
-        sheld.style.setProperty('--idp-chat-top', Math.round(e.clientY - chatDragOffsetY) + 'px');
-        syncChatHeaderPosition();
-        syncChatResizeHandlePosition();
-        try { window.dispatchEvent(new Event('resize')); } catch (err) { /* ignore */ }
-    });
+    document.addEventListener('pointermove', handleChatDragMove);
+    document.addEventListener('pointerup', stopChatDrag);
+    document.addEventListener('mousemove', handleChatDragMove);
+    document.addEventListener('mouseup', stopChatDrag);
 
-    document.addEventListener('mouseup', () => {
-        if (!isDraggingChat) return;
-        isDraggingChat = false;
-        chatHeader.style.cursor = 'grab';
-        if (chatPreState) {
-            const sheld = document.getElementById('sheld');
-            if (sheld) {
-                const l = parseInt(sheld.style.getPropertyValue('--idp-chat-left'), 10);
-                const t = parseInt(sheld.style.getPropertyValue('--idp-chat-top'), 10);
-                if (Number.isFinite(l)) chatPreState.left = l;
-                if (Number.isFinite(t)) chatPreState.top = t;
-            }
-        }
-    });
-
+    // チャットリサイズ
     chatResizeHandle.addEventListener('mousedown', (e) => {
         if (chatCurrentMode !== 'normal') return;
         e.stopPropagation(); e.preventDefault();
@@ -1030,9 +848,10 @@
                 if (Number.isFinite(h)) chatPreState.height = h;
             }
         }
+        saveDisplayState();  // ★ 保存
     });
 
-    // 以下、条件評価・キーワードロジック（既存のまま）
+    // 条件評価・キーワードロジック
     function normalizeConditionExpression(expr) {
         if (!expr || typeof expr !== 'string') return '';
         return expr.replace(/\band\b/gi, '+').replace(/\bor\b/gi, ',').replace(/\bnot\b/gi, '!');
@@ -1067,18 +886,12 @@
         };
         function parseOr() {
             let node = parseAnd();
-            while (peek() && peek().type === ',') {
-                consume(','); const right = parseAnd();
-                node = { type: 'OR', left: node, right };
-            }
+            while (peek() && peek().type === ',') { consume(','); const r = parseAnd(); node = { type: 'OR', left: node, right: r }; }
             return node;
         }
         function parseAnd() {
             let node = parseUnary();
-            while (peek() && peek().type === '+') {
-                consume('+'); const right = parseUnary();
-                node = { type: 'AND', left: node, right };
-            }
+            while (peek() && peek().type === '+') { consume('+'); const r = parseUnary(); node = { type: 'AND', left: node, right: r }; }
             return node;
         }
         function parseUnary() {
@@ -1132,9 +945,9 @@
     function getRandomImageSource(imageSource) {
         if (Array.isArray(imageSource)) {
             if (imageSource.length === 0) return null;
-            const validSources = imageSource.filter(src => typeof src === 'string' && src.trim() !== '');
-            if (validSources.length === 0) return null;
-            return validSources[Math.floor(Math.random() * validSources.length)];
+            const valid = imageSource.filter(src => typeof src === 'string' && src.trim() !== '');
+            if (valid.length === 0) return null;
+            return valid[Math.floor(Math.random() * valid.length)];
         }
         return (typeof imageSource === 'string' && imageSource.trim() !== '') ? imageSource : null;
     }
@@ -1147,13 +960,10 @@
             .filter(([key]) => key !== "default" && key !== "thumbnail")
             .map(([key, url]) => ({
                 condition: key, url: url,
-                complexity: (key.match(/\band\b/gi) || []).length * 10 +
-                    (key.match(/\bor\b/gi)  || []).length * 5  +
-                    (key.match(/\+/g)       || []).length * 8  +
-                    (key.match(/,/g)        || []).length * 4  +
-                    (key.match(/!/g)        || []).length * 6  +
-                    (key.match(/\(/g)       || []).length * 3  +
-                    (key.match(/\)/g)       || []).length * 3  + key.length
+                complexity: (key.match(/\band\b/gi) || []).length * 10 + (key.match(/\bor\b/gi) || []).length * 5 +
+                    (key.match(/\+/g) || []).length * 8 + (key.match(/,/g) || []).length * 4 +
+                    (key.match(/!/g) || []).length * 6 + (key.match(/\(/g) || []).length * 3 +
+                    (key.match(/\)/g) || []).length * 3 + key.length
             }))
             .sort((a, b) => b.complexity - a.complexity);
         return sortedKeywordEntriesCache;
@@ -1164,8 +974,7 @@
         const signature = getTextSignature(text);
         const now = Date.now();
         if (lastMatchCache.signature === signature && (now - lastMatchCache.timestamp) < MATCH_CACHE_TTL) return lastMatchCache.url;
-        const keywordEntries = getSortedKeywordEntries();
-        for (const entry of keywordEntries) {
+        for (const entry of getSortedKeywordEntries()) {
             try {
                 if (evaluateCondition(entry.condition, text)) {
                     const selected = getRandomImageSource(entry.url);
@@ -1183,8 +992,7 @@
         const messages = Array.from(document.querySelectorAll(selector));
         const start = Math.max(0, messages.length - MAX_MESSAGE_SCAN);
         for (let i = messages.length - 1; i >= start; i--) {
-            const textContent = messages[i].textContent || messages[i].innerText || "";
-            const mediaUrl = findMatchingImageUrl(textContent);
+            const mediaUrl = findMatchingImageUrl(messages[i].textContent || messages[i].innerText || "");
             if (mediaUrl) return mediaUrl;
         }
         return null;
@@ -1194,9 +1002,7 @@
         if (isDefaultImageFailed) return;
         if (!targetUrl || typeof targetUrl !== 'string' || !targetUrl.trim()) {
             const fallback = getRandomImageSource(currentImageMap.default) || currentImageMap.default;
-            if (fallback && fallback !== targetUrl && typeof fallback === 'string' && fallback.trim()) {
-                await updateImageWithUrl(fallback);
-            }
+            if (fallback && fallback !== targetUrl && typeof fallback === 'string' && fallback.trim()) await updateImageWithUrl(fallback);
             return;
         }
         let newUrl = targetUrl.trim();
@@ -1210,29 +1016,17 @@
         if (isVideoUrl(newUrl)) {
             const videoElement = document.createElement('video');
             videoElement.src = newUrl;
-            videoElement.autoplay = true;
-            videoElement.loop = true;
-            videoElement.muted = true;
-            videoElement.playsInline = true;
-            videoElement.preload = 'auto';
-            videoElement.style.width = '100%';
-            videoElement.style.height = '100%';
+            videoElement.autoplay = true; videoElement.loop = true; videoElement.muted = true;
+            videoElement.playsInline = true; videoElement.preload = 'auto';
+            videoElement.style.width = '100%'; videoElement.style.height = '100%';
             videoElement.style.objectFit = 'contain';
             videoElement.onerror = () => handleMediaError(videoElement, newUrl);
-            mediaContainer.innerHTML = '';
-            mediaContainer.appendChild(videoElement);
+            mediaContainer.innerHTML = ''; mediaContainer.appendChild(videoElement);
             videoElement.play().catch(() => {});
         } else {
             const imgElement = document.createElement('img');
-            imgElement.style.width = '100%';
-            imgElement.style.height = '100%';
-            imgElement.style.objectFit = 'contain';
-            imgElement.onload = () => {
-                if (currentImageUrl === newUrl) {
-                    mediaContainer.innerHTML = '';
-                    mediaContainer.appendChild(imgElement);
-                }
-            };
+            imgElement.style.width = '100%'; imgElement.style.height = '100%'; imgElement.style.objectFit = 'contain';
+            imgElement.onload = () => { if (currentImageUrl === newUrl) { mediaContainer.innerHTML = ''; mediaContainer.appendChild(imgElement); } };
             imgElement.onerror = () => handleMediaError(imgElement, newUrl);
             imgElement.src = newUrl;
             if (typeof imgElement.decode === 'function') imgElement.decode().catch(() => {});
@@ -1246,9 +1040,7 @@
                 if (currentImageUrl !== overrideImageUrl) await updateImageWithUrl(overrideImageUrl);
             } else {
                 const fallback = getRandomImageSource(currentImageMap.default) || currentImageMap.default;
-                if (fallback && typeof fallback === 'string' && fallback.trim() && currentImageUrl !== fallback) {
-                    await updateImageWithUrl(fallback);
-                }
+                if (fallback && typeof fallback === 'string' && fallback.trim() && currentImageUrl !== fallback) await updateImageWithUrl(fallback);
             }
             return;
         }
@@ -1268,19 +1060,14 @@
         }
         if (src && typeof src === 'string' && !src.match(/\.(png|jpg|jpeg|webp|gif|avif|bmp|mp4|webm)$/i)) {
             const detectedPath = await detectImageExtension(src);
-            if (detectedPath) {
-                element.src = detectedPath;
-                return;
-            }
+            if (detectedPath) { element.src = detectedPath; return; }
         }
         if (src && (src.match(/default\.(png|jpg|jpeg|webp|gif|avif|bmp|mp4|webm)$/i) || src.endsWith('/default'))) {
             isDefaultImageFailed = true;
             mediaContainer.style.display = 'none';
         } else {
             const fallback = getRandomImageSource(currentImageMap.default) || currentImageMap.default;
-            if (fallback && fallback !== src && typeof fallback === 'string' && fallback.trim()) {
-                element.src = fallback.trim();
-            }
+            if (fallback && fallback !== src && typeof fallback === 'string' && fallback.trim()) element.src = fallback.trim();
         }
     }
 
@@ -1380,8 +1167,7 @@
         if (!charName) {
             if (currentImageMap === defaultImageMap) {
                 currentImageMap = await detectImageMapExtensions(defaultImageMap);
-                invalidateAllCaches();
-                safeUpdateImage();
+                invalidateAllCaches(); safeUpdateImage();
             }
             return;
         }
@@ -1389,23 +1175,16 @@
         currentCharacter = charName;
         if (!forceRefresh && imageMapCache.has(charName)) {
             currentImageMap = imageMapCache.get(charName);
-            invalidateAllCaches();
-            preloadCharacterImages(currentImageMap);
-            safeUpdateImage();
+            invalidateAllCaches(); preloadCharacterImages(currentImageMap); safeUpdateImage();
             return;
         }
         let loadedMap = null;
         try {
             const resp = await fetch(`addchara/${charName}/${charName}_ext.json`);
-            if (resp.ok) {
-                const data = await resp.json();
-                loadedMap = findImageMapInData(data);
-            }
+            if (resp.ok) { const data = await resp.json(); loadedMap = findImageMapInData(data); }
         } catch (e) { /* ignore */ }
         const context = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
-        if (!loadedMap && context && context.character && context.character.data) {
-            loadedMap = findImageMapInData(context.character.data);
-        }
+        if (!loadedMap && context && context.character && context.character.data) loadedMap = findImageMapInData(context.character.data);
         if (loadedMap) {
             const detectedMap = await detectImageMapExtensions(loadedMap);
             currentImageMap = detectedMap;
@@ -1413,24 +1192,15 @@
         } else {
             currentImageMap = await detectImageMapExtensions(defaultImageMap);
         }
-        invalidateAllCaches();
-        preloadCharacterImages(currentImageMap);
-        safeUpdateImage();
+        invalidateAllCaches(); preloadCharacterImages(currentImageMap); safeUpdateImage();
     }
 
-    function toggleCustomWindow() {
-        if (isCustomWindowOpen) closeCustomWindow();
-        else openCustomWindow();
-    }
+    function toggleCustomWindow() { if (isCustomWindowOpen) closeCustomWindow(); else openCustomWindow(); }
 
-    function openCustomWindow() {
-        if (currentMode !== 'normal') {
-            applyNormalMode();
-            saveDisplayState();
-        }
-        // ★ チャットウインドウを明示モードへ
+    // ★ openCustomWindow: applyNormalMode のリセットを削除（imageManualMode を保持）
+    function openCustomWindow(options = {}) {
+        const { skipSave = false } = options;
         ensureChatExplicitPosition();
-
         document.getElementById('custom-width').value = imageContainer.offsetWidth;
         document.getElementById('custom-height').value = imageContainer.offsetHeight;
         document.getElementById('custom-left').value = parseInt(imageContainer.style.left) || DEFAULT_LEFT;
@@ -1442,13 +1212,16 @@
         syncChatHeaderPosition();
         syncChatResizeHandlePosition();
         updateChatSizeButtons();
+        if (!skipSave) saveDisplayState();
     }
 
-    function closeCustomWindow() {
+    function closeCustomWindow(options = {}) {
+        const { skipSave = false } = options;
         customWindow.style.display = 'none';
         isCustomWindowOpen = false;
         syncHeaderVisibility();
         syncChatHeaderVisibility();
+        if (!skipSave) saveDisplayState();
     }
 
     function updateCustomWindow() {
@@ -1460,7 +1233,7 @@
     }
 
     customButton.addEventListener('click', toggleCustomWindow);
-    document.getElementById('close-custom-window').addEventListener('click', closeCustomWindow);
+    document.getElementById('close-custom-window').addEventListener('click', () => closeCustomWindow());
 
     ['custom-width', 'custom-height', 'custom-left', 'custom-top'].forEach(id => {
         document.getElementById(id).addEventListener('input', () => {
@@ -1479,10 +1252,20 @@
         });
     });
 
+    // ★ saveDisplayState: imageManualMode / chat 状態 / customWindow 開閉状態も保存
     function saveDisplayState() {
         const state = {
-            preNormalState, bgColor: colorPicker.value, currentMode, textMode: currentTextMode,
-            isOverrideActive, overrideImageUrl, chatBgColor: chatColorPicker.value,
+            preNormalState,
+            bgColor: colorPicker.value,
+            currentMode,
+            textMode: currentTextMode,
+            isOverrideActive,
+            overrideImageUrl,
+            chatBgColor: chatColorPicker.value,
+            imageManualMode,                              // ★ 追加
+            chatCurrentMode,                              // ★ 追加
+            chatPreState: chatPreState ? { ...chatPreState } : null,  // ★ 追加
+            isCustomWindowOpen: isCustomWindowOpen === true,          // ★ 追加
         };
         const context = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
         if (context && context.extensionSettings) {
@@ -1522,21 +1305,23 @@
                 }
                 if (state.bgColor) { imageContainer.style.backgroundColor = state.bgColor; colorPicker.value = state.bgColor; }
                 currentMode = state.currentMode || 'normal';
-                if (state.textMode) {
-                    currentTextMode = state.textMode;
-                    textModeButton.textContent = currentTextMode === 'user' ? 'UT' : 'AI';
-                }
+                if (state.textMode) { currentTextMode = state.textMode; textModeButton.textContent = currentTextMode === 'user' ? 'UT' : 'AI'; }
                 if (state.chatBgColor) {
                     chatColorPicker.value = state.chatBgColor;
                     const rgb = hexToRgbString(state.chatBgColor);
                     document.documentElement.style.setProperty('--chat-bg-rgb', rgb);
                 }
+                // ★ 新規状態の復元
+                if (state.imageManualMode) imageManualMode = state.imageManualMode;
+                if (state.chatCurrentMode) chatCurrentMode = state.chatCurrentMode;
+                if (state.chatPreState) chatPreState = { ...state.chatPreState };
+                if (typeof state.isCustomWindowOpen === 'boolean') savedCustomWindowOpen = state.isCustomWindowOpen;
+
                 if (state.isOverrideActive) {
                     isOverrideActive = true;
                     overrideImageUrl = (typeof state.overrideImageUrl === 'string' && state.overrideImageUrl.trim()) ? state.overrideImageUrl.trim() : null;
                 } else {
-                    isOverrideActive = false;
-                    overrideImageUrl = null;
+                    isOverrideActive = false; overrideImageUrl = null;
                 }
                 switch (currentMode) {
                     case 'maximized': applyMaximizeMode(); break;
@@ -1572,6 +1357,7 @@
         else if (currentMode === 'maximized') maximizeBtn.classList.add('size-btn-disabled');
     }
 
+    // ★ internal applyNormalMode: チャットには触らない
     function applyNormalMode() {
         imageContainer.style.width = `${preNormalState.width}px`;
         imageContainer.style.height = `${preNormalState.height}px`;
@@ -1582,23 +1368,18 @@
         resizeHandle.style.display = 'block';
         header.style.cursor = 'grab';
         imageContainer.classList.remove('half-maximized');
-        maximizeButton.classList.remove('disabled');
-        maximizeButton.classList.add('enabled');
-        halfMaximizeButton.classList.remove('disabled');
-        halfMaximizeButton.classList.add('enabled');
-        customButton.classList.remove('disabled');
-        customButton.classList.add('enabled');
+        maximizeButton.classList.remove('disabled'); maximizeButton.classList.add('enabled');
+        halfMaximizeButton.classList.remove('disabled'); halfMaximizeButton.classList.add('enabled');
+        customButton.classList.remove('disabled'); customButton.classList.add('enabled');
         currentMode = 'normal';
         updateSizeButtons();
         syncHeaderPosition();
         syncHeaderVisibility();
     }
 
+    // ★ internal applyMaximizeMode: チャットには触らない
     function applyMaximizeMode() {
         if (currentMode === 'normal') updatePreNormalStateFromDOM();
-        // ★ チャットの明示モードを解除（text-styling の center モードが #sheld を制御できるように）
-        const sheld = document.getElementById('sheld');
-        if (sheld) sheld.classList.remove('idp-chat-explicit', 'idp-chat-maximized');
         imageContainer.style.setProperty('position', 'fixed', 'important');
         imageContainer.style.setProperty('width', '100vw', 'important');
         imageContainer.style.setProperty('height', '100vh', 'important');
@@ -1610,23 +1391,18 @@
         resizeHandle.style.display = 'none';
         header.style.cursor = 'default';
         imageContainer.classList.remove('half-maximized');
-        maximizeButton.classList.remove('enabled');
-        maximizeButton.classList.add('disabled');
-        halfMaximizeButton.classList.remove('disabled');
-        halfMaximizeButton.classList.add('enabled');
-        customButton.classList.remove('disabled');
-        customButton.classList.add('enabled');
+        maximizeButton.classList.remove('enabled'); maximizeButton.classList.add('disabled');
+        halfMaximizeButton.classList.remove('disabled'); halfMaximizeButton.classList.add('enabled');
+        customButton.classList.remove('disabled'); customButton.classList.add('enabled');
         currentMode = 'maximized';
         updateSizeButtons();
         syncHeaderPosition();
         syncHeaderVisibility();
     }
 
+    // ★ internal applyHalfMaximizeMode: チャットには触らない
     function applyHalfMaximizeMode() {
         if (currentMode === 'normal') updatePreNormalStateFromDOM();
-        // ★ チャットの明示モードを解除（text-styling の split モードが #sheld を制御できるように）
-        const sheld = document.getElementById('sheld');
-        if (sheld) sheld.classList.remove('idp-chat-explicit', 'idp-chat-maximized');
         imageContainer.style.setProperty('position', 'fixed', 'important');
         imageContainer.style.setProperty('width', '50vw', 'important');
         imageContainer.style.setProperty('height', '100vh', 'important');
@@ -1638,12 +1414,9 @@
         resizeHandle.style.display = 'none';
         header.style.cursor = 'default';
         imageContainer.classList.add('half-maximized');
-        maximizeButton.classList.remove('disabled');
-        maximizeButton.classList.add('enabled');
-        halfMaximizeButton.classList.remove('enabled');
-        halfMaximizeButton.classList.add('disabled');
-        customButton.classList.remove('disabled');
-        customButton.classList.add('enabled');
+        maximizeButton.classList.remove('disabled'); maximizeButton.classList.add('enabled');
+        halfMaximizeButton.classList.remove('enabled'); halfMaximizeButton.classList.add('disabled');
+        customButton.classList.remove('disabled'); customButton.classList.add('enabled');
         currentMode = 'halfMaximized';
         updateSizeButtons();
         syncHeaderPosition();
@@ -1671,9 +1444,11 @@
         };
     }
 
+    // ★ 画像ヘッダーボタン: imageManualMode を更新してから適用・保存
     restoreSizeBtn.addEventListener('click', (e) => {
         e.stopPropagation(); e.preventDefault();
         if (currentMode === 'normal') return;
+        if (getTextStylingLayoutMode() === 'manual') imageManualMode = 'normal';
         applyNormalMode();
         saveDisplayState();
     });
@@ -1681,6 +1456,7 @@
     maximizeSizeBtn.addEventListener('click', (e) => {
         e.stopPropagation(); e.preventDefault();
         if (currentMode === 'maximized') return;
+        if (getTextStylingLayoutMode() === 'manual') imageManualMode = 'maximized';
         applyMaximizeMode();
         saveDisplayState();
     });
@@ -1896,6 +1672,35 @@
     setupGalleryObserver();
     requestAnimationFrame(positionTextModeButton);
 
+    // ★ 遅延復元: text-styling.js の初期化(500ms)後に、保存された手動モード状態を適用
+    setTimeout(() => {
+        try {
+            const lm = getTextStylingLayoutMode();
+            if (lm === 'manual' && savedCustomWindowOpen) {
+                if (!isCustomWindowOpen) {
+                    openCustomWindow({ skipSave: true });
+                }
+                // 画像の手動モード時の状態を復元
+                if (imageManualMode === 'maximized') {
+                    applyMaximizeMode();
+                } else if (imageManualMode === 'halfMaximized') {
+                    applyHalfMaximizeMode();
+                }
+                // チャット状態を復元
+                if (chatPreState) {
+                    ensureChatExplicitPosition();
+                    if (chatCurrentMode === 'maximized') applyChatMaximizedState();
+                    else applyChatNormalState();
+                }
+                console.log('[ImageDisplay] 手動モード状態を復元しました', {
+                    imageManualMode, chatCurrentMode, hasChatPreState: !!chatPreState,
+                });
+            }
+        } catch (e) {
+            console.warn('[ImageDisplay] delayed restore failed:', e);
+        }
+    }, 1500);
+
     window.ImageDisplayExtension = {
         setOverrideImage: async function (url) {
             const cleanUrl = (url && typeof url === 'string') ? url.trim() : '';
@@ -1917,10 +1722,36 @@
         getCurrentImageUrl: function () { return currentImageUrl; },
         isOverride: function () { return isOverrideActive; },
         getOverrideImageUrl: function () { return overrideImageUrl; },
-        applyNormalMode: function () { applyNormalMode(); saveDisplayState(); },
-        applyMaximizeMode: function () { applyMaximizeMode(); saveDisplayState(); },
-        applyHalfMaximizeMode: function () { applyHalfMaximizeMode(); saveDisplayState(); },
+
+        // ★ text-styling からの API: imageManualMode に応じて復元 + チャット復元
+        applyNormalMode: function () {
+            if (imageManualMode === 'maximized') applyMaximizeMode();
+            else if (imageManualMode === 'halfMaximized') applyHalfMaximizeMode();
+            else applyNormalMode();
+            // チャット状態の復元
+            if (chatPreState) {
+                ensureChatExplicitPosition();
+                if (chatCurrentMode === 'maximized') applyChatMaximizedState();
+                else applyChatNormalState();
+            }
+            saveDisplayState();
+        },
+        applyMaximizeMode: function () {
+            // text-styling の center モード: チャットは text-styling が管理
+            const sheld = document.getElementById('sheld');
+            if (sheld) sheld.classList.remove('idp-chat-explicit', 'idp-chat-maximized');
+            applyMaximizeMode();
+            saveDisplayState();
+        },
+        applyHalfMaximizeMode: function () {
+            // text-styling の split モード
+            const sheld = document.getElementById('sheld');
+            if (sheld) sheld.classList.remove('idp-chat-explicit', 'idp-chat-maximized');
+            applyHalfMaximizeMode();
+            saveDisplayState();
+        },
         getCurrentMode: function () { return currentMode; },
+
         openCustomWindow: function () { try { openCustomWindow(); } catch (e) { console.warn(e); } },
         closeCustomWindow: function () { try { closeCustomWindow(); } catch (e) { console.warn(e); } },
         isCustomWindowOpen: function () { return isCustomWindowOpen; },
