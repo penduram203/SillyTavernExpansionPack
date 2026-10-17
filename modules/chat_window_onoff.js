@@ -309,14 +309,13 @@ function applyToggleChatButtonLayout() {
     const gicRect = gicBtn.getBoundingClientRect();
     if (gicRect.width <= 0 || gicRect.height <= 0) return;
 
-    const gap = 0;
     const btnW = btn.offsetWidth || 50;
     const btnH = btn.offsetHeight || 50;
 
     // 💡 の left は 🎨 の幅 + gap 分右（🎨 が left:0 に収まる）
-    let left = btnW + gap;
+    let left = btnW;
     // 背景生成ボタンの上端から 5px 上
-    let top = gicRect.top - btnH - gap - 5;
+    let top = gicRect.top - btnH - 5;
 
     const margin = 4;
     const vw = window.innerWidth;
