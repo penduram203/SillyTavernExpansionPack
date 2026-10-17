@@ -303,7 +303,6 @@ function applyToggleChatButtonLayout() {
     const btn = document.getElementById('toggle-chat-button');
     if (!btn) return;
 
-    // ★ チャットウインドウ（#sheld）の左隣、最下部から125px上
     const sheld = document.getElementById('sheld');
     if (!sheld) return;
 
@@ -313,10 +312,9 @@ function applyToggleChatButtonLayout() {
     const btnW = btn.offsetWidth || 50;
     const btnH = btn.offsetHeight || 50;
 
-    // チャットウインドウの左隣（左端）
-    let left = sheldRect.left - btnW;
-    // チャットウインドウ最下部から125px上方向（ボタンの下端が125px上）
-    let top = sheldRect.bottom - btnH - 125;
+    // ★ チャットの左隣 + 右に50px、最下部から125px上 + さらに10px上
+    let left = sheldRect.left - btnW + 50;
+    let top = sheldRect.bottom - btnH - 125 - 10;
 
     const margin = 4;
     const vw = window.innerWidth;
