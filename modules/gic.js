@@ -657,7 +657,7 @@ function setButtonLabel(label) {
     if (btn.textContent !== label) {
         btn.textContent = label;
         console.log(`[GIC] ラベル設定: ${label}`);
-        requestAnimationFrame(positionGalleryButton);
+        requestAnimationFrame();
     }
 }
 
@@ -875,7 +875,7 @@ function positionGalleryButton() {
     if (!galleryBtn) return;
 
     // ★ 💡ボタン基準からさらに上50px、右50px
-    const EXTRA_UP = 60;
+    const EXTRA_UP = 50;
     const EXTRA_RIGHT = 50;
 
     const bulbBtn = document.getElementById('toggle-chat-button');
