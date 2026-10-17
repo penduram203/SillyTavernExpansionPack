@@ -869,7 +869,6 @@ async function handleButtonAction() {
     savePersistedState();
 }
 
-// ===== ギャラリーボタンの位置制御 =====
 // ============================================================
 // ★ 🎨 ボタン位置: 💡 の左端から 50px 左
 //    （旧: bRect.left - btnW - gap = 0 だったのを 50px 左シフトして -50 に）
