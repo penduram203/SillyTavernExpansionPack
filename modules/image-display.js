@@ -250,24 +250,20 @@
     customButton.id = 'custom-button';
     customButton.textContent = '手動';
     customButton.title = '位置とサイズを手動設定';
-    // controlContainer.appendChild(customButton);  // ← 統合により非表示
 
     // ★ Text_styling 側のボタンに統合したため、maximizeButton と
     //    halfMaximizeButton も DOM に追加しない。
-    //    （API 経由で applyMaximizeMode / applyHalfMaximizeMode が呼ばれる）
     const maximizeButton = document.createElement('button');
     maximizeButton.id = 'maximize-button';
     maximizeButton.textContent = 'フル';
     maximizeButton.title = '全画面モードに切替';
     maximizeButton.classList.add('enabled');
-    // controlContainer.appendChild(maximizeButton);  // ← 統合により非表示
 
     const halfMaximizeButton = document.createElement('button');
     halfMaximizeButton.id = 'half-maximize-button';
     halfMaximizeButton.textContent = '左半分';
     halfMaximizeButton.title = '左半分モードに切替';
     halfMaximizeButton.classList.add('enabled');
-    // controlContainer.appendChild(halfMaximizeButton);  // ← 統合により非表示
 
     // カスタム設定ウィンドウ
     const customWindow = document.createElement('div');
@@ -956,7 +952,20 @@
 
         if (state) {
             try {
-                if (state.preNormalState) preNormalState = state.preNormalState;
+                // ★ preNormalState のサニティチェック（0 を保持しつつデフォルト補完）
+                if (state.preNormalState) {
+                    const pns = state.preNormalState;
+                    const w = Number(pns.width);
+                    const h = Number(pns.height);
+                    const l = Number(pns.left);
+                    const t = Number(pns.top);
+                    preNormalState = {
+                        width: Number.isFinite(w) && w > 0 ? w : DEFAULT_WIDTH,
+                        height: Number.isFinite(h) && h > 0 ? h : DEFAULT_HEIGHT,
+                        left: Number.isFinite(l) ? l : DEFAULT_LEFT,
+                        top: Number.isFinite(t) ? t : DEFAULT_TOP,
+                    };
+                }
                 if (state.bgColor) {
                     imageContainer.style.backgroundColor = state.bgColor;
                     colorPicker.value = state.bgColor;
@@ -1114,6 +1123,23 @@
     // ★ maximizeButton / halfMaximizeButton は DOM に追加していないため、
     //    click リスナーは登録しない（API 経由で呼ばれる）
 
+    // ============================================================
+    // ★ preNormalState を現在のインラインスタイルから更新するヘルパー
+    //    （ドラッグ/リサイズ後の値を保存するために必要）
+    // ============================================================
+    function updatePreNormalStateFromDOM() {
+        const leftVal = parseInt(imageContainer.style.left, 10);
+        const topVal = parseInt(imageContainer.style.top, 10);
+        const wVal = imageContainer.offsetWidth;
+        const hVal = imageContainer.offsetHeight;
+        preNormalState = {
+            width: Number.isFinite(wVal) && wVal > 0 ? wVal : DEFAULT_WIDTH,
+            height: Number.isFinite(hVal) && hVal > 0 ? hVal : DEFAULT_HEIGHT,
+            left: Number.isFinite(leftVal) ? leftVal : DEFAULT_LEFT,
+            top: Number.isFinite(topVal) ? topVal : DEFAULT_TOP,
+        };
+    }
+
     header.addEventListener('mousedown', (e) => {
         if (e.target === colorPicker || currentMode !== 'normal') return;
         isDragging = true;
@@ -1137,6 +1163,10 @@
             isDragging = false;
             imageContainer.classList.remove('dragging');
             if (currentMode === 'normal') header.style.cursor = 'grab';
+            // ★ preNormalState を現在値で更新してから保存
+            if (currentMode === 'normal') {
+                updatePreNormalStateFromDOM();
+            }
             saveDisplayState();
         }
     });
@@ -1165,6 +1195,10 @@
             if (isResizing) {
                 isResizing = false;
                 imageContainer.classList.remove('resizing');
+                // ★ preNormalState を現在値で更新してから保存
+                if (currentMode === 'normal') {
+                    updatePreNormalStateFromDOM();
+                }
                 saveDisplayState();
                 document.removeEventListener('mousemove', handleResize);
                 document.removeEventListener('mouseup', stopResize);
@@ -1445,10 +1479,6 @@
 
         // ============================================================
         // ★ Text_styling 統合用 API
-        //    Text_styling のトグルボタンから呼び出される
-        //    - center モード: applyMaximizeMode
-        //    - split  モード: applyHalfMaximizeMode
-        //    - manual モード: applyNormalMode + openCustomWindow
         // ============================================================
         applyNormalMode: function () {
             console.log('🎯 API: applyNormalMode を実行');
@@ -1471,7 +1501,6 @@
 
         // ============================================================
         // ★ Text_styling 統合用 API（手動モード）
-        //    カスタムウィンドウの開閉を外部から制御できるようにする
         // ============================================================
         openCustomWindow: function () {
             console.log('🎯 API: openCustomWindow を実行');
