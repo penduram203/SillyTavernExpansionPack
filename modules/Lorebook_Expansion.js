@@ -9,9 +9,10 @@
 //   二次: entry.extensions.lorebook_expansion (best effort ミラー)
 //   読込時は一次を優先。一次が無ければ二次から移行（マイグレーション）。
 //
-// ★ v5 修正:
-//   - ST起動時のWIドロワー自動オープン問題への対策を追加
-//     (ST本体が RossAscends-mods.js 経由で自動クリックする挙動を抑止)
+// ★ v6 修正:
+//   - ST起動時のWIドロワー自動オープン問題への対策を強化
+//     ST本体が jQuery.trigger('click') や classList.add を直接使う場合でも
+//     MutationObserver で強制クローズする
 
 import {
     extension_settings,
@@ -95,7 +96,7 @@ function wait(ms) {
 }
 
 // ============================================================
-// ★ 永続ストア (extension_settings 内)
+// 永続ストア (extension_settings 内)
 // ============================================================
 function getLexStore() {
     if (!extension_settings[MODULE_NAME]) extension_settings[MODULE_NAME] = {};
@@ -860,94 +861,158 @@ function bootstrap() {
 }
 
 // ============================================================
-// ★ ST起動時のWIドロワー自動オープン問題への対策
+// ★ ST起動時のWIドロワー自動オープン問題への対策（強化版）
+//
 //   ST本体は起動時、キャラクターに紐付くロアブックがあると
 //   RossAscends-mods.js 経由で WI ドロワー（#WorldInfo）を
 //   自動で開く。これが「起動直後からロアブック設定ウインドウが
 //   開いた状態になっている」問題の原因。
 //
-//   対策:
-//     1. 初期化中の WIドロワートグルクリックをキャプチャフェーズで
-//        抑止する（ST本体の自動クリックを防ぐ）
-//     2. APP_READY 後、まだ開いていたら強制クローズする
-//        （保存状態から復元されたケースに対応）
-//     3. APP_READY + 800ms でブロックを解除
-//        （ユーザーの意図的なクリックを妨げない）
+//   ST本体の実装揺れに対応するため、以下の3段構えで防御する:
+//     (A) MutationObserver で #WorldInfo の class/style 変更を監視し、
+//         openDrawer が付いた瞬間に同期強制クローズ
+//     (B) click / mousedown / pointerdown をキャプチャフェーズで捕捉し、
+//         WIドロワーのトグルへの操作を抑止
+//     (C) 100ms 間隔の安全網で強制クローズを繰り返す
+//
+//   ブロックは APP_READY + 1500ms で解除する。
+//   ユーザーの意図的なクリックは以降 通常通り動作する。
 // ============================================================
 (function setupWIDrawerAutoOpenBlocker() {
     let blocking = true;
     let released = false;
-    let forceClosed = false;
 
-    const isWIDrawerToggle = (el) => {
-        if (!el || !el.closest) return false;
-        const toggle = el.closest('.drawer-toggle.drawer-header');
-        if (!toggle) return false;
-        // WIドロワー（#WorldInfo）内のトグルかを確認
-        return !!toggle.closest('#WorldInfo');
-    };
+    function findWIDrawer() {
+        return document.getElementById('WorldInfo') ||
+               document.querySelector('#world_info') ||
+               document.querySelector('.drawer[id*="WorldInfo" i]');
+    }
 
-    // --- 1. キャプチャフェーズでWIドロワートグルクリックを抑止 ---
-    document.addEventListener('click', (e) => {
+    /**
+     * WIドロワーを閉じた状態に強制する。
+     * 変更があれば true を返す。
+     */
+    function forceCloseWIDrawer(reason) {
+        const wi = findWIDrawer();
+        if (!wi) return false;
+
+        let changed = false;
+
+        // #WorldInfo 本体の openDrawer クラス除去
+        if (wi.classList.contains('openDrawer')) {
+            wi.classList.remove('openDrawer');
+            changed = true;
+        }
+
+        // 内部の drawer 関連要素から openDrawer を除去
+        wi.querySelectorAll('.drawer-content, .drawer-toggle, .drawer-header, .drawer-icon').forEach(el => {
+            if (el.classList.contains('openDrawer')) {
+                el.classList.remove('openDrawer');
+                changed = true;
+            }
+        });
+
+        // .drawer-content は closedDrawer 状態を保証
+        const content = wi.querySelector('.drawer-content');
+        if (content && !content.classList.contains('closedDrawer')) {
+            content.classList.add('closedDrawer');
+            changed = true;
+        }
+
+        if (changed) {
+            console.log(`${LOG} 🚫 WIドロワー自動オープンを検知して強制クローズ (${reason})`);
+        }
+        return changed;
+    }
+
+    // ==========================================================
+    // (A) MutationObserver
+    // ==========================================================
+    const observedEls = new WeakSet();
+
+    function attachObserverTo(el) {
+        if (!el || observedEls.has(el)) return;
+        observedEls.add(el);
+
+        const mo = new MutationObserver(() => {
+            if (!blocking) return;
+            forceCloseWIDrawer('MutationObserver');
+        });
+        mo.observe(el, {
+            attributes: true,
+            attributeFilter: ['class', 'style'],
+        });
+    }
+
+    function attachAll() {
+        const wi = findWIDrawer();
+        if (!wi) return;
+        attachObserverTo(wi);
+        wi.querySelectorAll('.drawer-content, .drawer-toggle, .drawer-header, .drawer-icon')
+          .forEach(attachObserverTo);
+    }
+
+    attachAll();
+    const attachWatcher = setInterval(attachAll, 300);
+
+    // ==========================================================
+    // (B) click / mousedown / pointerdown キャプチャフェーズブロック
+    // ==========================================================
+    ['click', 'mousedown', 'pointerdown'].forEach(evtType => {
+        document.addEventListener(evtType, (e) => {
+            if (!blocking) return;
+            if (!e.target || !e.target.closest) return;
+
+            const wi = findWIDrawer();
+            if (!wi || !wi.contains(e.target)) return;
+
+            const toggleHit = e.target.closest('.drawer-toggle, .drawer-header, .drawer-icon');
+            if (!toggleHit) return;
+
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            console.log(`${LOG} 🚫 起動時のWIドロワー自動オープンをブロック (${evtType})`);
+        }, true);
+    });
+
+    // ==========================================================
+    // (C) 100ms 間隔の安全網
+    // ==========================================================
+    const safetyWatcher = setInterval(() => {
         if (!blocking) return;
-        if (!isWIDrawerToggle(e.target)) return;
+        forceCloseWIDrawer('safety-net');
+    }, 100);
 
-        e.stopImmediatePropagation();
-        e.preventDefault();
-        console.log(`${LOG} 🚫 起動時のWIドロワー自動オープンをブロックしました`);
-    }, true);
-
-    // --- 2. ブロック解除 + 念のための強制クローズ ---
+    // ==========================================================
+    // ブロック解除
+    // ==========================================================
     function releaseBlocking() {
         if (released) return;
         released = true;
 
-        // 先にブロックを解除（自前のtoggle.click()がブロックされないように）
+        // 解除直前に最終強制クローズ（まだ blocking=true のうち）
+        forceCloseWIDrawer('final-close');
+
+        // その後でブロック解除
         blocking = false;
-
-        // まだ開いていたら強制的に閉じる
-        if (!forceClosed) {
-            forceClosed = true;
-            try {
-                const wiDrawer = document.getElementById('WorldInfo');
-                if (wiDrawer) {
-                    const isOpen = wiDrawer.classList.contains('openDrawer');
-                    if (isOpen) {
-                        const toggle = wiDrawer.querySelector('.drawer-toggle.drawer-header');
-                        if (toggle && typeof toggle.click === 'function') {
-                            toggle.click();
-                            console.log(`${LOG} 🚪 WIドロワーを強制クローズしました`);
-                        }
-                    }
-                }
-            } catch (err) {
-                console.warn(LOG, 'WIドロワー強制クローズに失敗:', err);
-            }
-        }
-
+        clearInterval(attachWatcher);
+        clearInterval(safetyWatcher);
         console.log(`${LOG} 🔓 WIドロワー自動オープンブロックを解除しました`);
     }
 
-    // --- 3. APP_READY 待機（フォールバック付き） ---
     let releaseScheduled = false;
     const scheduleRelease = () => {
         if (releaseScheduled) return;
         releaseScheduled = true;
-        // ST本体の自動クリックが済むのを待ってから解除
-        setTimeout(releaseBlocking, 800);
+        // ST本体のオープン処理が済むまで十分待つ
+        setTimeout(releaseBlocking, 1500);
     };
 
     if (eventSource && event_types && event_types.APP_READY) {
         eventSource.on(event_types.APP_READY, scheduleRelease);
-        // フォールバック: APP_READYが来なかった場合
+        // フォールバック: APP_READY が来ない環境向け
         setTimeout(scheduleRelease, 8000);
     } else {
-        // eventSourceが取れない環境向けフォールバック
-        try {
-            jQuery(() => {
-                setTimeout(releaseBlocking, 800);
-            });
-        } catch (e) { /* ignore */ }
         setTimeout(scheduleRelease, 8000);
     }
 })();
