@@ -42,7 +42,7 @@
 
     let headerVisible = false;
 
-    // ★ #top-bar hover 用
+    // ★ #top-bar / #top-settings-holder 連動 hover 用
     const TOP_BAR_HOVER_MARGIN = 20;
     let topBarHoverVisible = false;
     let lastMouseX = -1;
@@ -201,21 +201,23 @@
     }
 
     // ============================================================
-    // ★ #top-bar を普段非表示 / hover で表示する CSS
-    //    - z-index / position には一切触らない
-    //    - opacity と pointer-events のみ制御
+    // ★ #top-bar と #top-settings-holder を普段非表示 / hover で表示する CSS
+    //    両者は常に連動する（同じクラスで制御）
+    //    z-index / position には触らない
     // ============================================================
     (function injectTopBarCSS() {
         if (document.getElementById('idp-topbar-extra-css')) return;
         const style = document.createElement('style');
         style.id = 'idp-topbar-extra-css';
         style.textContent = `
-            #top-bar {
+            #top-bar,
+            #top-settings-holder {
                 opacity: 0 !important;
                 pointer-events: none !important;
                 transition: opacity 0.15s ease !important;
             }
-            #top-bar.idp-topbar-visible {
+            #top-bar.idp-topbar-visible,
+            #top-settings-holder.idp-topbar-visible {
                 opacity: 1 !important;
                 pointer-events: auto !important;
             }
@@ -447,9 +449,6 @@
         header.style.setProperty('z-index', String(headerZ), 'important');
     }
 
-    // ============================================================
-    // ★ ヘッダー表示制御（位置・サイズウインドウ開閉のみで判定）
-    // ============================================================
     function shouldShowHeader() {
         return isCustomWindowOpen === true;
     }
@@ -466,43 +465,55 @@
     }
 
     // ============================================================
-    // ★ #top-bar の hover 表示制御
-    //    - 普段は opacity: 0 / pointer-events: none
-    //    - マウスが top-bar 矩形 + 20px 以内で opacity: 1 / pointer-events: auto
-    //    - z-index / position には触らない
+    // ★ #top-bar / #top-settings-holder の hover 表示制御（連動）
     // ============================================================
     function getTopBar() {
         return document.getElementById('top-bar');
     }
 
+    function getTopSettingsHolder() {
+        return document.getElementById('top-settings-holder');
+    }
+
     function setTopBarVisible(visible) {
         const topBar = getTopBar();
-        if (!topBar) return;
+        const settingsHolder = getTopSettingsHolder();
+        if (!topBar && !settingsHolder) return;
         if (topBarHoverVisible === visible) return;
         topBarHoverVisible = visible;
-        topBar.classList.toggle('idp-topbar-visible', visible);
+        if (topBar) topBar.classList.toggle('idp-topbar-visible', visible);
+        if (settingsHolder) settingsHolder.classList.toggle('idp-topbar-visible', visible);
+    }
+
+    function isInsideRect(rect, x, y, margin) {
+        if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+        return x >= rect.left - margin &&
+               x <= rect.right + margin &&
+               y >= rect.top - margin &&
+               y <= rect.bottom + margin;
     }
 
     function updateTopBarVisibility(x, y) {
         const topBar = getTopBar();
-        if (!topBar) return;
+        const settingsHolder = getTopSettingsHolder();
+
+        if (!topBar && !settingsHolder) {
+            setTopBarVisible(false);
+            return;
+        }
 
         if (x < 0 || y < 0) {
             setTopBarVisible(false);
             return;
         }
 
-        const rect = topBar.getBoundingClientRect();
-        if (rect.width <= 0 || rect.height <= 0) {
-            setTopBarVisible(false);
-            return;
+        let inside = false;
+        if (topBar) {
+            inside = inside || isInsideRect(topBar.getBoundingClientRect(), x, y, TOP_BAR_HOVER_MARGIN);
         }
-
-        const inside =
-            x >= rect.left - TOP_BAR_HOVER_MARGIN &&
-            x <= rect.right + TOP_BAR_HOVER_MARGIN &&
-            y >= rect.top - TOP_BAR_HOVER_MARGIN &&
-            y <= rect.bottom + TOP_BAR_HOVER_MARGIN;
+        if (settingsHolder) {
+            inside = inside || isInsideRect(settingsHolder.getBoundingClientRect(), x, y, TOP_BAR_HOVER_MARGIN);
+        }
 
         setTopBarVisible(inside);
     }
@@ -559,9 +570,6 @@
         applyHeaderZIndex();
     }
 
-    // ============================================================
-    // 条件評価・キーワードロジック
-    // ============================================================
     function normalizeConditionExpression(expr) {
         if (!expr || typeof expr !== 'string') return '';
         return expr
@@ -1549,7 +1557,6 @@
         updateTopBarVisibility(lastMouseX, lastMouseY);
     });
 
-    // ★ #top-bar の表示状態も定期的に再評価（マウス静止中のレイアウト変化対策）
     setInterval(() => {
         syncHeaderPosition();
         updateTopBarVisibility(lastMouseX, lastMouseY);
@@ -1597,7 +1604,6 @@
     loadCharacterData(true);
     setupChatDomObserver();
 
-    // ★ 初期化時に #top-bar の hover 状態も初期化（非表示で開始）
     updateTopBarVisibility(-1, -1);
 
     let pollCount = 0;
