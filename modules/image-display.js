@@ -40,6 +40,12 @@
     const Z_INDEX_HEADER_DEFAULT = '15000';
     const HEADER_HEIGHT = 30;
 
+    // ★ ヘッダー hover 表示用
+    const HEADER_HOVER_MARGIN = 20;
+    let headerHoverVisible = false;
+    let lastMouseX = -1;
+    let lastMouseY = -1;
+
     function getTextSignature(text) {
         if (!text || typeof text !== 'string') return '';
         return text.slice(-200);
@@ -193,7 +199,7 @@
     }
 
     // ============================================================
-    // CSS 追加
+    // CSS 追加（ヘッダーは通常非表示、.idp-visible で表示）
     // ============================================================
     (function injectHeaderExtraCSS() {
         if (document.getElementById('image-display-header-extra-css')) return;
@@ -222,6 +228,14 @@
                 border-bottom: 1px solid #555 !important;
                 cursor: grab;
                 user-select: none !important;
+                /* ★ 普段は非表示 */
+                opacity: 0 !important;
+                pointer-events: none !important;
+                transition: opacity 0.15s ease !important;
+            }
+            /* ★ マウスが近づいた時のみ表示 */
+            #image-display-header.idp-visible {
+                opacity: 1 !important;
                 pointer-events: auto !important;
             }
             #image-display-title {
@@ -395,7 +409,7 @@
     document.body.appendChild(customWindow);
 
     // ============================================================
-    // #top-bar の z-index のみ参照（位置制御には使わない）
+    // #top-bar z-index 参照
     // ============================================================
     function getTopBarZIndex() {
         const topBar = document.getElementById('top-bar');
@@ -420,9 +434,64 @@
     }
 
     // ============================================================
+    // ★ ヘッダー hover 表示制御
+    // ============================================================
+    function setHeaderVisible(visible) {
+        if (!header) return;
+        if (headerHoverVisible === visible) return;
+        headerHoverVisible = visible;
+        header.classList.toggle('idp-visible', visible);
+    }
+
+    function updateHeaderVisibility(x, y) {
+        if (!header) return;
+
+        // ドラッグ中は常に表示
+        if (isDragging) {
+            setHeaderVisible(true);
+            return;
+        }
+
+        if (x < 0 || y < 0) {
+            setHeaderVisible(false);
+            return;
+        }
+
+        const rect = header.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) {
+            setHeaderVisible(false);
+            return;
+        }
+
+        const inside =
+            x >= rect.left - HEADER_HOVER_MARGIN &&
+            x <= rect.right + HEADER_HOVER_MARGIN &&
+            y >= rect.top - HEADER_HOVER_MARGIN &&
+            y <= rect.bottom + HEADER_HOVER_MARGIN;
+
+        setHeaderVisible(inside);
+    }
+
+    document.addEventListener('mousemove', (e) => {
+        lastMouseX = e.clientX;
+        lastMouseY = e.clientY;
+        updateHeaderVisibility(e.clientX, e.clientY);
+    }, { passive: true });
+
+    document.addEventListener('mouseleave', () => {
+        lastMouseX = -1;
+        lastMouseY = -1;
+        setHeaderVisible(false);
+    });
+
+    window.addEventListener('blur', () => {
+        lastMouseX = -1;
+        lastMouseY = -1;
+        setHeaderVisible(false);
+    });
+
+    // ============================================================
     // ヘッダー位置の同期
-    //   - 最大化/左右: top: 0（画面最上部）・全幅
-    //   - 手動: コンテナ位置に追従（クランプなし）
     // ============================================================
     function syncHeaderPosition() {
         if (!imageContainer || !header) return;
@@ -447,7 +516,6 @@
             return;
         }
 
-        // normal モード（クランプしない）
         const rect = imageContainer.getBoundingClientRect();
         if (rect.width <= 0 || rect.height <= 0) return;
 
@@ -1208,7 +1276,7 @@
     }
 
     // ============================================================
-    // モード別レイアウト適用（top: 0 で viewport 全体を使用）
+    // モード別レイアウト適用
     // ============================================================
     function applyNormalMode() {
         imageContainer.style.width = `${preNormalState.width}px`;
@@ -1229,6 +1297,8 @@
         currentMode = 'normal';
         updateSizeButtons();
         syncHeaderPosition();
+        // モード切替直後に最後のマウス位置で再判定
+        updateHeaderVisibility(lastMouseX, lastMouseY);
     }
 
     function applyMaximizeMode() {
@@ -1257,6 +1327,7 @@
         currentMode = 'maximized';
         updateSizeButtons();
         syncHeaderPosition();
+        updateHeaderVisibility(lastMouseX, lastMouseY);
     }
 
     function applyHalfMaximizeMode() {
@@ -1285,6 +1356,7 @@
         currentMode = 'halfMaximized';
         updateSizeButtons();
         syncHeaderPosition();
+        updateHeaderVisibility(lastMouseX, lastMouseY);
     }
 
     restoreDisplayState();
@@ -1364,6 +1436,8 @@
         if (currentMode !== 'normal') return;
 
         isDragging = true;
+        // ドラッグ開始時は強制表示
+        setHeaderVisible(true);
         offsetX = e.clientX - imageContainer.getBoundingClientRect().left;
         offsetY = e.clientY - imageContainer.getBoundingClientRect().top;
         imageContainer.classList.add('dragging');
@@ -1390,6 +1464,8 @@
             }
             syncHeaderPosition();
             saveDisplayState();
+            // ドラッグ終了後に最後のマウス位置で再判定
+            updateHeaderVisibility(lastMouseX, lastMouseY);
         }
     });
 
@@ -1443,6 +1519,7 @@
             imageContainer.style.setProperty('top', '0', 'important');
         }
         syncHeaderPosition();
+        updateHeaderVisibility(lastMouseX, lastMouseY);
     });
 
     setInterval(() => {
@@ -1734,6 +1811,7 @@
         },
         syncHeaderPosition: syncHeaderPosition,
         applyHeaderZIndex: applyHeaderZIndex,
+        setHeaderVisible: setHeaderVisible,
     };
     console.log("✅ Image Display Extension API を window.ImageDisplayExtension に公開しました");
 })();
