@@ -296,8 +296,8 @@ function applyChatLayout() {
 }
 
 // ============================================================
-// ★ 💡 ボタン位置: 背景生成ボタンの 5px 上（チャット位置と無関係）
-//    横並び: 🎨 が left:0、💡 が left:btnW+gap
+// ★ 💡 ボタン位置: 背景生成ボタンの 5px 上、背景生成ボタンと左端を揃える
+//    （元は btnW + gap = 55px だったのを、55px 左シフトして 0px に）
 // ============================================================
 function applyToggleChatButtonLayout() {
     const btn = document.getElementById('toggle-chat-button');
@@ -309,16 +309,16 @@ function applyToggleChatButtonLayout() {
     const gicRect = gicBtn.getBoundingClientRect();
     if (gicRect.width <= 0 || gicRect.height <= 0) return;
 
-    const gap = 0;
+    const gap = 5;
     const btnW = btn.offsetWidth || 50;
     const btnH = btn.offsetHeight || 50;
 
-    // 💡 の left は 🎨 の幅 + gap 分右（🎨 が left:0 に収まる）
-    let left = btnW + gap;
-    // 背景生成ボタンの上端から 5px 上
-    let top = gicRect.top - btnH - gap - 5;
+    // ★ 55px 左シフト: 旧 btnW + gap (= 55px) → gicBtn.left (= 0px)
+    let left = gicRect.left;
+    let top = gicRect.top - btnH - gap;
 
-    const margin = 4;
+    // ★ 負座標を許可（オフスクリーン配置のため）
+    const margin = -100;
     const vw = window.innerWidth;
     const vh = window.innerHeight;
     if (left < margin) left = margin;
