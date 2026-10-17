@@ -873,22 +873,21 @@ function positionGalleryButton() {
     const galleryBtn = document.getElementById(GALLERY_BUTTON_ID);
     if (!galleryBtn) return;
 
-    const bulbBtn = document.getElementById('toggle-chat-button');
-    if (bulbBtn) {
-        const bRect = bulbBtn.getBoundingClientRect();
-        if (bRect.width > 0 && bRect.height > 0) {
+    // ★ 🎨 は背景生成ボタンを基準に独立配置（💡 の位置に依存しない）
+    const gicBtn = document.getElementById('gic-release-override-button');
+    if (gicBtn) {
+        const gicRect = gicBtn.getBoundingClientRect();
+        if (gicRect.width > 0 && gicRect.height > 0) {
             const gap = 5;
             const btnW = galleryBtn.offsetWidth || 50;
             const btnH = galleryBtn.offsetHeight || 50;
 
-            // 💡 が (-55, +50) 動いたので、🎨 は元の位置を維持するため逆補正
-            //   left: 💡.left から 55 を引いて元の -5 に戻す
-            //   top:  💡.top から 50 を引いて元の位置に戻す
-            let left = bRect.left - btnW - gap + 55;
-            let top  = bRect.top + (bRect.height - btnH) / 2 - 50;
+            // 前回位置 (gicRect.top - btnH - gap - 50) から 50px 下 = gicRect.top - btnH - gap
+            let left = gicRect.left - 5;
+            let top  = gicRect.top - btnH - gap;
 
             const margin = 4;
-            const minLeft = -10;   // ★ 💡 と同様に負数を許可
+            const minLeft = -10;
             const vw = window.innerWidth;
             const vh = window.innerHeight;
             if (left < minLeft) left = minLeft;
@@ -908,9 +907,9 @@ function positionGalleryButton() {
         }
     }
 
-    const gicBtn = document.getElementById(BUTTON_ID);
-    if (!gicBtn) return;
-    const w = gicBtn.offsetWidth;
+    const gicBtn2 = document.getElementById(BUTTON_ID);
+    if (!gicBtn2) return;
+    const w = gicBtn2.offsetWidth;
     if (!w) return;
     galleryBtn.style.left = (w + 4) + 'px';
 
