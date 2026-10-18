@@ -1,91 +1,70 @@
 /* ============================================================
-   media_controller.css
-   キャラ作成時のフォルダ案内トースト
+   Media Controller
+   キャラクター作成時のフォルダ作成通知スタイル
    ============================================================ */
 
+/* ── toastr メッセージ内の改行を有効化 ── */
+#toast-container .toast-message {
+    white-space: pre-line !important;
+    line-height: 1.5 !important;
+    word-break: break-word !important;
+}
+
+#toast-container.toast-top-center > div {
+    max-width: min(90vw, 640px) !important;
+}
+
+#toast-container .toast-title {
+    font-weight: bold !important;
+    word-break: break-word !important;
+}
+
+/* ── カスタムトースト（toastr 非対応環境用フォールバック） ── */
 .mc-toast {
     position: fixed;
-    top: 60px;
+    top: 80px;
     left: 50%;
     transform: translateX(-50%);
-    z-index: 20000;
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    padding: 14px 16px;
     min-width: 320px;
-    max-width: 560px;
+    max-width: min(90vw, 640px);
     background: rgba(30, 30, 30, 0.96);
-    color: #f0f0f0;
-    border: 1px solid #555;
-    border-left: 4px solid #4caf50;
+    color: #fff;
     border-radius: 8px;
-    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
-    font-family: "Noto Sans", sans-serif;
+    border-left: 4px solid #4caf50;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55);
+    z-index: 999999;
     font-size: 14px;
-    line-height: 1.5;
-    animation: mc-toast-in 0.25s ease-out;
-    pointer-events: auto;
-    -webkit-backdrop-filter: blur(4px);
-    backdrop-filter: blur(4px);
+    line-height: 1.6;
+    overflow: hidden;
+    opacity: 0;
+    animation: mc-toast-in 0.25s ease forwards;
 }
 
-.mc-toast-hiding {
-    animation: mc-toast-out 0.3s ease-in forwards;
+.mc-toast.mc-toast-hide {
+    animation: mc-toast-out 0.4s ease forwards;
 }
 
-.mc-toast-icon {
-    font-size: 24px;
-    line-height: 1;
-    flex: 0 0 auto;
+.mc-toast-header {
+    padding: 10px 16px;
+    background: rgba(0, 0, 0, 0.35);
+    font-weight: bold;
+    font-size: 13px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    word-break: break-word;
 }
 
 .mc-toast-body {
-    flex: 1 1 auto;
-    min-width: 0;
-}
-
-.mc-toast-title {
-    font-weight: bold;
-    margin-bottom: 4px;
-    color: #7fffa0;
-    font-size: 14px;
-}
-
-.mc-toast-text {
-    color: #f0f0f0;
+    padding: 12px 16px 16px;
+    white-space: pre-line;
     word-break: break-word;
-    white-space: pre-wrap;
-}
-
-.mc-toast-hint {
-    margin-top: 6px;
-    font-size: 12px;
-    color: #aaa;
-}
-
-.mc-toast-close {
-    flex: 0 0 auto;
-    background: transparent;
-    border: none;
-    color: #aaa;
-    font-size: 20px;
-    line-height: 1;
-    cursor: pointer;
-    padding: 0 4px;
-    transition: color 0.15s ease;
-}
-
-.mc-toast-close:hover {
-    color: #fff;
 }
 
 @keyframes mc-toast-in {
-    from { opacity: 0; transform: translateX(-50%) translateY(-16px); }
-    to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+    from { opacity: 0; transform: translate(-50%, -12px); }
+    to   { opacity: 1; transform: translate(-50%, 0); }
 }
 
 @keyframes mc-toast-out {
-    from { opacity: 1; transform: translateX(-50%) translateY(0); }
-    to   { opacity: 0; transform: translateX(-50%) translateY(-16px); }
+    from { opacity: 1; transform: translate(-50%, 0); }
+    to   { opacity: 0; transform: translate(-50%, -12px); }
 }
