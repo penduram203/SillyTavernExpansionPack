@@ -16,15 +16,22 @@
         '#character_name_text',
     ];
 
-    // ユーザー指定のメッセージ文言（変更しないこと）
+    // メッセージ本文（改行は \n で表現し、CSS の white-space: pre-line で描画）
     const MESSAGE_TEXT =
-        'キャラ名をコピーしました。addcharaフォルダ内に新規フォルダを作成し、フォルダ名にキャラ名を貼り付けて下さい。';
+        'キャラ名をクリップボードにコピーしました。\n' +
+        'addcharaフォルダ内に新規フォルダを作成し、フォルダ名に貼り付けて下さい。';
 
     // 重複クリック防止用（ラベル＋内部inputの二重発火対策）
     let lastCreateClickTime = 0;
     const CREATE_DEBOUNCE_MS = 500;
 
     // ---------- ユーティリティ ----------
+
+    function escapeHtml(str) {
+        return String(str).replace(/[&<>"']/g, (c) => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+        }[c]));
+    }
 
     /**
      * キャラクター名入力欄から値を取得する（input/textarea/contenteditable 両対応）
@@ -33,11 +40,9 @@
         for (const sel of NAME_INPUT_SELECTORS) {
             const el = document.querySelector(sel);
             if (!el) continue;
-            // <input>/<textarea>
             if (typeof el.value === 'string' && el.value.trim()) {
                 return el.value.trim();
             }
-            // contenteditable
             if (el.isContentEditable && typeof el.textContent === 'string' && el.textContent.trim()) {
                 return el.textContent.trim();
             }
@@ -77,41 +82,57 @@
     }
 
     /**
+     * タイトルHTML（キャラ名を強調表示）
+     */
+    function buildTitleHtml(name) {
+        if (!name) return '<span class="mc-toast-icon">📁</span> フォルダ作成のお願い';
+        return `<span class="mc-toast-icon">📁</span> キャラ名: <span class="mc-toast-name">${escapeHtml(name)}</span>`;
+    }
+
+    /**
+     * 本文HTML（\n は CSS の white-space: pre-line で改行表示）
+     */
+    function buildBodyHtml(message) {
+        return `<div class="mc-toast-body-text">${escapeHtml(message)}</div>`;
+    }
+
+    /**
      * メッセージ表示（toastr 優先、無ければカスタムトースト）
      */
     function showMessage(message, name) {
-        const title = name ? `キャラ名: ${name}` : 'フォルダ作成のお願い';
+        const titleHtml = buildTitleHtml(name);
+        const bodyHtml = buildBodyHtml(message);
 
         if (typeof toastr !== 'undefined' && typeof toastr.info === 'function') {
-            toastr.info(message, title, {
+            toastr.info(bodyHtml, titleHtml, {
                 timeOut: 15000,
                 extendedTimeOut: 10000,
                 closeButton: true,
                 progressBar: true,
                 positionClass: 'toast-top-center',
-                escapeHtml: true,
+                escapeHtml: false, // HTMLを有効化（キャラ名は escapeHtml 済み）
+                newestOnTop: false,
             });
             return;
         }
-
-        showCustomToast(message, title);
+        showCustomToast(bodyHtml, titleHtml);
     }
 
     /**
      * カスタムトースト（toastr 非対応環境用フォールバック）
      */
-    function showCustomToast(message, title) {
+    function showCustomToast(bodyHtml, titleHtml) {
         document.querySelectorAll('.mc-toast').forEach(el => el.remove());
         const toast = document.createElement('div');
         toast.className = 'mc-toast';
 
         const header = document.createElement('div');
         header.className = 'mc-toast-header';
-        header.textContent = title;
+        header.innerHTML = titleHtml;
 
         const body = document.createElement('div');
         body.className = 'mc-toast-body';
-        body.textContent = message;
+        body.innerHTML = bodyHtml;
 
         toast.appendChild(header);
         toast.appendChild(body);
@@ -125,8 +146,6 @@
 
     /**
      * キャラクター作成ボタン押下時のメイン処理
-     *   1) キャラ名をクリップボードへ自動保存
-     *   2) addchara フォルダ作成を促すメッセージを表示
      */
     async function handleCreateCharacter() {
         const name = getCharacterName();
@@ -142,9 +161,10 @@
             showMessage(MESSAGE_TEXT, name);
         } else {
             showMessage(
-                `クリップボードへの自動コピーに失敗しました。\n` +
-                `以下のキャラ名を手動でコピーし、addcharaフォルダ内に新規フォルダを作成して、` +
-                `フォルダ名に貼り付けて下さい。\n\nキャラ名: ${name}`,
+                'クリップボードへの自動コピーに失敗しました。\n' +
+                '以下のキャラ名を手動でコピーし、addcharaフォルダ内に\n' +
+                '新規フォルダを作成して、フォルダ名に貼り付けて下さい。\n\n' +
+                `キャラ名: ${name}`,
                 '手動コピーが必要です'
             );
         }
@@ -152,11 +172,6 @@
 
     // ---------- イベント登録 ----------
 
-    /**
-     * #create_button_label のクリックをキャプチャフェーズで検出
-     * <label> クリック時は内部の <input id="create_button"> の click も発火するため、
-     * 短時間の重複実行をタイムスタンプ方式で排除する。
-     */
     function setupClickListener() {
         document.addEventListener('click', (e) => {
             const target = e.target;
@@ -164,7 +179,6 @@
             const btn = target.closest('#create_button_label');
             if (!btn) return;
 
-            // 重複実行防止（ラベル＋内部inputの二重発火対策）
             const now = Date.now();
             if (now - lastCreateClickTime < CREATE_DEBOUNCE_MS) {
                 console.log('[MediaController] 重複クリックをスキップ');
@@ -172,26 +186,50 @@
             }
             lastCreateClickTime = now;
 
-            // SillyTavern 本体の処理を妨げないよう、マイクロタスクで非同期実行
             Promise.resolve().then(handleCreateCharacter);
         }, true);
     }
 
     /**
-     * CSS未読込時のフォールバック（toastrメッセージの改行描画保証）
+     * CSS未読込時のフォールバック（toastrの装飾が最低限効くように）
      */
     function injectCriticalCSS() {
         if (document.getElementById('mc-critical-css')) return;
         const style = document.createElement('style');
         style.id = 'mc-critical-css';
         style.textContent = `
+            #toast-container .toast-info {
+                background-color: #1e1e1e !important;
+                border-left: 6px solid #4caf50 !important;
+                border-radius: 10px !important;
+                box-shadow: 0 8px 32px rgba(0,0,0,0.65) !important;
+                padding: 16px 20px !important;
+                opacity: 0.98 !important;
+            }
+            #toast-container .toast-title {
+                font-size: 18px !important;
+                font-weight: bold !important;
+                color: #7ee787 !important;
+                margin-bottom: 10px !important;
+                border-bottom: 1px solid rgba(255,255,255,0.12);
+                padding-bottom: 8px;
+            }
             #toast-container .toast-message {
+                font-size: 15px !important;
+                line-height: 1.8 !important;
+                color: #e8e8e8 !important;
                 white-space: pre-line !important;
-                line-height: 1.5 !important;
                 word-break: break-word !important;
             }
-            #toast-container.toast-top-center > div {
-                max-width: min(90vw, 640px) !important;
+            .mc-toast-name {
+                color: #ffd54f !important;
+                font-size: 20px !important;
+                font-weight: bold !important;
+                background: rgba(255, 213, 79, 0.15);
+                padding: 2px 10px;
+                border-radius: 6px;
+                border: 1px solid rgba(255, 213, 79, 0.5);
+                margin-left: 4px;
             }
         `;
         document.head.appendChild(style);
@@ -209,7 +247,6 @@
         init();
     }
 
-    // デバッグ・他モジュール連携用API
     window.MediaController = {
         getCharacterName,
         copyToClipboard,
