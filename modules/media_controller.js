@@ -391,7 +391,7 @@
         });
         observer.observe(document.body, { childList: true, subtree: true });
 
-        // ─── デバッグ用API（存在チェック付き） ───
+        // ─── デバッグ用API（window.MediaController が未定義でも安全） ───
         const api = window.MediaController || (window.MediaController = {});
         api.debugGalleryButton = function () {
             currentBtn = null;
@@ -423,20 +423,25 @@
     function init() {
         injectCriticalCSS();
         setupClickListener();
-        setupGalleryButtonHoverControl();
+        try {
+            setupGalleryButtonHoverControl();
+        } catch (e) {
+            console.error('[MediaController] setupGalleryButtonHoverControl でエラー:', e);
+        }
         console.log('[MediaController] 初期化完了');
     }
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
-    } else {
-        init();
-    }
-
+    // ★ init() より先に window.MediaController を定義
     window.MediaController = {
         getCharacterName,
         copyToClipboard,
         showMessage,
         handleCreateCharacter,
     };
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
 })();
