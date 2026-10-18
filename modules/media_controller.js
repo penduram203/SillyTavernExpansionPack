@@ -1,6 +1,7 @@
 /**
  * Media Controller
  * キャラクター作成時に public/addchara/{キャラクター名}/ フォルダを自動作成
+ * サーバープラグイン未導入時はセットアップガイドを自動表示
  * 将来的なメディア管理機能の基盤
  */
 (function () {
@@ -12,11 +13,14 @@
     // 定数
     // ═══════════════════════════════════════════════════════════
     const MODULE_NAME = 'media_controller';
-    const FOLDER_BASE = 'addchara';                      // public/ 以下のベースパス
-    const CREATE_FOLDER_ENDPOINT = '/api/expansion/create-folder';
-    const POLL_INTERVAL = 200;                           // キャラ検出ポーリング間隔 (ms)
-    const POLL_TIMEOUT = 15000;                          // 検出タイムアウト (ms)
+    const FOLDER_BASE = 'addchara';
+    const PLUGIN_ID = 'expansion-pack';
+    const HEALTH_ENDPOINT = `/api/plugins/${PLUGIN_ID}/health`;
+    const CREATE_FOLDER_ENDPOINT = `/api/plugins/${PLUGIN_ID}/create-folder`;
+    const POLL_INTERVAL = 200;
+    const POLL_TIMEOUT = 15000;
     const STATUS_DISPLAY_DURATION = 4000;
+    const HEALTH_CHECK_CACHE_TTL = 60000; // 60秒キャッシュ
 
     // ═══════════════════════════════════════════════════════════
     // 状態
@@ -24,15 +28,13 @@
     let isWatching = false;
     let statusEl = null;
     let statusTimer = null;
+    let setupModalEl = null;
+    let healthCache = { available: null, timestamp: 0 };
 
     // ═══════════════════════════════════════════════════════════
     // ユーティリティ
     // ═══════════════════════════════════════════════════════════
 
-    /**
-     * 現在選択中のキャラクター名を取得
-     * （image-display.js と同じ取得方式に統一）
-     */
     function getCurrentCharacterName() {
         try {
             if (typeof SillyTavern !== 'undefined') {
@@ -58,18 +60,11 @@
         return null;
     }
 
-    /**
-     * フォルダ名として危険な文字を検出（警告用）
-     * ※ 実際のファイル名は image-display.js と揃えるため、生の名前を使用する
-     */
     function checkDangerousChars(name) {
         if (!name) return false;
         return /[<>:"/\\|?*\x00-\x1F]/.test(name);
     }
 
-    /**
-     * ステータス表示（画面右下にトースト表示）
-     */
     function showStatus(message, type = 'info') {
         if (!statusEl) {
             statusEl = document.createElement('div');
@@ -89,14 +84,49 @@
     }
 
     // ═══════════════════════════════════════════════════════════
-    // フォルダ作成 API
+    // ヘルスチェック
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * キャラクター名フォルダを public/addchara/ 以下に作成
-     * @param {string} charName キャラクター名（生の名前）
-     * @returns {Promise<boolean>} 成功時 true
+     * サーバープラグインが利用可能かをチェック（60秒キャッシュ）
+     * @param {boolean} forceRefresh キャッシュを無視して再取得
+     * @returns {Promise<boolean>}
      */
+    async function checkEndpointAvailability(forceRefresh = false) {
+        const now = Date.now();
+        if (!forceRefresh && healthCache.available !== null &&
+            (now - healthCache.timestamp) < HEALTH_CHECK_CACHE_TTL) {
+            return healthCache.available;
+        }
+
+        try {
+            const resp = await fetch(HEALTH_ENDPOINT, {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' },
+                // タイムアウト用のAbortSignal
+                signal: AbortSignal.timeout ? AbortSignal.timeout(3000) : undefined,
+            });
+            if (resp.ok) {
+                const data = await resp.json().catch(() => ({}));
+                const available = data.ok === true;
+                healthCache = { available, timestamp: now };
+                console.log(`[MediaController] ヘルスチェック: ${available ? '✅ 利用可能' : '❌ 応答異常'}`);
+                return available;
+            }
+            healthCache = { available: false, timestamp: now };
+            console.log(`[MediaController] ヘルスチェック: ❌ HTTP ${resp.status}`);
+            return false;
+        } catch (e) {
+            healthCache = { available: false, timestamp: now };
+            console.log(`[MediaController] ヘルスチェック: ❌ 通信失敗 (${e.message})`);
+            return false;
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // フォルダ作成 API
+    // ═══════════════════════════════════════════════════════════
+
     async function createCharacterFolder(charName) {
         if (!charName || typeof charName !== 'string') {
             console.warn('[MediaController] 無効なキャラクター名:', charName);
@@ -119,8 +149,8 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    path: folderPath,           // 例: "addchara/キャラ名"
-                    base: 'public',             // public/ 直下に作成
+                    path: folderPath,
+                    base: 'public',
                     characterName: charName,
                 }),
             });
@@ -136,14 +166,198 @@
             console.warn(`[MediaController] ❌ サーバーエラー (${resp.status}):`, errText);
             showStatus(`❌ フォルダ作成失敗 (HTTP ${resp.status})`, 'error');
         } catch (e) {
-            console.warn(`[MediaController] ❌ フォルダ作成API未実装/通信失敗:`, e.message);
-            showStatus('⚠️ サーバー側エンドポイント未実装', 'warning');
-            console.warn(
-                '[MediaController] ヒント: SillyTavern サーバー側に ' +
-                `${CREATE_FOLDER_ENDPOINT} を実装してください。`
-            );
+            console.warn(`[MediaController] ❌ 通信失敗:`, e.message);
+            showStatus('❌ サーバーとの通信に失敗しました', 'error');
         }
         return false;
+    }
+
+    /**
+     * ヘルスチェック付きフォルダ作成
+     * 未導入時はセットアップガイドを表示
+     */
+    async function createCharacterFolderWithCheck(charName) {
+        const available = await checkEndpointAvailability();
+        if (!available) {
+            console.warn('[MediaController] サーバープラグイン未導入 → セットアップガイド表示');
+            showSetupGuide();
+            showStatus('⚠️ サーバープラグインが未導入です', 'warning');
+            return false;
+        }
+        return await createCharacterFolder(charName);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // セットアップガイド（モーダル）
+    // ═══════════════════════════════════════════════════════════
+
+    const PLUGIN_CODE = `const fs = require('fs');
+const path = require('path');
+
+async function init(router) {
+    router.get('/health', (req, res) => {
+        res.json({ ok: true, plugin: 'expansion-pack' });
+    });
+
+    router.post('/create-folder', (req, res) => {
+        try {
+            const { path: relPath, base } = req.body || {};
+            if (!relPath || base !== 'public') {
+                return res.status(400).send('invalid request');
+            }
+            const normalized = path.normalize(relPath).replace(/^(\\.\\.[\\/\\\\])+/, '');
+            const targetDir = path.join(process.cwd(), 'public', normalized);
+            const publicRoot = path.join(process.cwd(), 'public') + path.sep;
+            if (!targetDir.startsWith(publicRoot)) {
+                return res.status(403).send('forbidden');
+            }
+            fs.mkdirSync(targetDir, { recursive: true });
+            res.json({ ok: true, path: targetDir });
+        } catch (error) {
+            res.status(500).send(error.message);
+        }
+    });
+}
+
+module.exports = {
+    init,
+    info: { id: 'expansion-pack', name: 'Expansion Pack', description: 'Media folder helper' },
+};`;
+
+    function buildSetupGuideHTML() {
+        const escapedCode = PLUGIN_CODE
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+        return `
+            <div class="mc-setup-modal-backdrop"></div>
+            <div class="mc-setup-modal-content">
+                <div class="mc-setup-modal-header">
+                    <span class="mc-setup-modal-title">🔧 サーバープラグインのセットアップ</span>
+                    <button class="mc-setup-modal-close" title="閉じる">×</button>
+                </div>
+                <div class="mc-setup-modal-body">
+                    <p class="mc-setup-intro">
+                        <strong>Media Controller</strong> がキャラクター名フォルダを自動作成するには、
+                        SillyTavern サーバー側に専用プラグインが必要です。<br>
+                        以下の手順に従ってセットアップしてください。
+                    </p>
+
+                    <ol class="mc-setup-steps">
+                        <li>
+                            <div class="mc-step-title">📁 プラグインフォルダを作成</div>
+                            <div class="mc-step-desc">
+                                SillyTavernのインストール先に以下のフォルダを作成：
+                                <code class="mc-path">{SillyTavern}/plugins/expansion-pack/</code>
+                            </div>
+                        </li>
+                        <li>
+                            <div class="mc-step-title">📝 プラグインファイルを配置</div>
+                            <div class="mc-step-desc">
+                                作成したフォルダ内に <code>index.js</code> を作成し、以下のコードを貼り付け：
+                            </div>
+                            <div class="mc-code-wrapper">
+                                <pre class="mc-code-block"><code>${escapedCode}</code></pre>
+                                <button class="mc-copy-button" data-copy-target="plugin">📋 コピー</button>
+                            </div>
+                        </li>
+                        <li>
+                            <div class="mc-step-title">⚙️ config.yaml を編集</div>
+                            <div class="mc-step-desc">
+                                <code>{SillyTavern}/config.yaml</code> を開き、以下を設定：
+                                <pre class="mc-code-block mc-code-inline"><code>enableServerPlugins: true</code></pre>
+                            </div>
+                        </li>
+                        <li>
+                            <div class="mc-step-title">🔄 SillyTavern を再起動</div>
+                            <div class="mc-step-desc">
+                                サーバーを再起動すると、プラグインが自動的に読み込まれます。
+                            </div>
+                        </li>
+                    </ol>
+
+                    <div class="mc-setup-note">
+                        <strong>💡 ヒント:</strong>
+                        セットアップ完了後、このモーダルの「再チェック」ボタンで
+                        導入状況を確認できます。
+                    </div>
+                </div>
+                <div class="mc-setup-modal-footer">
+                    <button class="mc-setup-recheck-button">🔄 再チェック</button>
+                    <button class="mc-setup-close-button">閉じる</button>
+                </div>
+            </div>
+        `;
+    }
+
+    function showSetupGuide() {
+        if (setupModalEl) {
+            setupModalEl.classList.add('mc-visible');
+            return;
+        }
+
+        setupModalEl = document.createElement('div');
+        setupModalEl.id = 'mc-setup-modal';
+        setupModalEl.innerHTML = buildSetupGuideHTML();
+        document.body.appendChild(setupModalEl);
+
+        // イベント登録
+        setupModalEl.querySelector('.mc-setup-modal-close')
+            .addEventListener('click', hideSetupGuide);
+        setupModalEl.querySelector('.mc-setup-close-button')
+            .addEventListener('click', hideSetupGuide);
+        setupModalEl.querySelector('.mc-setup-modal-backdrop')
+            .addEventListener('click', hideSetupGuide);
+
+        setupModalEl.querySelector('.mc-copy-button')
+            .addEventListener('click', async (e) => {
+                const btn = e.currentTarget;
+                try {
+                    await navigator.clipboard.writeText(PLUGIN_CODE);
+                    btn.textContent = '✅ コピー完了';
+                    btn.classList.add('mc-copied');
+                    setTimeout(() => {
+                        btn.textContent = '📋 コピー';
+                        btn.classList.remove('mc-copied');
+                    }, 2000);
+                } catch (err) {
+                    btn.textContent = '❌ コピー失敗';
+                    setTimeout(() => { btn.textContent = '📋 コピー'; }, 2000);
+                }
+            });
+
+        setupModalEl.querySelector('.mc-setup-recheck-button')
+            .addEventListener('click', async (e) => {
+                const btn = e.currentTarget;
+                btn.disabled = true;
+                btn.textContent = '⏳ チェック中...';
+                const available = await checkEndpointAvailability(true);
+                if (available) {
+                    btn.textContent = '✅ 導入済み';
+                    btn.classList.add('mc-success');
+                    showStatus('✅ サーバープラグインを検出しました', 'success');
+                    setTimeout(() => hideSetupGuide(), 1200);
+                } else {
+                    btn.textContent = '❌ 未検出';
+                    btn.classList.add('mc-error');
+                    showStatus('⚠️ まだプラグインを検出できません', 'warning');
+                    setTimeout(() => {
+                        btn.disabled = false;
+                        btn.textContent = '🔄 再チェック';
+                        btn.classList.remove('mc-error');
+                    }, 2500);
+                }
+            });
+
+        // 表示アニメーション
+        requestAnimationFrame(() => {
+            setupModalEl.classList.add('mc-visible');
+        });
+    }
+
+    function hideSetupGuide() {
+        if (!setupModalEl) return;
+        setupModalEl.classList.remove('mc-visible');
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -171,7 +385,7 @@
                 clearInterval(timer);
                 isWatching = false;
                 console.log(`[MediaController] 🎉 新キャラ検出: ${newName}`);
-                await createCharacterFolder(newName);
+                await createCharacterFolderWithCheck(newName);
             }
         }, POLL_INTERVAL);
     }
@@ -181,7 +395,6 @@
     // ═══════════════════════════════════════════════════════════
 
     function setupCreateInterception() {
-        // キャプチャフェーズでクリックを検知（SillyTavern の処理より前）
         document.addEventListener('click', (e) => {
             const btn = e.target?.closest?.('#create_button_label, #create_button');
             if (!btn) return;
@@ -194,10 +407,23 @@
     // 初期化
     // ═══════════════════════════════════════════════════════════
 
-    function init() {
+    async function init() {
         setupCreateInterception();
         const initialName = getCurrentCharacterName();
         console.log(`[MediaController] 初期キャラ: ${initialName ?? 'なし'}`);
+
+        // 起動時にバックグラウンドでヘルスチェック（結果はキャッシュ）
+        checkEndpointAvailability().then(available => {
+            if (available) {
+                console.log('[MediaController] ✅ サーバープラグイン検出済み');
+            } else {
+                console.warn(
+                    '[MediaController] ⚠️ サーバープラグイン未検出。' +
+                    'キャラ作成時にセットアップガイドが表示されます。'
+                );
+            }
+        });
+
         console.log('[MediaController] ✅ 初期化完了');
     }
 
@@ -208,14 +434,20 @@
     }
 
     // ═══════════════════════════════════════════════════════════
-    // 公開API（将来の拡張用）
+    // 公開API
     // ═══════════════════════════════════════════════════════════
     window.MediaController = {
         getCurrentCharacterName,
         createCharacterFolder,
+        createCharacterFolderWithCheck,
+        checkEndpointAvailability,
+        showSetupGuide,
+        hideSetupGuide,
         showStatus,
         config: {
             FOLDER_BASE,
+            PLUGIN_ID,
+            HEALTH_ENDPOINT,
             CREATE_FOLDER_ENDPOINT,
         },
     };
