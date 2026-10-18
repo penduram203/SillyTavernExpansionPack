@@ -184,22 +184,24 @@
     })();
 
     // ============================================================
-    // #top-bar / #top-settings-holder: 常時表示・背景透過
-    //    背景色は JS の applyTopBarBackground() でインライン !important 適用
+    // #top-bar / #top-settings-holder: 常時表示
+    //   #top-bar のみ pointer-events を明示、#top-settings-holder は触らない
+    //   （触ると #WI-SP-button 等の hover 制御が壊れる）
     // ============================================================
     (function injectTopBarCSS() {
         if (document.getElementById('idp-topbar-extra-css')) return;
         const style = document.createElement('style');
         style.id = 'idp-topbar-extra-css';
         style.textContent = `
-            /* 常時表示 */
-            #top-bar, #top-settings-holder {
+            /* #top-bar: 常時表示 */
+            #top-bar {
                 opacity: 1 !important;
                 pointer-events: auto !important;
-            }
-            /* トランジションのみ CSS で指定（JS の setProperty では transition は維持される） */
-            #top-bar {
                 transition: background-color 0.2s ease, box-shadow 0.2s ease !important;
+            }
+            /* #top-settings-holder: 常時表示（opacity のみ。pointer-events は触らない） */
+            #top-settings-holder {
+                opacity: 1 !important;
             }
         `;
         document.head.appendChild(style);
@@ -481,8 +483,7 @@
     document.body.appendChild(chatResizeHandle);
 
     // ============================================================
-    // ★ #top-bar の背景をインライン !important で強制適用
-    //    SillyTavern 本体/テーマの !important より優先させるため
+    // #top-bar の背景をインライン !important で強制適用
     // ============================================================
     let _lastTopBarBgHover = null;
     function applyTopBarBackground(isHover) {
@@ -509,7 +510,7 @@
     }
 
     // ============================================================
-    // ★ #top-bar 近接検出
+    // #top-bar 近接検出
     // ============================================================
     function setupTopBarHover() {
         const TOP_BAR_HOVER_MARGIN = 20;
@@ -540,7 +541,6 @@
                 _isHover = inside;
                 document.body.classList.toggle('top-bar-hover', inside);
             }
-            // 状態に関わらず必ず再適用（テーマの再設定に対抗）
             applyTopBarBackground(_isHover);
         }
 
@@ -560,7 +560,6 @@
             update(-1, -1);
         });
 
-        // 初期適用 + 定期再適用（150ms 間隔で hover 状態を維持）
         applyTopBarBackground(false);
         setInterval(() => {
             if (_lastX >= 0) update(_lastX, _lastY);
@@ -1591,192 +1590,4 @@
     });
 
     setInterval(() => {
-        syncHeaderPosition();
-        syncChatHeaderPosition();
-        syncChatResizeHandlePosition();
-    }, 500);
-
-    function setupEventSourceListeners() {
-        if (typeof SillyTavern !== 'undefined' && SillyTavern.getContext) {
-            const context = SillyTavern.getContext();
-            if (context && context.eventSource && context.eventTypes) {
-                const { eventSource, eventTypes } = context;
-                const safeOn = (eventType, handler) => {
-                    if (eventType && typeof eventSource.on === 'function') eventSource.on(eventType, handler);
-                };
-                safeOn(eventTypes.STREAM_TOKEN_RECEIVED, handleStreamingUpdate);
-                const immediateUpdate = () => updateImage();
-                safeOn(eventTypes.CHARACTER_MESSAGE_RENDERED, immediateUpdate);
-                safeOn(eventTypes.USER_MESSAGE_RENDERED, immediateUpdate);
-                if (eventTypes.MESSAGE_DELETED) safeOn(eventTypes.MESSAGE_DELETED, immediateUpdate);
-                if (eventTypes.MESSAGE_EDITED) safeOn(eventTypes.MESSAGE_EDITED, immediateUpdate);
-                if (eventTypes.CHAT_LOADED) safeOn(eventTypes.CHAT_LOADED, immediateUpdate);
-                const onCharacterOrChatChanged = () => loadCharacterData(true);
-                safeOn(eventTypes.CHAT_CHANGED, onCharacterOrChatChanged);
-                safeOn(eventTypes.CHARACTER_SELECTED, onCharacterOrChatChanged);
-            }
-        }
-    }
-
-    setupEventSourceListeners();
-    setupSendInterception();
-    loadCharacterData(true);
-    setupChatDomObserver();
-
-    let pollCount = 0;
-    const initialPoll = setInterval(() => {
-        loadCharacterData();
-        pollCount++;
-        if (pollCount > 10) clearInterval(initialPoll);
-    }, 1000);
-
-    function positionTextModeButton() {
-        const textModeBtn = document.getElementById('text-mode-button');
-        if (!textModeBtn) return;
-        if (isOverrideActive) { textModeBtn.style.display = 'none'; textModeBtn.style.pointerEvents = 'none'; return; }
-        const gicBtn = document.getElementById('gic-release-override-button');
-        if (!gicBtn) { textModeBtn.style.display = 'none'; return; }
-        if (window.getComputedStyle(gicBtn).display === 'none') { textModeBtn.style.display = 'none'; return; }
-        const gicRect = gicBtn.getBoundingClientRect();
-        if (gicRect.width === 0 || gicRect.height === 0) { textModeBtn.style.display = 'none'; return; }
-        if (textModeBtn.style.display === 'none') textModeBtn.style.display = '';
-        textModeBtn.style.pointerEvents = '';
-        const gap = 5;
-        const btnW = textModeBtn.offsetWidth || 40;
-        const btnH = textModeBtn.offsetHeight || 30;
-        let left = gicRect.right + gap;
-        let top = gicRect.top + (gicRect.height - btnH) / 2;
-        const margin = 4, vw = window.innerWidth, vh = window.innerHeight;
-        if (left < margin) left = margin;
-        if (left + btnW > vw - margin) left = vw - margin - btnW;
-        if (top < margin) top = margin;
-        if (top + btnH > vh - margin) top = vh - margin - btnH;
-        textModeBtn.style.setProperty('z-index', '15000', 'important');
-        textModeBtn.style.setProperty('position', 'fixed', 'important');
-        textModeBtn.style.setProperty('left', Math.round(left) + 'px', 'important');
-        textModeBtn.style.setProperty('top', Math.round(top) + 'px', 'important');
-        textModeBtn.style.setProperty('right', 'auto', 'important');
-        textModeBtn.style.setProperty('bottom', 'auto', 'important');
-        textModeBtn.style.setProperty('transform', 'none', 'important');
-    }
-
-    setInterval(positionTextModeButton, 200);
-    window.addEventListener('resize', positionTextModeButton);
-
-    function isGalleryOpen() {
-        const candidates = document.querySelectorAll([
-            '#gallery_container', '.gallery-container', '.gallery_container',
-            '#gallery', '.gallery', '[data-gallery-container]', '.gallery-grid', '#gallery-grid'
-        ].join(','));
-        for (const el of candidates) {
-            if (!el) continue;
-            const style = window.getComputedStyle(el);
-            if (style.display === 'none') continue;
-            if (style.visibility === 'hidden') continue;
-            if (parseFloat(style.opacity) === 0) continue;
-            if (el.offsetParent === null && style.position !== 'fixed') continue;
-            const rect = el.getBoundingClientRect();
-            if (rect.width === 0 || rect.height === 0) continue;
-            return true;
-        }
-        return false;
-    }
-
-    let lastGalleryState = null;
-    function updateControlContainerVisibility() {
-        const galleryOpen = isGalleryOpen();
-        if (galleryOpen === lastGalleryState) return;
-        lastGalleryState = galleryOpen;
-        controlContainer.style.display = galleryOpen ? 'none' : 'flex';
-        const textModeBtn = document.getElementById('text-mode-button');
-        if (textModeBtn) textModeBtn.style.display = galleryOpen ? 'none' : '';
-        const gicButton = document.getElementById('gic-release-override-button');
-        if (gicButton) gicButton.style.display = galleryOpen ? 'none' : '';
-    }
-
-    function setupGalleryObserver() {
-        const observer = new MutationObserver(() => updateControlContainerVisibility());
-        observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
-        setInterval(updateControlContainerVisibility, 300);
-        updateControlContainerVisibility();
-    }
-
-    setupGalleryObserver();
-    requestAnimationFrame(positionTextModeButton);
-
-    setTimeout(() => {
-        try {
-            const lm = getTextStylingLayoutMode();
-            if (lm === 'manual' && savedCustomWindowOpen) {
-                if (!isCustomWindowOpen) openCustomWindow({ skipSave: true });
-                if (imageManualMode === 'maximized') applyMaximizeMode();
-                else if (imageManualMode === 'halfMaximized') applyHalfMaximizeMode();
-                if (chatPreState) {
-                    ensureChatExplicitPosition();
-                    if (chatCurrentMode === 'maximized') applyChatMaximizedState();
-                    else applyChatNormalState();
-                }
-                console.log('[ImageDisplay] 手動モード状態を復元しました', { imageManualMode, chatCurrentMode, hasChatPreState: !!chatPreState });
-            }
-        } catch (e) {
-            console.warn('[ImageDisplay] delayed restore failed:', e);
-        }
-    }, 1500);
-
-    window.ImageDisplayExtension = {
-        setOverrideImage: async function (url) {
-            const cleanUrl = (url && typeof url === 'string') ? url.trim() : '';
-            if (cleanUrl) {
-                const exists = await checkMediaExists(cleanUrl);
-                if (!exists) { clearOverrideState({ save: true }); safeUpdateImage(); return false; }
-            }
-            overrideImageUrl = cleanUrl || null;
-            isOverrideActive = true;
-            if (overrideImageUrl) await updateImageWithUrl(overrideImageUrl);
-            else {
-                const fallback = getRandomImageSource(currentImageMap.default) || currentImageMap.default;
-                if (fallback && typeof fallback === 'string' && fallback.trim()) await updateImageWithUrl(fallback);
-            }
-            saveDisplayState();
-            return true;
-        },
-        clearOverrideImage: function () { clearOverrideState({ save: true }); safeUpdateImage(); },
-        getCurrentImageUrl: function () { return currentImageUrl; },
-        isOverride: function () { return isOverrideActive; },
-        getOverrideImageUrl: function () { return overrideImageUrl; },
-
-        applyNormalMode: function () {
-            if (imageManualMode === 'maximized') applyMaximizeMode();
-            else if (imageManualMode === 'halfMaximized') applyHalfMaximizeMode();
-            else applyNormalMode();
-            if (chatPreState) {
-                ensureChatExplicitPosition();
-                if (chatCurrentMode === 'maximized') applyChatMaximizedState();
-                else applyChatNormalState();
-            }
-            saveDisplayState();
-        },
-        applyMaximizeMode: function () {
-            const sheld = document.getElementById('sheld');
-            if (sheld) sheld.classList.remove('idp-chat-explicit', 'idp-chat-maximized');
-            applyMaximizeMode();
-            saveDisplayState();
-        },
-        applyHalfMaximizeMode: function () {
-            const sheld = document.getElementById('sheld');
-            if (sheld) sheld.classList.remove('idp-chat-explicit', 'idp-chat-maximized');
-            applyHalfMaximizeMode();
-            saveDisplayState();
-        },
-        getCurrentMode: function () { return currentMode; },
-
-        openCustomWindow: function () { try { openCustomWindow(); } catch (e) { console.warn(e); } },
-        closeCustomWindow: function () { try { closeCustomWindow(); } catch (e) { console.warn(e); } },
-        isCustomWindowOpen: function () { return isCustomWindowOpen; },
-        syncHeaderPosition, applyHeaderZIndex, syncHeaderVisibility,
-        syncChatHeaderVisibility, syncChatHeaderPosition,
-        ensureChatExplicitPosition,
-        applyTopBarBackground,
-    };
-    console.log("✅ Image Display Extension API を window.ImageDisplayExtension に公開しました");
-})();
+        syncHeaderPosition
