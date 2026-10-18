@@ -185,7 +185,7 @@
 
     // ============================================================
     // #top-bar / #top-settings-holder: 常時表示・背景透過
-    //   ★ #top-settings-holder は CSS のみで制御（JS で touch しない）
+    //   ★ WIDrawerIcon の stale な openIcon / drawerPinnedOpen 状態を視覚的に矯正
     // ============================================================
     (function injectTopBarCSS() {
         if (document.getElementById('idp-topbar-extra-css')) return;
@@ -207,6 +207,18 @@
                 background-image: none !important;
                 backdrop-filter: none !important;
                 -webkit-backdrop-filter: none !important;
+            }
+
+            /* ★ WIDrawerIcon の stale な openIcon / drawerPinnedOpen 状態を視覚的に矯正
+                 非ホバー時は他アイコンと同じ減光状態に、ホバー時は完全不透明に */
+            html body #WIDrawerIcon.drawer-icon {
+                transition: opacity 0.15s ease !important;
+            }
+            html body #WIDrawerIcon.drawer-icon:not(:hover) {
+                opacity: 0.4 !important;
+            }
+            html body #WIDrawerIcon.drawer-icon:hover {
+                opacity: 1 !important;
             }
         `;
         document.head.appendChild(style);
@@ -489,7 +501,7 @@
 
     // ============================================================
     // ★ #top-bar のみ背景をインライン !important で強制適用
-    //    #top-settings-holder には一切触らない（hover 判定破壊防止）
+    //    #top-settings-holder には一切触らない
     // ============================================================
     let _lastTopBarBgHover = null;
     function applyTopBarBackground(isHover) {
