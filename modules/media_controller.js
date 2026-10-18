@@ -131,55 +131,25 @@
     }
 
     async function tryOpenFolder() {
-        const command = buildOpenCommand();
-        log('フォルダを開くコマンドを送信:', command);
+        try {
+            const response = await fetch('/api/open-folder', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: 'public/addchara' }),
+            });
 
-        const context = (typeof SillyTavern !== 'undefined') ? SillyTavern.getContext() : null;
-        if (!context) {
-            warn('SillyTavern コンテキストが取得できません');
+            if (!response.ok) {
+                const err = await response.text().catch(() => '');
+                warn('open-folder API が失敗:', response.status, err);
+                return false;
+            }
+
+            log('既存の /api/open-folder 経由でフォルダを開きました');
+            return true;
+        } catch (e) {
+            warn('open-folder API 呼び出しで例外:', e);
             return false;
         }
-
-        // ── 方法 1: executeSlashCommandsWithOptions + quiet ──
-        try {
-            if (typeof context.executeSlashCommandsWithOptions === 'function') {
-                await context.executeSlashCommandsWithOptions(
-                    `/sys ${command}`,
-                    { quiet: true }          // ★ チャットへの出力を抑制
-                );
-                log('/sys (quiet) 経由でフォルダオープン要求を送信しました');
-                return true;
-            }
-        } catch (e) {
-            warn('executeSlashCommandsWithOptions 経由失敗:', e);
-        }
-
-        // ── 方法 2: SlashCommandParser.commands.sys.callback を直接呼ぶ（quiet 指定） ──
-        try {
-            const parser = context.SlashCommandParser || window.SlashCommandParser;
-            const sysCmd = parser?.commands?.sys;
-            if (sysCmd && typeof sysCmd.callback === 'function') {
-                await sysCmd.callback({ quiet: 'true' }, command);
-                log('/sys callback 経由でフォルダオープン要求を送信しました（quiet）');
-                return true;
-            }
-        } catch (e) {
-            warn('SlashCommandParser 経由失敗:', e);
-        }
-
-        // ── 方法 3: executeSlashCommands（互換用） ──
-        try {
-            if (typeof context.executeSlashCommands === 'function') {
-                await context.executeSlashCommands(`/sys quiet=true ${command}`);
-                log('executeSlashCommands 経由で送信しました（quiet=true 埋め込み）');
-                return true;
-            }
-        } catch (e) {
-            warn('executeSlashCommands 経由失敗:', e);
-        }
-
-        warn('フォルダを自動で開けませんでした。手動で開いてください。');
-        return false;
     }
 
     // ────────────────────────────────────────────────────────
