@@ -159,3 +159,17 @@
     from { opacity: 1; transform: translate(-50%, 0)     scale(1); }
     to   { opacity: 0; transform: translate(-50%, -16px) scale(0.92); }
 }
+
+/* ============================================================
+   🎨 ギャラリーボタン（gic.js 生成）のホバー制御
+   :hover が効かない環境用の保険としても機能
+   ============================================================ */
+#gic-gallery-button:hover,
+#gallery-button:hover,
+#gic_button:hover,
+[id*="gic"][id*="button"]:hover,
+[id*="gallery"][id*="button"]:hover,
+[class*="gallery"][class*="icon"]:hover {
+    opacity: 1 !important;
+    transition: opacity 0.15s ease !important;
+}
