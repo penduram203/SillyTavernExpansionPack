@@ -184,29 +184,45 @@
     })();
 
     // ============================================================
-    // ★ #top-bar / #top-settings-holder は常時表示・背景透過
-    //    JS による hover 制御は撤廃
+    // #top-bar / #top-settings-holder は常時表示・背景透過
+    // ★ #top-bar は通常透明背景、マウス接近時のみ不透明背景
     // ============================================================
     (function injectTopBarCSS() {
         if (document.getElementById('idp-topbar-extra-css')) return;
         const style = document.createElement('style');
         style.id = 'idp-topbar-extra-css';
         style.textContent = `
-            /* 常時表示（opacity/pointer-events を強制、hover 制御なし） */
+            /* 常時表示（opacity/pointer-events を強制） */
             #top-bar, #top-settings-holder {
                 opacity: 1 !important;
                 pointer-events: auto !important;
-                transition: none !important;
             }
-            /* 背景色は透過（アイコン・子孫要素はそのまま不透過で描画） */
+
+            /* 背景透過・ブラー無効（アイコンは不透過で描画される） */
             #top-bar, #top-settings-holder {
-                background-color: transparent !important;
                 background-image: none !important;
                 backdrop-filter: none !important;
                 -webkit-backdrop-filter: none !important;
             }
-            /* ★ 派生して開くウインドウ（ドロワー等）は不透過のまま維持するため、
-                 子孫の背景色には触らない（個別テーマで設定された背景を保持） */
+
+            #top-settings-holder {
+                background-color: transparent !important;
+                transition: none !important;
+            }
+
+            /* ★ #top-bar: 通常は完全透明背景・透明シャドウ */
+            html body #top-bar {
+                background-color: rgba(23, 23, 23, 0) !important;
+                box-shadow: 0 2px 20px 0 rgba(0, 0, 0, 0) !important;
+                transition: background-color 0.2s ease, box-shadow 0.2s ease !important;
+            }
+
+            /* ★ マウスが #top-bar に接近した時のみ不透明背景 */
+            html body.top-bar-hover #top-bar {
+                background-color: rgb(23, 23, 23) !important;
+            }
+
+            /* 派生して開くウインドウの背景色はそのまま（触らない） */
         `;
         document.head.appendChild(style);
     })();
@@ -485,6 +501,64 @@
     const chatResizeHandle = document.createElement('div');
     chatResizeHandle.id = 'idp-chat-resize-handle';
     document.body.appendChild(chatResizeHandle);
+
+    // ============================================================
+    // ★ #top-bar 近接検出
+    //    マウスが #top-bar 矩形 + 20px 以内で body.top-bar-hover を付与
+    // ============================================================
+    function setupTopBarHover() {
+        const TOP_BAR_HOVER_MARGIN = 20;
+        let _isHover = false;
+        let _lastX = -1, _lastY = -1;
+
+        function update(x, y) {
+            const topBar = document.getElementById('top-bar');
+            if (!topBar) return;
+
+            if (x < 0 || y < 0) {
+                if (_isHover) {
+                    _isHover = false;
+                    document.body.classList.remove('top-bar-hover');
+                }
+                return;
+            }
+
+            const rect = topBar.getBoundingClientRect();
+            if (rect.width <= 0 || rect.height <= 0) return;
+
+            const inside =
+                x >= rect.left - TOP_BAR_HOVER_MARGIN && x <= rect.right + TOP_BAR_HOVER_MARGIN &&
+                y >= rect.top - TOP_BAR_HOVER_MARGIN && y <= rect.bottom + TOP_BAR_HOVER_MARGIN;
+
+            if (inside === _isHover) return;
+            _isHover = inside;
+            document.body.classList.toggle('top-bar-hover', inside);
+        }
+
+        document.addEventListener('mousemove', (e) => {
+            _lastX = e.clientX;
+            _lastY = e.clientY;
+            update(_lastX, _lastY);
+        }, { passive: true });
+
+        document.addEventListener('mouseleave', () => {
+            _lastX = -1; _lastY = -1;
+            update(-1, -1);
+        });
+
+        window.addEventListener('blur', () => {
+            _lastX = -1; _lastY = -1;
+            update(-1, -1);
+        });
+
+        setInterval(() => {
+            if (_lastX >= 0) update(_lastX, _lastY);
+        }, 300);
+
+        console.log(`[ImageDisplay] #top-bar hover 検出を開始しました (margin=${TOP_BAR_HOVER_MARGIN}px)`);
+    }
+
+    setupTopBarHover();
 
     function getTopBarZIndex() {
         const topBar = document.getElementById('top-bar');
