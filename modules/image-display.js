@@ -6,7 +6,7 @@
     const mediaExistsCache = new Map();
 
     const DEFAULT_WIDTH = 300, DEFAULT_HEIGHT = 200, DEFAULT_LEFT = 100, DEFAULT_TOP = 100, DEFAULT_BG_COLOR = '#000000';
-    const defaultImageMap = { "default": "addchara/default" };
+    const defaultImageMap = { "default": "user/images/default" };
     let currentCharacter = null;
     let currentImageMap = defaultImageMap;
     let currentImageUrl = null;
@@ -1238,7 +1238,7 @@
         }
         let loadedMap = null;
         try {
-            const resp = await fetch(`addchara/${charName}/${charName}_ext.json`);
+            const resp = await fetch(`user/images/${charName}/${charName}_ext.json`);
             if (resp.ok) { const data = await resp.json(); loadedMap = findImageMapInData(data); }
         } catch (e) { /* ignore */ }
         const context = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
