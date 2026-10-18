@@ -184,45 +184,23 @@
     })();
 
     // ============================================================
-    // #top-bar / #top-settings-holder は常時表示・背景透過
-    // ★ #top-bar は通常透明背景、マウス接近時のみ不透明背景
+    // #top-bar / #top-settings-holder: 常時表示・背景透過
+    //    背景色は JS の applyTopBarBackground() でインライン !important 適用
     // ============================================================
     (function injectTopBarCSS() {
         if (document.getElementById('idp-topbar-extra-css')) return;
         const style = document.createElement('style');
         style.id = 'idp-topbar-extra-css';
         style.textContent = `
-            /* 常時表示（opacity/pointer-events を強制） */
+            /* 常時表示 */
             #top-bar, #top-settings-holder {
                 opacity: 1 !important;
                 pointer-events: auto !important;
             }
-
-            /* 背景透過・ブラー無効（アイコンは不透過で描画される） */
-            #top-bar, #top-settings-holder {
-                background-image: none !important;
-                backdrop-filter: none !important;
-                -webkit-backdrop-filter: none !important;
-            }
-
-            #top-settings-holder {
-                background-color: transparent !important;
-                transition: none !important;
-            }
-
-            /* ★ #top-bar: 通常は完全透明背景・透明シャドウ */
-            html body #top-bar {
-                background-color: rgba(23, 23, 23, 0) !important;
-                box-shadow: 0 2px 20px 0 rgba(0, 0, 0, 0) !important;
+            /* トランジションのみ CSS で指定（JS の setProperty では transition は維持される） */
+            #top-bar {
                 transition: background-color 0.2s ease, box-shadow 0.2s ease !important;
             }
-
-            /* ★ マウスが #top-bar に接近した時のみ不透明背景 */
-            html body.top-bar-hover #top-bar {
-                background-color: rgb(23, 23, 23) !important;
-            }
-
-            /* 派生して開くウインドウの背景色はそのまま（触らない） */
         `;
         document.head.appendChild(style);
     })();
@@ -503,8 +481,35 @@
     document.body.appendChild(chatResizeHandle);
 
     // ============================================================
+    // ★ #top-bar の背景をインライン !important で強制適用
+    //    SillyTavern 本体/テーマの !important より優先させるため
+    // ============================================================
+    let _lastTopBarBgHover = null;
+    function applyTopBarBackground(isHover) {
+        const topBar = document.getElementById('top-bar');
+        if (!topBar) return;
+
+        const hover = !!isHover;
+        _lastTopBarBgHover = hover;
+
+        const bgColor = hover ? 'rgb(23, 23, 23)' : 'rgba(23, 23, 23, 0)';
+        topBar.style.setProperty('background-color', bgColor, 'important');
+        topBar.style.setProperty('background-image', 'none', 'important');
+        topBar.style.setProperty('box-shadow', '0 2px 20px 0 rgba(0, 0, 0, 0)', 'important');
+        topBar.style.setProperty('backdrop-filter', 'none', 'important');
+        topBar.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+
+        const topSettingsHolder = document.getElementById('top-settings-holder');
+        if (topSettingsHolder) {
+            topSettingsHolder.style.setProperty('background-color', 'transparent', 'important');
+            topSettingsHolder.style.setProperty('background-image', 'none', 'important');
+            topSettingsHolder.style.setProperty('backdrop-filter', 'none', 'important');
+            topSettingsHolder.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+        }
+    }
+
+    // ============================================================
     // ★ #top-bar 近接検出
-    //    マウスが #top-bar 矩形 + 20px 以内で body.top-bar-hover を付与
     // ============================================================
     function setupTopBarHover() {
         const TOP_BAR_HOVER_MARGIN = 20;
@@ -520,6 +525,7 @@
                     _isHover = false;
                     document.body.classList.remove('top-bar-hover');
                 }
+                applyTopBarBackground(_isHover);
                 return;
             }
 
@@ -530,9 +536,12 @@
                 x >= rect.left - TOP_BAR_HOVER_MARGIN && x <= rect.right + TOP_BAR_HOVER_MARGIN &&
                 y >= rect.top - TOP_BAR_HOVER_MARGIN && y <= rect.bottom + TOP_BAR_HOVER_MARGIN;
 
-            if (inside === _isHover) return;
-            _isHover = inside;
-            document.body.classList.toggle('top-bar-hover', inside);
+            if (inside !== _isHover) {
+                _isHover = inside;
+                document.body.classList.toggle('top-bar-hover', inside);
+            }
+            // 状態に関わらず必ず再適用（テーマの再設定に対抗）
+            applyTopBarBackground(_isHover);
         }
 
         document.addEventListener('mousemove', (e) => {
@@ -551,9 +560,12 @@
             update(-1, -1);
         });
 
+        // 初期適用 + 定期再適用（150ms 間隔で hover 状態を維持）
+        applyTopBarBackground(false);
         setInterval(() => {
             if (_lastX >= 0) update(_lastX, _lastY);
-        }, 300);
+            else applyTopBarBackground(_isHover);
+        }, 150);
 
         console.log(`[ImageDisplay] #top-bar hover 検出を開始しました (margin=${TOP_BAR_HOVER_MARGIN}px)`);
     }
@@ -1764,6 +1776,7 @@
         syncHeaderPosition, applyHeaderZIndex, syncHeaderVisibility,
         syncChatHeaderVisibility, syncChatHeaderPosition,
         ensureChatExplicitPosition,
+        applyTopBarBackground,
     };
     console.log("✅ Image Display Extension API を window.ImageDisplayExtension に公開しました");
 })();
