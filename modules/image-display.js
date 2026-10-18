@@ -184,24 +184,29 @@
     })();
 
     // ============================================================
-    // #top-bar / #top-settings-holder: 常時表示
-    //   #top-bar のみ pointer-events を明示、#top-settings-holder は触らない
-    //   （触ると #WI-SP-button 等の hover 制御が壊れる）
+    // #top-bar / #top-settings-holder: 常時表示・背景透過
+    //   ★ #top-settings-holder は CSS のみで制御（JS で touch しない）
     // ============================================================
     (function injectTopBarCSS() {
         if (document.getElementById('idp-topbar-extra-css')) return;
         const style = document.createElement('style');
         style.id = 'idp-topbar-extra-css';
         style.textContent = `
-            /* #top-bar: 常時表示 */
-            #top-bar {
+            /* 常時表示 */
+            #top-bar, #top-settings-holder {
                 opacity: 1 !important;
+            }
+            /* #top-bar のみ pointer-events を明示 */
+            #top-bar {
                 pointer-events: auto !important;
                 transition: background-color 0.2s ease, box-shadow 0.2s ease !important;
             }
-            /* #top-settings-holder: 常時表示（opacity のみ。pointer-events は触らない） */
+            /* #top-settings-holder は CSS で背景透過のみ。pointer-events は触らない */
             #top-settings-holder {
-                opacity: 1 !important;
+                background-color: transparent !important;
+                background-image: none !important;
+                backdrop-filter: none !important;
+                -webkit-backdrop-filter: none !important;
             }
         `;
         document.head.appendChild(style);
@@ -483,7 +488,8 @@
     document.body.appendChild(chatResizeHandle);
 
     // ============================================================
-    // #top-bar の背景をインライン !important で強制適用
+    // ★ #top-bar のみ背景をインライン !important で強制適用
+    //    #top-settings-holder には一切触らない（hover 判定破壊防止）
     // ============================================================
     let _lastTopBarBgHover = null;
     function applyTopBarBackground(isHover) {
@@ -499,14 +505,6 @@
         topBar.style.setProperty('box-shadow', '0 2px 20px 0 rgba(0, 0, 0, 0)', 'important');
         topBar.style.setProperty('backdrop-filter', 'none', 'important');
         topBar.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
-
-        const topSettingsHolder = document.getElementById('top-settings-holder');
-        if (topSettingsHolder) {
-            topSettingsHolder.style.setProperty('background-color', 'transparent', 'important');
-            topSettingsHolder.style.setProperty('background-image', 'none', 'important');
-            topSettingsHolder.style.setProperty('backdrop-filter', 'none', 'important');
-            topSettingsHolder.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
-        }
     }
 
     // ============================================================
