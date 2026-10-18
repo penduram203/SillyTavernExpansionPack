@@ -391,8 +391,9 @@
         });
         observer.observe(document.body, { childList: true, subtree: true });
 
-        // ─── デバッグ用API ───
-        window.MediaController.debugGalleryButton = function () {
+        // ─── デバッグ用API（存在チェック付き） ───
+        const api = window.MediaController || (window.MediaController = {});
+        api.debugGalleryButton = function () {
             currentBtn = null;
             const btn = findGalleryButton();
             console.log('=== 🎨 Gallery Button Debug ===');
