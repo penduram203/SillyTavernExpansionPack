@@ -422,10 +422,10 @@
     function init() {
         injectCriticalCSS();
         setupClickListener();
-        setupGalleryButtonHoverControl();   // ← この1行を追加
+        setupGalleryButtonHoverControl();
         console.log('[MediaController] 初期化完了');
     }
-    
+
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);
     } else {
