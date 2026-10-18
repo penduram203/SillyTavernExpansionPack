@@ -20,6 +20,10 @@
     const MESSAGE_TEXT =
         'キャラ名をコピーしました。addcharaフォルダ内に新規フォルダを作成し、フォルダ名にキャラ名を貼り付けて下さい。';
 
+    // 重複クリック防止用（ラベル＋内部inputの二重発火対策）
+    let lastCreateClickTime = 0;
+    const CREATE_DEBOUNCE_MS = 500;
+
     // ---------- ユーティリティ ----------
 
     /**
@@ -80,8 +84,8 @@
 
         if (typeof toastr !== 'undefined' && typeof toastr.info === 'function') {
             toastr.info(message, title, {
-                timeOut: 15000,          // 15秒表示
-                extendedTimeOut: 10000,  // hover時さらに10秒延長
+                timeOut: 15000,
+                extendedTimeOut: 10000,
                 closeButton: true,
                 progressBar: true,
                 positionClass: 'toast-top-center',
@@ -132,10 +136,8 @@
         }
         console.log('[MediaController] キャラクター作成を検出:', name);
 
-        // 1) クリップボードへコピー
         const copied = await copyToClipboard(name);
 
-        // 2) メッセージ表示
         if (copied) {
             showMessage(MESSAGE_TEXT, name);
         } else {
@@ -152,7 +154,8 @@
 
     /**
      * #create_button_label のクリックをキャプチャフェーズで検出
-     * （SillyTavern本体の処理より先にキャラ名入力欄を読み取るため）
+     * <label> クリック時は内部の <input id="create_button"> の click も発火するため、
+     * 短時間の重複実行をタイムスタンプ方式で排除する。
      */
     function setupClickListener() {
         document.addEventListener('click', (e) => {
@@ -162,13 +165,12 @@
             if (!btn) return;
 
             // 重複実行防止（ラベル＋内部inputの二重発火対策）
-            if (createDebounceTimer) {
+            const now = Date.now();
+            if (now - lastCreateClickTime < CREATE_DEBOUNCE_MS) {
                 console.log('[MediaController] 重複クリックをスキップ');
                 return;
             }
-            createDebounceTimer = setTimeout(() => {
-                createDebounceTimer = null;
-            }, CREATE_DEBOUNCE_MS);
+            lastCreateClickTime = now;
 
             // SillyTavern 本体の処理を妨げないよう、マイクロタスクで非同期実行
             Promise.resolve().then(handleCreateCharacter);
