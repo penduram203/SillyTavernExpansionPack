@@ -192,81 +192,21 @@
         const style = document.createElement('style');
         style.id = 'idp-topbar-extra-css';
         style.textContent = `
-            /* ============================================================
-             * コンテナ: 常時「透明な器」として存在（アイコンを表示するため）
-             * ============================================================ */
+            /* 常時表示（opacity/pointer-events を強制、hover 制御なし） */
             #top-bar, #top-settings-holder {
                 opacity: 1 !important;
                 pointer-events: auto !important;
-                visibility: visible !important;
+                transition: none !important;
+            }
+            /* 背景色は透過（アイコン・子孫要素はそのまま不透過で描画） */
+            #top-bar, #top-settings-holder {
                 background-color: transparent !important;
                 background-image: none !important;
                 backdrop-filter: none !important;
                 -webkit-backdrop-filter: none !important;
-                box-shadow: none !important;
-                border: none !important;
-                transition: none !important;
             }
-
-            /* ============================================================
-             * アイコン（.drawer-icon）: 常に表示
-             * ============================================================ */
-            #top-bar .drawer-icon,
-            #top-settings-holder .drawer-icon {
-                opacity: 1 !important;
-                pointer-events: auto !important;
-                visibility: visible !important;
-            }
-
-            /* ============================================================
-             * ドロワーの中身（.drawer-content = ラベル／展開パネル）:
-             * ドロワーが開いている時だけ表示
-             * ============================================================ */
-            #top-bar .drawer:not(.openDrawer) > .drawer-content,
-            #top-settings-holder .drawer:not(.openDrawer) > .drawer-content {
-                opacity: 0 !important;
-                visibility: hidden !important;
-                pointer-events: none !important;
-            }
-            #top-bar .drawer.openDrawer > .drawer-content,
-            #top-settings-holder .drawer.openDrawer > .drawer-content {
-                opacity: 1 !important;
-                visibility: visible !important;
-                pointer-events: auto !important;
-            }
-
-            /* ============================================================
-             * #top-settings-holder 直下の「アイコンでも .drawer でもない」要素:
-             * 普段は非表示、hover 時にのみ表示
-             * ============================================================ */
-            #top-settings-holder > *:not(.drawer-icon):not(.drawer) {
-                opacity: 0 !important;
-                visibility: hidden !important;
-                pointer-events: none !important;
-                transition: opacity 0.2s ease, visibility 0.2s ease !important;
-            }
-            #top-settings-holder:hover > *:not(.drawer-icon):not(.drawer) {
-                opacity: 1 !important;
-                visibility: visible !important;
-                pointer-events: auto !important;
-            }
-
-            /* ============================================================
-             * #top-bar 直下の「#top-settings-holder 以外」の要素:
-             * 普段は非表示、hover 時にのみ表示
-             * ============================================================ */
-            #top-bar > *:not(#top-settings-holder) {
-                opacity: 0 !important;
-                visibility: hidden !important;
-                pointer-events: none !important;
-                transition: opacity 0.2s ease, visibility 0.2s ease !important;
-            }
-            #top-bar:hover > *:not(#top-settings-holder),
-            #top-bar:focus-within > *:not(#top-settings-holder) {
-                opacity: 1 !important;
-                visibility: visible !important;
-                pointer-events: auto !important;
-            }
+            /* ★ 派生して開くウインドウ（ドロワー等）は不透過のまま維持するため、
+                 子孫の背景色には触らない（個別テーマで設定された背景を保持） */
         `;
         document.head.appendChild(style);
     })();
