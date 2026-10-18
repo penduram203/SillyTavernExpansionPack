@@ -40,6 +40,12 @@
 
     let headerVisible = false;
 
+    const TOP_BAR_HOVER_MARGIN = 20;
+    let topBarHoverVisible = false;
+    let lastMouseX = -1;
+    let lastMouseY = -1;
+    let topBarPinned = false;
+
     let imageManualMode = 'normal';
     let savedCustomWindowOpen = false;
 
@@ -183,30 +189,20 @@
         }
     })();
 
-    // ============================================================
-    // ★ #top-bar / #top-settings-holder は常時表示・背景透過
-    //    JS による hover 制御は撤廃
-    // ============================================================
     (function injectTopBarCSS() {
         if (document.getElementById('idp-topbar-extra-css')) return;
         const style = document.createElement('style');
         style.id = 'idp-topbar-extra-css';
         style.textContent = `
-            /* 常時表示（opacity/pointer-events を強制、hover 制御なし） */
             #top-bar, #top-settings-holder {
+                opacity: 0 !important;
+                pointer-events: none !important;
+                transition: opacity 0.15s ease !important;
+            }
+            #top-bar.idp-topbar-visible, #top-settings-holder.idp-topbar-visible {
                 opacity: 1 !important;
                 pointer-events: auto !important;
-                transition: none !important;
             }
-            /* 背景色は透過（アイコン・子孫要素はそのまま不透過で描画） */
-            #top-bar, #top-settings-holder {
-                background-color: transparent !important;
-                background-image: none !important;
-                backdrop-filter: none !important;
-                -webkit-backdrop-filter: none !important;
-            }
-            /* ★ 派生して開くウインドウ（ドロワー等）は不透過のまま維持するため、
-                 子孫の背景色には触らない（個別テーマで設定された背景を保持） */
         `;
         document.head.appendChild(style);
     })();
@@ -243,6 +239,7 @@
         document.head.appendChild(style);
     })();
 
+    // ★ チャットヘッダー / #sheld flex レイアウト / #form_sheld 幅上限
     (function injectChatHeaderCSS() {
         if (document.getElementById('idp-chat-header-css')) return;
         const style = document.createElement('style');
@@ -292,6 +289,7 @@
                 box-sizing: border-box !important;
                 z-index: 1 !important;
             }
+            /* 通常の explicit モード: #form_sheld は #sheld 幅 100%（縮むのは許容） */
             #sheld.idp-chat-explicit #form_sheld {
                 flex: 0 0 auto !important;
                 position: static !important;
@@ -304,6 +302,7 @@
                 box-sizing: border-box !important;
                 z-index: 2 !important;
             }
+            /* ★ 最大化時: 手動モード時の幅 (= --idp-form-max-width) を上限に固定し、横に伸ばさない */
             #sheld.idp-chat-maximized #form_sheld {
                 flex: 0 0 auto !important;
                 position: static !important;
@@ -528,6 +527,68 @@
         if (chatResizeHandle) chatResizeHandle.classList.toggle('idp-visible', visible && chatCurrentMode === 'normal');
     }
 
+    function getTopBar() { return document.getElementById('top-bar'); }
+    function getTopSettingsHolder() { return document.getElementById('top-settings-holder'); }
+
+    function setTopBarVisible(visible) {
+        const topBar = getTopBar();
+        const settingsHolder = getTopSettingsHolder();
+        if (!topBar && !settingsHolder) return;
+        if (topBarHoverVisible === visible) return;
+        topBarHoverVisible = visible;
+        if (topBar) topBar.classList.toggle('idp-topbar-visible', visible);
+        if (settingsHolder) settingsHolder.classList.toggle('idp-topbar-visible', visible);
+    }
+
+    function isInsideRect(rect, x, y, margin) {
+        if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+        return x >= rect.left - margin && x <= rect.right + margin &&
+               y >= rect.top - margin && y <= rect.bottom + margin;
+    }
+
+    function updateTopBarVisibility(x, y) {
+        if (topBarPinned) { setTopBarVisible(true); return; }
+        const topBar = getTopBar();
+        const settingsHolder = getTopSettingsHolder();
+        if (!topBar && !settingsHolder) { setTopBarVisible(false); return; }
+        if (x < 0 || y < 0) { setTopBarVisible(false); return; }
+        let inside = false;
+        if (topBar) inside = inside || isInsideRect(topBar.getBoundingClientRect(), x, y, TOP_BAR_HOVER_MARGIN);
+        if (settingsHolder) inside = inside || isInsideRect(settingsHolder.getBoundingClientRect(), x, y, TOP_BAR_HOVER_MARGIN);
+        setTopBarVisible(inside);
+    }
+
+    document.addEventListener('click', (e) => {
+        const topBar = getTopBar();
+        const settingsHolder = getTopSettingsHolder();
+        const insideTopArea = (topBar && topBar.contains(e.target)) || (settingsHolder && settingsHolder.contains(e.target));
+        if (insideTopArea) {
+            topBarPinned = true;
+            setTopBarVisible(true);
+        } else {
+            if (topBarPinned) {
+                topBarPinned = false;
+                updateTopBarVisibility(lastMouseX, lastMouseY);
+            }
+        }
+    }, true);
+
+    document.addEventListener('mousemove', (e) => {
+        lastMouseX = e.clientX;
+        lastMouseY = e.clientY;
+        updateTopBarVisibility(e.clientX, e.clientY);
+    }, { passive: true });
+
+    document.addEventListener('mouseleave', () => {
+        lastMouseX = -1; lastMouseY = -1;
+        updateTopBarVisibility(-1, -1);
+    });
+
+    window.addEventListener('blur', () => {
+        lastMouseX = -1; lastMouseY = -1;
+        if (!topBarPinned) setTopBarVisible(false);
+    });
+
     function syncHeaderPosition() {
         if (!imageContainer || !header) return;
         if (currentMode === 'maximized') {
@@ -629,6 +690,7 @@
         const sheld = document.getElementById('sheld');
         if (!sheld || !chatPreState) return;
         sheld.classList.remove('idp-chat-maximized');
+        // ★ 最大化用の幅上限をリセット
         sheld.style.removeProperty('--idp-form-max-width');
         sheld.style.setProperty('--idp-chat-left', Math.round(chatPreState.left) + 'px');
         sheld.style.setProperty('--idp-chat-top', Math.round(chatPreState.top) + 'px');
@@ -643,11 +705,13 @@
         try { window.dispatchEvent(new Event('resize')); } catch (e) { /* ignore */ }
     }
 
+    // ★ applyChatMaximizedState: 最大化前に #form_sheld の現在幅を CSS 変数へ保存
     function applyChatMaximizedState() {
         const sheld = document.getElementById('sheld');
         if (!sheld) return;
         if (chatCurrentMode === 'normal') ensureChatExplicitPosition();
 
+        // #form_sheld の現在幅を取得して --idp-form-max-width に保存
         const formSheld = document.getElementById('form_sheld');
         if (formSheld) {
             const w = Math.round(formSheld.getBoundingClientRect().width);
@@ -1502,12 +1566,14 @@
         syncHeaderVisibility();
         syncChatHeaderPosition();
         syncChatResizeHandlePosition();
+        updateTopBarVisibility(lastMouseX, lastMouseY);
     });
 
     setInterval(() => {
         syncHeaderPosition();
         syncChatHeaderPosition();
         syncChatResizeHandlePosition();
+        if (!topBarPinned) updateTopBarVisibility(lastMouseX, lastMouseY);
     }, 500);
 
     function setupEventSourceListeners() {
@@ -1536,6 +1602,7 @@
     setupSendInterception();
     loadCharacterData(true);
     setupChatDomObserver();
+    updateTopBarVisibility(-1, -1);
 
     let pollCount = 0;
     const initialPoll = setInterval(() => {
@@ -1688,8 +1755,14 @@
         closeCustomWindow: function () { try { closeCustomWindow(); } catch (e) { console.warn(e); } },
         isCustomWindowOpen: function () { return isCustomWindowOpen; },
         syncHeaderPosition, applyHeaderZIndex, syncHeaderVisibility,
+        updateTopBarVisibility, setTopBarVisible,
         syncChatHeaderVisibility, syncChatHeaderPosition,
         ensureChatExplicitPosition,
+        setTopBarPinned: function (pinned) {
+            topBarPinned = !!pinned;
+            if (topBarPinned) setTopBarVisible(true);
+            else updateTopBarVisibility(lastMouseX, lastMouseY);
+        },
     };
     console.log("✅ Image Display Extension API を window.ImageDisplayExtension に公開しました");
 })();
