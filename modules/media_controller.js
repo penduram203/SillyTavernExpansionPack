@@ -237,102 +237,186 @@
 
     // ============================================================
     // 🎨 ギャラリーボタンのホバー不透明化
-    //   gic.js が生成するボタンは .drawer-icon ではないため、
-    //   座標監視方式で個別に opacity を制御する
+    //   ・子要素制限を撤廃（spanなどでラップされていても検出）
+    //   ・親要素の opacity < 1 も遡って矯正（乗算対策）
+    //   ・デバッグ用API: window.MediaController.debugGalleryButton()
     // ============================================================
     function setupGalleryButtonHoverControl() {
-        const OPACITY_HOVER = '1';
         let lastX = -1, lastY = -1;
         let currentBtn = null;
+        let isHovering = false;
+        let debugLoggedOnce = false;
+        let pendingCheck = false;
 
-        /**
-         * 🎨 ボタンを探索（複数の候補セレクタ → 絵文字テキスト検索の順）
-         */
+        // ─── ボタン探索 ───
         function findGalleryButton() {
-            // DOM に残っている既存参照を優先
             if (currentBtn && document.body.contains(currentBtn)) return currentBtn;
 
+            // 既知セレクタ（ハイフン/アンダースコア両対応）
             const selectors = [
-                '#gic-gallery-button',
-                '#gallery-button',
-                '#gic_button',
+                '#gic-gallery-button', '#gic_gallery_button', '#gic-gallery-btn',
+                '#gallery-button', '#gallery_button', '#gallery-btn',
+                '#gic_button', '#gic-btn',
                 '[id*="gic"][id*="button"]',
+                '[id*="gic"][id*="btn"]',
                 '[id*="gallery"][id*="button"]',
+                '[id*="gallery"][id*="btn"]',
+                '.gic-gallery-button', '.gic-gallery-btn',
             ];
             for (const sel of selectors) {
                 const el = document.querySelector(sel);
                 if (el) { currentBtn = el; return el; }
             }
 
-            // フォールバック: 子要素なし・テキストが 🎨 の要素を探索
-            const candidates = document.querySelectorAll(
-                'button, div, span, a, [role="button"]'
-            );
-            for (const el of candidates) {
-                if (el.children.length > 0) continue;
-                const txt = (el.textContent || '').trim();
-                if (txt !== '🎨') continue;
+            // 絵文字フォールバック: 🎨 を含む「最も内側の表示要素」
+            const all = document.querySelectorAll('body *');
+            let best = null;
+            let bestDepth = -1;
+            for (const el of all) {
+                const text = (el.textContent || '').trim();
+                if (!text.includes('🎨')) continue;
                 const rect = el.getBoundingClientRect();
-                if (rect.width > 0 && rect.height > 0) {
-                    currentBtn = el;
-                    return el;
-                }
+                if (rect.width === 0 || rect.height === 0) continue;
+                if (rect.width > 300 || rect.height > 300) continue;
+                // 最も内側（depth最大）を優先
+                let depth = 0;
+                let p = el;
+                while (p && p !== document.body) { depth++; p = p.parentElement; }
+                if (depth > bestDepth) { best = el; bestDepth = depth; }
             }
-            return null;
+            currentBtn = best;
+            return best;
         }
 
-        /**
-         * 🎨 ボタン上にマウスがあるかを判定し opacity を更新
-         */
-        function updateHoverOpacity() {
+        // ─── ホバー時: ボタン＋半透明な祖先を強制不透明化 ───
+        function forceOpaque(el) {
+            let node = el;
+            let depth = 0;
+            while (node && node !== document.documentElement && depth < 10) {
+                const op = parseFloat(window.getComputedStyle(node).opacity);
+                if (!isNaN(op) && op < 1) {
+                    if (node.dataset.mcOpacitySaved !== '1') {
+                        node.dataset.mcOpacitySaved = '1';
+                        // 元のインライン値と優先度を保存
+                        node.dataset.mcOrigOpacityValue =
+                            node.style.getPropertyValue('opacity');
+                        node.dataset.mcOrigOpacityPriority =
+                            node.style.getPropertyPriority('opacity');
+                    }
+                    node.style.setProperty('opacity', '1', 'important');
+                }
+                node = node.parentElement;
+                depth++;
+            }
+        }
+
+        // ─── 離脱時: 自分が付けた opacity だけ元に戻す ───
+        function restoreOpacity(el) {
+            let node = el;
+            let depth = 0;
+            while (node && node !== document.documentElement && depth < 10) {
+                if (node.dataset.mcOpacitySaved === '1') {
+                    const curValue = node.style.getPropertyValue('opacity');
+                    const curPriority = node.style.getPropertyPriority('opacity');
+                    // 自分が設定した値のままの場合のみ復元（gic.jsが後から変えた値は尊重）
+                    if (curValue === '1' && curPriority === 'important') {
+                        const origValue = node.dataset.mcOrigOpacityValue || '';
+                        const origPriority = node.dataset.mcOrigOpacityPriority || '';
+                        if (origValue) {
+                            node.style.setProperty('opacity', origValue, origPriority);
+                        } else {
+                            node.style.removeProperty('opacity');
+                        }
+                    }
+                    delete node.dataset.mcOpacitySaved;
+                    delete node.dataset.mcOrigOpacityValue;
+                    delete node.dataset.mcOrigOpacityPriority;
+                }
+                node = node.parentElement;
+                depth++;
+            }
+        }
+
+        // ─── ホバー判定 ───
+        function checkHover() {
             const btn = findGalleryButton();
             if (!btn) return;
-
-            // ボタンが表示されていない場合はスキップ
             const rect = btn.getBoundingClientRect();
             if (rect.width === 0 || rect.height === 0) return;
 
             const inside =
-                lastX >= 0 && lastY >= 0 &&
                 lastX >= rect.left && lastX <= rect.right &&
                 lastY >= rect.top  && lastY <= rect.bottom;
 
-            if (inside) {
-                btn.style.setProperty('opacity', OPACITY_HOVER, 'important');
-                btn.dataset.mcGalleryHovered = '1';
-            } else if (btn.dataset.mcGalleryHovered === '1') {
-                // 自分で付けた opacity のみ解除（gic.js 側の値を尊重）
-                btn.style.removeProperty('opacity');
-                btn.dataset.mcGalleryHovered = '0';
+            if (inside && !isHovering) {
+                isHovering = true;
+                forceOpaque(btn);
+                if (!debugLoggedOnce) {
+                    debugLoggedOnce = true;
+                    console.log('[MediaController] 🎨 ボタンを検出しました:',
+                        { id: btn.id, className: btn.className, tagName: btn.tagName });
+                }
+            } else if (!inside && isHovering) {
+                isHovering = false;
+                restoreOpacity(btn);
             }
         }
 
-        // マウス座標を記録
+        // ─── イベント登録 ───
         document.addEventListener('mousemove', (e) => {
             lastX = e.clientX;
             lastY = e.clientY;
-            updateHoverOpacity();
+            checkHover();
         }, { passive: true });
 
-        // ウィンドウ外に出たらホバー解除
         document.addEventListener('mouseleave', () => {
-            lastX = -1;
-            lastY = -1;
-            updateHoverOpacity();
+            lastX = -1; lastY = -1;
+            checkHover();
         });
 
-        // 🎨 ボタンが後から追加／再生成されるケースに対応
-        // 100ms 間隔で座標判定を再評価（軽量）
-        setInterval(updateHoverOpacity, 100);
+        // マウス静止中にボタンが移動したケースにも追従
+        setInterval(() => {
+            if (lastX >= 0 && lastY >= 0) checkHover();
+        }, 100);
 
-        // DOM 追加を検出したら即評価
+        // ボタンが再生成されたら参照をリセット（rAFで間引き）
         const observer = new MutationObserver(() => {
-            currentBtn = null; // 参照をリセットして再探索
-            if (lastX >= 0 && lastY >= 0) updateHoverOpacity();
+            currentBtn = null;
+            if (pendingCheck) return;
+            pendingCheck = true;
+            requestAnimationFrame(() => {
+                pendingCheck = false;
+                if (lastX >= 0 && lastY >= 0) checkHover();
+            });
         });
         observer.observe(document.body, { childList: true, subtree: true });
 
+        // ─── デバッグ用API ───
+        window.MediaController.debugGalleryButton = function () {
+            currentBtn = null;
+            const btn = findGalleryButton();
+            console.log('=== 🎨 Gallery Button Debug ===');
+            if (!btn) { console.warn('ボタンが見つかりませんでした'); return; }
+            console.log('Element:', btn);
+            console.log('  id:', btn.id);
+            console.log('  className:', btn.className);
+            console.log('  tagName:', btn.tagName);
+            console.log('  textContent:', JSON.stringify(btn.textContent));
+            console.log('  computed opacity:', window.getComputedStyle(btn).opacity);
+            console.log('  computed pointer-events:', window.getComputedStyle(btn).pointerEvents);
+            console.log('  rect:', btn.getBoundingClientRect());
+            let p = btn.parentElement, i = 1;
+            while (p && i <= 8) {
+                const op = window.getComputedStyle(p).opacity;
+                console.log(`  parent[${i}] <${p.tagName} id="${p.id}" class="${p.className}"> opacity=${op}`);
+                if (op !== '1') console.warn(`  ^^ parent[${i}] が半透明です！`);
+                p = p.parentElement;
+                i++;
+            }
+        };
+
         console.log('[MediaController] 🎨 ギャラリーボタンのホバー制御を開始しました');
+        console.log('[MediaController] 動かない場合: window.MediaController.debugGalleryButton() を実行して結果を確認してください');
     }
     
     function init() {
