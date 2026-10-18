@@ -161,6 +161,15 @@
             const btn = target.closest('#create_button_label');
             if (!btn) return;
 
+            // 重複実行防止（ラベル＋内部inputの二重発火対策）
+            if (createDebounceTimer) {
+                console.log('[MediaController] 重複クリックをスキップ');
+                return;
+            }
+            createDebounceTimer = setTimeout(() => {
+                createDebounceTimer = null;
+            }, CREATE_DEBOUNCE_MS);
+
             // SillyTavern 本体の処理を妨げないよう、マイクロタスクで非同期実行
             Promise.resolve().then(handleCreateCharacter);
         }, true);
