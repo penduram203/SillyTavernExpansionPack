@@ -2,7 +2,6 @@
  * Media Controller
  * キャラクター作成時に public/addchara/{キャラクター名}/ フォルダを自動作成
  * サーバープラグイン未導入時はセットアップガイドを自動表示
- * 将来的なメディア管理機能の基盤
  */
 (function () {
     'use strict';
@@ -18,9 +17,10 @@
     const HEALTH_ENDPOINT = `/api/plugins/${PLUGIN_ID}/health`;
     const CREATE_FOLDER_ENDPOINT = `/api/plugins/${PLUGIN_ID}/create-folder`;
     const POLL_INTERVAL = 200;
-    const POLL_TIMEOUT = 15000;
+    const POLL_TIMEOUT = 30000; // 15s → 30s に延長
     const STATUS_DISPLAY_DURATION = 4000;
-    const HEALTH_CHECK_CACHE_TTL = 60000; // 60秒キャッシュ
+    const HEALTH_CHECK_CACHE_TTL = 60000;
+    const PLACEHOLDER_NAMES = ['SillyTavern System', 'System', ''];
 
     // ═══════════════════════════════════════════════════════════
     // 状態
@@ -30,34 +30,89 @@
     let statusTimer = null;
     let setupModalEl = null;
     let healthCache = { available: null, timestamp: 0 };
+    let lastCreatedName = null; // 検出済みキャラ名（二重処理防止）
 
     // ═══════════════════════════════════════════════════════════
     // ユーティリティ
     // ═══════════════════════════════════════════════════════════
 
+    function isPlaceholderName(name) {
+        if (!name || typeof name !== 'string') return true;
+        return PLACEHOLDER_NAMES.includes(name.trim());
+    }
+
+    /**
+     * 現在選択中のキャラクター名を取得
+     * ★ チェック順序を修正: ctx.characters[ctx.characterId] を最優先
+     */
     function getCurrentCharacterName() {
         try {
             if (typeof SillyTavern !== 'undefined') {
                 const ctx = SillyTavern.getContext();
                 if (ctx) {
-                    if (ctx.character?.name) return ctx.character.name;
-                    if (ctx.name2) return ctx.name2;
-                    if (ctx.characters && typeof ctx.characterId !== 'undefined' && ctx.characters[ctx.characterId]) {
+                    // ★ 1. ctx.characters[ctx.characterId] を最優先
+                    //    （キャラ作成後、ctx.character.name は古いまま残るため）
+                    if (ctx.characters && typeof ctx.characterId !== 'undefined' &&
+                        ctx.characters[ctx.characterId]) {
                         const cName = ctx.characters[ctx.characterId].name;
-                        if (cName) return cName;
+                        if (cName && !isPlaceholderName(cName)) return cName;
                     }
+                    // 2. ctx.character.name（プレースホルダ除外）
+                    if (ctx.character?.name && !isPlaceholderName(ctx.character.name)) {
+                        return ctx.character.name;
+                    }
+                    // 3. ctx.name2
+                    if (ctx.name2 && !isPlaceholderName(ctx.name2)) return ctx.name2;
                 }
+            }
+        } catch (e) {
+            console.warn('[MediaController] getCurrentCharacterName (context) エラー:', e);
+        }
+
+        // 4. DOM フォールバック（option.value も確認）
+        try {
+            const selected = document.querySelector(
+                '#character_select option:checked, select[name="character"] option:checked'
+            );
+            if (selected) {
+                // value（アバターファイル名）から拡張子を除去
+                const val = selected.value?.replace(/\.(png|jpg|jpeg|webp|gif)$/i, '');
+                if (val && !isPlaceholderName(val)) return val;
+                // textContent も確認
+                const text = selected.textContent?.trim();
+                if (text && !isPlaceholderName(text)) return text;
             }
         } catch (e) { /* ignore */ }
 
-        const selected = document.querySelector(
-            '#character_select option:checked, select[name="character"] option:checked'
-        );
-        if (selected) {
-            const text = selected.textContent?.trim();
-            if (text && text !== 'SillyTavern System') return text;
-        }
         return null;
+    }
+
+    /**
+     * キャラクターリストから「新しく追加されたキャラ」を検出
+     * （ctx.characterId が更新されない場合の保険）
+     */
+    function findNewCharacterFromList(knownAvatars) {
+        try {
+            if (typeof SillyTavern === 'undefined') return null;
+            const ctx = SillyTavern.getContext();
+            if (!ctx?.characters) return null;
+            const newChar = ctx.characters.find(c => c && c.avatar && !knownAvatars.has(c.avatar));
+            return newChar?.name || null;
+        } catch (e) { return null; }
+    }
+
+    /**
+     * 現在のキャラクターリストのアバターセットを取得
+     */
+    function getCurrentAvatarSet() {
+        const set = new Set();
+        try {
+            if (typeof SillyTavern === 'undefined') return set;
+            const ctx = SillyTavern.getContext();
+            if (!ctx?.characters) return set;
+            ctx.characters.forEach(c => { if (c?.avatar) set.add(c.avatar); });
+        } catch (e) { /* ignore */ }
+        return set;
     }
 
     function checkDangerousChars(name) {
@@ -87,11 +142,6 @@
     // ヘルスチェック
     // ═══════════════════════════════════════════════════════════
 
-    /**
-     * サーバープラグインが利用可能かをチェック（60秒キャッシュ）
-     * @param {boolean} forceRefresh キャッシュを無視して再取得
-     * @returns {Promise<boolean>}
-     */
     async function checkEndpointAvailability(forceRefresh = false) {
         const now = Date.now();
         if (!forceRefresh && healthCache.available !== null &&
@@ -103,7 +153,6 @@
             const resp = await fetch(HEALTH_ENDPOINT, {
                 method: 'GET',
                 headers: { 'Content-Type': 'application/json' },
-                // タイムアウト用のAbortSignal
                 signal: AbortSignal.timeout ? AbortSignal.timeout(3000) : undefined,
             });
             if (resp.ok) {
@@ -172,11 +221,13 @@
         return false;
     }
 
-    /**
-     * ヘルスチェック付きフォルダ作成
-     * 未導入時はセットアップガイドを表示
-     */
     async function createCharacterFolderWithCheck(charName) {
+        if (lastCreatedName === charName) {
+            console.log(`[MediaController] 同一キャラの二重処理をスキップ: ${charName}`);
+            return false;
+        }
+        lastCreatedName = charName;
+
         const available = await checkEndpointAvailability();
         if (!available) {
             console.warn('[MediaController] サーバープラグイン未導入 → セットアップガイド表示');
@@ -242,7 +293,6 @@ module.exports = {
                         SillyTavern サーバー側に専用プラグインが必要です。<br>
                         以下の手順に従ってセットアップしてください。
                     </p>
-
                     <ol class="mc-setup-steps">
                         <li>
                             <div class="mc-step-title">📁 プラグインフォルダを作成</div>
@@ -275,7 +325,6 @@ module.exports = {
                             </div>
                         </li>
                     </ol>
-
                     <div class="mc-setup-note">
                         <strong>💡 ヒント:</strong>
                         セットアップ完了後、このモーダルの「再チェック」ボタンで
@@ -301,7 +350,6 @@ module.exports = {
         setupModalEl.innerHTML = buildSetupGuideHTML();
         document.body.appendChild(setupModalEl);
 
-        // イベント登録
         setupModalEl.querySelector('.mc-setup-modal-close')
             .addEventListener('click', hideSetupGuide);
         setupModalEl.querySelector('.mc-setup-close-button')
@@ -349,7 +397,6 @@ module.exports = {
                 }
             });
 
-        // 表示アニメーション
         requestAnimationFrame(() => {
             setupModalEl.classList.add('mc-visible');
         });
@@ -361,7 +408,7 @@ module.exports = {
     }
 
     // ═══════════════════════════════════════════════════════════
-    // キャラクター作成の検出
+    // キャラクター作成の検出（ポーリング + リスト差分）
     // ═══════════════════════════════════════════════════════════
 
     function startWatchingCreation() {
@@ -369,23 +416,49 @@ module.exports = {
         isWatching = true;
 
         const oldName = getCurrentCharacterName();
-        console.log(`[MediaController] キャラ作成監視開始 (旧キャラ: ${oldName ?? 'なし'})`);
+        const knownAvatars = getCurrentAvatarSet(); // ★ キャラリストのスナップショット
+        console.log(
+            `[MediaController] キャラ作成監視開始 ` +
+            `(旧キャラ: ${oldName ?? 'なし'}, 既知キャラ数: ${knownAvatars.size})`
+        );
         const startTime = Date.now();
+        let pollCount = 0;
 
         const timer = setInterval(async () => {
+            pollCount++;
             if (Date.now() - startTime > POLL_TIMEOUT) {
                 clearInterval(timer);
                 isWatching = false;
-                console.warn('[MediaController] キャラ作成の検出タイムアウト');
+                console.warn(`[MediaController] キャラ作成の検出タイムアウト (${pollCount}回ポーリング)`);
                 return;
             }
 
+            // ★ 方法1: 現在名の変化を検出
             const newName = getCurrentCharacterName();
             if (newName && newName !== oldName) {
                 clearInterval(timer);
                 isWatching = false;
-                console.log(`[MediaController] 🎉 新キャラ検出: ${newName}`);
+                console.log(`[MediaController] 🎉 新キャラ検出(名前変化): ${newName} (poll=${pollCount})`);
                 await createCharacterFolderWithCheck(newName);
+                return;
+            }
+
+            // ★ 方法2: キャラリストの増加を検出（フォールバック）
+            const listNewName = findNewCharacterFromList(knownAvatars);
+            if (listNewName) {
+                clearInterval(timer);
+                isWatching = false;
+                console.log(`[MediaController] 🎉 新キャラ検出(リスト差分): ${listNewName} (poll=${pollCount})`);
+                await createCharacterFolderWithCheck(listNewName);
+                return;
+            }
+
+            // ★ デバッグログ（10回に1回だけ出力）
+            if (pollCount % 10 === 1) {
+                console.log(
+                    `[MediaController] poll#${pollCount}: ` +
+                    `newName="${newName}", chars=${getCurrentAvatarSet().size}`
+                );
             }
         }, POLL_INTERVAL);
     }
@@ -403,16 +476,52 @@ module.exports = {
         }, true);
     }
 
+    /**
+     * ★ 保険: SillyTavern のイベントでも検出
+     *    ポーリングが間に合わない/失敗するケースをカバー
+     */
+    function setupEventFallback() {
+        try {
+            if (typeof SillyTavern === 'undefined') return;
+            const ctx = SillyTavern.getContext();
+            if (!ctx?.eventSource || !ctx?.eventTypes) return;
+            const { eventSource, eventTypes } = ctx;
+
+            const onCharacterAppeared = () => {
+                if (!isWatching) return;
+                // 少し待ってから名前を確認（コンテキスト更新待ち）
+                setTimeout(() => {
+                    const name = getCurrentCharacterName();
+                    if (name && name !== lastCreatedName) {
+                        console.log(`[MediaController] 🎉 新キャラ検出(イベント): ${name}`);
+                        createCharacterFolderWithCheck(name);
+                    }
+                }, 500);
+            };
+
+            ['CHARACTER_PAGE_LOADED', 'CHARACTER_SELECTED', 'CHAT_CHANGED', 'CHARACTER_EDITED']
+                .forEach(evName => {
+                    const evType = eventTypes[evName];
+                    if (evType && typeof eventSource.on === 'function') {
+                        eventSource.on(evType, onCharacterAppeared);
+                        console.log(`[MediaController] イベントフォールバック登録: ${evName}`);
+                    }
+                });
+        } catch (e) {
+            console.warn('[MediaController] イベントフォールバック登録失敗:', e);
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════
     // 初期化
     // ═══════════════════════════════════════════════════════════
 
     async function init() {
         setupCreateInterception();
+        setupEventFallback();
         const initialName = getCurrentCharacterName();
         console.log(`[MediaController] 初期キャラ: ${initialName ?? 'なし'}`);
 
-        // 起動時にバックグラウンドでヘルスチェック（結果はキャッシュ）
         checkEndpointAvailability().then(available => {
             if (available) {
                 console.log('[MediaController] ✅ サーバープラグイン検出済み');
