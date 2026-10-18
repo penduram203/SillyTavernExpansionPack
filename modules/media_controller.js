@@ -2,6 +2,7 @@
  * Media Controller
  * SillyTavern キャラクター作成時に、キャラ名をクリップボードへ自動保存し
  * ローカルディスクの addchara フォルダ内に新規フォルダ作成を促す通知を表示する。
+ * 併せて、🎨 ギャラリーボタン（#gic-open-gallery-button）のホバー時不透明化を制御する。
  */
 (function () {
     'use strict';
@@ -190,55 +191,10 @@
         }, true);
     }
 
-    /**
-     * CSS未読込時のフォールバック（toastrの装飾が最低限効くように）
-     */
-    function injectCriticalCSS() {
-        if (document.getElementById('mc-critical-css')) return;
-        const style = document.createElement('style');
-        style.id = 'mc-critical-css';
-        style.textContent = `
-            #toast-container .toast-info {
-                background-color: #1e1e1e !important;
-                border-left: 6px solid #4caf50 !important;
-                border-radius: 10px !important;
-                box-shadow: 0 8px 32px rgba(0,0,0,0.65) !important;
-                padding: 16px 20px !important;
-                opacity: 0.98 !important;
-            }
-            #toast-container .toast-title {
-                font-size: 18px !important;
-                font-weight: bold !important;
-                color: #7ee787 !important;
-                margin-bottom: 10px !important;
-                border-bottom: 1px solid rgba(255,255,255,0.12);
-                padding-bottom: 8px;
-            }
-            #toast-container .toast-message {
-                font-size: 15px !important;
-                line-height: 1.8 !important;
-                color: #e8e8e8 !important;
-                white-space: pre-line !important;
-                word-break: break-word !important;
-            }
-            .mc-toast-name {
-                color: #ffd54f !important;
-                font-size: 20px !important;
-                font-weight: bold !important;
-                background: rgba(255, 213, 79, 0.15);
-                padding: 2px 10px;
-                border-radius: 6px;
-                border: 1px solid rgba(255, 213, 79, 0.5);
-                margin-left: 4px;
-            }
-        `;
-        document.head.appendChild(style);
-    }
-
     // ============================================================
     // 🎨 ギャラリーボタンのホバー不透明化
-    //   ・子要素制限を撤廃（spanなどでラップされていても検出）
-    //   ・親要素の opacity < 1 も遡って矯正（乗算対策）
+    //   実ID: #gic-open-gallery-button
+    //   ・子孫要素・疑似要素(::before/::after)・半透明な祖先も矯正
     //   ・デバッグ用API: window.MediaController.debugGalleryButton()
     // ============================================================
     function setupGalleryButtonHoverControl() {
@@ -252,8 +208,9 @@
         function findGalleryButton() {
             if (currentBtn && document.body.contains(currentBtn)) return currentBtn;
 
-            // 既知セレクタ（ハイフン/アンダースコア両対応）
+            // 既知セレクタ（実ID #gic-open-gallery-button を先頭に配置）
             const selectors = [
+                '#gic-open-gallery-button',      // ★ 実ID（最優先）
                 '#gic-gallery-button', '#gic_gallery_button', '#gic-gallery-btn',
                 '#gallery-button', '#gallery_button', '#gallery-btn',
                 '#gic_button', '#gic-btn',
@@ -278,7 +235,6 @@
                 const rect = el.getBoundingClientRect();
                 if (rect.width === 0 || rect.height === 0) continue;
                 if (rect.width > 300 || rect.height > 300) continue;
-                // 最も内側（depth最大）を優先
                 let depth = 0;
                 let p = el;
                 while (p && p !== document.body) { depth++; p = p.parentElement; }
@@ -288,8 +244,9 @@
             return best;
         }
 
-        // ─── ホバー時: ボタン＋半透明な祖先を強制不透明化 ───
+        // ─── ホバー時: ボタン＋祖先＋疑似要素＋子孫を強制不透明化 ───
         function forceOpaque(el) {
+            // 祖先のインライン opacity 矯正
             let node = el;
             let depth = 0;
             while (node && node !== document.documentElement && depth < 10) {
@@ -297,7 +254,6 @@
                 if (!isNaN(op) && op < 1) {
                     if (node.dataset.mcOpacitySaved !== '1') {
                         node.dataset.mcOpacitySaved = '1';
-                        // 元のインライン値と優先度を保存
                         node.dataset.mcOrigOpacityValue =
                             node.style.getPropertyValue('opacity');
                         node.dataset.mcOrigOpacityPriority =
@@ -308,9 +264,28 @@
                 node = node.parentElement;
                 depth++;
             }
+
+            // 疑似要素・子孫要素の opacity をマーカー属性＋CSSで矯正
+            let fixStyle = document.getElementById('mc-gallery-hover-fix');
+            if (!fixStyle) {
+                fixStyle = document.createElement('style');
+                fixStyle.id = 'mc-gallery-hover-fix';
+                document.head.appendChild(fixStyle);
+            }
+            el.setAttribute('data-mc-gallery-hover', '1');
+            fixStyle.textContent = `
+                [data-mc-gallery-hover="1"],
+                [data-mc-gallery-hover="1"]::before,
+                [data-mc-gallery-hover="1"]::after,
+                [data-mc-gallery-hover="1"] *,
+                [data-mc-gallery-hover="1"] *::before,
+                [data-mc-gallery-hover="1"] *::after {
+                    opacity: 1 !important;
+                }
+            `;
         }
 
-        // ─── 離脱時: 自分が付けた opacity だけ元に戻す ───
+        // ─── 離脱時: 自分が付けた opacity とマーカーを元に戻す ───
         function restoreOpacity(el) {
             let node = el;
             let depth = 0;
@@ -318,7 +293,6 @@
                 if (node.dataset.mcOpacitySaved === '1') {
                     const curValue = node.style.getPropertyValue('opacity');
                     const curPriority = node.style.getPropertyPriority('opacity');
-                    // 自分が設定した値のままの場合のみ復元（gic.jsが後から変えた値は尊重）
                     if (curValue === '1' && curPriority === 'important') {
                         const origValue = node.dataset.mcOrigOpacityValue || '';
                         const origPriority = node.dataset.mcOrigOpacityPriority || '';
@@ -335,6 +309,10 @@
                 node = node.parentElement;
                 depth++;
             }
+
+            el.removeAttribute('data-mc-gallery-hover');
+            const fixStyle = document.getElementById('mc-gallery-hover-fix');
+            if (fixStyle) fixStyle.textContent = '';
         }
 
         // ─── ホバー判定 ───
@@ -396,30 +374,111 @@
         api.debugGalleryButton = function () {
             currentBtn = null;
             const btn = findGalleryButton();
-            console.log('=== 🎨 Gallery Button Debug ===');
+            console.log('=== 🎨 Gallery Button Debug (v2) ===');
             if (!btn) { console.warn('ボタンが見つかりませんでした'); return; }
             console.log('Element:', btn);
             console.log('  id:', btn.id);
             console.log('  className:', btn.className);
             console.log('  tagName:', btn.tagName);
             console.log('  textContent:', JSON.stringify(btn.textContent));
-            console.log('  computed opacity:', window.getComputedStyle(btn).opacity);
-            console.log('  computed pointer-events:', window.getComputedStyle(btn).pointerEvents);
+            const cs = window.getComputedStyle(btn);
+            console.log('  computed opacity:', cs.opacity);
+            console.log('  computed pointer-events:', cs.pointerEvents);
+            console.log('  computed visibility:', cs.visibility);
+            console.log('  computed display:', cs.display);
+            console.log('  computed background-color:', cs.backgroundColor);
             console.log('  rect:', btn.getBoundingClientRect());
+
+            // 疑似要素の詳細
+            ['::before', '::after'].forEach(pseudo => {
+                const pcs = window.getComputedStyle(btn, pseudo);
+                console.log(`  ${pseudo}:`, {
+                    content: pcs.content,
+                    opacity: pcs.opacity,
+                    display: pcs.display,
+                    visibility: pcs.visibility,
+                    background: pcs.backgroundColor,
+                    width: pcs.width,
+                    height: pcs.height,
+                });
+            });
+
+            // 子孫要素
+            btn.querySelectorAll('*').forEach((child, i) => {
+                const ccs = window.getComputedStyle(child);
+                console.log(`  child[${i}] <${child.tagName}> opacity=${ccs.opacity} text=${JSON.stringify(child.textContent)}`);
+            });
+
+            // 祖先要素
             let p = btn.parentElement, i = 1;
-            while (p && i <= 8) {
+            while (p && i <= 10) {
                 const op = window.getComputedStyle(p).opacity;
-                console.log(`  parent[${i}] <${p.tagName} id="${p.id}" class="${p.className}"> opacity=${op}`);
+                const bg = window.getComputedStyle(p).backgroundColor;
+                console.log(`  parent[${i}] <${p.tagName} id="${p.id}" class="${p.className}"> opacity=${op} bg=${bg}`);
                 if (op !== '1') console.warn(`  ^^ parent[${i}] が半透明です！`);
                 p = p.parentElement;
                 i++;
             }
+
+            // 兄弟要素（🎨テキストを持つもの）
+            const siblings = btn.parentElement ? btn.parentElement.children : [];
+            Array.from(siblings).forEach((s, i) => {
+                if (s === btn) return;
+                if (!(s.textContent || '').includes('🎨')) return;
+                const scs = window.getComputedStyle(s);
+                console.log(`  sibling[${i}] <${s.tagName} id="${s.id}" class="${s.className}"> opacity=${scs.opacity} text=${JSON.stringify(s.textContent)}`);
+            });
         };
 
         console.log('[MediaController] 🎨 ギャラリーボタンのホバー制御を開始しました');
         console.log('[MediaController] 動かない場合: window.MediaController.debugGalleryButton() を実行して結果を確認してください');
     }
-    
+
+    /**
+     * CSS未読込時のフォールバック（toastrの装飾が最低限効くように）
+     */
+    function injectCriticalCSS() {
+        if (document.getElementById('mc-critical-css')) return;
+        const style = document.createElement('style');
+        style.id = 'mc-critical-css';
+        style.textContent = `
+            #toast-container .toast-info {
+                background-color: #1e1e1e !important;
+                border-left: 6px solid #4caf50 !important;
+                border-radius: 10px !important;
+                box-shadow: 0 8px 32px rgba(0,0,0,0.65) !important;
+                padding: 16px 20px !important;
+                opacity: 0.98 !important;
+            }
+            #toast-container .toast-title {
+                font-size: 18px !important;
+                font-weight: bold !important;
+                color: #7ee787 !important;
+                margin-bottom: 10px !important;
+                border-bottom: 1px solid rgba(255,255,255,0.12);
+                padding-bottom: 8px;
+            }
+            #toast-container .toast-message {
+                font-size: 15px !important;
+                line-height: 1.8 !important;
+                color: #e8e8e8 !important;
+                white-space: pre-line !important;
+                word-break: break-word !important;
+            }
+            .mc-toast-name {
+                color: #ffd54f !important;
+                font-size: 20px !important;
+                font-weight: bold !important;
+                background: rgba(255, 213, 79, 0.15);
+                padding: 2px 10px;
+                border-radius: 6px;
+                border: 1px solid rgba(255, 213, 79, 0.5);
+                margin-left: 4px;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
     function init() {
         injectCriticalCSS();
         setupClickListener();
@@ -431,7 +490,8 @@
         console.log('[MediaController] 初期化完了');
     }
 
-    // ★ init() より先に window.MediaController を定義
+    // ★ init() より先に window.MediaController を定義する
+    //   （setupGalleryButtonHoverControl 内で debugGalleryButton を追加するため）
     window.MediaController = {
         getCharacterName,
         copyToClipboard,
