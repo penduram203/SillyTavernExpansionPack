@@ -126,9 +126,9 @@
 
     async function detectImageExtension(charName, fileNameWithExt) {
         if (!charName || !fileNameWithExt) return null;
-        const path = fileNameWithExt.startsWith('addchara/')
+        const path = fileNameWithExt.startsWith('user/images/')
             ? fileNameWithExt
-            : `addchara/${charName}/${fileNameWithExt}`;
+            : `user/images/${charName}/${fileNameWithExt}`;
         const exists = await checkMediaExists(path);
         return exists ? path : null;
     }
@@ -1423,7 +1423,7 @@
     async function loadExistingJSONData(charName) {
         if (!charName) return;
         try {
-            const jsonPath = `addchara/${charName}/${charName}_ext.json`;
+            const jsonPath = `user/images/${charName}/${charName}_ext.json`;
             const response = await fetch(jsonPath);
             if (response.ok) {
                 const data = await response.json();
@@ -1797,7 +1797,7 @@
     }
 
     function buildImageMapFromForm(charName) {
-        const toPaths = (raw) => parseImageNames(raw).map(name => `addchara/${charName}/${extractFileNameFromPath(name)}`);
+        const toPaths = (raw) => parseImageNames(raw).map(name => `user/images/${charName}/${extractFileNameFromPath(name)}`);
         const imageMap = {};
 
         const defaultPaths = toPaths(document.getElementById('stj_default_image').value);
