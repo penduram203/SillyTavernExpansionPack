@@ -1790,3 +1790,60 @@
     };
     console.log("✅ Image Display Extension API を window.ImageDisplayExtension に公開しました");
 })();
+
+(function () {
+    const TARGET_ID = 'WIDrawerIcon';
+    const OPACITY_NORMAL = '0.4';
+    const OPACITY_HOVER = '1';
+
+    let isHovered = false;
+
+    function updateIconOpacity(hover) {
+        const icon = document.getElementById(TARGET_ID);
+        if (!icon) return;
+        // CSSの !important に勝つため、setProperty を使用する
+        icon.style.setProperty('opacity', hover ? OPACITY_HOVER : OPACITY_NORMAL, 'important');
+    }
+
+    // マウスがアイコンの矩形内にあるか判定
+    function checkHover(e) {
+        const icon = document.getElementById(TARGET_ID);
+        if (!icon) return;
+
+        const rect = icon.getBoundingClientRect();
+        // アイコンが非表示、またはサイズがない場合はスキップ
+        if (rect.width === 0 || rect.height === 0) return;
+
+        const inside =
+            e.clientX >= rect.left &&
+            e.clientX <= rect.right &&
+            e.clientY >= rect.top &&
+            e.clientY <= rect.bottom;
+
+        if (inside !== isHovered) {
+            isHovered = inside;
+            updateIconOpacity(isHovered);
+        }
+    }
+
+    // イベントリスナーを登録
+    document.addEventListener('mousemove', checkHover, { passive: true });
+
+    // マウスがウィンドウ外に出たときはホバー解除
+    document.addEventListener('mouseleave', () => {
+        if (isHovered) {
+            isHovered = false;
+            updateIconOpacity(false);
+        }
+    });
+
+    // 初期状態を設定（念のため）
+    // DOMの準備ができてから実行
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => updateIconOpacity(false));
+    } else {
+        updateIconOpacity(false);
+    }
+
+    console.log('[ImageDisplay] WIDrawerIcon のホバー検出を開始しました');
+})();
