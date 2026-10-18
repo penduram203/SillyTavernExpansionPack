@@ -214,10 +214,11 @@
             html body #WIDrawerIcon.drawer-icon {
                 transition: opacity 0.15s ease !important;
             }
-            html body #WIDrawerIcon.drawer-icon:not(:hover) {
+            /* 修正後：状態クラスを追加して特異性を向上 */
+            html body #WIDrawerIcon.drawer-icon.drawerPinnedOpen.openIcon:not(:hover) {
                 opacity: 0.4 !important;
             }
-            html body #WIDrawerIcon.drawer-icon:hover {
+            html body #WIDrawerIcon.drawer-icon.drawerPinnedOpen.openIcon:hover {
                 opacity: 1 !important;
             }
         `;
