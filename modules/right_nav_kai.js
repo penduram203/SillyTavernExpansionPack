@@ -82,7 +82,7 @@
 
         // 1. _ext.json からのサムネイル/デフォルト画像検索
         try {
-            const extPath = `addchara/${charName}/${charName}_ext.json`;
+            const extPath = `user/images/${charName}/${charName}_ext.json`;
             const resp = await fetch(extPath);
             if (resp.ok) {
                 const data = await resp.json();
@@ -106,7 +106,7 @@
         }
 
         // 2. フォールバック (defa.mp4)
-        const fallback = `addchara/${charName}/defa.mp4`;
+        const fallback = `user/images/${charName}/defa.mp4`;
         const exists = await checkMediaExists(fallback);
         if (exists) {
             mediaCache.set(charName, fallback);
