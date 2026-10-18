@@ -140,35 +140,38 @@
             return false;
         }
 
-        // ── 方法 1: SlashCommandParser.commands.sys.callback を直接呼ぶ ──
-        try {
-            const parser = context.SlashCommandParser || window.SlashCommandParser;
-            const sysCmd = parser?.commands?.sys;
-            if (sysCmd && typeof sysCmd.callback === 'function') {
-                await sysCmd.callback({ quiet: 'true' }, command);
-                log('/sys 経由でフォルダオープン要求を送信しました');
-                return true;
-            }
-        } catch (e) {
-            warn('SlashCommandParser 経由失敗:', e);
-        }
-
-        // ── 方法 2: executeSlashCommandsWithOptions ──
+        // ── 方法 1: executeSlashCommandsWithOptions + quiet ──
         try {
             if (typeof context.executeSlashCommandsWithOptions === 'function') {
-                await context.executeSlashCommandsWithOptions(`/sys ${command}`);
-                log('executeSlashCommandsWithOptions 経由で送信しました');
+                await context.executeSlashCommandsWithOptions(
+                    `/sys ${command}`,
+                    { quiet: true }          // ★ チャットへの出力を抑制
+                );
+                log('/sys (quiet) 経由でフォルダオープン要求を送信しました');
                 return true;
             }
         } catch (e) {
             warn('executeSlashCommandsWithOptions 経由失敗:', e);
         }
 
-        // ── 方法 3: executeSlashCommands ──
+        // ── 方法 2: SlashCommandParser.commands.sys.callback を直接呼ぶ（quiet 指定） ──
+        try {
+            const parser = context.SlashCommandParser || window.SlashCommandParser;
+            const sysCmd = parser?.commands?.sys;
+            if (sysCmd && typeof sysCmd.callback === 'function') {
+                await sysCmd.callback({ quiet: 'true' }, command);
+                log('/sys callback 経由でフォルダオープン要求を送信しました（quiet）');
+                return true;
+            }
+        } catch (e) {
+            warn('SlashCommandParser 経由失敗:', e);
+        }
+
+        // ── 方法 3: executeSlashCommands（互換用） ──
         try {
             if (typeof context.executeSlashCommands === 'function') {
-                await context.executeSlashCommands(`/sys ${command}`);
-                log('executeSlashCommands 経由で送信しました');
+                await context.executeSlashCommands(`/sys quiet=true ${command}`);
+                log('executeSlashCommands 経由で送信しました（quiet=true 埋め込み）');
                 return true;
             }
         } catch (e) {
