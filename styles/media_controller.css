@@ -1,7 +1,8 @@
 /* ============================================================
-   Media Controller - ステータス表示UI
+   Media Controller - ステータス表示 & セットアップガイド
    ============================================================ */
 
+/* ── ステータストースト ── */
 #mc-status-indicator {
     position: fixed;
     bottom: 20px;
@@ -42,8 +43,292 @@
 }
 
 /* ============================================================
+   セットアップガイドモーダル
+   ============================================================ */
+
+#mc-setup-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    display: none;
+    opacity: 0;
+    transition: opacity 0.25s ease;
+}
+
+#mc-setup-modal.mc-visible {
+    display: block;
+    opacity: 1;
+}
+
+#mc-setup-modal .mc-setup-modal-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+}
+
+#mc-setup-modal .mc-setup-modal-content {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(90vw, 720px);
+    max-height: 88vh;
+    display: flex;
+    flex-direction: column;
+    background: #1e1e1e;
+    color: #ddd;
+    border: 1px solid #444;
+    border-radius: 10px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+    overflow: hidden;
+    font-family: "Noto Sans", sans-serif;
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+#mc-setup-modal .mc-setup-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: #2a2a2a;
+    border-bottom: 1px solid #444;
+    flex: 0 0 auto;
+}
+
+#mc-setup-modal .mc-setup-modal-title {
+    font-size: 15px;
+    font-weight: bold;
+    color: #fff;
+}
+
+#mc-setup-modal .mc-setup-modal-close {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    background: transparent;
+    color: #aaa;
+    border: none;
+    border-radius: 4px;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+#mc-setup-modal .mc-setup-modal-close:hover {
+    background: #444;
+    color: #fff;
+}
+
+#mc-setup-modal .mc-setup-modal-body {
+    flex: 1 1 auto;
+    padding: 16px 20px;
+    overflow-y: auto;
+}
+
+#mc-setup-modal .mc-setup-intro {
+    margin: 0 0 16px 0;
+    color: #ccc;
+}
+
+#mc-setup-modal .mc-setup-steps {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 16px 0;
+    counter-reset: mc-step-counter;
+}
+
+#mc-setup-modal .mc-setup-steps > li {
+    counter-increment: mc-step-counter;
+    position: relative;
+    padding: 12px 12px 12px 44px;
+    margin-bottom: 10px;
+    background: #252525;
+    border: 1px solid #3a3a3a;
+    border-radius: 6px;
+}
+
+#mc-setup-modal .mc-setup-steps > li::before {
+    content: counter(mc-step-counter);
+    position: absolute;
+    left: 10px;
+    top: 12px;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #4caf50;
+    color: #fff;
+    font-weight: bold;
+    font-size: 13px;
+    border-radius: 50%;
+}
+
+#mc-setup-modal .mc-step-title {
+    font-weight: bold;
+    color: #fff;
+    margin-bottom: 4px;
+}
+
+#mc-setup-modal .mc-step-desc {
+    color: #bbb;
+    font-size: 12px;
+}
+
+#mc-setup-modal .mc-path {
+    display: inline-block;
+    padding: 2px 6px;
+    background: #1a1a1a;
+    border: 1px solid #555;
+    border-radius: 3px;
+    font-family: monospace;
+    font-size: 11px;
+    color: #ffb74d;
+    word-break: break-all;
+    margin-top: 4px;
+}
+
+#mc-setup-modal code {
+    background: #1a1a1a;
+    color: #ffb74d;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-family: monospace;
+    font-size: 11px;
+}
+
+#mc-setup-modal .mc-code-wrapper {
+    position: relative;
+    margin-top: 8px;
+}
+
+#mc-setup-modal .mc-code-block {
+    margin: 0;
+    padding: 10px 12px;
+    background: #0d0d0d;
+    border: 1px solid #333;
+    border-radius: 4px;
+    color: #ddd;
+    font-family: "Consolas", "Monaco", monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    overflow-x: auto;
+    max-height: 240px;
+    overflow-y: auto;
+    white-space: pre;
+    tab-size: 4;
+}
+
+#mc-setup-modal .mc-code-block.mc-code-inline {
+    max-height: none;
+    margin-top: 4px;
+    padding: 4px 8px;
+    display: inline-block;
+}
+
+#mc-setup-modal .mc-copy-button {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    padding: 4px 10px;
+    background: #4caf50;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+    z-index: 1;
+}
+
+#mc-setup-modal .mc-copy-button:hover {
+    background: #66bb6a;
+}
+
+#mc-setup-modal .mc-copy-button.mc-copied {
+    background: #2e7d32;
+}
+
+#mc-setup-modal .mc-setup-note {
+    padding: 10px 12px;
+    background: rgba(255, 152, 0, 0.12);
+    border-left: 3px solid #ff9800;
+    border-radius: 4px;
+    color: #ffcc80;
+    font-size: 12px;
+}
+
+#mc-setup-modal .mc-setup-modal-footer {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    padding: 12px 16px;
+    background: #2a2a2a;
+    border-top: 1px solid #444;
+    flex: 0 0 auto;
+}
+
+#mc-setup-modal .mc-setup-modal-footer button {
+    padding: 6px 16px;
+    border: 1px solid #666;
+    border-radius: 4px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+#mc-setup-modal .mc-setup-recheck-button {
+    background: #1976d2;
+    color: #fff;
+    border-color: #1976d2;
+}
+
+#mc-setup-modal .mc-setup-recheck-button:hover:not(:disabled) {
+    background: #2196f3;
+}
+
+#mc-setup-modal .mc-setup-recheck-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+#mc-setup-modal .mc-setup-recheck-button.mc-success {
+    background: #4caf50;
+    border-color: #4caf50;
+}
+
+#mc-setup-modal .mc-setup-recheck-button.mc-error {
+    background: #f44336;
+    border-color: #f44336;
+}
+
+#mc-setup-modal .mc-setup-close-button {
+    background: #444;
+    color: #ddd;
+}
+
+#mc-setup-modal .mc-setup-close-button:hover {
+    background: #555;
+    color: #fff;
+}
+
+/* ── レスポンシブ対応 ── */
+@media (max-width: 600px) {
+    #mc-setup-modal .mc-setup-modal-content {
+        width: 96vw;
+        max-height: 92vh;
+    }
+    #mc-setup-modal .mc-setup-modal-body {
+        padding: 12px;
+    }
+}
+
+/* ============================================================
    将来のメディア管理機能用プレースホルダ
-   （ギャラリー、プレビュー等を追加予定）
    ============================================================ */
 
 .mc-media-folder-indicator {
