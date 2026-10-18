@@ -209,16 +209,22 @@
                 -webkit-backdrop-filter: none !important;
             }
 
-            /* ★ WIDrawerIcon の stale な openIcon / drawerPinnedOpen 状態を視覚的に矯正
-                 非ホバー時は他アイコンと同じ減光状態に、ホバー時は完全不透明に */
-            html body #WIDrawerIcon.drawer-icon {
+            /* ── 全ドロワーアイコンを常時ほぼ透明に ── */
+            .drawer-icon.closedIcon,
+            .drawer-icon.openIcon {
+                opacity: 0.01 !important;
                 transition: opacity 0.15s ease !important;
             }
-            /* 修正後：状態クラスを追加して特異性を向上 */
-            html body #WIDrawerIcon.drawer-icon.drawerPinnedOpen.openIcon:not(:hover) {
+
+            /* ── #top-bar ホバー判定が有効な時は 0.4 に ── */
+            body.top-bar-hover .drawer-icon.closedIcon,
+            body.top-bar-hover .drawer-icon.openIcon {
                 opacity: 0.4 !important;
             }
-            html body #WIDrawerIcon.drawer-icon.drawerPinnedOpen.openIcon:hover {
+
+            /* ── 個別アイコンにマウスが乗った時は完全不透明 ── */
+            body.top-bar-hover .drawer-icon.closedIcon:hover,
+            body.top-bar-hover .drawer-icon.openIcon:hover {
                 opacity: 1 !important;
             }
         `;
@@ -1791,59 +1797,93 @@
     console.log("✅ Image Display Extension API を window.ImageDisplayExtension に公開しました");
 })();
 
-(function () {
-    const TARGET_ID = 'WIDrawerIcon';
-    const OPACITY_NORMAL = '0.4';
-    const OPACITY_HOVER = '1';
+// ============================================================
+// 全ドロワーアイコンの opacity 制御
+//   通常時: 0.01 / top-bar ホバー時: 0.4 / アイコン個別ホバー時: 1
+// ============================================================
+(function setupDrawerIconOpacityControl() {
+    const OPACITY_NORMAL     = '0.01';  // 通常時（ほぼ透明）
+    const OPACITY_TOPBAR     = '0.4';   // #top-bar ホバー判定中
+    const OPACITY_ICON_HOVER = '1';     // アイコン個別ホバー時
 
-    let isHovered = false;
+    let isTopBarHover = false;
+    let lastX = -1, lastY = -1;
 
-    function updateIconOpacity(hover) {
-        const icon = document.getElementById(TARGET_ID);
-        if (!icon) return;
-        // CSSの !important に勝つため、setProperty を使用する
-        icon.style.setProperty('opacity', hover ? OPACITY_HOVER : OPACITY_NORMAL, 'important');
+    function getDrawerIcons() {
+        // closedIcon / openIcon の両方を対象にする
+        return document.querySelectorAll(
+            '.drawer-icon.closedIcon, .drawer-icon.openIcon'
+        );
     }
 
-    // マウスがアイコンの矩形内にあるか判定
-    function checkHover(e) {
-        const icon = document.getElementById(TARGET_ID);
-        if (!icon) return;
-
-        const rect = icon.getBoundingClientRect();
-        // アイコンが非表示、またはサイズがない場合はスキップ
-        if (rect.width === 0 || rect.height === 0) return;
-
-        const inside =
-            e.clientX >= rect.left &&
-            e.clientX <= rect.right &&
-            e.clientY >= rect.top &&
-            e.clientY <= rect.bottom;
-
-        if (inside !== isHovered) {
-            isHovered = inside;
-            updateIconOpacity(isHovered);
-        }
+    function isMouseOverElement(x, y, el) {
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return false;
+        return (
+            x >= rect.left && x <= rect.right &&
+            y >= rect.top  && y <= rect.bottom
+        );
     }
 
-    // イベントリスナーを登録
-    document.addEventListener('mousemove', checkHover, { passive: true });
+    function updateAllIcons(x, y) {
+        const icons = getDrawerIcons();
+        icons.forEach(icon => {
+            let opacity;
+            if (x >= 0 && y >= 0 && isMouseOverElement(x, y, icon)) {
+                // アイコン個別ホバー
+                opacity = OPACITY_ICON_HOVER;
+            } else if (isTopBarHover) {
+                // #top-bar 近接ホバー中
+                opacity = OPACITY_TOPBAR;
+            } else {
+                // 通常時
+                opacity = OPACITY_NORMAL;
+            }
+            icon.style.setProperty('opacity', opacity, 'important');
+        });
+    }
 
-    // マウスがウィンドウ外に出たときはホバー解除
-    document.addEventListener('mouseleave', () => {
-        if (isHovered) {
-            isHovered = false;
-            updateIconOpacity(false);
+    function syncTopBarHover() {
+        // 既存の setupTopBarHover() が付与する body.top-bar-hover を利用
+        isTopBarHover = document.body.classList.contains('top-bar-hover');
+    }
+
+    // ── マウス移動でリアルタイム更新 ──
+    document.addEventListener('mousemove', (e) => {
+        lastX = e.clientX;
+        lastY = e.clientY;
+        syncTopBarHover();
+        updateAllIcons(lastX, lastY);
+    }, { passive: true });
+
+    // ── body.top-bar-hover クラスの変化を監視 ──
+    const observer = new MutationObserver(() => {
+        syncTopBarHover();
+        if (lastX >= 0 && lastY >= 0) {
+            updateAllIcons(lastX, lastY);
+        } else {
+            updateAllIcons(-1, -1);
         }
     });
+    observer.observe(document.body, {
+        attributes: true,
+        attributeFilter: ['class']
+    });
 
-    // 初期状態を設定（念のため）
-    // DOMの準備ができてから実行
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => updateIconOpacity(false));
-    } else {
-        updateIconOpacity(false);
-    }
+    // ── マウスがウィンドウ外に出た時 ──
+    document.addEventListener('mouseleave', () => {
+        lastX = -1;
+        lastY = -1;
+        isTopBarHover = false;
+        updateAllIcons(-1, -1);
+    });
 
-    console.log('[ImageDisplay] WIDrawerIcon のホバー検出を開始しました');
+    // ── 初期化 ──
+    syncTopBarHover();
+    updateAllIcons(-1, -1);
+
+    console.log(
+        `[ImageDisplay] 全ドロワーアイコンの opacity 制御を開始 ` +
+        `(normal=${OPACITY_NORMAL}, topbar=${OPACITY_TOPBAR}, hover=${OPACITY_ICON_HOVER})`
+    );
 })();
