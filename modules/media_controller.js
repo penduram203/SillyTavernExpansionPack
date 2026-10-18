@@ -1,199 +1,17 @@
 /**
- * Media Controller
- * SillyTavern キャラクター作成時に、キャラ名をクリップボードへ自動保存し
- * ローカルディスクの addchara フォルダ内に新規フォルダ作成を促す通知を表示する。
- * 併せて、🎨 ギャラリーボタン（#gic-open-gallery-button）のホバー時不透明化を制御する。
+ * Media Controller（最小構成）
+ * 残存機能:
+ *   1. 🎨 ギャラリーボタンのホバー不透明化（座標監視）
+ *   2. 🎨 ギャラリーボタンの疑似要素 opacity 矯正
  */
 (function () {
     'use strict';
-    console.log('[MediaController] 初期化開始');
-
-    const MODULE_NAME = 'media_controller';
-
-    // キャラクター名入力フィールドの候補セレクタ（新旧SillyTavern対応）
-    const NAME_INPUT_SELECTORS = [
-        '#character_name_pole',
-        '#character_name',
-        '#character_name_text',
-    ];
-
-    // メッセージ本文（改行は \n で表現し、CSS の white-space: pre-line で描画）
-    const MESSAGE_TEXT =
-        'キャラ名をクリップボードにコピーしました。\n' +
-        'addcharaフォルダ内に新規フォルダを作成し、フォルダ名に貼り付けて下さい。';
-
-    // 重複クリック防止用（ラベル＋内部inputの二重発火対策）
-    let lastCreateClickTime = 0;
-    const CREATE_DEBOUNCE_MS = 500;
-
-    // ---------- ユーティリティ ----------
-
-    function escapeHtml(str) {
-        return String(str).replace(/[&<>"']/g, (c) => ({
-            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-        }[c]));
-    }
-
-    /**
-     * キャラクター名入力欄から値を取得する（input/textarea/contenteditable 両対応）
-     */
-    function getCharacterName() {
-        for (const sel of NAME_INPUT_SELECTORS) {
-            const el = document.querySelector(sel);
-            if (!el) continue;
-            if (typeof el.value === 'string' && el.value.trim()) {
-                return el.value.trim();
-            }
-            if (el.isContentEditable && typeof el.textContent === 'string' && el.textContent.trim()) {
-                return el.textContent.trim();
-            }
-        }
-        return null;
-    }
-
-    /**
-     * クリップボードへコピー（Clipboard API → execCommand フォールバック）
-     */
-    async function copyToClipboard(text) {
-        if (!text) return false;
-        try {
-            if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-                await navigator.clipboard.writeText(text);
-                console.log('[MediaController] クリップボードへコピー成功:', text);
-                return true;
-            }
-        } catch (e) {
-            console.warn('[MediaController] Clipboard API 失敗、フォールバック試行:', e);
-        }
-        try {
-            const ta = document.createElement('textarea');
-            ta.value = text;
-            ta.setAttribute('readonly', '');
-            ta.style.cssText = 'position:fixed;top:0;left:-9999px;opacity:0;';
-            document.body.appendChild(ta);
-            ta.select();
-            const ok = document.execCommand('copy');
-            document.body.removeChild(ta);
-            if (ok) console.log('[MediaController] execCommand でコピー成功');
-            return ok;
-        } catch (e) {
-            console.warn('[MediaController] フォールバックコピー失敗:', e);
-            return false;
-        }
-    }
-
-    /**
-     * タイトルHTML（キャラ名を強調表示）
-     */
-    function buildTitleHtml(name) {
-        if (!name) return '<span class="mc-toast-icon">📁</span> フォルダ作成のお願い';
-        return `<span class="mc-toast-icon">📁</span> キャラ名: <span class="mc-toast-name">${escapeHtml(name)}</span>`;
-    }
-
-    /**
-     * 本文HTML（\n は CSS の white-space: pre-line で改行表示）
-     */
-    function buildBodyHtml(message) {
-        return `<div class="mc-toast-body-text">${escapeHtml(message)}</div>`;
-    }
-
-    /**
-     * メッセージ表示（toastr 優先、無ければカスタムトースト）
-     */
-    function showMessage(message, name) {
-        const titleHtml = buildTitleHtml(name);
-        const bodyHtml = buildBodyHtml(message);
-
-        if (typeof toastr !== 'undefined' && typeof toastr.info === 'function') {
-            toastr.info(bodyHtml, titleHtml, {
-                timeOut: 15000,
-                extendedTimeOut: 10000,
-                closeButton: true,
-                progressBar: true,
-                positionClass: 'toast-top-center',
-                escapeHtml: false, // HTMLを有効化（キャラ名は escapeHtml 済み）
-                newestOnTop: false,
-            });
-            return;
-        }
-        showCustomToast(bodyHtml, titleHtml);
-    }
-
-    /**
-     * カスタムトースト（toastr 非対応環境用フォールバック）
-     */
-    function showCustomToast(bodyHtml, titleHtml) {
-        document.querySelectorAll('.mc-toast').forEach(el => el.remove());
-        const toast = document.createElement('div');
-        toast.className = 'mc-toast';
-
-        const header = document.createElement('div');
-        header.className = 'mc-toast-header';
-        header.innerHTML = titleHtml;
-
-        const body = document.createElement('div');
-        body.className = 'mc-toast-body';
-        body.innerHTML = bodyHtml;
-
-        toast.appendChild(header);
-        toast.appendChild(body);
-        document.body.appendChild(toast);
-
-        setTimeout(() => {
-            toast.classList.add('mc-toast-hide');
-            setTimeout(() => toast.remove(), 400);
-        }, 15000);
-    }
-
-    /**
-     * キャラクター作成ボタン押下時のメイン処理
-     */
-    async function handleCreateCharacter() {
-        const name = getCharacterName();
-        if (!name) {
-            console.log('[MediaController] キャラ名未入力のためスキップ');
-            return;
-        }
-        console.log('[MediaController] キャラクター作成を検出:', name);
-
-        const copied = await copyToClipboard(name);
-
-        if (copied) {
-            showMessage(MESSAGE_TEXT, name);
-        } else {
-            showMessage(
-                'クリップボードへの自動コピーに失敗しました。\n' +
-                '以下のキャラ名を手動でコピーし、addcharaフォルダ内に\n' +
-                '新規フォルダを作成して、フォルダ名に貼り付けて下さい。\n\n' +
-                `キャラ名: ${name}`,
-                '手動コピーが必要です'
-            );
-        }
-    }
-
-    // ---------- イベント登録 ----------
-
-    function setupClickListener() {
-        document.addEventListener('click', (e) => {
-            const target = e.target;
-            if (!target || typeof target.closest !== 'function') return;
-            const btn = target.closest('#create_button_label');
-            if (!btn) return;
-
-            const now = Date.now();
-            if (now - lastCreateClickTime < CREATE_DEBOUNCE_MS) {
-                console.log('[MediaController] 重複クリックをスキップ');
-                return;
-            }
-            lastCreateClickTime = now;
-
-            Promise.resolve().then(handleCreateCharacter);
-        }, true);
-    }
+    console.log('[MediaController] 初期化開始（ホバー制御のみ）');
 
     // ============================================================
     // 🎨 ギャラリーボタンのホバー不透明化
     //   実ID: #gic-open-gallery-button
+    //   ・座標監視方式（:hover に依存しない）
     //   ・子孫要素・疑似要素(::before/::after)・半透明な祖先も矯正
     //   ・デバッグ用API: window.MediaController.debugGalleryButton()
     // ============================================================
@@ -208,7 +26,6 @@
         function findGalleryButton() {
             if (currentBtn && document.body.contains(currentBtn)) return currentBtn;
 
-            // 既知セレクタ（実ID #gic-open-gallery-button を先頭に配置）
             const selectors = [
                 '#gic-open-gallery-button',      // ★ 実ID（最優先）
                 '#gic-gallery-button', '#gic_gallery_button', '#gic-gallery-btn',
@@ -227,16 +44,14 @@
 
             // 絵文字フォールバック: 🎨 を含む「最も内側の表示要素」
             const all = document.querySelectorAll('body *');
-            let best = null;
-            let bestDepth = -1;
+            let best = null, bestDepth = -1;
             for (const el of all) {
                 const text = (el.textContent || '').trim();
                 if (!text.includes('🎨')) continue;
                 const rect = el.getBoundingClientRect();
                 if (rect.width === 0 || rect.height === 0) continue;
                 if (rect.width > 300 || rect.height > 300) continue;
-                let depth = 0;
-                let p = el;
+                let depth = 0, p = el;
                 while (p && p !== document.body) { depth++; p = p.parentElement; }
                 if (depth > bestDepth) { best = el; bestDepth = depth; }
             }
@@ -247,22 +62,18 @@
         // ─── ホバー時: ボタン＋祖先＋疑似要素＋子孫を強制不透明化 ───
         function forceOpaque(el) {
             // 祖先のインライン opacity 矯正
-            let node = el;
-            let depth = 0;
+            let node = el, depth = 0;
             while (node && node !== document.documentElement && depth < 10) {
                 const op = parseFloat(window.getComputedStyle(node).opacity);
                 if (!isNaN(op) && op < 1) {
                     if (node.dataset.mcOpacitySaved !== '1') {
                         node.dataset.mcOpacitySaved = '1';
-                        node.dataset.mcOrigOpacityValue =
-                            node.style.getPropertyValue('opacity');
-                        node.dataset.mcOrigOpacityPriority =
-                            node.style.getPropertyPriority('opacity');
+                        node.dataset.mcOrigOpacityValue = node.style.getPropertyValue('opacity');
+                        node.dataset.mcOrigOpacityPriority = node.style.getPropertyPriority('opacity');
                     }
                     node.style.setProperty('opacity', '1', 'important');
                 }
-                node = node.parentElement;
-                depth++;
+                node = node.parentElement; depth++;
             }
 
             // 疑似要素・子孫要素の opacity をマーカー属性＋CSSで矯正
@@ -279,16 +90,13 @@
                 [data-mc-gallery-hover="1"]::after,
                 [data-mc-gallery-hover="1"] *,
                 [data-mc-gallery-hover="1"] *::before,
-                [data-mc-gallery-hover="1"] *::after {
-                    opacity: 1 !important;
-                }
+                [data-mc-gallery-hover="1"] *::after { opacity: 1 !important; }
             `;
         }
 
         // ─── 離脱時: 自分が付けた opacity とマーカーを元に戻す ───
         function restoreOpacity(el) {
-            let node = el;
-            let depth = 0;
+            let node = el, depth = 0;
             while (node && node !== document.documentElement && depth < 10) {
                 if (node.dataset.mcOpacitySaved === '1') {
                     const curValue = node.style.getPropertyValue('opacity');
@@ -296,18 +104,14 @@
                     if (curValue === '1' && curPriority === 'important') {
                         const origValue = node.dataset.mcOrigOpacityValue || '';
                         const origPriority = node.dataset.mcOrigOpacityPriority || '';
-                        if (origValue) {
-                            node.style.setProperty('opacity', origValue, origPriority);
-                        } else {
-                            node.style.removeProperty('opacity');
-                        }
+                        if (origValue) node.style.setProperty('opacity', origValue, origPriority);
+                        else node.style.removeProperty('opacity');
                     }
                     delete node.dataset.mcOpacitySaved;
                     delete node.dataset.mcOrigOpacityValue;
                     delete node.dataset.mcOrigOpacityPriority;
                 }
-                node = node.parentElement;
-                depth++;
+                node = node.parentElement; depth++;
             }
 
             el.removeAttribute('data-mc-gallery-hover');
@@ -322,9 +126,8 @@
             const rect = btn.getBoundingClientRect();
             if (rect.width === 0 || rect.height === 0) return;
 
-            const inside =
-                lastX >= rect.left && lastX <= rect.right &&
-                lastY >= rect.top  && lastY <= rect.bottom;
+            const inside = lastX >= rect.left && lastX <= rect.right &&
+                           lastY >= rect.top  && lastY <= rect.bottom;
 
             if (inside && !isHovering) {
                 isHovering = true;
@@ -342,20 +145,15 @@
 
         // ─── イベント登録 ───
         document.addEventListener('mousemove', (e) => {
-            lastX = e.clientX;
-            lastY = e.clientY;
-            checkHover();
+            lastX = e.clientX; lastY = e.clientY; checkHover();
         }, { passive: true });
 
         document.addEventListener('mouseleave', () => {
-            lastX = -1; lastY = -1;
-            checkHover();
+            lastX = -1; lastY = -1; checkHover();
         });
 
         // マウス静止中にボタンが移動したケースにも追従
-        setInterval(() => {
-            if (lastX >= 0 && lastY >= 0) checkHover();
-        }, 100);
+        setInterval(() => { if (lastX >= 0 && lastY >= 0) checkHover(); }, 100);
 
         // ボタンが再生成されたら参照をリセット（rAFで間引き）
         const observer = new MutationObserver(() => {
@@ -374,7 +172,7 @@
         api.debugGalleryButton = function () {
             currentBtn = null;
             const btn = findGalleryButton();
-            console.log('=== 🎨 Gallery Button Debug (v2) ===');
+            console.log('=== 🎨 Gallery Button Debug ===');
             if (!btn) { console.warn('ボタンが見つかりませんでした'); return; }
             console.log('Element:', btn);
             console.log('  id:', btn.id);
@@ -386,118 +184,41 @@
             console.log('  computed pointer-events:', cs.pointerEvents);
             console.log('  computed visibility:', cs.visibility);
             console.log('  computed display:', cs.display);
-            console.log('  computed background-color:', cs.backgroundColor);
             console.log('  rect:', btn.getBoundingClientRect());
-
-            // 疑似要素の詳細
             ['::before', '::after'].forEach(pseudo => {
                 const pcs = window.getComputedStyle(btn, pseudo);
                 console.log(`  ${pseudo}:`, {
-                    content: pcs.content,
-                    opacity: pcs.opacity,
-                    display: pcs.display,
-                    visibility: pcs.visibility,
-                    background: pcs.backgroundColor,
-                    width: pcs.width,
-                    height: pcs.height,
+                    content: pcs.content, opacity: pcs.opacity,
+                    display: pcs.display, visibility: pcs.visibility,
                 });
             });
-
-            // 子孫要素
             btn.querySelectorAll('*').forEach((child, i) => {
                 const ccs = window.getComputedStyle(child);
                 console.log(`  child[${i}] <${child.tagName}> opacity=${ccs.opacity} text=${JSON.stringify(child.textContent)}`);
             });
-
-            // 祖先要素
             let p = btn.parentElement, i = 1;
             while (p && i <= 10) {
                 const op = window.getComputedStyle(p).opacity;
-                const bg = window.getComputedStyle(p).backgroundColor;
-                console.log(`  parent[${i}] <${p.tagName} id="${p.id}" class="${p.className}"> opacity=${op} bg=${bg}`);
+                console.log(`  parent[${i}] <${p.tagName} id="${p.id}" class="${p.className}"> opacity=${op}`);
                 if (op !== '1') console.warn(`  ^^ parent[${i}] が半透明です！`);
-                p = p.parentElement;
-                i++;
+                p = p.parentElement; i++;
             }
-
-            // 兄弟要素（🎨テキストを持つもの）
-            const siblings = btn.parentElement ? btn.parentElement.children : [];
-            Array.from(siblings).forEach((s, i) => {
-                if (s === btn) return;
-                if (!(s.textContent || '').includes('🎨')) return;
-                const scs = window.getComputedStyle(s);
-                console.log(`  sibling[${i}] <${s.tagName} id="${s.id}" class="${s.className}"> opacity=${scs.opacity} text=${JSON.stringify(s.textContent)}`);
-            });
         };
 
         console.log('[MediaController] 🎨 ギャラリーボタンのホバー制御を開始しました');
-        console.log('[MediaController] 動かない場合: window.MediaController.debugGalleryButton() を実行して結果を確認してください');
     }
 
-    /**
-     * CSS未読込時のフォールバック（toastrの装飾が最低限効くように）
-     */
-    function injectCriticalCSS() {
-        if (document.getElementById('mc-critical-css')) return;
-        const style = document.createElement('style');
-        style.id = 'mc-critical-css';
-        style.textContent = `
-            #toast-container .toast-info {
-                background-color: #1e1e1e !important;
-                border-left: 6px solid #4caf50 !important;
-                border-radius: 10px !important;
-                box-shadow: 0 8px 32px rgba(0,0,0,0.65) !important;
-                padding: 16px 20px !important;
-                opacity: 0.98 !important;
-            }
-            #toast-container .toast-title {
-                font-size: 18px !important;
-                font-weight: bold !important;
-                color: #7ee787 !important;
-                margin-bottom: 10px !important;
-                border-bottom: 1px solid rgba(255,255,255,0.12);
-                padding-bottom: 8px;
-            }
-            #toast-container .toast-message {
-                font-size: 15px !important;
-                line-height: 1.8 !important;
-                color: #e8e8e8 !important;
-                white-space: pre-line !important;
-                word-break: break-word !important;
-            }
-            .mc-toast-name {
-                color: #ffd54f !important;
-                font-size: 20px !important;
-                font-weight: bold !important;
-                background: rgba(255, 213, 79, 0.15);
-                padding: 2px 10px;
-                border-radius: 6px;
-                border: 1px solid rgba(255, 213, 79, 0.5);
-                margin-left: 4px;
-            }
-        `;
-        document.head.appendChild(style);
-    }
-
+    // ============================================================
+    // 初期化
+    // ============================================================
     function init() {
-        injectCriticalCSS();
-        setupClickListener();
-        try {
-            setupGalleryButtonHoverControl();
-        } catch (e) {
-            console.error('[MediaController] setupGalleryButtonHoverControl でエラー:', e);
-        }
+        try { setupGalleryButtonHoverControl(); }
+        catch (e) { console.error('[MediaController] setupGalleryButtonHoverControl でエラー:', e); }
         console.log('[MediaController] 初期化完了');
     }
 
-    // ★ init() より先に window.MediaController を定義する
-    //   （setupGalleryButtonHoverControl 内で debugGalleryButton を追加するため）
-    window.MediaController = {
-        getCharacterName,
-        copyToClipboard,
-        showMessage,
-        handleCreateCharacter,
-    };
+    // ★ init() より先に window.MediaController を定義
+    window.MediaController = window.MediaController || {};
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);
