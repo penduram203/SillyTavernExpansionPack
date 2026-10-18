@@ -161,15 +161,23 @@
 }
 
 /* ============================================================
-   🎨 ギャラリーボタン（gic.js 生成）のホバー制御
-   :hover が効かない環境用の保険としても機能
+   🎨 ギャラリーボタン（gic.js生成）のホバー不透明化
+   想定される全てのID/クラスパターンを網羅
    ============================================================ */
 #gic-gallery-button:hover,
+#gic_gallery_button:hover,
+#gic-gallery-btn:hover,
 #gallery-button:hover,
+#gallery_button:hover,
+#gallery-btn:hover,
 #gic_button:hover,
+#gic-btn:hover,
 [id*="gic"][id*="button"]:hover,
+[id*="gic"][id*="btn"]:hover,
 [id*="gallery"][id*="button"]:hover,
-[class*="gallery"][class*="icon"]:hover {
+[id*="gallery"][id*="btn"]:hover,
+.gic-gallery-button:hover,
+.gic-gallery-btn:hover {
     opacity: 1 !important;
     transition: opacity 0.15s ease !important;
 }
