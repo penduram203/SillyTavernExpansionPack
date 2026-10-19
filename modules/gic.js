@@ -1234,9 +1234,8 @@ function setupGalleryDragToJson() {
     function handleDrop(x, y) {
         if (!dragState) return;
         const cell = findDropCell(x, y);
-        if (!cell) return;
         window.dispatchEvent(new CustomEvent('gic-drop-file', {
-            detail: { path: dragState.path, cell }
+            detail: { path: dragState.path, cell, x, y }
         }));
     }
 
