@@ -2,7 +2,6 @@
     const ALLOWED_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif', 'bmp', 'mp4', 'webm'];
     const MODULE_NAME = 'stj_editor';
 
-    // ★ メディア存在チェックのキャッシュ
     const mediaCache = new Map();
     const MEDIA_CACHE_FALSE_TTL_MS = 3000;
     const MEDIA_CHECK_TIMEOUT_MS = 5000;
@@ -24,14 +23,12 @@
     let pointerDragHandlerInstalled = false;
     const DRAG_THRESHOLD_PX = 5;
 
-    // ===== 自動スクロール =====
     const AUTOSCROLL_EDGE_PX = 200;
     const AUTOSCROLL_MAX_SPEED = 35;
     let autoScrollRAF = null;
     let autoScrollTarget = null;
     let autoScrollDelta = 0;
 
-    // ===== 一括削除モード =====
     let isBulkDeleteMode = false;
     let isDialogActive = false;
 
@@ -76,7 +73,6 @@
         return null;
     }
 
-    // ===== メディア存在チェック =====
     function checkMediaExists(mediaUrl) {
         if (!mediaUrl || typeof mediaUrl !== 'string' || !mediaUrl.trim()) {
             return Promise.resolve(false);
@@ -161,7 +157,6 @@
         return null;
     }
 
-    // --- 条件評価エンジン ---
     function normalizeConditionExpression(expr) {
         if (!expr || typeof expr !== 'string') return '';
         return expr
@@ -287,7 +282,6 @@
         );
     }
 
-    // ===== 拡張子入力ボタン =====
     function buildExtensionButtonsHtml() {
         return `
             <div class="stj-extension-buttons">
@@ -357,7 +351,6 @@
         });
     }
 
-    // ===== 編集スナップショット =====
     function saveEditSnapshot(item) {
         if (!item) return;
         const kw = item.querySelector('.stj-keyword-input');
@@ -378,7 +371,6 @@
         }
     }
 
-    // ===== ダイアログ =====
     function showDeleteConfirmDialog(message, onConfirm, onCancel) {
         if (!confirmDialogEl) return;
         const msgEl = confirmDialogEl.querySelector('.stj-confirm-message');
@@ -418,7 +410,6 @@
         parent.removeChild(placeholder);
     }
 
-    // ===== 自動スクロール =====
     function findScrollableAncestor(el) {
         let cur = el ? el.parentElement : null;
         while (cur && cur !== document.body && cur !== document.documentElement) {
@@ -502,7 +493,6 @@
         }
     }
 
-    // ===== ドラッグゴースト =====
     function createDragGhost(sourceItem, cursorX, cursorY) {
         const previewEl = sourceItem.querySelector('.stj-image-preview');
         if (!previewEl) return null;
@@ -650,7 +640,6 @@
         });
     }
 
-    // ===== 一括削除モード =====
     function enterBulkDeleteMode() {
         if (isBulkDeleteMode) return;
         isBulkDeleteMode = true;
@@ -659,7 +648,6 @@
             el.classList.remove('editing');
         });
 
-        // 編集中のspecialセルを閉じる
         document.querySelectorAll('.stj-special-item.editing').forEach(item => {
             const inputEl = item.querySelector('.stj-image-input');
             if (inputEl && item.dataset.originalImage !== undefined) {
@@ -691,7 +679,6 @@
             btn.disabled = true;
         });
 
-        // specialセルの決定/キャンセルを無効化
         document.querySelectorAll('.stj-special-action-row button').forEach(btn => {
             btn.disabled = true;
         });
@@ -732,7 +719,6 @@
             btn.disabled = false;
         });
 
-        // specialセルの決定/キャンセルを有効化
         document.querySelectorAll('.stj-special-action-row button').forEach(btn => {
             btn.disabled = false;
         });
@@ -767,14 +753,20 @@
         openExportModal();
     }
 
+    // ============================================================
+    // ★ モーダル表示（CSSと同期した geometry をJSでも設定）
+    //   width  = calc(85vw - 200px)  → 横幅を200px縮小
+    //   left   = 200px               → 左端を右へ200pxずらす
+    //   right  edge = 200 + (85vw-200) = 85vw  → 右端位置を維持
+    // ============================================================
     function openExportModal() {
         if (!stjModalEl) return;
 
         stjModalEl.style.display = 'block';
         stjModalEl.style.position = 'fixed';
         stjModalEl.style.top = '0px';
-        stjModalEl.style.left = '0vw';
-        stjModalEl.style.width = '85vw';
+        stjModalEl.style.left = '200px';
+        stjModalEl.style.width = 'calc(85vw - 200px)';
         stjModalEl.style.height = '100vh';
         stjModalEl.style.zIndex = '10001';
         stjModalEl.scrollTop = 0;
@@ -1171,7 +1163,6 @@
             });
         }
 
-        // 決定ボタン
         modal.querySelectorAll('.stj-apply-special').forEach(btn => {
             btn.addEventListener('click', function(e) {
                 e.stopPropagation();
@@ -1188,7 +1179,6 @@
             });
         });
 
-        // キャンセルボタン
         modal.querySelectorAll('.stj-cancel-special').forEach(btn => {
             btn.addEventListener('click', function(e) {
                 e.stopPropagation();
@@ -1203,7 +1193,6 @@
             });
         });
 
-        // 画像クリックで編集モードへ
         modal.querySelectorAll('.stj-special-item').forEach(item => {
             const previewEl = item.querySelector('.stj-image-preview');
             const inputEl = item.querySelector('.stj-image-input');
@@ -1259,7 +1248,6 @@
         }
     }
 
-    // ===== 一括削除の実行フロー =====
     function executeBulkDelete() {
         const marked = document.querySelectorAll('.stj-keyword-item.stj-marked-for-delete');
         if (marked.length === 0) return;
@@ -1652,7 +1640,6 @@
         previewEl.appendChild(indexDisplay);
     }
 
-    // ★ 世代カウンタ（連続クリック時のレース防止）
     const _previewLoadGen = new WeakMap();
 
     async function updateImagePreview(previewId, charName, rawValue, targetIndex = 0) {
