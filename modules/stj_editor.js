@@ -737,7 +737,6 @@
 
     function openExportModal() {
         if (!stjModalEl) return;
-        // ★ 既に開いている場合はスキップ
         if (stjModalEl.style.display === 'block') return;
 
         stjModalEl.style.display = 'block';
@@ -775,25 +774,17 @@
         document.body.classList.remove('stj-editor-open');
     }
 
-    // ============================================================
-    // closeExportModal の新仕様:
-    //   - ユーザーが「キャンセル」を押した場合 → ギャラリーも一緒に閉じる
-    //   - ギャラリー側から呼ばれた場合 (fromGallery=true) → ギャラリーは既に閉じているので何もしない
-    // ============================================================
     function closeExportModal(opts = {}) {
         if (!stjModalEl) return;
         const { fromGallery = false, force = false } = opts;
 
-        // 既に閉じている場合は何もしない
         if (stjModalEl.style.display !== 'block') return;
 
-        // 一括削除やダイアログ中は（fromGallery/force以外）閉じない
         if (!force && (isBulkDeleteMode || isDialogActive)) return;
 
         closeExportModalInternal();
 
         if (!fromGallery) {
-            // ユーザー操作（キャンセル）→ ギャラリーも閉じる
             if (window.GicApi?.closeGallery) {
                 try {
                     window.GicApi.closeGallery();
@@ -908,8 +899,107 @@
     }
 
     // ============================================================
-    // ★ ギャラリーからの画像ドラッグ&ドロップ受け入れ
-    //    .stj-keyword-item / .stj-special-item がドロップターゲットになる
+    // ★ グローバル drop インターセプタ
+    //    - window capture phase で最速で捕捉
+    //    - SillyTavern のキャラクターインポート誤発動を完全に防止
+    // ============================================================
+    function installGlobalDropInterceptor() {
+        if (window.__gicDropInterceptorInstalled) return;
+        window.__gicDropInterceptorInstalled = true;
+
+        window.addEventListener('drop', (e) => {
+            if (!window.__gicDragInProgress) return;
+
+            const cell = e.target && e.target.closest
+                ? e.target.closest('.stj-keyword-item, .stj-special-item')
+                : null;
+            if (!cell) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+
+            handleCellDrop(cell, e);
+        }, true);
+
+        window.addEventListener('dragover', (e) => {
+            if (!window.__gicDragInProgress) return;
+            const cell = e.target && e.target.closest
+                ? e.target.closest('.stj-keyword-item, .stj-special-item')
+                : null;
+            if (!cell) return;
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            try { e.dataTransfer.dropEffect = 'copy'; } catch (_) {}
+            cell.classList.add('stj-drop-target');
+        }, true);
+
+        window.addEventListener('dragleave', (e) => {
+            if (!window.__gicDragInProgress) return;
+            const cell = e.target && e.target.closest
+                ? e.target.closest('.stj-keyword-item, .stj-special-item')
+                : null;
+            if (!cell) return;
+            if (e.relatedTarget && cell.contains(e.relatedTarget)) return;
+            cell.classList.remove('stj-drop-target');
+        }, true);
+
+        console.log('[STJ Editor] 🌐 グローバル drop インターセプタを設置しました');
+    }
+
+    // ============================================================
+    // ★ セルへのドロップ処理を一元化
+    // ============================================================
+    function handleCellDrop(cell, e) {
+        if (!cell) return;
+        cell.classList.remove('stj-drop-target');
+
+        let path = '';
+        try {
+            path = e.dataTransfer.getData('application/x-gic-path')
+                || e.dataTransfer.getData('text/plain')
+                || e.dataTransfer.getData('text/uri-list')
+                || '';
+        } catch (_) {}
+
+        if (!path) {
+            console.warn('[STJ Editor] drop: パス取得失敗');
+            return;
+        }
+
+        const fileName = extractFileNameFromPath(path);
+        if (!fileName) return;
+
+        const inputEl = cell.querySelector('.stj-image-input');
+        if (!inputEl) return;
+
+        const current = parseImageNames(inputEl.value || '');
+        if (current.includes(fileName)) {
+            console.log(`[STJ Editor] ${fileName} は既に含まれています`);
+            return;
+        }
+        current.push(fileName);
+        inputEl.value = current.join(',');
+
+        cell.classList.add('editing');
+
+        const charName = document.getElementById('stj_char_name_display')?.textContent || '';
+        const previewEl = cell.querySelector('.stj-image-preview');
+        if (previewEl && charName) {
+            updateImagePreview(previewEl.id, charName, inputEl.value);
+        }
+
+        try {
+            inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+        } catch (_) {}
+
+        console.log(`[STJ Editor] 🖼️ ドロップで追加: ${fileName} → ${inputEl.value}`);
+    }
+
+    // ============================================================
+    // ★ セル単位のドロップターゲット（ビジュアルフィードバック補助）
+    //   drop 本体はグローバルインターセプタが処理する
     // ============================================================
     function setupCellDropTargets(container) {
         if (!container) container = document;
@@ -923,67 +1013,16 @@
             if (!inputEl) return;
 
             cell.addEventListener('dragenter', (e) => {
+                if (!window.__gicDragInProgress) return;
                 e.preventDefault();
                 e.stopPropagation();
-                cell.classList.add('stj-drop-target');
-            });
-
-            cell.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                try { e.dataTransfer.dropEffect = 'copy'; } catch (_) {}
                 cell.classList.add('stj-drop-target');
             });
 
             cell.addEventListener('dragleave', (e) => {
-                // 子要素間の移動で発火するのを防ぐ
+                if (!window.__gicDragInProgress) return;
                 if (e.relatedTarget && cell.contains(e.relatedTarget)) return;
                 cell.classList.remove('stj-drop-target');
-            });
-
-            cell.addEventListener('drop', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                cell.classList.remove('stj-drop-target');
-
-                let path = '';
-                try {
-                    path = e.dataTransfer.getData('text/plain')
-                        || e.dataTransfer.getData('text/uri-list')
-                        || '';
-                } catch (_) {}
-                if (!path) {
-                    console.warn('[STJ Editor] drop: パスを取得できませんでした');
-                    return;
-                }
-
-                const fileName = extractFileNameFromPath(path);
-                if (!fileName) return;
-
-                // 現在の入力値にカンマ区切りで追加（重複は防止）
-                const current = parseImageNames(inputEl.value || '');
-                if (current.includes(fileName)) {
-                    console.log(`[STJ Editor] ${fileName} は既に含まれているためスキップ`);
-                    return;
-                }
-                current.push(fileName);
-                inputEl.value = current.join(',');
-
-                // 編集モードへ（プレビューを即座に更新）
-                cell.classList.add('editing');
-
-                const charName = document.getElementById('stj_char_name_display')?.textContent || '';
-                const previewEl = cell.querySelector('.stj-image-preview');
-                if (previewEl && charName) {
-                    updateImagePreview(previewEl.id, charName, inputEl.value);
-                }
-
-                // input イベントを発火（runLiveTest が走る）
-                try {
-                    inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-                } catch (_) {}
-
-                console.log(`[STJ Editor] 🖼️ ドロップで追加: ${fileName} → ${inputEl.value}`);
             });
         });
     }
@@ -1223,7 +1262,6 @@
             });
         }
 
-        // ★ キャンセル: ギャラリーとJSON編集画面を同時に閉じる
         const cancelBtn = document.getElementById('stj_cancel_export');
         if (cancelBtn) {
             cancelBtn.addEventListener('click', (e) => {
@@ -1322,8 +1360,11 @@
 
         installPointerDragHandlers();
 
-        // ★ 既存セルにドロップターゲットを設定
+        // ★ 既存セルにドロップターゲット（ビジュアル補助）を設定
         setupCellDropTargets(modal);
+
+        // ★ グローバル drop インターセプタを設置
+        installGlobalDropInterceptor();
     }
 
     function executeBulkDelete() {
