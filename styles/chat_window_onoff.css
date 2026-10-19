@@ -1,18 +1,28 @@
 /* ============================================================ */
-/* 電球ボタン: #send_form の左隣に隙間なく配置                      */
-/*   位置は JS (applyToggleChatButtonLayout) で動的に設定           */
-/*   普段は完全非表示 / body.lbe-aux-hover で半透明表示             */
-/*   / ボタン直接 hover 時のみ完全不透明                            */
+/* Chat Window On/Off - スタイル                                  */
+/*                                                              */
+/* 【責務】                                                      */
+/*   - 💡/🎨 ボタンの配置（座標はJSが設定）                       */
+/*   - body.gic-buttons-wake / chat-bulb-hover の wake 状態制御   */
+/*   - body.tsp-open / gallery-open / stj-editor-open 時の無効化  */
+/*   - チャットウィンドウ透過状態 (chat-window-is-hidden)         */
+/*   - アバター非表示・スクロールバー右端移動・z-index             */
+/*                                                              */
+/* 【責務外】                                                    */
+/*   - 左下ボタン群の「外観」(背景色・枠・transform) と            */
+/*     Tアイコンの外観は text-styling.css が所有する。            */
+/* ============================================================ */
+
+/* ============================================================ */
+/* (1) 💡 ボタン本体: #send_form の左隣に隙間なく配置              */
+/*     位置は JS (applyToggleChatButtonLayout) で動的に設定        */
 /* ============================================================ */
 #toggle-chat-button {
     position: fixed;
     left: -9999px;
     top: -9999px;
-
-    /* ★ サイズ 50px に拡大 */
     width: 50px;
     height: 50px;
-
     background-color: #444;
     color: white;
     border: 1px solid #666;
@@ -21,27 +31,25 @@
     display: flex;
     align-items: center;
     justify-content: center;
-
     font-size: 26px;
-
     z-index: 15000;
     box-shadow: 0 2px 8px rgba(0,0,0,0.5);
-
-    /* 普段は完全非表示 */
     opacity: 0;
     pointer-events: auto;
     transition: opacity 0.15s ease;
-
     box-sizing: border-box;
     padding: 0;
     line-height: 1;
 }
 
+#toggle-chat-button.active {
+    background-color: #444;
+}
+
 /* ============================================================ */
-/* ギャラリーボタン (🎨): 電球ボタンの左隣に配置                   */
+/* (2) 🎨 ギャラリーボタン: 電球ボタンの左隣に配置                 */
 /* ============================================================ */
 #gic-open-gallery-button {
-    /* ★ サイズ 50px に拡大 */
     width: 50px !important;
     height: 50px !important;
     opacity: 0 !important;
@@ -50,50 +58,105 @@
 }
 
 /* ============================================================ */
-/* ★ aux hover 判定時の透過率制御                                  */
-/*   マウスが aux 領域に近づいたら 0.3（Tボタン/中央ボタンと同率）  */
-/*   ボタンに直接重なった時だけ 1.0（完全不透明）                   */
+/* (3) 起動領域 (wake) 反応                                       */
+/*     body.gic-buttons-wake = 左下 110×150px の領域にマウスが入る */
+/*     body.chat-bulb-hover = 💡ボタン近接 (周囲20px)              */
 /* ============================================================ */
 
-/* (a) aux hover 領域内: 半透明で表示 */
-html body.lbe-aux-hover #toggle-chat-button,
-html body.lbe-aux-hover #gic-open-gallery-button {
+/* 起動領域内: 左下ボタン群を半透明表示 (#manual-settings-button 含む) */
+body.gic-buttons-wake #text-mode-button,
+body.gic-buttons-wake #custom-button,
+body.gic-buttons-wake #maximize-button,
+body.gic-buttons-wake #half-maximize-button,
+body.gic-buttons-wake #gic-release-override-button,
+body.gic-buttons-wake #center-button,
+body.gic-buttons-wake #right-half-button,
+body.gic-buttons-wake #manual-settings-button,
+body.gic-buttons-wake #restore-panel-button {
+    opacity: 0.3 !important;
+}
+
+/* ボタン直接 hover 時は完全不透明 */
+body.gic-buttons-wake #text-mode-button:hover,
+body.gic-buttons-wake #custom-button:hover,
+body.gic-buttons-wake #maximize-button:hover,
+body.gic-buttons-wake #half-maximize-button:hover,
+body.gic-buttons-wake #gic-release-override-button:hover,
+body.gic-buttons-wake #center-button:hover,
+body.gic-buttons-wake #right-half-button:hover,
+body.gic-buttons-wake #manual-settings-button:hover,
+body.gic-buttons-wake #restore-panel-button:hover {
+    opacity: 1 !important;
+}
+
+/* 💡 近接時: 電球を半透明で表示 */
+body.chat-bulb-hover #toggle-chat-button {
     opacity: 0.3 !important;
     background-color: #444 !important;
 }
 
-/* (b) マウスがボタンに直接重なった時: 完全不透明 */
+/* 🎨 wake 時: 💡近接中は除外（独立制御） */
+body.gic-buttons-wake:not(.chat-bulb-hover) #gic-open-gallery-button {
+    opacity: 0.3 !important;
+    background-color: #444 !important;
+}
+
+/* 💡/🎨 に直接 hover 時は完全不透明 */
 html body #toggle-chat-button:hover,
 html body #gic-open-gallery-button:hover,
-html body.lbe-aux-hover #toggle-chat-button:hover,
-html body.lbe-aux-hover #gic-open-gallery-button:hover {
+html body.chat-bulb-hover #toggle-chat-button:hover,
+html body.gic-buttons-wake #gic-open-gallery-button:hover {
     opacity: 1 !important;
     background-color: #444 !important;
 }
 
-/* アクティブ（チャット透過中）の状態でも背景色は統一 */
-#toggle-chat-button.active {
-    background-color: #444;
-}
+/* ============================================================ */
+/* (4) パネル表示中の無効化                                       */
+/* ============================================================ */
 
-/* ============================================================ */
-/* ★ Text_styling パネル表示中: 💡/🎨 を完全無効化                */
-/* ============================================================ */
+/* Tパネル表示中: 💡/🎨 を完全無効化 */
 html body.tsp-open #toggle-chat-button,
 html body.tsp-open #gic-open-gallery-button {
     pointer-events: none !important;
     opacity: 0 !important;
     cursor: default !important;
 }
-
 html body.tsp-open #toggle-chat-button:hover,
 html body.tsp-open #gic-open-gallery-button:hover {
     opacity: 0 !important;
     pointer-events: none !important;
 }
 
+/* ギャラリー表示中: 💡 を非表示・クリック無効 */
+html body.gallery-open #toggle-chat-button {
+    display: none !important;
+    pointer-events: none !important;
+    opacity: 0 !important;
+    cursor: default !important;
+}
+
+/* JSON編集画面表示中: 左下の全ボタンを非表示 */
+html body.stj-editor-open #toggle-chat-button,
+html body.stj-editor-open #gic-open-gallery-button,
+html body.stj-editor-open #gic-release-override-button,
+html body.stj-editor-open #text-mode-button,
+html body.stj-editor-open #restore-panel-button,
+html body.stj-editor-open #center-button,
+html body.stj-editor-open #right-half-button,
+html body.stj-editor-open #custom-button,
+html body.stj-editor-open #maximize-button,
+html body.stj-editor-open #half-maximize-button,
+html body.stj-editor-open #manual-settings-button,
+html body.stj-editor-open #window-control-buttons,
+html body.stj-editor-open #image-control-container {
+    display: none !important;
+    pointer-events: none !important;
+    opacity: 0 !important;
+    cursor: default !important;
+}
+
 /* ============================================================ */
-/* ★ クイックリプライボタン (.qr--button) は常に完全透明          */
+/* (5) クイックリプライボタンは常に完全透明                       */
 /* ============================================================ */
 html body .qr--button,
 html body .qr--button.menu_button,
@@ -104,7 +167,7 @@ html body #send_form .qr--button {
 }
 
 /* ============================================================ */
-/* 透過効果のトランジション                                        */
+/* (6) 透過効果のトランジション                                    */
 /* ============================================================ */
 #chat,
 #form_sheld,
@@ -113,7 +176,7 @@ html body #send_form .qr--button {
 }
 
 /* ============================================================ */
-/* body.chat-window-is-hidden 付与時の透過                         */
+/* (7) body.chat-window-is-hidden 付与時の透過                    */
 /* ============================================================ */
 html body.chat-window-is-hidden #chat,
 html body.chat-window-is-hidden #form_sheld,
@@ -124,7 +187,7 @@ html body.chat-window-is-hidden #sheldheader {
 }
 
 /* ============================================================ */
-/* 1. 全てのメッセージのアバターを常に非表示                       */
+/* (8) アバター非表示                                             */
 /* ============================================================ */
 .mes .mesAvatarWrapper,
 .mesAvatarWrapper {
@@ -135,9 +198,8 @@ html body.chat-window-is-hidden #sheldheader {
 }
 
 /* ============================================================ */
-/* 2. スクロールバーだけを画面右端に移動                          */
+/* (9) スクロールバーを画面右端に移動 + z-index 調整               */
 /* ============================================================ */
-
 :root {
     --cw-content-width: 900px;
 }
@@ -174,132 +236,4 @@ html body.chat-window-is-hidden #sheldheader {
     #form_sheld * {
         pointer-events: auto !important;
     }
-}
-
-/* ============================================================ */
-/* 3. Text_styling: 中央ボタンを移動                              */
-/* ============================================================ */
-#center-button,
-#right-half-button {
-    transform: translate(-35px, -8px) !important;
-}
-
-/* ============================================================ */
-/* 4. 左下のボタン群: 通常透明 / 起動領域で半透明                  */
-/* ============================================================ */
-
-#image-control-container,
-#window-control-buttons {
-    opacity: 1 !important;
-}
-
-#text-mode-button,
-#custom-button,
-#maximize-button,
-#half-maximize-button,
-#gic-release-override-button,
-#center-button,
-#right-half-button,
-#restore-panel-button {
-    opacity: 0 !important;
-    transition: opacity 0.15s ease !important;
-}
-
-body.gic-buttons-wake #text-mode-button,
-body.gic-buttons-wake #custom-button,
-body.gic-buttons-wake #maximize-button,
-body.gic-buttons-wake #half-maximize-button,
-body.gic-buttons-wake #gic-release-override-button,
-body.gic-buttons-wake #center-button,
-body.gic-buttons-wake #right-half-button,
-body.gic-buttons-wake #restore-panel-button {
-    opacity: 0.3 !important;
-}
-
-body.gic-buttons-wake #text-mode-button:hover,
-body.gic-buttons-wake #custom-button:hover,
-body.gic-buttons-wake #maximize-button:hover,
-body.gic-buttons-wake #half-maximize-button:hover,
-body.gic-buttons-wake #gic-release-override-button:hover,
-body.gic-buttons-wake #center-button:hover,
-body.gic-buttons-wake #right-half-button:hover,
-body.gic-buttons-wake #restore-panel-button:hover {
-    opacity: 1 !important;
-}
-
-/* ============================================================ */
-/* 5. 左下ボタンの外観統一                                        */
-/* ============================================================ */
-
-#text-mode-button,
-#custom-button,
-#maximize-button,
-#half-maximize-button,
-#center-button,
-#right-half-button {
-    background-color: #444 !important;
-    background-image: none !important;
-    color: #ffffff !important;
-    border: 1px solid #666 !important;
-    padding: 6px 12px !important;
-    font-size: 12px !important;
-    font-family: inherit !important;
-    font-weight: normal !important;
-    border-radius: 4px !important;
-    text-shadow: none !important;
-    box-shadow: none !important;
-    line-height: normal !important;
-    text-align: center !important;
-    white-space: nowrap !important;
-    box-sizing: content-box !important;
-}
-
-#maximize-button.disabled {
-    background-color: #444 !important;
-    color: #ffffff !important;
-    border: 1px solid #666 !important;
-    cursor: not-allowed !important;
-}
-
-body.gic-buttons-wake #text-mode-button:hover,
-body.gic-buttons-wake #custom-button:hover,
-body.gic-buttons-wake #maximize-button:hover,
-body.gic-buttons-wake #half-maximize-button:hover,
-body.gic-buttons-wake #center-button:hover,
-body.gic-buttons-wake #right-half-button:hover {
-    background-color: #666 !important;
-}
-
-/* ============================================================ */
-/* 6. Text_styling T アイコン                                     */
-/* ============================================================ */
-
-#restore-panel-button {
-    width: 32px !important;
-    height: 32px !important;
-    background-color: #444 !important;
-    background-image: none !important;
-    color: #ffffff !important;
-    border: 1px solid #666 !important;
-    border-radius: 4px !important;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.5) !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    font-size: 18px !important;
-    padding: 0 !important;
-    box-sizing: border-box !important;
-    text-shadow: none !important;
-    transform: translate(-9px, -8px) !important;
-}
-
-#restore-panel-button:hover {
-    background-color: #444 !important;
-    color: #ffffff !important;
-}
-
-#restore-panel-button.active,
-#restore-panel-button.selected {
-    background-color: #444 !important;
-    color: #ffffff !important;
 }
