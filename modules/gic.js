@@ -651,6 +651,28 @@ function getCurrentCharacterName() {
             transition: none !important;
             animation: none !important;
         }
+
+        /* ★ ドラッグ中はギャラリーの位置・サイズ・transform を完全固定 */
+        body.gic-dragging #gallery {
+            position: fixed !important;
+            top: 50% !important;
+            left: 0 !important;
+            right: auto !important;
+            bottom: auto !important;
+            transform: translateY(-50%) !important;
+            -webkit-transform: translateY(-50%) !important;
+            margin: 0 !important;
+            contain: layout style !important;
+            will-change: transform !important;
+        }
+
+        /* ★ ドラッグ中はギャラリー内の全アニメーション・トランジションを停止 */
+        body.gic-dragging #gallery,
+        body.gic-dragging #gallery * {
+            transition: none !important;
+            animation: none !important;
+        }
+        
     `;
     document.head.appendChild(style);
     console.log('[GIC] 🖼️ ギャラリー配置CSSを注入しました');
@@ -1068,6 +1090,37 @@ function setupGalleryDragToJson() {
     window.__gicGalleryDragInstalled = true;
 
     const GALLERY_THUMB_SELECTOR = '.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item';
+    let galleryLockState = null;
+
+    // ★ ドラッグ中は #gallery の位置・transform を完全ロック
+    function lockGallery() {
+        if (galleryLockState) return;
+        const gallery = document.getElementById('gallery');
+        if (!gallery) return;
+        galleryLockState = { element: gallery };
+        gallery.style.setProperty('position', 'fixed', 'important');
+        gallery.style.setProperty('top', '50%', 'important');
+        gallery.style.setProperty('left', '0', 'important');
+        gallery.style.setProperty('right', 'auto', 'important');
+        gallery.style.setProperty('bottom', 'auto', 'important');
+        gallery.style.setProperty('transform', 'translateY(-50%)', 'important');
+        gallery.style.setProperty('-webkit-transform', 'translateY(-50%)', 'important');
+        gallery.style.setProperty('margin', '0', 'important');
+        gallery.style.setProperty('contain', 'layout style', 'important');
+        gallery.style.setProperty('will-change', 'transform', 'important');
+    }
+
+    function unlockGallery() {
+        if (!galleryLockState) return;
+        const el = galleryLockState.element;
+        try {
+            if (el && el.parentNode) {
+                el.style.removeProperty('contain');
+                el.style.removeProperty('will-change');
+            }
+        } catch (_) {}
+        galleryLockState = null;
+    }
 
     function getPathFromThumb(thumb) {
         if (!thumb) return null;
@@ -1085,19 +1138,12 @@ function setupGalleryDragToJson() {
         return url ? urlToServerPath(url) : null;
     }
 
-    function getThumbDisplayUrl(thumb) {
-        const img = thumb.querySelector('img');
-        if (img) return img.currentSrc || img.src || img.getAttribute('src') || '';
-        return thumb.getAttribute('data-ngsrc') || thumb.getAttribute('data-src') || '';
-    }
-
     function markDraggable(thumb) {
         if (!thumb || thumb.dataset.gicDragReady === '1') return;
         thumb.dataset.gicDragReady = '1';
         thumb.setAttribute('draggable', 'true');
 
-        // ★ Firefox の img ファイル自動添付を防ぐ:
-        //   img を完全に無効化し、ドラッグ元を thumb (div) に固定
+        // Firefox の img ファイル自動添付を防止
         thumb.querySelectorAll('img').forEach(img => {
             img.setAttribute('draggable', 'false');
             img.style.pointerEvents = 'none';
@@ -1110,9 +1156,9 @@ function setupGalleryDragToJson() {
 
             e.stopPropagation();
 
-            // ★ ドラッグ中フラグ（レイアウト抑制 + drop インターセプト用）
             window.__gicDragInProgress = true;
             document.body.classList.add('gic-dragging');
+            lockGallery();
 
             try {
                 e.dataTransfer.effectAllowed = 'copy';
@@ -1120,38 +1166,36 @@ function setupGalleryDragToJson() {
                 e.dataTransfer.setData('text/plain', path);
                 e.dataTransfer.setData('text/uri-list', path);
 
-                // ★ サムネイルサイズのカスタムゴースト（背景画像方式）
-                const displayUrl = getThumbDisplayUrl(thumb);
+                // ★ Canvas ベースのドラッグ画像（DOM操作なし・サムネイルサイズ）
                 const w = thumb.offsetWidth || 100;
                 const h = thumb.offsetHeight || 100;
-
-                if (displayUrl && w > 0 && h > 0) {
-                    const ghost = document.createElement('div');
-                    ghost.style.cssText = [
-                        'position:fixed',
-                        'top:-9999px',
-                        'left:-9999px',
-                        `width:${w}px`,
-                        `height:${h}px`,
-                        `background-image:url("${displayUrl.replace(/"/g, '%22')}")`,
-                        'background-size:cover',
-                        'background-position:center',
-                        'border:2px solid #ffd54f',
-                        'border-radius:4px',
-                        'box-shadow:0 4px 16px rgba(0,0,0,0.6)',
-                        'pointer-events:none',
-                        'z-index:2147483647',
-                    ].join(';');
-                    document.body.appendChild(ghost);
+                if (w > 0 && h > 0) {
                     try {
-                        e.dataTransfer.setDragImage(ghost, w / 2, h / 2);
+                        const canvas = document.createElement('canvas');
+                        canvas.width = w;
+                        canvas.height = h;
+                        const ctx = canvas.getContext('2d');
+                        const imgEl = thumb.querySelector('img');
+                        if (imgEl && imgEl.complete && imgEl.naturalWidth > 0) {
+                            try { ctx.drawImage(imgEl, 0, 0, w, h); }
+                            catch (_) {
+                                ctx.fillStyle = 'rgba(30,30,30,0.9)';
+                                ctx.fillRect(0, 0, w, h);
+                            }
+                        } else {
+                            ctx.fillStyle = 'rgba(30,30,30,0.9)';
+                            ctx.fillRect(0, 0, w, h);
+                        }
+                        ctx.strokeStyle = '#ffd54f';
+                        ctx.lineWidth = 3;
+                        ctx.strokeRect(1.5, 1.5, w - 3, h - 3);
+                        e.dataTransfer.setDragImage(canvas, w / 2, h / 2);
                     } catch (err) {
-                        console.warn('[GIC] setDragImage 失敗:', err);
+                        console.warn('[GIC] setDragImage (canvas) 失敗:', err);
                     }
-                    setTimeout(() => ghost.remove(), 0);
                 }
             } catch (err) {
-                console.warn('[GIC] dragstart setData エラー:', err);
+                console.warn('[GIC] dragstart エラー:', err);
             }
 
             thumb.classList.add('gic-dragging-to-json');
@@ -1160,6 +1204,7 @@ function setupGalleryDragToJson() {
         thumb.addEventListener('dragend', () => {
             window.__gicDragInProgress = false;
             document.body.classList.remove('gic-dragging');
+            unlockGallery();
             thumb.classList.remove('gic-dragging-to-json');
         }, true);
     }
@@ -1180,6 +1225,17 @@ function setupGalleryDragToJson() {
         const gallery = document.getElementById('gallery');
         if (!gallery || !gallery.contains(e.target)) return;
         if (!e.target.closest(GALLERY_THUMB_SELECTOR)) e.preventDefault();
+    }, true);
+
+    // ★ ドキュメントレベルの dragend 保険（thumb の dragend が発火しない場合に備える）
+    document.addEventListener('dragend', () => {
+        if (!window.__gicDragInProgress) return;
+        window.__gicDragInProgress = false;
+        document.body.classList.remove('gic-dragging');
+        unlockGallery();
+        document.querySelectorAll('.gic-dragging-to-json').forEach(el => {
+            el.classList.remove('gic-dragging-to-json');
+        });
     }, true);
 
     console.log('[GIC] 🖼️ ギャラリーサムネイルの個別ドラッグを有効化しました');
