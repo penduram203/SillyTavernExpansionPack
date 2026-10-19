@@ -7,7 +7,7 @@
     const MEDIA_CHECK_TIMEOUT_MS = 5000;
 
     let stjModalEl = null;
-    let stjButtonEl = null;
+    let stjButtonEl = null; // 未使用（互換性のため残置）
     let outsideClickHandlerInstalled = false;
     let helpOutsideHandlerInstalled = false;
     let modalOpenedTimestamp = 0;
@@ -724,28 +724,10 @@
         });
     }
 
-    function createExportButton() {
-        const buttonContainer = document.querySelector('#rm_ch_create_block .form_create_bottom_buttons_block');
-        if (!buttonContainer) return;
-
-        if (stjButtonEl && document.body.contains(stjButtonEl)) {
-            if (stjButtonEl.parentNode !== buttonContainer) {
-                buttonContainer.prepend(stjButtonEl);
-            }
-        } else {
-            const exportButton = document.createElement('button');
-            exportButton.id = 'stj_export_button';
-            exportButton.textContent = 'JSONデータ編集';
-            exportButton.className = 'menu_button';
-            exportButton.addEventListener('click', handleExportButtonClick, true);
-            buttonContainer.prepend(exportButton);
-            stjButtonEl = exportButton;
-        }
-
-        if (!stjModalEl || !document.body.contains(stjModalEl)) {
-            createExportModal();
-        }
-    }
+    // ============================================================
+    // ★ キャラ編集画面の「JSONデータ編集」ボタンは廃止
+    //   ギャラリー開閉と連動して自動で開閉する方式に変更
+    // ============================================================
 
     function handleExportButtonClick(e) {
         e.stopImmediatePropagation();
@@ -753,15 +735,10 @@
         openExportModal();
     }
 
-    // ============================================================
-    // ★ モーダル表示（CSSと同期した geometry をJSでも設定）
-    //   案B適用: left: 200px → 300px
-    //   右端 = 300 + (85vw - 200) = 85vw + 100px（右端 +100px）
-    //   左端 = 300px（+100px）
-    //   幅   = 85vw - 200px（変化なし）
-    // ============================================================
     function openExportModal() {
         if (!stjModalEl) return;
+        // ★ 既に開いている場合はスキップ
+        if (stjModalEl.style.display === 'block') return;
 
         stjModalEl.style.display = 'block';
         stjModalEl.style.position = 'fixed';
@@ -792,12 +769,39 @@
         })();
     }
 
-    function closeExportModal() {
+    function closeExportModalInternal() {
         if (!stjModalEl) return;
-        if (isBulkDeleteMode || isDialogActive) return;
         stjModalEl.style.display = 'none';
-
         document.body.classList.remove('stj-editor-open');
+    }
+
+    // ============================================================
+    // closeExportModal の新仕様:
+    //   - ユーザーが「キャンセル」を押した場合 → ギャラリーも一緒に閉じる
+    //   - ギャラリー側から呼ばれた場合 (fromGallery=true) → ギャラリーは既に閉じているので何もしない
+    // ============================================================
+    function closeExportModal(opts = {}) {
+        if (!stjModalEl) return;
+        const { fromGallery = false, force = false } = opts;
+
+        // 既に閉じている場合は何もしない
+        if (stjModalEl.style.display !== 'block') return;
+
+        // 一括削除やダイアログ中は（fromGallery/force以外）閉じない
+        if (!force && (isBulkDeleteMode || isDialogActive)) return;
+
+        closeExportModalInternal();
+
+        if (!fromGallery) {
+            // ユーザー操作（キャンセル）→ ギャラリーも閉じる
+            if (window.GicApi?.closeGallery) {
+                try {
+                    window.GicApi.closeGallery();
+                } catch (e) {
+                    console.warn('[STJ Editor] GicApi.closeGallery エラー:', e);
+                }
+            }
+        }
     }
 
     const applyBtnStyle = 'margin: 0; padding: 5px 14px; font-size: 13px; font-weight: bold; color: #000000; background-color: #e0e0e0; border: 1px solid #aaa; border-radius: 4px; cursor: pointer; white-space: nowrap;';
@@ -1137,6 +1141,7 @@
             });
         }
 
+        // ★ キャンセル: ギャラリーとJSON編集画面を同時に閉じる
         const cancelBtn = document.getElementById('stj_cancel_export');
         if (cancelBtn) {
             cancelBtn.addEventListener('click', (e) => {
@@ -1983,6 +1988,10 @@
         attachKeywordRowListeners(newItem, index);
     }
 
+    // ============================================================
+    // ★ 初期化: キャラ編集画面のボタンは作らない。モーダルDOMのみ準備し、
+    //   window.STJEditor API を公開する（ギャラリー側から開閉制御）
+    // ============================================================
     function initStjEditor() {
         const context = getSTContext();
         if (!context) {
@@ -1990,24 +1999,37 @@
             return;
         }
 
-        const eventSource = context.eventSource;
-        const eventTypes = context.eventTypes;
-
-        createExportButton();
-
-        if (eventSource && eventTypes) {
-            if (eventTypes.CHAT_CHANGED) {
-                eventSource.on(eventTypes.CHAT_CHANGED, createExportButton);
-            }
-            if (eventTypes.CHARACTER_LOADED) {
-                eventSource.on(eventTypes.CHARACTER_LOADED, createExportButton);
-            }
-            if (eventTypes.APP_READY) {
-                eventSource.on(eventTypes.APP_READY, createExportButton);
-            }
-        } else {
-            console.warn('[STJ Editor] eventSource or eventTypes not found in context.');
+        // モーダルDOMのみ先に作成（ボタンは作成しない）
+        if (!stjModalEl || !document.body.contains(stjModalEl)) {
+            createExportModal();
         }
+
+        // 外部公開API（ギャラリー側から開閉制御される）
+        window.STJEditor = {
+            open: function () {
+                try {
+                    openExportModal();
+                    return true;
+                } catch (e) {
+                    console.warn('[STJ Editor] open エラー:', e);
+                    return false;
+                }
+            },
+            close: function (opts) {
+                try {
+                    closeExportModal(opts || {});
+                    return true;
+                } catch (e) {
+                    console.warn('[STJ Editor] close エラー:', e);
+                    return false;
+                }
+            },
+            isOpen: function () {
+                return !!(stjModalEl && stjModalEl.style.display === 'block');
+            },
+        };
+
+        console.log('[STJ Editor] JSONエディタAPIを公開しました（キャラ編集画面のボタンは廃止）');
     }
 
     $(document).ready(() => {
