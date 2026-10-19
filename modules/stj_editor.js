@@ -659,6 +659,15 @@
             el.classList.remove('editing');
         });
 
+        // 編集中のspecialセルを閉じる
+        document.querySelectorAll('.stj-special-item.editing').forEach(item => {
+            const inputEl = item.querySelector('.stj-image-input');
+            if (inputEl && item.dataset.originalImage !== undefined) {
+                inputEl.value = item.dataset.originalImage;
+            }
+            item.classList.remove('editing');
+        });
+
         if (stjModalEl) stjModalEl.classList.add('stj-bulk-delete-mode');
 
         const addBtn = document.getElementById('stj_add_keyword');
@@ -679,6 +688,11 @@
         if (exportBtn) exportBtn.disabled = true;
 
         document.querySelectorAll('.stj-keyword-item .stj-apply-row, .stj-keyword-item .stj-cancel-row, .stj-keyword-item .stj-delete-row').forEach(btn => {
+            btn.disabled = true;
+        });
+
+        // specialセルの決定/キャンセルを無効化
+        document.querySelectorAll('.stj-special-action-row button').forEach(btn => {
             btn.disabled = true;
         });
     }
@@ -715,6 +729,11 @@
         if (exportBtn) exportBtn.disabled = false;
 
         document.querySelectorAll('.stj-keyword-item .stj-apply-row, .stj-keyword-item .stj-cancel-row, .stj-keyword-item .stj-delete-row').forEach(btn => {
+            btn.disabled = false;
+        });
+
+        // specialセルの決定/キャンセルを有効化
+        document.querySelectorAll('.stj-special-action-row button').forEach(btn => {
             btn.disabled = false;
         });
     }
@@ -919,35 +938,39 @@
             <div class="stj-top-section">
                 <div class="stj-special-container">
                     <div class="stj-special-item">
+                        <div class="stj-special-label">デフォルト表示</div>
                         <div class="stj-special-preview">
                             <div class="stj-image-preview" id="stj_preview_default" style="position: relative;">
                                 <div class="stj-preview-text">デフォルトメディアプレビュー</div>
                             </div>
-                        </div>
-                        <div class="stj-special-inputs">
-                            <div class="stj-input-group">
-                                <label for="stj_default_image">ファイル名</label>
-                                <input type="text" id="stj_default_image" value="defa" class="stj-image-input" placeholder="複数ファイルはカンマ区切り">
-                                ${buildExtensionButtonsHtml()}
-                                <div>
+                            <div class="stj-special-inputs">
+                                <div class="stj-input-group">
+                                    <label for="stj_default_image">ファイル名</label>
+                                    <input type="text" id="stj_default_image" value="defa" class="stj-image-input" placeholder="複数ファイルはカンマ区切り">
+                                    ${buildExtensionButtonsHtml()}
+                                </div>
+                                <div class="stj-special-action-row">
                                     <button type="button" class="stj-apply-special" data-target="default" style="${applyBtnStyle}">決定</button>
+                                    <button type="button" class="stj-cancel-special" data-target="default">キャンセル</button>
                                 </div>
                             </div>
                         </div>
                     </div>
                     <div class="stj-special-item">
+                        <div class="stj-special-label">サムネイル表示</div>
                         <div class="stj-special-preview">
                             <div class="stj-image-preview" id="stj_preview_thumbnail" style="position: relative;">
                                 <div class="stj-preview-text">サムネイルプレビュー</div>
                             </div>
-                        </div>
-                        <div class="stj-special-inputs">
-                            <div class="stj-input-group">
-                                <label for="stj_thumbnail_image">ファイル名</label>
-                                <input type="text" id="stj_thumbnail_image" value="thum" class="stj-image-input" placeholder="複数ファイルはカンマ区切り">
-                                ${buildExtensionButtonsHtml()}
-                                <div>
+                            <div class="stj-special-inputs">
+                                <div class="stj-input-group">
+                                    <label for="stj_thumbnail_image">ファイル名</label>
+                                    <input type="text" id="stj_thumbnail_image" value="thum" class="stj-image-input" placeholder="複数ファイルはカンマ区切り">
+                                    ${buildExtensionButtonsHtml()}
+                                </div>
+                                <div class="stj-special-action-row">
                                     <button type="button" class="stj-apply-special" data-target="thumbnail" style="${applyBtnStyle}">決定</button>
+                                    <button type="button" class="stj-cancel-special" data-target="thumbnail">キャンセル</button>
                                 </div>
                             </div>
                         </div>
@@ -1148,17 +1171,66 @@
             });
         }
 
+        // 決定ボタン
         modal.querySelectorAll('.stj-apply-special').forEach(btn => {
             btn.addEventListener('click', function(e) {
                 e.stopPropagation();
                 if (isBulkDeleteMode || isDialogActive) return;
                 const charName = document.getElementById('stj_char_name_display').textContent;
                 const target = this.getAttribute('data-target');
+                const item = this.closest('.stj-special-item');
                 if (target === 'default') {
                     updateImagePreview('stj_preview_default', charName, document.getElementById('stj_default_image')?.value);
                 } else if (target === 'thumbnail') {
                     updateImagePreview('stj_preview_thumbnail', charName, document.getElementById('stj_thumbnail_image')?.value);
                 }
+                if (item) item.classList.remove('editing');
+            });
+        });
+
+        // キャンセルボタン
+        modal.querySelectorAll('.stj-cancel-special').forEach(btn => {
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                if (isBulkDeleteMode || isDialogActive) return;
+                const item = this.closest('.stj-special-item');
+                if (!item) return;
+                const inputEl = item.querySelector('.stj-image-input');
+                if (inputEl && item.dataset.originalImage !== undefined) {
+                    inputEl.value = item.dataset.originalImage;
+                }
+                item.classList.remove('editing');
+            });
+        });
+
+        // 画像クリックで編集モードへ
+        modal.querySelectorAll('.stj-special-item').forEach(item => {
+            const previewEl = item.querySelector('.stj-image-preview');
+            const inputEl = item.querySelector('.stj-image-input');
+            if (!previewEl || !inputEl) return;
+
+            previewEl.addEventListener('click', (e) => {
+                const t = e.target;
+                if (t && t.closest && t.closest('button')) return;
+
+                modal.querySelectorAll('.stj-special-item.editing').forEach(other => {
+                    if (other === item) return;
+                    const oi = other.querySelector('.stj-image-input');
+                    if (oi && other.dataset.originalImage !== undefined) {
+                        oi.value = other.dataset.originalImage;
+                    }
+                    other.classList.remove('editing');
+                });
+
+                if (item.classList.contains('editing')) return;
+
+                e.preventDefault();
+                e.stopPropagation();
+
+                item.dataset.originalImage = inputEl.value;
+
+                item.classList.add('editing');
+                setTimeout(() => { try { inputEl.focus(); } catch (err) {} }, 50);
             });
         });
 
@@ -1583,23 +1655,15 @@
     // ★ 世代カウンタ（連続クリック時のレース防止）
     const _previewLoadGen = new WeakMap();
 
-    // =========================================================================
-    // ★ プレビュー更新（3状態を明示管理）
-    //    状態A: 入力空欄 → 通常プレースホルダを表示
-    //    状態B: ファイル不存在 → エラープレースホルダを表示
-    //    状態C: メディア表示成功 → プレースホルダを非表示、メディアを表示
-    // =========================================================================
     async function updateImagePreview(previewId, charName, rawValue, targetIndex = 0) {
         const previewEl = document.getElementById(previewId);
         if (!previewEl) return;
 
         previewEl.style.position = 'relative';
 
-        // --- 世代カウンタ ---
         const myGen = (_previewLoadGen.get(previewEl) || 0) + 1;
         _previewLoadGen.set(previewEl, myGen);
 
-        // --- プレースホルダ要素を確保（元テキストを保存） ---
         let placeholder = previewEl.querySelector(':scope > .stj-preview-text');
         if (!placeholder) {
             placeholder = document.createElement('div');
@@ -1611,7 +1675,6 @@
             placeholder.dataset.originalText = (placeholder.textContent || 'プレビュー').trim() || 'プレビュー';
         }
 
-        // --- ヘルパー ---
         const removeMedia = () => {
             previewEl.querySelectorAll(':scope > img, :scope > video').forEach(el => el.remove());
         };
@@ -1638,9 +1701,6 @@
 
         const imageNames = parseImageNames(rawValue);
 
-        // =====================================================
-        // 状態A: 空欄 → 通常プレースホルダを表示
-        // =====================================================
         if (!charName || imageNames.length === 0) {
             removeMedia();
             removeNav();
@@ -1661,9 +1721,6 @@
 
         if (_previewLoadGen.get(previewEl) !== myGen) return;
 
-        // =====================================================
-        // 状態B: ファイルが見つからない → エラープレースホルダ
-        // =====================================================
         if (fullPath === null) {
             removeMedia();
             removeNav();
@@ -1673,19 +1730,12 @@
             return;
         }
 
-        // =====================================================
-        // 状態C-1: 同じパスが既に表示済み → ナビだけ更新
-        // =====================================================
         if (previewEl.dataset.currentPath === fullPath) {
             placeholderHide();
             addPreviewNavButtons(previewEl, imageNames, currentIndex, previewId, charName, rawValue);
             return;
         }
 
-        // =====================================================
-        // 状態C-2: これからメディアをロード
-        //   ローディング中はプレースホルダを隠す（黒や旧テキストの残像回避）
-        // =====================================================
         removeMedia();
         removeNav();
         removeLoading();
@@ -1729,9 +1779,7 @@
 
             if (_previewLoadGen.get(previewEl) !== myGen) { removeLoading(); return; }
 
-            // ロード失敗の可能性 → 念のため readyState を確認
             if (video.readyState === 0) {
-                // データが読めていない → エラー扱い
                 removeLoading();
                 placeholderShowError();
                 previewEl.dataset.currentPath = '__missing__';
@@ -1775,7 +1823,6 @@
             if (_previewLoadGen.get(previewEl) !== myGen) { removeLoading(); return; }
 
             if (!decodeOk) {
-                // デコード失敗 → エラープレースホルダ
                 removeLoading();
                 placeholderShowError();
                 previewEl.dataset.currentPath = '__missing__';
