@@ -59,7 +59,6 @@
         if (display) display.textContent = kw || '';
     }
 
-    // ★ 9枚上限を撤廃（無制限）
     function addImageToCell(cell, fileName) {
         if (!cell || !fileName) return false;
         const images = getCellImages(cell);
@@ -379,12 +378,7 @@
         const rect = previewEl.getBoundingClientRect();
         const ghost = document.createElement('div');
         ghost.className = 'stj-drag-ghost';
-        const container = sourceItem.parentNode;
-        if (container) {
-            const items = Array.from(container.querySelectorAll('.stj-keyword-item'));
-            const num = items.indexOf(sourceItem) + 1;
-            ghost.dataset.cellNum = String(num);
-        }
+        // ★ セル番号は表示しない（要件により削除）
         const media = previewEl.querySelector('img, video');
         if (media) {
             const cloned = media.cloneNode(true);
@@ -634,6 +628,18 @@
             }
         });
 
+        // ★ キーワード入力欄で Enter → 決定と同じ動作で閉じる
+        const kwInput = modal.querySelector('.stj-cell-modal-keyword');
+        if (kwInput) {
+            kwInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    applyCellModal();
+                }
+            });
+        }
+
         // ★ イベント委譲：動的に増えるスロット削除ボタンに対応
         modal.querySelector('.stj-cell-modal-grid').addEventListener('click', (e) => {
             const btn = e.target.closest('.stj-cell-modal-slot-remove');
@@ -683,6 +689,13 @@
 
         renderCellModalGrid(cell);
         currentCellModal.classList.add('visible');
+
+        // ★ キーワード入力欄にフォーカス（Enterで決定しやすく）
+        if (!isSpecial && kwInput) {
+            setTimeout(() => {
+                try { kwInput.focus(); } catch (e) { /* ignore */ }
+            }, 50);
+        }
     }
 
     function closeCellModal(revert) {
@@ -722,7 +735,6 @@
         const grid = currentCellModal.querySelector('.stj-cell-modal-grid');
         if (!grid) return;
 
-        // 最低9スロット（3x3）、画像数がそれを超えたら3の倍数で拡張
         const neededSlots = Math.max(9, Math.ceil(images.length / 3) * 3);
         const currentCount = grid.children.length;
         for (let i = currentCount; i < neededSlots; i++) {
@@ -1108,69 +1120,6 @@
         });
     }
 
-    function attachPreviewNavButtonGuards(btn) {
-        const stopAll = (e) => {
-            e.stopPropagation();
-            if (e.type === 'mousedown') e.preventDefault();
-        };
-        btn.addEventListener('mousedown', stopAll);
-        btn.addEventListener('mouseup', stopAll);
-        btn.addEventListener('dblclick', stopAll);
-    }
-
-    function addPreviewNavButtons(previewEl, imageNames, currentIndex, previewId, charName, rawValue) {
-        previewEl.querySelectorAll(':scope > .stj-preview-nav-btn, :scope > .stj-preview-index-display').forEach(el => el.remove());
-        if (imageNames.length <= 1) return;
-
-        const leftButton = document.createElement('button');
-        leftButton.className = 'stj-preview-nav-btn';
-        leftButton.innerHTML = '←';
-        leftButton.type = 'button';
-        Object.assign(leftButton.style, {
-            position: 'absolute', left: '5px', top: '50%',
-            transform: 'translateY(-50%)', zIndex: '25',
-            background: 'rgba(0,0,0,0.65)', color: 'white',
-            border: '2px solid rgba(255,255,255,0.6)', borderRadius: '4px',
-            padding: '5px 10px', cursor: 'pointer', pointerEvents: 'auto',
-        });
-        attachPreviewNavButtonGuards(leftButton);
-        leftButton.addEventListener('click', (e) => {
-            e.stopPropagation(); e.preventDefault();
-            updateImagePreview(previewId, charName, rawValue, currentIndex - 1);
-        });
-        previewEl.appendChild(leftButton);
-
-        const rightButton = document.createElement('button');
-        rightButton.className = 'stj-preview-nav-btn';
-        rightButton.innerHTML = '→';
-        rightButton.type = 'button';
-        Object.assign(rightButton.style, {
-            position: 'absolute', right: '5px', top: '50%',
-            transform: 'translateY(-50%)', zIndex: '25',
-            background: 'rgba(0,0,0,0.65)', color: 'white',
-            border: '2px solid rgba(255,255,255,0.6)', borderRadius: '4px',
-            padding: '5px 10px', cursor: 'pointer', pointerEvents: 'auto',
-        });
-        attachPreviewNavButtonGuards(rightButton);
-        rightButton.addEventListener('click', (e) => {
-            e.stopPropagation(); e.preventDefault();
-            updateImagePreview(previewId, charName, rawValue, currentIndex + 1);
-        });
-        previewEl.appendChild(rightButton);
-
-        const indexDisplay = document.createElement('div');
-        indexDisplay.className = 'stj-preview-index-display';
-        Object.assign(indexDisplay.style, {
-            position: 'absolute', bottom: '5px', left: '50%',
-            transform: 'translateX(-50%)', zIndex: '25',
-            background: 'rgba(0,0,0,0.65)', color: 'white',
-            padding: '2px 8px', borderRadius: '3px', fontSize: '12px',
-            pointerEvents: 'none',
-        });
-        indexDisplay.textContent = `${currentIndex + 1}/${imageNames.length}`;
-        previewEl.appendChild(indexDisplay);
-    }
-
     const _previewLoadGen = new WeakMap();
 
     async function updateImagePreview(previewId, charName, rawValue, targetIndex = 0) {
@@ -1193,7 +1142,6 @@
         }
 
         const removeMedia = () => previewEl.querySelectorAll(':scope > img, :scope > video').forEach(el => el.remove());
-        const removeNav = () => previewEl.querySelectorAll(':scope > .stj-preview-nav-btn, :scope > .stj-preview-index-display').forEach(el => el.remove());
         const removeLoading = () => previewEl.querySelectorAll(':scope > .stj-preview-loading').forEach(el => el.remove());
         const placeholderShowNormal = () => {
             placeholder.textContent = placeholder.dataset.originalText;
@@ -1213,7 +1161,7 @@
         const imageNames = parseImageNames(rawValue);
 
         if (!charName || imageNames.length === 0) {
-            removeMedia(); removeNav(); removeLoading();
+            removeMedia(); removeLoading();
             placeholderShowNormal();
             delete previewEl.dataset.currentIndex;
             delete previewEl.dataset.currentPath;
@@ -1230,7 +1178,7 @@
         if (_previewLoadGen.get(previewEl) !== myGen) return;
 
         if (fullPath === null) {
-            removeMedia(); removeNav(); removeLoading();
+            removeMedia(); removeLoading();
             placeholderShowError();
             previewEl.dataset.currentPath = '__missing__';
             return;
@@ -1238,11 +1186,10 @@
 
         if (previewEl.dataset.currentPath === fullPath) {
             placeholderHide();
-            addPreviewNavButtons(previewEl, imageNames, currentIndex, previewId, charName, rawValue);
             return;
         }
 
-        removeMedia(); removeNav(); removeLoading(); placeholderHide();
+        removeMedia(); removeLoading(); placeholderHide();
 
         const loadingEl = document.createElement('div');
         loadingEl.className = 'stj-preview-loading';
@@ -1283,7 +1230,6 @@
             video.play().catch(() => {});
             previewEl.dataset.currentPath = fullPath;
             removeLoading(); placeholderHide();
-            addPreviewNavButtons(previewEl, imageNames, currentIndex, previewId, charName, rawValue);
         } else {
             const img = new Image();
             img.src = fullPath;
@@ -1312,7 +1258,6 @@
             previewEl.appendChild(img);
             previewEl.dataset.currentPath = fullPath;
             removeLoading(); placeholderHide();
-            addPreviewNavButtons(previewEl, imageNames, currentIndex, previewId, charName, rawValue);
         }
     }
 
