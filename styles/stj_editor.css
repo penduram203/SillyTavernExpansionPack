@@ -22,17 +22,16 @@
 
 /* ============================================================
    モーダルウィンドウスタイル
-   ★ 幅を旧: max(100vw+80px, 1640px) → 新: max(100vw-120px, 1440px)
-     （200px縮小、中央寄せ維持で右端が100px左へ移動）
+   ★ left: 200px + width: calc(85vw - 200px)
+     → 左端を右に200px、幅を200px縮小、右端は 85vw で維持
    ============================================================ */
 #stj_export_modal {
   display: none;
   position: fixed;
   top: 0;
-  left: 0;
-  right: 0;
-  margin: 0 auto;
-  width: max(calc(100vw - 120px), 1440px);
+  left: 200px;
+  right: auto;
+  width: calc(85vw - 200px);
   height: 100vh;
   background-color: #2d3748;
   border: 1px solid #4a5568;
@@ -508,7 +507,8 @@
   display: none;
   flex-direction: column;
   justify-content: center;
-  gap: 10px;
+  /* ★ ファイル名入力欄を上に・決定/キャンセルを下に広げるため gap を 10px → 110px に拡大 */
+  gap: 110px;
   padding: 20px 12px;
   box-sizing: border-box;
   background: rgba(0, 0, 0, 0.85);
@@ -1008,4 +1008,61 @@
   width: 100%; height: 100%;
   object-fit: contain;
   display: block;
-  pointer-events: none
+  pointer-events: none;
+}
+.stj-drag-ghost::after {
+  content: attr(data-cell-num);
+  position: absolute;
+  top: 6px; right: 10px;
+  font-size: 34px;
+  font-weight: 900;
+  line-height: 1;
+  color: #ffffff;
+  text-shadow:
+    2px 0 0 #000000,
+    -2px 0 0 #000000,
+    0 2px 0 #000000,
+    0 -2px 0 #000000,
+    2px 2px 0 #000000,
+    -2px 2px 0 #000000,
+    2px -2px 0 #000000,
+    -2px -2px 0 #000000;
+  z-index: 2;
+  pointer-events: none;
+  user-select: none;
+}
+.stj-drag-ghost::before {
+  content: "移動中";
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 3px 12px;
+  background: rgba(255, 140, 0, 0.9);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: bold;
+  border-radius: 4px;
+  z-index: 2;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* ===== レスポンシブ ===== */
+@media (max-width: 1380px) {
+  .stj-grid-container { grid-template-columns: repeat(4, 260px); min-width: 1040px; }
+}
+@media (max-width: 1120px) {
+  .stj-grid-container { grid-template-columns: repeat(3, 260px); min-width: 780px; }
+  .stj-top-section { flex-direction: column; }
+  .stj-info-panel { width: 100%; min-height: auto; }
+}
+@media (max-width: 860px) {
+  .stj-grid-container { grid-template-columns: repeat(2, 260px); min-width: 520px; }
+}
+@media (max-width: 600px) {
+  .stj-grid-container { grid-template-columns: 1fr; min-width: 260px; }
+  .stj-special-container { flex-direction: column; }
+  .stj-button-group { flex-direction: column; gap: 10px; }
+  .stj-button-group > div { justify-content: center; }
+}
