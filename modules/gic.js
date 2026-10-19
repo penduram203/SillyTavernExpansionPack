@@ -643,6 +643,13 @@ function getCurrentCharacterName() {
             pointer-events: none !important;
             user-select: none !important;
         }
+
+        /* ★ ドラッグ中は #gallery 全体を pointer-events: none に
+              → nGY2 の内部 mousemove 反応を完全遮断 ＋ 下層の JSON セルへのヒットテストを透過 */
+        body.gic-dragging #gallery,
+        body.gic-dragging #gallery * {
+            pointer-events: none !important;
+        }
     `;
     document.head.appendChild(style);
     console.log('[GIC] 🖼️ ギャラリー配置CSSを注入しました');
@@ -1045,9 +1052,11 @@ function setupGalleryDedupeObserver() {
 
 // ============================================================
 // ★ ギャラリーサムネイルを個別にドラッグ可能にする
-//    - draggable=false で ネイティブD&D を完全無効化
+//    - draggable=false でネイティブD&Dを完全無効化
 //    - mousedown/mousemove/mouseup を document キャプチャ段階で独占制御
-//    - ドラッグ直後 250ms は click をキャプチャ段階で抑止（ページャー誤爆防止）
+//    - elementsFromPoint でギャラリーの下の JSON セルも検出
+//    - ドラッグ直後 250ms は click を抑止（ページャー誤爆防止）
+//    - rAF で位置・スクロールのドリフトを監視して強制復元
 //    - クリック拡大表示はそのまま維持
 // ============================================================
 function setupGalleryDragToJson() {
@@ -1060,7 +1069,9 @@ function setupGalleryDragToJson() {
     let dragState = null;
     let ghostEl = null;
     let suppressClickUntil = 0;
-    let frozenGalleryRect = null;   // ★ 追加: ドラッグ開始時のギャラリー位置
+    let driftRAF = null;
+    let startRect = null;
+    let startScroll = null;
 
     function getPathFromThumb(thumb) {
         if (!thumb) return null;
@@ -1118,10 +1129,80 @@ function setupGalleryDragToJson() {
         ghostEl.style.top = (y - ghostEl.offsetHeight / 2) + 'px';
     }
 
+    // ★ elementsFromPoint を使い、ギャラリーの下にあるJSONセルも検出
+    function findDropCell(x, y) {
+        if (typeof document.elementsFromPoint === 'function') {
+            const elements = document.elementsFromPoint(x, y);
+            for (const el of elements) {
+                if (!el || !el.closest) continue;
+                if (el.id === 'gic-drag-ghost') continue;
+                const cell = el.closest('.stj-keyword-item, .stj-special-item');
+                if (cell) return cell;
+            }
+        }
+        // フォールバック
+        const el = document.elementFromPoint(x, y);
+        return el && el.closest ? el.closest('.stj-keyword-item, .stj-special-item') : null;
+    }
+
+    function startDriftWatch() {
+        if (driftRAF) return;
+        const g = document.getElementById('gallery');
+        if (!g) return;
+
+        const r = g.getBoundingClientRect();
+        startRect = { left: r.left, top: r.top };
+
+        const ng = g.querySelector('.nGY2Gallery');
+        startScroll = ng ? { top: ng.scrollTop, left: ng.scrollLeft } : null;
+
+        function check() {
+            if (!dragState || !dragState.isDragging) {
+                driftRAF = null;
+                return;
+            }
+            const g2 = document.getElementById('gallery');
+            if (!g2) { driftRAF = null; return; }
+
+            // 位置ドリフト検出
+            const cur = g2.getBoundingClientRect();
+            const dx = Math.abs(cur.left - startRect.left);
+            const dy = Math.abs(cur.top - startRect.top);
+            if (dx > 0.5 || dy > 0.5) {
+                console.warn(`[GIC] gallery drift (Δx=${dx.toFixed(1)}, Δy=${dy.toFixed(1)}) → restore`);
+                g2.style.setProperty('position', 'fixed', 'important');
+                g2.style.setProperty('left', '0', 'important');
+                g2.style.setProperty('top', '50%', 'important');
+                g2.style.setProperty('transform', 'translateY(-50%)', 'important');
+            }
+
+            // スクロールドリフト検出
+            if (startScroll) {
+                const ng2 = g2.querySelector('.nGY2Gallery');
+                if (ng2) {
+                    if (Math.abs(ng2.scrollTop - startScroll.top) > 2) {
+                        console.warn('[GIC] scroll drift (top) → restore');
+                        ng2.scrollTop = startScroll.top;
+                    }
+                    if (Math.abs(ng2.scrollLeft - startScroll.left) > 2) {
+                        console.warn('[GIC] scroll drift (left) → restore');
+                        ng2.scrollLeft = startScroll.left;
+                    }
+                }
+            }
+
+            driftRAF = requestAnimationFrame(check);
+        }
+        driftRAF = requestAnimationFrame(check);
+    }
+
     function cleanup() {
         if (ghostEl) { ghostEl.remove(); ghostEl = null; }
         dragState = null;
-        frozenGalleryRect = null;   // ★ 追加: 復元用スナップショットをクリア
+        startRect = null;
+        startScroll = null;
+        if (driftRAF) { cancelAnimationFrame(driftRAF); driftRAF = null; }
+
         window.__gicDragInProgress = false;
         document.body.classList.remove('gic-dragging');
 
@@ -1129,17 +1210,13 @@ function setupGalleryDragToJson() {
             el.classList.remove('stj-drop-target');
         });
 
-        // ★ nGY2 の再レイアウトを促しつつ、500ms 間はこちらのレイアウト更新も抑止
+        // ★ resize 発火は削除（SillyTavern の MUI リセット誘発を防止）
         window.__gicNoLayoutUntil = Date.now() + 500;
-        setTimeout(() => {
-            try { window.dispatchEvent(new Event('resize')); } catch (_) {}
-        }, 100);
     }
 
     function handleDrop(x, y) {
         if (!dragState) return;
-        const targetEl = document.elementFromPoint(x, y);
-        const cell = targetEl ? targetEl.closest('.stj-keyword-item, .stj-special-item') : null;
+        const cell = findDropCell(x, y);
         if (!cell) return;
         window.dispatchEvent(new CustomEvent('gic-drop-file', {
             detail: { path: dragState.path, cell }
@@ -1157,7 +1234,6 @@ function setupGalleryDragToJson() {
         });
     }
 
-    // mousedown: 起点記録
     document.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
         const gallery = document.getElementById('gallery');
@@ -1168,15 +1244,6 @@ function setupGalleryDragToJson() {
         const path = getPathFromThumb(thumb);
         if (!path) return;
 
-        // ★ ドラッグ開始時のギャラリー位置を記録
-        const gRect = gallery.getBoundingClientRect();
-        frozenGalleryRect = {
-            left: gRect.left,
-            top: gRect.top,
-            width: gRect.width,
-            height: gRect.height
-        };
-
         dragState = {
             startX: e.clientX,
             startY: e.clientY,
@@ -1186,7 +1253,6 @@ function setupGalleryDragToJson() {
         };
     }, true);
 
-    // mousemove: 全遮断（nGY2 の drag-reorder 完全抑止）
     document.addEventListener('mousemove', (e) => {
         if (!dragState) return;
         e.stopImmediatePropagation();
@@ -1200,38 +1266,23 @@ function setupGalleryDragToJson() {
             ghostEl = createGhost(dragState.thumb, e.clientX, e.clientY);
             window.__gicDragInProgress = true;
             document.body.classList.add('gic-dragging');
-        }
-
-        // ★ ギャラリーの位置がズレていたら強制復元
-        if (frozenGalleryRect) {
-            const gallery = document.getElementById('gallery');
-            if (gallery) {
-                const cur = gallery.getBoundingClientRect();
-                const driftX = Math.abs(cur.left - frozenGalleryRect.left);
-                const driftY = Math.abs(cur.top - frozenGalleryRect.top);
-                if (driftX > 0.5 || driftY > 0.5) {
-                    console.warn(`[GIC] ギャラリーがドリフト (Δx=${driftX.toFixed(1)}, Δy=${driftY.toFixed(1)}) → 強制復元`);
-                    gallery.style.setProperty('left', frozenGalleryRect.left + 'px', 'important');
-                    gallery.style.setProperty('top', frozenGalleryRect.top + 'px', 'important');
-                    gallery.style.setProperty('transform', 'none', 'important');
-                }
-            }
-
-            // ★ .nGY2Gallery の transform も監視・矯正
-            const ngy2 = document.querySelector('#gallery .nGY2Gallery');
-            if (ngy2) {
-                const cs = getComputedStyle(ngy2);
-                if (cs.transform !== 'none' && cs.transform !== 'matrix(1, 0, 0, 1, 0, 0)') {
-                    console.warn('[GIC] .nGY2Gallery に transform が付与されたため矯正:', cs.transform);
-                    ngy2.style.setProperty('transform', 'none', 'important');
-                }
-            }
+            startDriftWatch();  // ★ ドリフト監視開始
         }
 
         moveGhost(e.clientX, e.clientY);
-        // ... 以降は既存コードのまま
+
+        const cell = findDropCell(e.clientX, e.clientY);
+        document.querySelectorAll('.stj-drop-target').forEach(el => {
+            if (el !== cell) el.classList.remove('stj-drop-target');
+        });
+        if (cell) cell.classList.add('stj-drop-target');
     }, true);
-    // mouseup: ドラッグ時は完全抑止し、click 抑止タイマーをセット
+
+    document.addEventListener('pointermove', (e) => {
+        if (!dragState) return;
+        e.stopImmediatePropagation();
+    }, true);
+
     document.addEventListener('mouseup', (e) => {
         if (!dragState) return;
 
@@ -1240,20 +1291,17 @@ function setupGalleryDragToJson() {
         if (wasDragging) {
             e.stopImmediatePropagation();
             e.preventDefault();
-            // ★ 直後の click を 250ms 間抑止
             suppressClickUntil = Date.now() + 250;
             handleDrop(e.clientX, e.clientY);
         }
         cleanup();
     }, true);
 
-    // pointerup: ドラッグ時のみ遮断
     document.addEventListener('pointerup', (e) => {
         if (!dragState || !dragState.isDragging) return;
         e.stopImmediatePropagation();
     }, true);
 
-    // ★ click 抑止（ドラッグ直後の意図しないクリックを根絶）
     document.addEventListener('click', (e) => {
         if (Date.now() < suppressClickUntil) {
             e.stopImmediatePropagation();
@@ -1262,7 +1310,6 @@ function setupGalleryDragToJson() {
         }
     }, true);
 
-    // ★ ページャーの mousedown も念のため抑止（保険）
     document.addEventListener('mousedown', (e) => {
         if (Date.now() >= suppressClickUntil) return;
         if (e.target.closest && e.target.closest('.gic-pagination-pager')) {
@@ -1271,7 +1318,6 @@ function setupGalleryDragToJson() {
         }
     }, true);
 
-    // ネイティブ dragstart は完全阻止
     document.addEventListener('dragstart', (e) => {
         const gallery = document.getElementById('gallery');
         if (gallery && gallery.contains(e.target) && e.target.closest(GALLERY_THUMB_SELECTOR)) {
@@ -1290,7 +1336,7 @@ function setupGalleryDragToJson() {
     observer.observe(document.body, { childList: true, subtree: true });
     setInterval(scanAndMarkAll, 1000);
 
-    console.log('[GIC] 🖼️ ギャラリーサムネイルの個別ドラッグを有効化しました（クリック抑止付き）');
+    console.log('[GIC] 🖼️ ギャラリーサムネイルの個別ドラッグを有効化しました（elementsFromPoint + drift監視）');
 }
 
 // ===== ギャラリー配置・プレビュー制御 =====
@@ -1486,8 +1532,7 @@ function positionPager(pager) {
     pager.style.setProperty('bottom', Math.round(bottom) + 'px', 'important');
     pager.style.setProperty('top', 'auto', 'important');
     pager.style.setProperty('right', 'auto', 'important');
-    // ★ この行を削除（CSSに任せる）:
-    // pager.style.setProperty('pointer-events', 'auto', 'important');
+    // ★ インライン !important の pointer-events 設定は削除（CSS 側でドラッグ中は none にする）
     pager.style.setProperty('z-index', '2147483647', 'important');
 }
 
