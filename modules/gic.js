@@ -1,28 +1,3 @@
-// ★ 一時デバッグ: saveSettingsDebounced の呼び出し元を追跡
-(function debugHook() {
-    let hooked = false;
-    const iv = setInterval(() => {
-        if (hooked) return;
-        if (typeof SillyTavern === 'undefined' || !SillyTavern.getContext) return;
-        const ctx = SillyTavern.getContext();
-        if (!ctx || typeof ctx.saveSettingsDebounced !== 'function') return;
-        hooked = true;
-        clearInterval(iv);
-
-        const orig = ctx.saveSettingsDebounced.bind(ctx);
-        let callCount = 0;
-        ctx.saveSettingsDebounced = function (...args) {
-            callCount++;
-            if (callCount <= 5) {
-                console.log(`[DEBUG] saveSettingsDebounced #${callCount}`);
-                console.trace('呼び出し元');
-            }
-            return orig(...args);
-        };
-        console.log('[DEBUG] saveSettingsDebounced をフックしました');
-    }, 50);
-})();
-
 // ★ 最初に comfy_boot.js を読み込む（fetch インターセプタを最速で設置）
 import './comfy_boot.js';
 import './gic_lorebook.js';
