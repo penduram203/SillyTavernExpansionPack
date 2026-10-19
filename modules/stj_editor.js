@@ -907,34 +907,44 @@
         if (window.__gicDropInterceptorInstalled) return;
         window.__gicDropInterceptorInstalled = true;
 
-        window.addEventListener('drop', (e) => {
-            if (!window.__gicDragInProgress) return;
-
-            const cell = e.target && e.target.closest
-                ? e.target.closest('.stj-keyword-item, .stj-special-item')
-                : null;
-            if (!cell) return;
-
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
-
-            handleCellDrop(cell, e);
-        }, true);
-
+        // ★ dragover: セル以外でも常に preventDefault して SillyTavern 側をブロック
         window.addEventListener('dragover', (e) => {
             if (!window.__gicDragInProgress) return;
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+
             const cell = e.target && e.target.closest
                 ? e.target.closest('.stj-keyword-item, .stj-special-item')
                 : null;
             if (!cell) return;
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
             try { e.dataTransfer.dropEffect = 'copy'; } catch (_) {}
             cell.classList.add('stj-drop-target');
         }, true);
 
+        // ★ dragenter も常にブロック
+        window.addEventListener('dragenter', (e) => {
+            if (!window.__gicDragInProgress) return;
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+        }, true);
+
+        // ★ drop: セル以外でも常にブロック
+        window.addEventListener('drop', (e) => {
+            if (!window.__gicDragInProgress) return;
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+
+            const cell = e.target && e.target.closest
+                ? e.target.closest('.stj-keyword-item, .stj-special-item')
+                : null;
+            if (!cell) return;
+            handleCellDrop(cell, e);
+        }, true);
+
+        // dragleave は通常通り（ビジュアルフィードバック解除用）
         window.addEventListener('dragleave', (e) => {
             if (!window.__gicDragInProgress) return;
             const cell = e.target && e.target.closest
