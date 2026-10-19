@@ -1,3 +1,28 @@
+// ★ 一時デバッグ: saveSettingsDebounced の呼び出し元を追跡
+(function debugHook() {
+    let hooked = false;
+    const iv = setInterval(() => {
+        if (hooked) return;
+        if (typeof SillyTavern === 'undefined' || !SillyTavern.getContext) return;
+        const ctx = SillyTavern.getContext();
+        if (!ctx || typeof ctx.saveSettingsDebounced !== 'function') return;
+        hooked = true;
+        clearInterval(iv);
+
+        const orig = ctx.saveSettingsDebounced.bind(ctx);
+        let callCount = 0;
+        ctx.saveSettingsDebounced = function (...args) {
+            callCount++;
+            if (callCount <= 5) {
+                console.log(`[DEBUG] saveSettingsDebounced #${callCount}`);
+                console.trace('呼び出し元');
+            }
+            return orig(...args);
+        };
+        console.log('[DEBUG] saveSettingsDebounced をフックしました');
+    }, 50);
+})();
+
 // ★ 最初に comfy_boot.js を読み込む（fetch インターセプタを最速で設置）
 import './comfy_boot.js';
 import './gic_lorebook.js';
@@ -95,7 +120,7 @@ function isGalleryOpenInFlight() {
 
 let warmupState = 'idle';
 
-// ===== 一括削除機能の状態 =====
+// ===== 一括選択機能の状態 =====
 let _bulkDeleteMode = false;
 const _bulkDeleteSelected = new Map();
 let _bulkDeleteHeaderObserver = null;
@@ -575,7 +600,7 @@ function getCurrentCharacterName() {
         }
 
         body.gic-bulk-delete-mode #gallery::before {
-            content: var(--gic-bulk-banner-text, '🗑 削除モード中 — 画像をクリックして選択、再度クリックで解除');
+            content: var(--gic-bulk-banner-text, '一括選択モード — 画像をクリックして選択');
             position: absolute;
             top: 0;
             left: 0;
@@ -623,29 +648,24 @@ function getCurrentCharacterName() {
             background-color: #444 !important;
         }
 
-        /* ★ ドラッグ中のサムネイルの強調表示 */
         .gic-dragging-to-json {
             opacity: 0.5 !important;
             outline: 3px solid #ffd54f !important;
             outline-offset: -3px !important;
         }
 
-        /* ★ ドラッグ中はギャラリー内のアニメーション・トランジションを停止 */
         body.gic-dragging #gallery,
         body.gic-dragging #gallery * {
             transition: none !important;
             animation: none !important;
         }
 
-        /* ★ ドラッグ中はページャー・ページ番号を完全無効化（クリック防止） */
         body.gic-dragging .gic-pagination-pager,
         body.gic-dragging .gic-pagination-pager * {
             pointer-events: none !important;
             user-select: none !important;
         }
 
-        /* ★ ドラッグ中は #gallery 全体を pointer-events: none に
-              → nGY2 の内部 mousemove 反応を完全遮断 ＋ 下層の JSON セルへのヒットテストを透過 */
         body.gic-dragging #gallery,
         body.gic-dragging #gallery * {
             pointer-events: none !important;
@@ -1228,8 +1248,17 @@ function setupGalleryDragToJson() {
     function handleDrop(x, y) {
         if (!dragState) return;
         const cell = findDropCell(x, y);
+
+        // ★ 一括選択モードで選択中の画像があれば、それらをまとめてドロップ
+        let paths = [dragState.path];
+        if (_bulkDeleteMode && _bulkDeleteSelected.size > 0) {
+            const selectedPaths = [];
+            _bulkDeleteSelected.forEach(p => { if (p) selectedPaths.push(p); });
+            if (selectedPaths.length > 0) paths = selectedPaths;
+        }
+
         window.dispatchEvent(new CustomEvent('gic-drop-file', {
-            detail: { path: dragState.path, cell, x, y }
+            detail: { paths, path: paths[0], cell, x, y }
         }));
     }
 
@@ -1359,8 +1388,8 @@ function setupGalleryDragToJson() {
             // クリック判定 → nGY2 のクリック動作を手動でシミュレート
             e.stopImmediatePropagation();
             e.preventDefault();
-            // ★ 一括削除モードでは合成クリックを発火しない
-            //    （自然クリックだけで選択をトグルさせる）
+            // ★ 一括選択モードでは合成クリックを発火しない
+            //    （自然クリックのみで選択をトグルさせる）
             if (!_bulkDeleteMode) {
                 simulateClick(thumb, e.clientX, e.clientY);
             }
@@ -1899,7 +1928,7 @@ function fitPreviewToViewport(panel) {
     }
 }
 
-// ===== 一括削除機能 =====
+// ===== 一括選択機能 =====
 
 function findGalleryHeaderControls() {
     const result = { header: null, trashIcon: null, checkIcon: null, refreshIcon: null, dropdown: null, folderInput: null, folderRow: null };
@@ -1984,8 +2013,8 @@ function enterBulkDeleteMode() {
     _bulkDeleteMode = true;
     _bulkDeleteSelected.clear();
     document.body.classList.add('gic-bulk-delete-mode');
-    console.log('[GIC-Bulk] 一括削除モード開始');
-    showBulkDeleteToast('削除モード開始 — 画像をクリックして選択してください');
+    console.log('[GIC-Bulk] 一括選択モード開始');
+    showBulkDeleteToast('一括選択モード — 画像をクリックして選択してください');
     updateBulkDeleteButton();
     updateBulkDeleteBanner();
 }
@@ -1996,9 +2025,9 @@ function exitBulkDeleteMode() {
     _bulkDeleteSelected.clear();
     document.body.classList.remove('gic-bulk-delete-mode');
     document.querySelectorAll('.gic-bulk-selected').forEach(el => el.classList.remove('gic-bulk-selected'));
-    showBulkDeleteToast('削除モード終了');
+    showBulkDeleteToast('一括選択モードを終了しました');
     updateBulkDeleteButton();
-    console.log('[GIC-Bulk] 一括削除モード終了');
+    console.log('[GIC-Bulk] 一括選択モード終了');
 }
 
 function showBulkDeleteToast(message) {
@@ -2053,14 +2082,14 @@ function toggleBulkSelection(itemEl, evt) {
 function updateBulkDeleteButton() {
     const btn = document.getElementById('gic-bulk-delete-button');
     if (!btn) return;
-    if (_bulkDeleteSelected.size > 0) {
-        btn.classList.remove('gic-bulk-delete-disabled');
-        btn.disabled = false;
-        btn.textContent = `一括削除 (${_bulkDeleteSelected.size})`;
+    // ★ 常に押せる。モード中は選択数も表示
+    btn.classList.remove('gic-bulk-delete-disabled');
+    btn.disabled = false;
+    if (_bulkDeleteMode) {
+        const n = _bulkDeleteSelected.size;
+        btn.textContent = n > 0 ? `選択終了 (${n})` : '選択終了';
     } else {
-        btn.classList.add('gic-bulk-delete-disabled');
-        btn.disabled = true;
-        btn.textContent = '一括削除';
+        btn.textContent = '一括選択';
     }
 }
 
@@ -2070,8 +2099,8 @@ function updateBulkDeleteBanner() {
     if (!gallery) return;
     const count = _bulkDeleteSelected.size;
     const text = count > 0
-        ? `🗑 削除モード中 — ${count} 枚選択中（クリックで選択解除）`
-        : '🗑 削除モード中 — 画像をクリックして選択、再度クリックで解除';
+        ? `一括選択中 — ${count} 枚（🗑 で削除 / ドラッグでまとめて登録）`
+        : '一括選択モード — 画像をクリックして選択';
     gallery.style.setProperty('--gic-bulk-banner-text', `"${text}"`);
 }
 
@@ -2081,13 +2110,16 @@ function createBulkDeleteButton() {
     btn = document.createElement('button');
     btn.id = 'gic-bulk-delete-button';
     btn.type = 'button';
-    btn.className = 'gic-bulk-delete-button gic-bulk-delete-disabled';
-    btn.textContent = '一括削除';
-    btn.disabled = true;
-    btn.title = '選択した画像を一括削除';
+    btn.className = 'gic-bulk-delete-button';
+    btn.textContent = '一括選択';
+    btn.title = '一括選択モードの開始／終了';
     btn.addEventListener('click', (e) => {
         e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
-        executeBulkDelete();
+        if (_bulkDeleteMode) {
+            exitBulkDeleteMode();
+        } else {
+            enterBulkDeleteMode();
+        }
     });
     return btn;
 }
@@ -2100,26 +2132,26 @@ function placeBulkDeleteButton(controls) {
     if (folderInput && folderInput.parentElement) {
         folderInput.classList.add('gic-bulk-shortened-input');
         folderInput.insertAdjacentElement('afterend', btn);
-        console.log('[GIC-Bulk] 一括削除ボタンをフォルダ入力欄の直後に挿入');
+        console.log('[GIC-Bulk] 一括選択ボタンをフォルダ入力欄の直後に挿入');
         updateBulkDeleteButton();
         return;
     }
     if (folderRow) {
         folderRow.appendChild(btn);
-        console.log('[GIC-Bulk] 一括削除ボタンをフォルダ行末尾に挿入');
+        console.log('[GIC-Bulk] 一括選択ボタンをフォルダ行末尾に挿入');
         updateBulkDeleteButton();
         return;
     }
     if (dropdown && dropdown.parentElement) {
         dropdown.classList.add('gic-bulk-shrunk-dropdown');
         dropdown.parentElement.insertBefore(btn, dropdown);
-        console.log('[GIC-Bulk] 一括削除ボタンをドロップダウンの直前に挿入');
+        console.log('[GIC-Bulk] 一括選択ボタンをドロップダウンの直前に挿入');
         updateBulkDeleteButton();
         return;
     }
     if (header) {
         header.appendChild(btn);
-        console.log('[GIC-Bulk] 一括削除ボタンをヘッダー末尾に挿入');
+        console.log('[GIC-Bulk] 一括選択ボタンをヘッダー末尾に挿入');
         updateBulkDeleteButton();
     }
 }
@@ -2160,7 +2192,11 @@ async function tryDeleteImage(rawPath) {
 }
 
 async function executeBulkDelete() {
-    if (_bulkDeleteSelected.size === 0) { console.warn('[GIC-Bulk] 選択された画像がありません'); return; }
+    if (_bulkDeleteSelected.size === 0) {
+        console.warn('[GIC-Bulk] 選択された画像がありません');
+        showBulkDeleteToast('削除する画像が選択されていません');
+        return;
+    }
     const count = _bulkDeleteSelected.size;
     if (!window.confirm(`選択した ${count} 枚の画像を削除しますか？\nこの操作は取り消せません。`)) return;
 
@@ -2300,7 +2336,10 @@ function installBulkDeleteDocumentHandlers() {
     window.addEventListener('click', (e) => {
         // ★ 合成クリック（simulateClick 由来）は無視。自然クリックのみ処理する
         if (!e.isTrusted) return;
+        // ★ ドラッグ直後のクリックは無視
+        if (Date.now() < (window.__gicNoLayoutUntil || 0)) return;
         if (!inGallery(e.target)) return;
+
         const isBulkBtn = e.target.closest('.gic-bulk-delete-button');
         const trash = e.target.closest(TRASH_SELECTOR);
         if (!isBulkBtn && trash && !trash.classList.contains('dragClose')) {
@@ -2308,15 +2347,21 @@ function installBulkDeleteDocumentHandlers() {
             const now = Date.now();
             if (now - _lastTrashToggleAt < TRASH_TOGGLE_DEBOUNCE_MS) return;
             _lastTrashToggleAt = now;
-            if (_bulkDeleteMode) exitBulkDeleteMode();
-            else enterBulkDeleteMode();
+            // ★ 🗑 = 選択済み画像の削除
+            if (_bulkDeleteSelected.size > 0) {
+                executeBulkDelete();
+            } else if (_bulkDeleteMode) {
+                showBulkDeleteToast('削除する画像を選択してください');
+            } else {
+                showBulkDeleteToast('先に「一括選択」ボタンで画像を選択してください');
+            }
             return;
         }
         if (_bulkDeleteMode) {
             if (e.target.closest(SKIP_UI_SELECTOR)) return;
             const item = findItem(e.target, e.clientX, e.clientY);
             if (item) {
-                // ★ 一括削除モードでは nGY2 のプレビューが開かないよう伝播を止める
+                // ★ 一括選択モードでは nGY2 のプレビューを抑止
                 e.stopPropagation();
                 e.preventDefault();
                 toggleBulkSelection(item, e);
@@ -3094,7 +3139,6 @@ function initializeGIC() {
         if (pager) positionPager(pager);
     }, 1500);
 
-    // ★ 100ms 毎にギャラリー位置を強制チェック（movingUIリセット等への保険）
     setInterval(() => {
         if (window.__gicDragInProgress) return;
         if (Date.now() < (window.__gicNoLayoutUntil || 0)) return;
