@@ -311,6 +311,11 @@ function getCurrentCharacterName() {
     document.head.appendChild(style);
 })();
 
+// ============================================================
+// ★ ギャラリー拡大プレビューを JSON編集画面(10001) より手前に表示
+//   panelSel  : z-index 15000
+//   closeSel  : z-index 15001（閉じるボタンはプレビューより上）
+// ============================================================
 (function injectGalleryLayoutStyle() {
     if (document.getElementById('gic-gallery-layout-style')) return;
     const style = document.createElement('style');
@@ -331,6 +336,7 @@ function getCurrentCharacterName() {
             transform-origin: left center !important;
             margin: 0 !important;
             visibility: hidden !important;
+            z-index: 15000 !important;
         }
 
         ${closeSel} {
@@ -343,7 +349,7 @@ function getCurrentCharacterName() {
             opacity: 0 !important;
             pointer-events: none !important;
             transition: opacity 0.15s ease !important;
-            z-index: 10000 !important;
+            z-index: 15001 !important;
             margin: 0 !important;
         }
 
@@ -1480,6 +1486,11 @@ function applyPageNumbers() {
     positionPager(pager);
 }
 
+// ============================================================
+// ★ 拡大プレビューを JSON編集画面(10001) より手前に表示
+//   panel  : z-index 15000
+//   close  : z-index 15001
+// ============================================================
 function fitPreviewToViewport(panel) {
     if (!panel) return;
 
@@ -1538,6 +1549,7 @@ function fitPreviewToViewport(panel) {
         panel.style.setProperty('max-width', 'none', 'important');
         panel.style.setProperty('max-height', 'none', 'important');
         panel.style.setProperty('visibility', 'visible', 'important');
+        panel.style.setProperty('z-index', '15000', 'important');
 
         img.style.setProperty('width', finalW + 'px', 'important');
         img.style.setProperty('height', finalH + 'px', 'important');
@@ -1558,6 +1570,7 @@ function fitPreviewToViewport(panel) {
             );
             closeBtn.style.setProperty('transform-origin', 'left center', 'important');
             closeBtn.style.setProperty('margin', '0', 'important');
+            closeBtn.style.setProperty('z-index', '15001', 'important');
         }
     };
 
