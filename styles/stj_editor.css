@@ -1,4 +1,4 @@
-/* 新規追加ボタンスタイル */
+/* 新規追加ボタンスタイル（旧・互換性のため残置） */
 #stj_export_button {
   width: 120px;
   height: 40px;
@@ -22,9 +22,9 @@
 
 /* ============================================================
    モーダルウィンドウスタイル（案B適用）
-     left: 300px             ← 200px + 100px（左端+100）
-     width: calc(85vw - 200px) ← 変化なし
-     右端 = 300 + (85vw-200) = 85vw + 100px（右端+100）
+     left: 480px             ← ウィンドウ全体を右へ180px移動
+     width: calc(85vw - 200px) ← 幅200px縮小
+     右端 = 480 + (85vw-200) = 85vw + 280px
    ============================================================ */
 #stj_export_modal {
   display: none;
@@ -162,7 +162,7 @@
   color: white;
 }
 #stj_add_keyword {
-  background-color: #c8961b;
+  background-color: #b8860b;
   color: white;
 }
 #stj_add_keyword:hover {
@@ -1049,6 +1049,22 @@
   z-index: 2;
   pointer-events: none;
   white-space: nowrap;
+}
+
+/* ============================================================
+   ★ ギャラリーからのドラッグ&ドロップ時のビジュアルフィードバック
+   ============================================================ */
+.stj-keyword-item.stj-drop-target,
+.stj-special-item.stj-drop-target {
+    outline: 4px dashed #ffd54f !important;
+    outline-offset: -4px !important;
+    background-color: rgba(255, 213, 79, 0.08) !important;
+}
+
+.stj-keyword-item.stj-drop-target .stj-image-preview,
+.stj-special-item.stj-drop-target .stj-image-preview {
+    border-color: #ffd54f !important;
+    border-style: solid !important;
 }
 
 /* ===== レスポンシブ ===== */
