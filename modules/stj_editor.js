@@ -755,9 +755,10 @@
 
     // ============================================================
     // ★ モーダル表示（CSSと同期した geometry をJSでも設定）
-    //   width  = calc(85vw - 200px)  → 横幅を200px縮小
-    //   left   = 200px               → 左端を右へ200pxずらす
-    //   right  edge = 200 + (85vw-200) = 85vw  → 右端位置を維持
+    //   案B適用: left: 200px → 300px
+    //   右端 = 300 + (85vw - 200) = 85vw + 100px（右端 +100px）
+    //   左端 = 300px（+100px）
+    //   幅   = 85vw - 200px（変化なし）
     // ============================================================
     function openExportModal() {
         if (!stjModalEl) return;
@@ -765,7 +766,7 @@
         stjModalEl.style.display = 'block';
         stjModalEl.style.position = 'fixed';
         stjModalEl.style.top = '0px';
-        stjModalEl.style.left = '200px';
+        stjModalEl.style.left = '300px';
         stjModalEl.style.width = 'calc(85vw - 200px)';
         stjModalEl.style.height = '100vh';
         stjModalEl.style.zIndex = '10001';
