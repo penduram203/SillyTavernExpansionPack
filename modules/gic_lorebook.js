@@ -7,6 +7,10 @@
 //   - HEAD リクエストで URL 存在チェック（404 の text/html を回避）
 //   - APP_READY 待機
 //   - エラー時の安全なフォールバック（機能停止させない）
+//
+// ★ v4 修正:
+//   - 動的 import のパス誤りを修正
+//     （'/scripts/script.js' → '/script.js'、'/scripts/extensions/world-info.js' → '/scripts/world-info.js'）
 
 import { eventSource, event_types, getRequestHeaders } from '../../../../../script.js';
 import { getContext } from '../../../../extensions.js';
@@ -183,7 +187,8 @@ async function loadWorldInfoEntries(worldName) {
     } catch (e) { /* ignore */ }
 
     try {
-        const mod = await import('../../../world-info.js');
+        // ★ 修正: /scripts/world-info.js に解決されるよう1階層深く
+        const mod = await import('../../../../world-info.js');
         if (mod.world_info && mod.world_info[worldName] && mod.world_info[worldName].entries) {
             return Object.values(mod.world_info[worldName].entries);
         }
@@ -401,7 +406,8 @@ async function executeSd(prompt) {
     console.log(`[GIC-Lore] /sd 実行試行: ${cmd.slice(0, 120)}${cmd.length > 120 ? '...' : ''}`);
 
     try {
-        const mod = await import('../../../../script.js');
+        // ★ 修正: /script.js に解決されるよう1階層深く
+        const mod = await import('../../../../../script.js');
         if (typeof mod.executeSlashCommandsWithOptions === 'function') {
             await mod.executeSlashCommandsWithOptions(cmd);
             console.log('[GIC-Lore] ✅ 方式1 成功');
@@ -481,7 +487,7 @@ async function processChoice(force = false) {
             if (settings.fallbackToLast) {
                 console.log('[GIC-Lore] /sd last にフォールバック');
                 try {
-                    const mod = await import('../../../../script.js');
+                    const mod = await import('../../../../../script.js');
                     if (typeof mod.executeSlashCommandsWithOptions === 'function') {
                         const cmd = settings.quiet ? '/sd quiet=true' : '/sd';
                         await mod.executeSlashCommandsWithOptions(cmd);
