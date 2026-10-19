@@ -887,6 +887,12 @@
         `;
     }
 
+    // ============================================================
+    // ★ グローバル drop インターセプタ（フォールバック）
+    //    gic.js のカスタムドラッグは gic-drop-file イベントを使うため、
+    //    このインターセプタは通常発火しない。ネイティブD&Dが
+    //    万一発火した場合の保険として残す。
+    // ============================================================
     function installGlobalDropInterceptor() {
         if (window.__gicDropInterceptorInstalled) return;
         window.__gicDropInterceptorInstalled = true;
@@ -935,25 +941,33 @@
             cell.classList.remove('stj-drop-target');
         }, true);
 
-        console.log('[STJ Editor] 🌐 グローバル drop インターセプタを設置しました');
+        console.log('[STJ Editor] 🌐 グローバル drop インターセプタを設置しました（フォールバック）');
     }
 
-    function handleCellDrop(cell, e) {
-        if (!cell) return;
+    // ============================================================
+    // ★ gic.js のカスタムドラッグから発火される gic-drop-file イベント
+    // ============================================================
+    function installCustomDropListener() {
+        if (window.__gicCustomDropListenerInstalled) return;
+        window.__gicCustomDropListenerInstalled = true;
+
+        window.addEventListener('gic-drop-file', (e) => {
+            const { path, cell } = e.detail || {};
+            if (!path || !cell) return;
+            handleCellDropFromPath(cell, path);
+        });
+
+        console.log('[STJ Editor] 🎯 カスタムドロップリスナーを設置しました');
+    }
+
+    // ============================================================
+    // ★ パス文字列からセルへファイル名を追加する共通処理
+    //   - ネイティブD&D / カスタムイベント の両方から呼ばれる
+    //   - 編集モードでなければスナップショットを先に保存 → キャンセルで復元可能
+    // ============================================================
+    function handleCellDropFromPath(cell, path) {
+        if (!cell || !path) return;
         cell.classList.remove('stj-drop-target');
-
-        let path = '';
-        try {
-            path = e.dataTransfer.getData('application/x-gic-path')
-                || e.dataTransfer.getData('text/plain')
-                || e.dataTransfer.getData('text/uri-list')
-                || '';
-        } catch (_) {}
-
-        if (!path) {
-            console.warn('[STJ Editor] drop: パス取得失敗');
-            return;
-        }
 
         const fileName = extractFileNameFromPath(path);
         if (!fileName) return;
@@ -967,7 +981,7 @@
             return;
         }
 
-        // ★ 編集モードでなければスナップショットを保存（キャンセル時の復元用）
+        // 編集モードでなければスナップショットを保存（キャンセル時の復元用）
         if (!cell.classList.contains('editing')) {
             saveEditSnapshot(cell);
             cell.classList.add('editing');
@@ -987,6 +1001,24 @@
         } catch (_) {}
 
         console.log(`[STJ Editor] 🖼️ ドロップで追加: ${fileName} → ${inputEl.value}`);
+    }
+
+    // ============================================================
+    // ★ ネイティブD&D用（フォールバック、通常は gic-drop-file が使われる）
+    // ============================================================
+    function handleCellDrop(cell, e) {
+        if (!cell) return;
+        cell.classList.remove('stj-drop-target');
+
+        let path = '';
+        try {
+            path = e.dataTransfer.getData('application/x-gic-path')
+                || e.dataTransfer.getData('text/plain')
+                || e.dataTransfer.getData('text/uri-list')
+                || '';
+        } catch (_) {}
+
+        handleCellDropFromPath(cell, path);
     }
 
     function setupCellDropTargets(container) {
@@ -1354,6 +1386,9 @@
         setupCellDropTargets(modal);
 
         installGlobalDropInterceptor();
+
+        // ★ カスタムドラッグからのドロップリスナー
+        installCustomDropListener();
     }
 
     function executeBulkDelete() {
