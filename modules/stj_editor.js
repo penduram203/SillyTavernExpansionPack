@@ -378,7 +378,7 @@
         const rect = previewEl.getBoundingClientRect();
         const ghost = document.createElement('div');
         ghost.className = 'stj-drag-ghost';
-        // ★ セル番号は表示しない（要件により削除）
+        // セル番号は表示しない
         const media = previewEl.querySelector('img, video');
         if (media) {
             const cloned = media.cloneNode(true);
@@ -908,11 +908,17 @@
         window.__gicCustomDropListenerInstalled = true;
 
         window.addEventListener('gic-drop-file', (e) => {
-            const { path, cell, x, y } = e.detail || {};
-            if (!path) return;
+            const { path, paths, cell, x, y } = e.detail || {};
+            // ★ paths 配列を優先、なければ単一 path
+            const pathList = (Array.isArray(paths) && paths.length > 0)
+                ? paths
+                : (path ? [path] : []);
+            if (pathList.length === 0) return;
 
             if (cell) {
-                handleCellDropFromPath(cell, path);
+                for (const p of pathList) {
+                    handleCellDropFromPath(cell, p);
+                }
                 return;
             }
 
@@ -922,7 +928,9 @@
                 if (contentEl && typeof x === 'number' && typeof y === 'number') {
                     const rect = contentEl.getBoundingClientRect();
                     if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
-                        handleCellDropFromPath(currentModalCell, path);
+                        for (const p of pathList) {
+                            handleCellDropFromPath(currentModalCell, p);
+                        }
                     }
                 }
             }
