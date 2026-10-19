@@ -1234,19 +1234,6 @@
         }
 
         installPointerDragHandlers();
-
-        if (!outsideClickHandlerInstalled) {
-            outsideClickHandlerInstalled = true;
-            document.addEventListener('mousedown', (e) => {
-                if (!stjModalEl) return;
-                if (stjModalEl.style.display !== 'block') return;
-                if (isBulkDeleteMode || isDialogActive) return;
-                if (Date.now() - modalOpenedTimestamp < MODAL_OPEN_GUARD_MS) return;
-                if (stjModalEl.contains(e.target)) return;
-                if (stjButtonEl && stjButtonEl.contains(e.target)) return;
-                closeExportModal();
-            }, true);
-        }
     }
 
     function executeBulkDelete() {
