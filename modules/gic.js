@@ -302,7 +302,7 @@ function getCurrentCharacterName() {
 
 // ============================================================
 // ★ ギャラリー拡大プレビューを JSON編集画面(10001) より手前に表示
-//   ＋ ドラッグ中のチラつき抑制
+//   ＋ ドラッグ中のチラつき・クリック誤発動抑制
 // ============================================================
 (function injectGalleryLayoutStyle() {
     if (document.getElementById('gic-gallery-layout-style')) return;
@@ -636,6 +636,13 @@ function getCurrentCharacterName() {
             transition: none !important;
             animation: none !important;
         }
+
+        /* ★ ドラッグ中はページャー・ページ番号を完全無効化（クリック防止） */
+        body.gic-dragging .gic-pagination-pager,
+        body.gic-dragging .gic-pagination-pager * {
+            pointer-events: none !important;
+            user-select: none !important;
+        }
     `;
     document.head.appendChild(style);
     console.log('[GIC] 🖼️ ギャラリー配置CSSを注入しました');
@@ -922,7 +929,7 @@ function positionGalleryButton() {
     positionStatusMessage();
 }
 
-// ===== 公式ギャラリーの開閉検知（キャッシュ付き） =====
+// ===== 公式ギャラリーの開閉検知 =====
 
 function isGalleryOpen() {
     const now = performance.now();
@@ -1038,19 +1045,21 @@ function setupGalleryDedupeObserver() {
 
 // ============================================================
 // ★ ギャラリーサムネイルを個別にドラッグ可能にする
-//    document capture フェーズで dragstart を掌握し、
-//    nGY2 の drag-reorder を stopImmediatePropagation で抑止する。
-//    → ギャラリーの画像一覧が一切動かなくなる。
+//    - draggable=false で ネイティブD&D を完全無効化
+//    - mousedown/mousemove/mouseup を document キャプチャ段階で独占制御
+//    - ドラッグ直後 250ms は click をキャプチャ段階で抑止（ページャー誤爆防止）
+//    - クリック拡大表示はそのまま維持
 // ============================================================
 function setupGalleryDragToJson() {
     if (window.__gicGalleryDragInstalled) return;
     window.__gicGalleryDragInstalled = true;
 
     const GALLERY_THUMB_SELECTOR = '.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item';
-    const DRAG_THRESHOLD = 5; // px
+    const DRAG_THRESHOLD = 5;
 
-    let dragState = null;   // { startX, startY, thumb, path, isDragging }
+    let dragState = null;
     let ghostEl = null;
+    let suppressClickUntil = 0;
 
     function getPathFromThumb(thumb) {
         if (!thumb) return null;
@@ -1113,10 +1122,16 @@ function setupGalleryDragToJson() {
         dragState = null;
         window.__gicDragInProgress = false;
         document.body.classList.remove('gic-dragging');
-        // ドロップターゲット強調をすべて解除
+
         document.querySelectorAll('.stj-drop-target').forEach(el => {
             el.classList.remove('stj-drop-target');
         });
+
+        // ★ nGY2 の再レイアウトを促しつつ、500ms 間はこちらのレイアウト更新も抑止
+        window.__gicNoLayoutUntil = Date.now() + 500;
+        setTimeout(() => {
+            try { window.dispatchEvent(new Event('resize')); } catch (_) {}
+        }, 100);
     }
 
     function handleDrop(x, y) {
@@ -1129,7 +1144,6 @@ function setupGalleryDragToJson() {
         }));
     }
 
-    // サムネイルを draggable=false に固定（ネイティブD&Dを完全に無効化）
     function markThumb(thumb) {
         if (!thumb || thumb.dataset.gicDragReady === '1') return;
         thumb.dataset.gicDragReady = '1';
@@ -1141,7 +1155,7 @@ function setupGalleryDragToJson() {
         });
     }
 
-    // mousedown: 起点を記録（preventDefaultしない → クリック検出は維持）
+    // mousedown: 起点記録
     document.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
         const gallery = document.getElementById('gallery');
@@ -1161,11 +1175,9 @@ function setupGalleryDragToJson() {
         };
     }, true);
 
-    // mousemove: トラッキング中はすべて遮断（nGY2のdrag-reorderを完全抑止）
+    // mousemove: 全遮断（nGY2 の drag-reorder 完全抑止）
     document.addEventListener('mousemove', (e) => {
         if (!dragState) return;
-
-        // ★ 最重要: nGY2のmousemoveハンドラに一切見せない
         e.stopImmediatePropagation();
 
         if (!dragState.isDragging) {
@@ -1181,7 +1193,6 @@ function setupGalleryDragToJson() {
 
         moveGhost(e.clientX, e.clientY);
 
-        // ドロップターゲット強調
         const targetEl = document.elementFromPoint(e.clientX, e.clientY);
         const cell = targetEl ? targetEl.closest('.stj-keyword-item, .stj-special-item') : null;
         document.querySelectorAll('.stj-drop-target').forEach(el => {
@@ -1190,13 +1201,13 @@ function setupGalleryDragToJson() {
         if (cell) cell.classList.add('stj-drop-target');
     }, true);
 
-    // pointermove: ブラウザが生成する同義イベントも遮断
+    // pointermove: 同義イベントも遮断
     document.addEventListener('pointermove', (e) => {
         if (!dragState) return;
         e.stopImmediatePropagation();
     }, true);
 
-    // mouseup: ドラッグ時のみブロック、クリック時は素通し
+    // mouseup: ドラッグ時は完全抑止し、click 抑止タイマーをセット
     document.addEventListener('mouseup', (e) => {
         if (!dragState) return;
 
@@ -1205,17 +1216,35 @@ function setupGalleryDragToJson() {
         if (wasDragging) {
             e.stopImmediatePropagation();
             e.preventDefault();
+            // ★ 直後の click を 250ms 間抑止
+            suppressClickUntil = Date.now() + 250;
             handleDrop(e.clientX, e.clientY);
         }
-        // クリック時は nGY2 の mouseup ハンドラが拡大表示を実行できるよう素通し
-
         cleanup();
     }, true);
 
-    // pointerup もドラッグ時のみ遮断
+    // pointerup: ドラッグ時のみ遮断
     document.addEventListener('pointerup', (e) => {
         if (!dragState || !dragState.isDragging) return;
         e.stopImmediatePropagation();
+    }, true);
+
+    // ★ click 抑止（ドラッグ直後の意図しないクリックを根絶）
+    document.addEventListener('click', (e) => {
+        if (Date.now() < suppressClickUntil) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            console.log('[GIC] ドラッグ直後のクリックを抑止');
+        }
+    }, true);
+
+    // ★ ページャーの mousedown も念のため抑止（保険）
+    document.addEventListener('mousedown', (e) => {
+        if (Date.now() >= suppressClickUntil) return;
+        if (e.target.closest && e.target.closest('.gic-pagination-pager')) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+        }
     }, true);
 
     // ネイティブ dragstart は完全阻止
@@ -1237,7 +1266,7 @@ function setupGalleryDragToJson() {
     observer.observe(document.body, { childList: true, subtree: true });
     setInterval(scanAndMarkAll, 1000);
 
-    console.log('[GIC] 🖼️ ギャラリーサムネイルの個別ドラッグを有効化しました（カスタムポインター方式）');
+    console.log('[GIC] 🖼️ ギャラリーサムネイルの個別ドラッグを有効化しました（クリック抑止付き）');
 }
 
 // ===== ギャラリー配置・プレビュー制御 =====
@@ -2437,6 +2466,8 @@ function setupBulkDelete() {
 function applyGalleryLayout() {
     if (isApplyingLayout) return;
     if (window.__gicDragInProgress) return;
+    // ★ ドラッグ終了直後は nGY2 にレイアウトを任せる
+    if (Date.now() < (window.__gicNoLayoutUntil || 0)) return;
     isApplyingLayout = true;
     try {
         if (!isGalleryOpen()) {
