@@ -315,6 +315,7 @@ function getCurrentCharacterName() {
 // ★ ギャラリー拡大プレビューを JSON編集画面(10001) より手前に表示
 //   panelSel  : z-index 15000
 //   closeSel  : z-index 15001（閉じるボタンはプレビューより上）
+//   ＋ ドラッグ中はギャラリーのチラつきを抑制
 // ============================================================
 (function injectGalleryLayoutStyle() {
     if (document.getElementById('gic-gallery-layout-style')) return;
@@ -641,6 +642,15 @@ function getCurrentCharacterName() {
             outline: 3px solid #ffd54f !important;
             outline-offset: -3px !important;
         }
+
+        /* ★ ドラッグ中はギャラリーのチラつきを抑制（transition/animation 停止） */
+        body.gic-dragging #gallery,
+        body.gic-dragging #gallery *,
+        body.gic-dragging .gic-pagination-pager,
+        body.gic-dragging .gic-pagination-pager * {
+            transition: none !important;
+            animation: none !important;
+        }
     `;
     document.head.appendChild(style);
     console.log('[GIC] 🖼️ ギャラリー配置CSSを注入しました');
@@ -895,7 +905,6 @@ function positionGalleryButton() {
             const btnW = galleryBtn.offsetWidth || 50;
             const btnH = galleryBtn.offsetHeight || 50;
 
-            // 前回位置 (gicRect.top - btnH - gap - 50) から 50px 下 = gicRect.top - btnH - gap
             let left = gicRect.left - 5;
             let top  = gicRect.top - btnH - gap;
 
@@ -982,17 +991,11 @@ function isGalleryOpen() {
 
 // ============================================================
 // ★ #gallery 重複排除
-//    ST本体は開くたびに新しい #gallery 要素を追加し、
-//    古い要素を残してしまうことがある。
-//    複数あると二重表示になるため、常に1つだけ残す。
 // ============================================================
 function dedupeGalleryElements() {
     const galleries = Array.from(document.querySelectorAll('#gallery'));
     if (galleries.length <= 1) return galleries[0] || null;
 
-    // 優先順位:
-    //   1. data-gic-height-logged="true" が付いている要素（GICがスタイル適用済み）
-    //   2. 最後の要素（STが最新で作成したもの）
     let keep = galleries.find(g => g.dataset.gicHeightLogged === 'true');
     if (!keep) {
         keep = galleries[galleries.length - 1];
@@ -1038,10 +1041,8 @@ function setupGalleryDedupeObserver() {
         }
         if (!foundNewGallery) return;
 
-        // 即座に重複排除
         dedupeGalleryElements();
 
-        // 残った要素に GIC スタイルを再適用
         try {
             applyGalleryWindowLayout();
             styleGalleryWindowCloseButton();
@@ -1056,8 +1057,11 @@ function setupGalleryDedupeObserver() {
 
 // ============================================================
 // ★ ギャラリーサムネイルを個別にドラッグ可能にする
-//    JSON編集画面のセルへドロップしてファイル名を追加できる
-//    ※ クリック（拡大表示）は一切妨害しない
+//    - サムネイルサイズのカスタムゴースト（背景画像 div 方式）
+//    - img の pointer-events を無効化して Firefox の file 添付を防止
+//    - ドラッグ中フラグ window.__gicDragInProgress を立てて
+//      レイアウト更新・SillyTavern のキャラインポートを抑止
+//    - クリック（拡大表示）には一切干渉しない
 // ============================================================
 function setupGalleryDragToJson() {
     if (window.__gicGalleryDragInstalled) return;
@@ -1072,9 +1076,7 @@ function setupGalleryDragToJson() {
                || thumb.getAttribute('data-image');
         if (!url) {
             const img = thumb.querySelector('img');
-            if (img) {
-                url = img.getAttribute('data-src') || img.getAttribute('src');
-            }
+            if (img) url = img.getAttribute('data-src') || img.getAttribute('src');
         }
         if (!url) {
             const a = thumb.querySelector('a');
@@ -1083,34 +1085,70 @@ function setupGalleryDragToJson() {
         return url ? urlToServerPath(url) : null;
     }
 
+    function getThumbDisplayUrl(thumb) {
+        const img = thumb.querySelector('img');
+        if (img) return img.currentSrc || img.src || img.getAttribute('src') || '';
+        return thumb.getAttribute('data-ngsrc') || thumb.getAttribute('data-src') || '';
+    }
+
     function markDraggable(thumb) {
         if (!thumb || thumb.dataset.gicDragReady === '1') return;
         thumb.dataset.gicDragReady = '1';
         thumb.setAttribute('draggable', 'true');
 
-        // サムネイル内部の img は個別に draggable を切る（親で制御）
-        const img = thumb.querySelector('img');
-        if (img) img.setAttribute('draggable', 'false');
+        // ★ Firefox の img ファイル自動添付を防ぐ:
+        //   img を完全に無効化し、ドラッグ元を thumb (div) に固定
+        thumb.querySelectorAll('img').forEach(img => {
+            img.setAttribute('draggable', 'false');
+            img.style.pointerEvents = 'none';
+            try { img.style.webkitUserDrag = 'none'; } catch (_) {}
+        });
 
         thumb.addEventListener('dragstart', (e) => {
             const path = getPathFromThumb(thumb);
-            if (!path) {
-                // パス不明の場合はドラッグ自体をキャンセル（パネル移動を防ぐ）
-                e.preventDefault();
-                return;
-            }
+            if (!path) { e.preventDefault(); return; }
 
-            // 親要素の dragstart（パネル移動）を完全に止める
             e.stopPropagation();
+
+            // ★ ドラッグ中フラグ（レイアウト抑制 + drop インターセプト用）
+            window.__gicDragInProgress = true;
+            document.body.classList.add('gic-dragging');
 
             try {
                 e.dataTransfer.effectAllowed = 'copy';
+                e.dataTransfer.setData('application/x-gic-path', path);
                 e.dataTransfer.setData('text/plain', path);
                 e.dataTransfer.setData('text/uri-list', path);
 
-                const dragImg = thumb.querySelector('img');
-                if (dragImg) {
-                    try { e.dataTransfer.setDragImage(dragImg, 20, 20); } catch (_) {}
+                // ★ サムネイルサイズのカスタムゴースト（背景画像方式）
+                const displayUrl = getThumbDisplayUrl(thumb);
+                const w = thumb.offsetWidth || 100;
+                const h = thumb.offsetHeight || 100;
+
+                if (displayUrl && w > 0 && h > 0) {
+                    const ghost = document.createElement('div');
+                    ghost.style.cssText = [
+                        'position:fixed',
+                        'top:-9999px',
+                        'left:-9999px',
+                        `width:${w}px`,
+                        `height:${h}px`,
+                        `background-image:url("${displayUrl.replace(/"/g, '%22')}")`,
+                        'background-size:cover',
+                        'background-position:center',
+                        'border:2px solid #ffd54f',
+                        'border-radius:4px',
+                        'box-shadow:0 4px 16px rgba(0,0,0,0.6)',
+                        'pointer-events:none',
+                        'z-index:2147483647',
+                    ].join(';');
+                    document.body.appendChild(ghost);
+                    try {
+                        e.dataTransfer.setDragImage(ghost, w / 2, h / 2);
+                    } catch (err) {
+                        console.warn('[GIC] setDragImage 失敗:', err);
+                    }
+                    setTimeout(() => ghost.remove(), 0);
                 }
             } catch (err) {
                 console.warn('[GIC] dragstart setData エラー:', err);
@@ -1120,6 +1158,8 @@ function setupGalleryDragToJson() {
         }, true);
 
         thumb.addEventListener('dragend', () => {
+            window.__gicDragInProgress = false;
+            document.body.classList.remove('gic-dragging');
             thumb.classList.remove('gic-dragging-to-json');
         }, true);
     }
@@ -1130,27 +1170,16 @@ function setupGalleryDragToJson() {
         gallery.querySelectorAll(GALLERY_THUMB_SELECTOR).forEach(markDraggable);
     }
 
-    // サムネイルが動的に生成されるため、MutationObserver + 定期スキャンの二段構え
-    const observer = new MutationObserver(() => {
-        scanAndMarkAll();
-    });
+    const observer = new MutationObserver(() => { scanAndMarkAll(); });
     observer.observe(document.body, { childList: true, subtree: true });
 
     setInterval(scanAndMarkAll, 1000);
 
-    // ★ パネル本体（サムネイル以外）の dragstart はキャンセル
-    //    → 「1ページ全体がドラッグで移動」を防止
+    // サムネイル以外の dragstart はキャンセル（パネル移動防止）
     document.addEventListener('dragstart', (e) => {
         const gallery = document.getElementById('gallery');
         if (!gallery || !gallery.contains(e.target)) return;
-
-        const thumb = e.target.closest(GALLERY_THUMB_SELECTOR);
-        if (!thumb) {
-            // サムネイル以外（ヘッダー・ギャラリー本体など）の dragstart を抑止
-            e.preventDefault();
-            return;
-        }
-        // サムネイル内のドラッグは thumb 側のハンドラが処理
+        if (!e.target.closest(GALLERY_THUMB_SELECTOR)) e.preventDefault();
     }, true);
 
     console.log('[GIC] 🖼️ ギャラリーサムネイルの個別ドラッグを有効化しました');
@@ -1192,7 +1221,6 @@ function closeAllPreviews() {
 
 // ============================================================
 // ★ ギャラリーウインドウの❌ボタンを非表示
-//    （拡大プレビューの❌は残す）
 // ============================================================
 function styleGalleryWindowCloseButton() {
     const galleryEls = document.querySelectorAll('#gallery');
@@ -1201,7 +1229,6 @@ function styleGalleryWindowCloseButton() {
         closeButtons.forEach(btn => {
             if (btn.closest('.galleryImageDraggable')) return;
 
-            // ギャラリーウインドウ本体の❌は非表示（JSON編集画面のキャンセルのみで閉じる）
             btn.style.setProperty('display', 'none', 'important');
             btn.style.setProperty('visibility', 'hidden', 'important');
             btn.style.setProperty('pointer-events', 'none', 'important');
@@ -1592,8 +1619,6 @@ function applyPageNumbers() {
 
 // ============================================================
 // ★ 拡大プレビューを JSON編集画面(10001) より手前に表示
-//   panel  : z-index 15000
-//   close  : z-index 15001
 // ============================================================
 function fitPreviewToViewport(panel) {
     if (!panel) return;
@@ -2360,6 +2385,8 @@ function setupBulkDelete() {
 
 function applyGalleryLayout() {
     if (isApplyingLayout) return;
+    // ★ ドラッグ中はレイアウト更新をスキップ（チラつき防止）
+    if (window.__gicDragInProgress) return;
     isApplyingLayout = true;
     try {
         if (!isGalleryOpen()) {
@@ -2367,7 +2394,6 @@ function applyGalleryLayout() {
             return;
         }
 
-        // ★ 最初に重複排除（複数の #gallery があれば1つに）
         dedupeGalleryElements();
 
         applyGalleryWindowLayout();
@@ -2416,8 +2442,6 @@ let lastGalleryStateForGic = null;
 
 // ============================================================
 // ★ ギャラリー開閉と JSON編集画面 を連動させる
-//   開: ギャラリー → JSON編集画面を自動で開く（ウォームアップ中は除く）
-//   閉: ギャラリー → JSON編集画面も閉じる（保険）
 // ============================================================
 function syncGalleryButtonVisibility() {
     const galleryOpen = isGalleryOpen();
@@ -2448,7 +2472,6 @@ function syncGalleryButtonVisibility() {
     if (galleryOpen) {
         applyGalleryLayout();
 
-        // ★ ギャラリーが開いた → JSON編集画面も自動で開く（ウォームアップ中は除く）
         if (warmupState !== 'running') {
             setTimeout(() => {
                 if (isGalleryOpen() && window.STJEditor?.open) {
@@ -2465,7 +2488,6 @@ function syncGalleryButtonVisibility() {
         resetGalleryHeightCache();
         closeAllPreviews();
 
-        // ★ ギャラリーが閉じた → JSON編集画面も閉じる（保険）
         if (wasOpen && window.STJEditor?.isOpen?.()) {
             try {
                 window.STJEditor.close({ fromGallery: true, force: true });
@@ -2510,7 +2532,6 @@ function openGalleryFromGic() {
         if (ctx && typeof ctx.openGallery === 'function') {
             ctx.openGallery();
             console.log('[GIC] ギャラリーを開きました (ctx.openGallery)');
-            // ★ 開いた直後に重複排除（念のため）
             setTimeout(() => dedupeGalleryElements(), 50);
             return true;
         }
@@ -2565,22 +2586,19 @@ function openGalleryFromGic() {
 }
 
 // ============================================================
-// ★ ギャラリー閉じる時に付属UI（ページャー・プレビュー・JSON編集画面）を
-//    ギャラリー本体と完全に同じタイミングで消す
+// ★ ギャラリー閉じる時に付属UIを同期的に消す
 // ============================================================
 function hideGalleryAttachmentsImmediately(reason = '') {
     if (reason) {
         console.log(`[GIC] 🚪 付属UIを即座に非表示 (${reason})`);
     }
 
-    // 1. ページャー（番号ボタン群）を即削除
     const pager = document.querySelector('.gic-pagination-pager');
     if (pager) {
         pager.remove();
         _lastPagerSignature = '';
     }
 
-    // 2. 拡大プレビュー画像を即座に非表示 + 削除
     const previews = getAllPreviews();
     for (const el of previews) {
         el.style.setProperty('display', 'none', 'important');
@@ -2590,17 +2608,14 @@ function hideGalleryAttachmentsImmediately(reason = '') {
     }
     currentPreviewEl = null;
 
-    // 3. ステータスメッセージも隠す
     hideStatusMessage();
 
-    // 4. 一括削除モードなら終了
     if (_bulkDeleteMode) {
         document.body.classList.remove('gic-bulk-delete-mode');
         _bulkDeleteMode = false;
         _bulkDeleteSelected.clear();
     }
 
-    // 5. 高さキャッシュをクリア
     for (const sel of GALLERY_WINDOW_SELECTORS) {
         const elements = document.querySelectorAll(sel);
         for (const el of elements) {
@@ -2610,13 +2625,11 @@ function hideGalleryAttachmentsImmediately(reason = '') {
         }
     }
 
-    // 6. ページネーションの状態もリセット
     _paginationSnapshot = { count: -1, since: 0, stable: false };
     _paginationWindowStart = 0;
     _paginationWindowManual = false;
     _galleryTotalPagesCache = 0;
 
-    // 7. ★ JSON編集画面も閉じる（fromGallery: true でループ防止）
     if (window.STJEditor?.isOpen?.()) {
         try {
             window.STJEditor.close({ fromGallery: true, force: true });
@@ -2628,9 +2641,7 @@ function hideGalleryAttachmentsImmediately(reason = '') {
 }
 
 // ============================================================
-// ★ ギャラリー閉じるボタンの押下をキャプチャフェーズで横取りし、
-//    ST本体がギャラリーを閉じる前に付属UIを同期的に消す。
-//    ※ ギャラリー❌は非表示にしているが、Escape押下などの経路もカバー
+// ★ ギャラリー閉じるボタンの押下をキャプチャフェーズで横取り
 // ============================================================
 function installGalleryCloseInterceptor() {
     if (window.__gicCloseInterceptorInstalled) return;
@@ -2671,12 +2682,10 @@ function installGalleryCloseInterceptor() {
 
 // ============================================================
 // ★ 公式ギャラリーを閉じる（プログラム的）
-//    ※❌非表示のため Escape をプライマリにする
 // ============================================================
 function closeGalleryProgrammatically() {
     hideGalleryAttachmentsImmediately('closeGalleryProgrammatically');
 
-    // プライマリ: Escape キー
     let closed = false;
     try {
         const esc = new KeyboardEvent('keydown', {
@@ -2695,7 +2704,6 @@ function closeGalleryProgrammatically() {
         console.warn('[GIC] Escape 発火失敗:', e);
     }
 
-    // 保険: まだ開いていれば .dragClose も試す（遅延）
     if (closed) {
         setTimeout(() => {
             if (!isGalleryOpen()) return;
@@ -3399,10 +3407,8 @@ function initializeGIC() {
 
     installBulkDeleteDocumentHandlers();
 
-    // ★ ギャラリー閉じるインターセプタを設置
     installGalleryCloseInterceptor();
 
-    // ★ 新しい #gallery の追加を監視して重複排除
     setupGalleryDedupeObserver();
 
     // ★ ギャラリーサムネイルの個別ドラッグを有効化
@@ -3414,14 +3420,12 @@ function initializeGIC() {
     setupTextStylingObserver();
     setupGalleryObserverForGic();
 
-    // ★ 外部公開API（stj_editor.js から呼ばれる）
     exposeGicApi();
 
     validatePersistedState().catch(e => {
         console.warn('[GIC] 永続化状態の検証に失敗:', e);
     });
 
-    // ★ SDソースの整合性を取る（ComfyUI 未起動時に 500 エラーを抑止）
     ensureSdSourceConsistency().catch(e => {
         console.warn('[GIC] SDソース整合性チェックに失敗:', e);
     });
@@ -3446,7 +3450,7 @@ function initializeGIC() {
     applyGalleryLayout();
 }
 
-// ★ APP_READY を待ってから初期化（起動直後の失敗を回避）
+// ★ APP_READY を待ってから初期化
 function bootstrapGIC() {
     let started = false;
     const startOnce = () => {
@@ -3487,10 +3491,8 @@ export async function activate() {
     loadPersistedState();
     installBulkDeleteDocumentHandlers();
 
-    // ★ ギャラリー閉じるインターセプタを設置
     installGalleryCloseInterceptor();
 
-    // ★ 新しい #gallery の追加を監視して重複排除
     setupGalleryDedupeObserver();
 
     // ★ ギャラリーサムネイルの個別ドラッグを有効化
@@ -3501,10 +3503,8 @@ export async function activate() {
     setupGalleryObserverForGic();
     applyGalleryLayout();
 
-    // ★ 外部公開API（stj_editor.js から呼ばれる）
     exposeGicApi();
 
-    // ★ activate でも SDソース整合性チェック
     ensureSdSourceConsistency().catch(e => {
         console.warn('[GIC] SDソース整合性チェックに失敗:', e);
     });
