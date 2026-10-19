@@ -21,15 +21,16 @@
 }
 
 /* ============================================================
-   モーダルウィンドウスタイル
-   ★ left: 200px + width: calc(85vw - 200px)
-     → 左端を右に200px、幅を200px縮小、右端は 85vw で維持
+   モーダルウィンドウスタイル（案B適用）
+     left: 300px             ← 200px + 100px（左端+100）
+     width: calc(85vw - 200px) ← 変化なし
+     右端 = 300 + (85vw-200) = 85vw + 100px（右端+100）
    ============================================================ */
 #stj_export_modal {
   display: none;
   position: fixed;
   top: 0;
-  left: 200px;
+  left: 300px;
   right: auto;
   width: calc(85vw - 200px);
   height: 100vh;
@@ -507,7 +508,7 @@
   display: none;
   flex-direction: column;
   justify-content: center;
-  /* ★ ファイル名入力欄を上に・決定/キャンセルを下に広げるため gap を 10px → 110px に拡大 */
+  /* ファイル名入力欄を上に・決定/キャンセルを下に広げる */
   gap: 110px;
   padding: 20px 12px;
   box-sizing: border-box;
