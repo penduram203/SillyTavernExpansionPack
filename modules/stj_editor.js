@@ -1,5 +1,4 @@
 (function() {
-    const ALLOWED_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif', 'bmp', 'mp4', 'webm'];
     const MODULE_NAME = 'stj_editor';
 
     const mediaCache = new Map();
@@ -7,7 +6,6 @@
     const MEDIA_CHECK_TIMEOUT_MS = 5000;
 
     let stjModalEl = null;
-    let stjButtonEl = null;
     let outsideClickHandlerInstalled = false;
     let helpOutsideHandlerInstalled = false;
     let modalOpenedTimestamp = 0;
@@ -16,7 +14,6 @@
     let confirmDialogEl = null;
     let pendingDeleteCallback = null;
     let pendingCancelCallback = null;
-
     let messageDialogEl = null;
 
     let pointerDragState = null;
@@ -62,14 +59,11 @@
         if (display) display.textContent = kw || '';
     }
 
+    // ★ 9枚上限を撤廃（無制限）
     function addImageToCell(cell, fileName) {
         if (!cell || !fileName) return false;
         const images = getCellImages(cell);
         if (images.includes(fileName)) return false;
-        if (images.length >= 9) {
-            console.warn('[STJ Editor] セルには最大9枚まで登録できます:', fileName);
-            return false;
-        }
         images.push(fileName);
         setCellImages(cell, images);
         return true;
@@ -100,17 +94,13 @@
     function getExtensionSettings() {
         const context = getSTContext();
         if (!context || !context.extensionSettings) return {};
-        if (!context.extensionSettings[MODULE_NAME]) {
-            context.extensionSettings[MODULE_NAME] = {};
-        }
+        if (!context.extensionSettings[MODULE_NAME]) context.extensionSettings[MODULE_NAME] = {};
         return context.extensionSettings[MODULE_NAME];
     }
 
     function persistSettings() {
         const context = getSTContext();
-        if (context && typeof context.saveSettingsDebounced === 'function') {
-            context.saveSettingsDebounced();
-        }
+        if (context && typeof context.saveSettingsDebounced === 'function') context.saveSettingsDebounced();
     }
 
     function detectCharacterNameFromDOM() {
@@ -122,9 +112,7 @@
     }
 
     function checkMediaExists(mediaUrl) {
-        if (!mediaUrl || typeof mediaUrl !== 'string' || !mediaUrl.trim()) {
-            return Promise.resolve(false);
-        }
+        if (!mediaUrl || typeof mediaUrl !== 'string' || !mediaUrl.trim()) return Promise.resolve(false);
         const cleanUrl = mediaUrl.trim();
         if (mediaCache.has(cleanUrl)) {
             const cached = mediaCache.get(cleanUrl);
@@ -191,6 +179,7 @@
         return null;
     }
 
+    // ===== 条件評価 =====
     function normalizeConditionExpression(expr) {
         if (!expr || typeof expr !== 'string') return '';
         return expr.replace(/\band\b/gi, '+').replace(/\bor\b/gi, ',').replace(/\bnot\b/gi, '!');
@@ -266,10 +255,7 @@
             if (tokens.length === 0) return false;
             const ast = parseConditionTokens(tokens);
             return evaluateConditionNode(ast, text.toLowerCase());
-        } catch (error) {
-            console.error(`❌ 条件評価エラー "${condStr}":`, error);
-            return false;
-        }
+        } catch (error) { return false; }
     }
 
     function calcConditionComplexity(condition) {
@@ -331,9 +317,7 @@
             const style = window.getComputedStyle(cur);
             const oy = style.overflowY;
             if ((oy === 'auto' || oy === 'scroll' || oy === 'overlay')
-                && cur.scrollHeight > cur.clientHeight + 1) {
-                return cur;
-            }
+                && cur.scrollHeight > cur.clientHeight + 1) return cur;
             cur = cur.parentElement;
         }
         return document.scrollingElement || document.documentElement;
@@ -375,9 +359,7 @@
         autoScrollDelta = delta;
         if (delta !== 0) {
             if (!autoScrollRAF) autoScrollRAF = requestAnimationFrame(autoScrollStep);
-        } else {
-            stopAutoScroll();
-        }
+        } else stopAutoScroll();
     }
 
     function updateDragTarget(s, x, y) {
@@ -421,13 +403,7 @@
         } else {
             const fallback = document.createElement('div');
             fallback.textContent = 'プレビュー';
-            fallback.style.position = 'absolute';
-            fallback.style.top = '50%';
-            fallback.style.left = '50%';
-            fallback.style.transform = 'translate(-50%, -50%)';
-            fallback.style.color = '#a0aec0';
-            fallback.style.fontSize = '14px';
-            fallback.style.pointerEvents = 'none';
+            fallback.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#a0aec0;font-size:14px;pointer-events:none;';
             ghost.appendChild(fallback);
         }
         ghost.style.width = rect.width + 'px';
@@ -448,16 +424,9 @@
 
     function removeDragGhost(ghostState) {
         if (!ghostState) return;
-        if (ghostState.el && ghostState.el.parentNode) {
-            ghostState.el.parentNode.removeChild(ghostState.el);
-        }
+        if (ghostState.el && ghostState.el.parentNode) ghostState.el.parentNode.removeChild(ghostState.el);
     }
 
-    // ============================================================
-    // セル並び替えドラッグ
-    //   クリックのみ（ドラッグなし）→ ポップアップを開く
-    //   ドラッグ → セル並び替え
-    // ============================================================
     function installPointerDragHandlers() {
         if (pointerDragHandlerInstalled) return;
         pointerDragHandlerInstalled = true;
@@ -502,14 +471,11 @@
                 const src = s.sourceItem;
                 if (!src) return;
                 if (s.isBulkDelete || isBulkDeleteMode) {
-                    if (src.classList.contains('stj-marked-for-delete')) {
-                        src.classList.remove('stj-marked-for-delete');
-                    } else {
-                        src.classList.add('stj-marked-for-delete');
-                    }
+                    if (src.classList.contains('stj-marked-for-delete')) src.classList.remove('stj-marked-for-delete');
+                    else src.classList.add('stj-marked-for-delete');
                     return;
                 }
-                // ★ ドラッグしていなければポップアップを開く
+                // ドラッグしていなければポップアップを開く
                 openCellModal(src);
             }
         });
@@ -529,9 +495,7 @@
     function enterBulkDeleteMode() {
         if (isBulkDeleteMode) return;
         isBulkDeleteMode = true;
-        // ポップアップは閉じる
         closeCellModal(false);
-
         if (stjModalEl) stjModalEl.classList.add('stj-bulk-delete-mode');
 
         const addBtn = document.getElementById('stj_add_keyword');
@@ -546,28 +510,19 @@
         if (bulkBtn) bulkBtn.style.display = 'none';
         if (delCancelBtn) delCancelBtn.style.display = '';
         if (delExecBtn) delExecBtn.style.display = '';
-
         if (saveBtn) saveBtn.disabled = true;
         if (cancelBtn) cancelBtn.disabled = true;
         if (exportBtn) exportBtn.disabled = true;
-
-        document.querySelectorAll('.stj-keyword-item .stj-delete-row').forEach(btn => {
-            btn.disabled = true;
-        });
+        document.querySelectorAll('.stj-keyword-item .stj-delete-row').forEach(btn => btn.disabled = true);
     }
 
     function exitBulkDeleteMode() {
         if (!isBulkDeleteMode) return;
         isBulkDeleteMode = false;
         isDialogActive = false;
-
-        document.querySelectorAll('.stj-keyword-item.stj-marked-for-delete').forEach(el => {
-            el.classList.remove('stj-marked-for-delete');
-        });
-
+        document.querySelectorAll('.stj-keyword-item.stj-marked-for-delete').forEach(el => el.classList.remove('stj-marked-for-delete'));
         hideMessageDialog();
         hideDeleteConfirmDialog();
-
         if (stjModalEl) stjModalEl.classList.remove('stj-bulk-delete-mode');
 
         const addBtn = document.getElementById('stj_add_keyword');
@@ -582,14 +537,10 @@
         if (bulkBtn) bulkBtn.style.display = '';
         if (delCancelBtn) delCancelBtn.style.display = 'none';
         if (delExecBtn) delExecBtn.style.display = 'none';
-
         if (saveBtn) saveBtn.disabled = false;
         if (cancelBtn) cancelBtn.disabled = false;
         if (exportBtn) exportBtn.disabled = false;
-
-        document.querySelectorAll('.stj-keyword-item .stj-delete-row').forEach(btn => {
-            btn.disabled = false;
-        });
+        document.querySelectorAll('.stj-keyword-item .stj-delete-row').forEach(btn => btn.disabled = false);
     }
 
     function openExportModal() {
@@ -604,9 +555,7 @@
         stjModalEl.style.height = '100vh';
         stjModalEl.style.zIndex = '10001';
         stjModalEl.scrollTop = 0;
-
         document.body.classList.add('stj-editor-open');
-
         modalOpenedTimestamp = Date.now();
 
         const charName = detectCharacterNameFromDOM() || '';
@@ -619,9 +568,7 @@
                 loadSavedData(charName);
                 setupPreviewListeners();
                 runLiveTest();
-            } catch (err) {
-                console.error('[STJ Editor] モーダル表示エラー:', err);
-            }
+            } catch (err) { console.error('[STJ Editor] モーダル表示エラー:', err); }
         })();
     }
 
@@ -661,13 +608,7 @@
                     <input type="text" class="stj-cell-modal-keyword" placeholder="キーワード">
                     <span class="stj-cell-modal-number"></span>
                 </div>
-                <div class="stj-cell-modal-grid">
-                    ${Array.from({length: 9}, (_, i) => `
-                        <div class="stj-cell-modal-slot" data-index="${i}">
-                            <button type="button" class="stj-cell-modal-slot-remove" title="登録解除">×</button>
-                        </div>
-                    `).join('')}
-                </div>
+                <div class="stj-cell-modal-grid"></div>
             </div>
         `;
         document.body.appendChild(modal);
@@ -693,17 +634,19 @@
             }
         });
 
-        modal.querySelectorAll('.stj-cell-modal-slot-remove').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const slot = btn.closest('.stj-cell-modal-slot');
-                const fileName = slot.dataset.fileName;
-                if (fileName && currentModalCell) {
-                    removeImageFromCell(currentModalCell, fileName);
-                    renderCellModalGrid(currentModalCell);
-                    updateCellPreview(currentModalCell);
-                }
-            });
+        // ★ イベント委譲：動的に増えるスロット削除ボタンに対応
+        modal.querySelector('.stj-cell-modal-grid').addEventListener('click', (e) => {
+            const btn = e.target.closest('.stj-cell-modal-slot-remove');
+            if (!btn) return;
+            e.stopPropagation();
+            e.preventDefault();
+            const slot = btn.closest('.stj-cell-modal-slot');
+            const fileName = slot.dataset.fileName;
+            if (fileName && currentModalCell) {
+                removeImageFromCell(currentModalCell, fileName);
+                renderCellModalGrid(currentModalCell);
+                updateCellPreview(currentModalCell);
+            }
         });
 
         return modal;
@@ -733,6 +676,11 @@
             numberEl.textContent = String(allCells.indexOf(cell) + 1);
         }
 
+        // ★ グリッドを毎回リセット（セルに応じたスロット数で開く）
+        const grid = currentCellModal.querySelector('.stj-cell-modal-grid');
+        grid.innerHTML = '';
+        grid.scrollTop = 0;
+
         renderCellModalGrid(cell);
         currentCellModal.classList.add('visible');
     }
@@ -740,7 +688,6 @@
     function closeCellModal(revert) {
         if (!currentCellModal) return;
         if (revert && currentModalCell) {
-            // 変更を破棄
             if (!currentModalCell.classList.contains('stj-special-item')) {
                 setCellKeyword(currentModalCell, modalOriginalKeyword);
             }
@@ -768,10 +715,25 @@
         modalOriginalImages = [];
     }
 
+    // ★ 動的スロット生成（9以上は3の倍数で拡張）
     function renderCellModalGrid(cell) {
         if (!currentCellModal || !cell) return;
         const images = getCellImages(cell);
-        const slots = currentCellModal.querySelectorAll('.stj-cell-modal-slot');
+        const grid = currentCellModal.querySelector('.stj-cell-modal-grid');
+        if (!grid) return;
+
+        // 最低9スロット（3x3）、画像数がそれを超えたら3の倍数で拡張
+        const neededSlots = Math.max(9, Math.ceil(images.length / 3) * 3);
+        const currentCount = grid.children.length;
+        for (let i = currentCount; i < neededSlots; i++) {
+            const slot = document.createElement('div');
+            slot.className = 'stj-cell-modal-slot';
+            slot.dataset.index = String(i);
+            slot.innerHTML = `<button type="button" class="stj-cell-modal-slot-remove" title="登録解除">×</button>`;
+            grid.appendChild(slot);
+        }
+
+        const slots = grid.querySelectorAll('.stj-cell-modal-slot');
         const charName = document.getElementById('stj_char_name_display')?.textContent || '';
 
         slots.forEach((slot, i) => {
@@ -827,7 +789,7 @@
 
         const added = addImageToCell(cell, fileName);
         if (!added) {
-            console.log(`[STJ Editor] ${fileName} は追加できません（重複 or 上限9枚）`);
+            console.log(`[STJ Editor] ${fileName} は追加できません（重複）`);
             return;
         }
         updateCellPreview(cell);
@@ -925,6 +887,8 @@
             if (e.relatedTarget && cell.contains(e.relatedTarget)) return;
             cell.classList.remove('stj-drop-target');
         }, true);
+
+        console.log('[STJ Editor] 🌐 グローバル drop インターセプタを設置しました');
     }
 
     function installCustomDropListener() {
@@ -956,7 +920,7 @@
     }
 
     // ============================================================
-    // セル個別のクリック・削除リスナー
+    // セル個別のリスナー
     // ============================================================
     function attachKeywordRowListeners(item, index) {
         const previewEl = item.querySelector('.stj-image-preview');
@@ -1048,9 +1012,7 @@
         for (const c of candidates) {
             try {
                 if (evaluateCondition(c.keyword, text)) { matched = c; break; }
-            } catch (e) {
-                console.error(`条件評価エラー "${c.keyword}":`, e);
-            }
+            } catch (e) { /* ignore */ }
         }
 
         if (matched) {
@@ -1065,9 +1027,6 @@
         }
     }
 
-    // ============================================================
-    // セル追加
-    // ============================================================
     function addKeywordRow(modal) {
         const container = modal.querySelector('#stj_keywords_container');
         const itemCount = container.querySelectorAll('.stj-keyword-item').length;
@@ -1089,9 +1048,6 @@
         runLiveTest();
     }
 
-    // ============================================================
-    // JSON 読み込み・フォーム反映
-    // ============================================================
     async function loadExistingJSONData(charName) {
         if (!charName) return;
         try {
@@ -1116,7 +1072,6 @@
             return arr.map(p => extractFileNameFromPath(p)).filter(Boolean);
         };
 
-        // デフォルト
         const defaultCell = document.querySelector('.stj-special-item:nth-child(1)');
         if (defaultCell) {
             const files = imageMap.default !== undefined ? toFileNames(imageMap.default) : [];
@@ -1124,7 +1079,6 @@
             updateCellPreview(defaultCell);
         }
 
-        // サムネイル
         const thumbnailCell = document.querySelector('.stj-special-item:nth-child(2)');
         if (thumbnailCell) {
             const files = imageMap.thumbnail !== undefined ? toFileNames(imageMap.thumbnail) : [];
@@ -1132,7 +1086,6 @@
             updateCellPreview(thumbnailCell);
         }
 
-        // キーワードセル
         const container = document.getElementById('stj_keywords_container');
         if (!container) return;
         container.innerHTML = '';
@@ -1147,9 +1100,7 @@
         }
     }
 
-    function setupPreviewListeners() {
-        updatePreview();
-    }
+    function setupPreviewListeners() { updatePreview(); }
 
     function updatePreview() {
         document.querySelectorAll('.stj-keyword-item, .stj-special-item').forEach(cell => {
@@ -1365,9 +1316,6 @@
         }
     }
 
-    // ============================================================
-    // JSON出力
-    // ============================================================
     function buildImageMapFromForm(charName) {
         const imageMap = {};
         const toPaths = (names) => names.map(name => `user/images/${charName}/${extractFileNameFromPath(name)}`);
@@ -1461,9 +1409,7 @@
         document.querySelectorAll('.stj-keyword-item').forEach(item => {
             const kw = getCellKeyword(item).trim();
             const images = getCellImages(item);
-            if (kw || images.length > 0) {
-                data.keywords.push({ keyword: kw, images });
-            }
+            if (kw || images.length > 0) data.keywords.push({ keyword: kw, images });
         });
 
         const stjSettings = getExtensionSettings();
@@ -1478,7 +1424,6 @@
         const data = stjSettings[charName];
         if (!data) return;
         try {
-            // 旧形式互換: defaultImage / thumbnailImage を images に変換
             const defaultImages = data.defaultImages
                 || (data.defaultImage ? parseImageNames(data.defaultImage) : []);
             const thumbnailImages = data.thumbnailImages
@@ -1504,9 +1449,7 @@
                     addKeywordRowWithData(container, index, { keyword: kw.keyword, images });
                 });
             }
-        } catch (e) {
-            console.error('保存データの読み込みに失敗しました', e);
-        }
+        } catch (e) { console.error('保存データの読み込みに失敗しました', e); }
     }
 
     function addKeywordRowWithData(container, index, data) {
@@ -1535,9 +1478,20 @@
         }
     }
 
-    // ============================================================
-    // メインモーダル作成
-    // ============================================================
+    function buildSyntaxGuideHtml() {
+        return `
+            <div class="stj-guide-section">
+                <div class="stj-guide-section-title">🔧 基本演算子</div>
+                <ul class="stj-guide-list">
+                    <li><code class="stj-op">+</code> <b>AND</b>（全て含む）<div class="stj-op-ex">例：<code>山+川</code> → 「山」と「川」の両方が含まれる時にマッチ</div></li>
+                    <li><code class="stj-op">,</code> <b>OR</b>（いずれか含む）<div class="stj-op-ex">例：<code>山,川</code> → 「山」または「川」のどちらかが含まれる時にマッチ</div></li>
+                    <li><code class="stj-op">!</code> <b>NOT</b>（除外）<div class="stj-op-ex">例：<code>!山</code> → 「山」が含まれていない時にのみマッチ</div></li>
+                    <li><code class="stj-op">( )</code> <b>グループ化</b>（入れ子可能）<div class="stj-op-ex">例：<code>(山+川),谷</code> → 「山と川」または「谷」のいずれかにマッチ</div></li>
+                </ul>
+            </div>
+        `;
+    }
+
     function createExportModal() {
         const existingModal = document.getElementById('stj_export_modal');
         if (existingModal) existingModal.remove();
@@ -1554,13 +1508,9 @@
                     <strong id="stj_char_name_display"></strong>
                     <button type="button" class="stj-help-btn" id="stj_help_button">ヘルプ</button>
                 </div>
-                <div class="stj-syntax-guide" id="stj_syntax_guide">
-                    ${buildSyntaxGuideHtml()}
-                </div>
+                <div class="stj-syntax-guide" id="stj_syntax_guide">${buildSyntaxGuideHtml()}</div>
                 <textarea id="stj_test_input" placeholder="試しに文章を入力してください（例：笑顔で挨拶する）..."></textarea>
-                <div id="stj_test_result">
-                    判定結果: <span style="color: #aaa; font-weight: normal;">文章を入力するとヒットするキーワードが表示されます</span>
-                </div>
+                <div id="stj_test_result">判定結果: <span style="color: #aaa; font-weight: normal;">文章を入力するとヒットするキーワードが表示されます</span></div>
             </div>
 
             <div class="stj-top-section">
@@ -1583,17 +1533,17 @@
                     </div>
                 </div>
                 <div class="stj-info-panel">
-                    <div class="stj-info-note">※セルをクリックすると9マスの編集ウインドウが開きます</div>
+                    <div class="stj-info-note">※セルをクリックすると編集ウインドウが開きます</div>
                     <div class="stj-info-guide">
                         <h4>📖 操作方法</h4>
                         <ul class="stj-guide-ops">
-                            <li><b>セルをクリック</b>：9マスの編集ウインドウが開きます</li>
-                            <li><b>ギャラリーからドラッグ&ドロップ</b>：画像のファイル名を追加できます</li>
-                            <li><b>セルをドラッグ</b>：他のセルと位置を入れ替えられます</li>
-                            <li><b>編集ウインドウでホバー</b>：各マスに ❌ ボタンが表示され、登録を解除できます</li>
-                            <li><b>❌ボタン</b>：セルを削除します（確認あり）</li>
-                            <li><b>一括削除</b>：複数のセルを選択してまとめて削除します</li>
-                            <li><b>セル追加</b>：新しいセルを追加します</li>
+                            <li><b>セルをクリック</b>：編集ウインドウが開きます</li>
+                            <li><b>ギャラリーからドラッグ&ドロップ</b>：画像を追加できます</li>
+                            <li><b>セルをドラッグ</b>：セルの位置を入れ替えられます</li>
+                            <li><b>編集ウインドウでホバー</b>：各マスに ❌ ボタン → 登録解除</li>
+                            <li><b>❌ボタン</b>：セルを削除します</li>
+                            <li><b>一括削除</b>：複数のセルをまとめて削除</li>
+                            <li><b>セル追加</b>：新しいセルを追加</li>
                         </ul>
                     </div>
                 </div>
@@ -1746,19 +1696,14 @@
             });
         });
 
-        // 最初の通常セル
         const firstItem = modal.querySelector('.stj-keyword-item');
-        if (firstItem) {
-            attachKeywordRowListeners(firstItem, 0);
-        }
-        // 全セルにドロップターゲットを設定
+        if (firstItem) attachKeywordRowListeners(firstItem, 0);
         setupCellDropTargets(modal);
 
         installPointerDragHandlers();
         installGlobalDropInterceptor();
         installCustomDropListener();
 
-        // 特殊セルの初期プレビュー
         const defaultCell = modal.querySelector('.stj-special-item:nth-child(1)');
         const thumbnailCell = modal.querySelector('.stj-special-item:nth-child(2)');
         if (defaultCell) updateCellPreview(defaultCell);
@@ -1797,32 +1742,6 @@
         }, 1000);
     }
 
-    function buildSyntaxGuideHtml() {
-        return `
-            <div class="stj-guide-section">
-                <div class="stj-guide-section-title">🔧 基本演算子</div>
-                <ul class="stj-guide-list">
-                    <li>
-                        <code class="stj-op">+</code> <b>AND</b>（全て含む）
-                        <div class="stj-op-ex">例：<code>山+川</code> → 文章に「山」と「川」の両方が含まれる時にマッチ</div>
-                    </li>
-                    <li>
-                        <code class="stj-op">,</code> <b>OR</b>（いずれか含む）
-                        <div class="stj-op-ex">例：<code>山,川</code> → 文章に「山」または「川」のどちらかが含まれる時にマッチ</div>
-                    </li>
-                    <li>
-                        <code class="stj-op">!</code> <b>NOT</b>（除外）
-                        <div class="stj-op-ex">例：<code>!山</code> → 文章に「山」が含まれていない時にのみマッチ</div>
-                    </li>
-                    <li>
-                        <code class="stj-op">( )</code> <b>グループ化</b>（入れ子可能）
-                        <div class="stj-op-ex">例：<code>(山+川),谷</code> → 「山と川」または「谷」のいずれかにマッチ</div>
-                    </li>
-                </ul>
-            </div>
-        `;
-    }
-
     function initStjEditor() {
         const context = getSTContext();
         if (!context) { setTimeout(initStjEditor, 500); return; }
@@ -1848,7 +1767,5 @@
         console.log('[STJ Editor] JSONエディタAPIを公開しました（キャラ編集画面のボタンは廃止）');
     }
 
-    $(document).ready(() => {
-        initStjEditor();
-    });
+    $(document).ready(() => { initStjEditor(); });
 })();
