@@ -15,20 +15,15 @@ const LABEL_NORMAL     = '事前設定';
 const HIDE_CLASS       = 'gic-hidden-by-text-styling';
 const HIDDEN_MES_CLASS = 'gic-hidden-message';
 
-// ★ ComfyUI 可用性キャッシュキー（comfy_boot.js と共有）
 const COMFY_CACHE_KEY = 'gic_comfyUnavailable';
 
-// ===== ComfyUI 接続チェック関連 =====
 const COMFYUI_PROBE_URL_CANDIDATES = [
     'http://127.0.0.1:8188',
     'http://localhost:8188',
 ];
 const COMFYUI_PROBE_TIMEOUT_MS = 3000;
 
-// ===== ギャラリー配置カスタマイズ用定数 =====
-const GALLERY_WINDOW_SELECTORS = [
-    '#gallery',
-];
+const GALLERY_WINDOW_SELECTORS = ['#gallery'];
 
 const GALLERY_PREVIEW_SELECTORS = [
     '.galleryImageDraggable',
@@ -107,7 +102,6 @@ let _bulkDeleteHeaderObserver = null;
 let _lastTrashToggleAt = 0;
 const TRASH_TOGGLE_DEBOUNCE_MS = 1500;
 
-// ===== ★ SD ソース自動調整の状態 =====
 let _sdSourceChecked = false;
 
 // ===== ユーティリティ =====
@@ -136,10 +130,6 @@ function checkImageExists(url) {
         }
     });
 }
-
-// ============================================================
-// ★ ComfyUI 接続チェック & SD ソース自動調整
-// ============================================================
 
 async function checkComfyUIAvailable() {
     const originalFetch = window.__gicOriginalFetch || window.fetch;
@@ -219,7 +209,6 @@ async function ensureSdSourceConsistency() {
     }
 }
 
-// ===== 永続化ヘルパー =====
 function loadPersistedState() {
     try {
         const ctx = getContext();
@@ -313,9 +302,7 @@ function getCurrentCharacterName() {
 
 // ============================================================
 // ★ ギャラリー拡大プレビューを JSON編集画面(10001) より手前に表示
-//   panelSel  : z-index 15000
-//   closeSel  : z-index 15001（閉じるボタンはプレビューより上）
-//   ＋ ドラッグ中はギャラリーのチラつきを抑制
+//   ＋ ドラッグ中のチラつき抑制
 // ============================================================
 (function injectGalleryLayoutStyle() {
     if (document.getElementById('gic-gallery-layout-style')) return;
@@ -643,36 +630,12 @@ function getCurrentCharacterName() {
             outline-offset: -3px !important;
         }
 
-        /* ★ ドラッグ中はギャラリーのチラつきを抑制（transition/animation 停止） */
-        body.gic-dragging #gallery,
-        body.gic-dragging #gallery *,
-        body.gic-dragging .gic-pagination-pager,
-        body.gic-dragging .gic-pagination-pager * {
-            transition: none !important;
-            animation: none !important;
-        }
-
-        /* ★ ドラッグ中はギャラリーの位置・サイズ・transform を完全固定 */
-        body.gic-dragging #gallery {
-            position: fixed !important;
-            top: 50% !important;
-            left: 0 !important;
-            right: auto !important;
-            bottom: auto !important;
-            transform: translateY(-50%) !important;
-            -webkit-transform: translateY(-50%) !important;
-            margin: 0 !important;
-            contain: layout style !important;
-            will-change: transform !important;
-        }
-
-        /* ★ ドラッグ中はギャラリー内の全アニメーション・トランジションを停止 */
+        /* ★ ドラッグ中はギャラリー内のアニメーション・トランジションを停止 */
         body.gic-dragging #gallery,
         body.gic-dragging #gallery * {
             transition: none !important;
             animation: none !important;
         }
-        
     `;
     document.head.appendChild(style);
     console.log('[GIC] 🖼️ ギャラリー配置CSSを注入しました');
@@ -918,7 +881,6 @@ function positionGalleryButton() {
     const galleryBtn = document.getElementById(GALLERY_BUTTON_ID);
     if (!galleryBtn) return;
 
-    // ★ 🎨 は背景生成ボタンを基準に独立配置（💡 の位置に依存しない）
     const gicBtn = document.getElementById('gic-release-override-button');
     if (gicBtn) {
         const gicRect = gicBtn.getBoundingClientRect();
@@ -1037,9 +999,6 @@ function dedupeGalleryElements() {
     return keep;
 }
 
-// ============================================================
-// ★ 新しい #gallery 要素が追加されたら即座に重複排除
-// ============================================================
 function setupGalleryDedupeObserver() {
     if (window.__gicGalleryDedupeObserverInstalled) return;
     window.__gicGalleryDedupeObserverInstalled = true;
@@ -1079,48 +1038,15 @@ function setupGalleryDedupeObserver() {
 
 // ============================================================
 // ★ ギャラリーサムネイルを個別にドラッグ可能にする
-//    - サムネイルサイズのカスタムゴースト（背景画像 div 方式）
-//    - img の pointer-events を無効化して Firefox の file 添付を防止
-//    - ドラッグ中フラグ window.__gicDragInProgress を立てて
-//      レイアウト更新・SillyTavern のキャラインポートを抑止
-//    - クリック（拡大表示）には一切干渉しない
+//    document capture フェーズで dragstart を掌握し、
+//    nGY2 の drag-reorder を stopImmediatePropagation で抑止する。
+//    → ギャラリーの画像一覧が一切動かなくなる。
 // ============================================================
 function setupGalleryDragToJson() {
     if (window.__gicGalleryDragInstalled) return;
     window.__gicGalleryDragInstalled = true;
 
     const GALLERY_THUMB_SELECTOR = '.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item';
-    let galleryLockState = null;
-
-    // ★ ドラッグ中は #gallery の位置・transform を完全ロック
-    function lockGallery() {
-        if (galleryLockState) return;
-        const gallery = document.getElementById('gallery');
-        if (!gallery) return;
-        galleryLockState = { element: gallery };
-        gallery.style.setProperty('position', 'fixed', 'important');
-        gallery.style.setProperty('top', '50%', 'important');
-        gallery.style.setProperty('left', '0', 'important');
-        gallery.style.setProperty('right', 'auto', 'important');
-        gallery.style.setProperty('bottom', 'auto', 'important');
-        gallery.style.setProperty('transform', 'translateY(-50%)', 'important');
-        gallery.style.setProperty('-webkit-transform', 'translateY(-50%)', 'important');
-        gallery.style.setProperty('margin', '0', 'important');
-        gallery.style.setProperty('contain', 'layout style', 'important');
-        gallery.style.setProperty('will-change', 'transform', 'important');
-    }
-
-    function unlockGallery() {
-        if (!galleryLockState) return;
-        const el = galleryLockState.element;
-        try {
-            if (el && el.parentNode) {
-                el.style.removeProperty('contain');
-                el.style.removeProperty('will-change');
-            }
-        } catch (_) {}
-        galleryLockState = null;
-    }
 
     function getPathFromThumb(thumb) {
         if (!thumb) return null;
@@ -1142,72 +1068,87 @@ function setupGalleryDragToJson() {
         if (!thumb || thumb.dataset.gicDragReady === '1') return;
         thumb.dataset.gicDragReady = '1';
         thumb.setAttribute('draggable', 'true');
-
-        // Firefox の img ファイル自動添付を防止
         thumb.querySelectorAll('img').forEach(img => {
             img.setAttribute('draggable', 'false');
             img.style.pointerEvents = 'none';
             try { img.style.webkitUserDrag = 'none'; } catch (_) {}
         });
+    }
 
-        thumb.addEventListener('dragstart', (e) => {
-            const path = getPathFromThumb(thumb);
-            if (!path) { e.preventDefault(); return; }
+    // ★ document キャプチャフェーズで dragstart を完全掌握
+    document.addEventListener('dragstart', (e) => {
+        const gallery = document.getElementById('gallery');
+        if (!gallery || !gallery.contains(e.target)) return;
 
-            e.stopPropagation();
+        const thumb = e.target.closest(GALLERY_THUMB_SELECTOR);
+        if (!thumb) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            return;
+        }
 
-            window.__gicDragInProgress = true;
-            document.body.classList.add('gic-dragging');
-            lockGallery();
+        // ★ nGY2 に dragstart を見せない
+        e.stopImmediatePropagation();
 
-            try {
-                e.dataTransfer.effectAllowed = 'copy';
-                e.dataTransfer.setData('application/x-gic-path', path);
-                e.dataTransfer.setData('text/plain', path);
-                e.dataTransfer.setData('text/uri-list', path);
+        const path = getPathFromThumb(thumb);
+        if (!path) { e.preventDefault(); return; }
 
-                // ★ Canvas ベースのドラッグ画像（DOM操作なし・サムネイルサイズ）
-                const w = thumb.offsetWidth || 100;
-                const h = thumb.offsetHeight || 100;
-                if (w > 0 && h > 0) {
-                    try {
-                        const canvas = document.createElement('canvas');
-                        canvas.width = w;
-                        canvas.height = h;
-                        const ctx = canvas.getContext('2d');
-                        const imgEl = thumb.querySelector('img');
-                        if (imgEl && imgEl.complete && imgEl.naturalWidth > 0) {
-                            try { ctx.drawImage(imgEl, 0, 0, w, h); }
-                            catch (_) {
-                                ctx.fillStyle = 'rgba(30,30,30,0.9)';
-                                ctx.fillRect(0, 0, w, h);
-                            }
-                        } else {
+        window.__gicDragInProgress = true;
+        document.body.classList.add('gic-dragging');
+
+        try {
+            e.dataTransfer.effectAllowed = 'copy';
+            e.dataTransfer.setData('application/x-gic-path', path);
+            e.dataTransfer.setData('text/plain', path);
+            e.dataTransfer.setData('text/uri-list', path);
+
+            const w = thumb.offsetWidth || 100;
+            const h = thumb.offsetHeight || 100;
+            if (w > 0 && h > 0) {
+                try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = w;
+                    canvas.height = h;
+                    const ctx = canvas.getContext('2d');
+                    const imgEl = thumb.querySelector('img');
+                    if (imgEl && imgEl.complete && imgEl.naturalWidth > 0) {
+                        try { ctx.drawImage(imgEl, 0, 0, w, h); }
+                        catch (_) {
                             ctx.fillStyle = 'rgba(30,30,30,0.9)';
                             ctx.fillRect(0, 0, w, h);
                         }
-                        ctx.strokeStyle = '#ffd54f';
-                        ctx.lineWidth = 3;
-                        ctx.strokeRect(1.5, 1.5, w - 3, h - 3);
-                        e.dataTransfer.setDragImage(canvas, w / 2, h / 2);
-                    } catch (err) {
-                        console.warn('[GIC] setDragImage (canvas) 失敗:', err);
+                    } else {
+                        ctx.fillStyle = 'rgba(30,30,30,0.9)';
+                        ctx.fillRect(0, 0, w, h);
                     }
+                    ctx.strokeStyle = '#ffd54f';
+                    ctx.lineWidth = 3;
+                    ctx.strokeRect(1.5, 1.5, w - 3, h - 3);
+                    e.dataTransfer.setDragImage(canvas, w / 2, h / 2);
+                } catch (err) {
+                    console.warn('[GIC] setDragImage 失敗:', err);
                 }
-            } catch (err) {
-                console.warn('[GIC] dragstart エラー:', err);
             }
+        } catch (err) {
+            console.warn('[GIC] dragstart エラー:', err);
+        }
 
-            thumb.classList.add('gic-dragging-to-json');
-        }, true);
+        thumb.classList.add('gic-dragging-to-json');
+    }, true);
 
-        thumb.addEventListener('dragend', () => {
-            window.__gicDragInProgress = false;
-            document.body.classList.remove('gic-dragging');
-            unlockGallery();
-            thumb.classList.remove('gic-dragging-to-json');
-        }, true);
-    }
+    // dragend: 状態リセット + nGY2 に再レイアウトを促す
+    document.addEventListener('dragend', (e) => {
+        if (!window.__gicDragInProgress) return;
+        window.__gicDragInProgress = false;
+        document.body.classList.remove('gic-dragging');
+        document.querySelectorAll('.gic-dragging-to-json').forEach(el => {
+            el.classList.remove('gic-dragging-to-json');
+        });
+
+        setTimeout(() => {
+            try { window.dispatchEvent(new Event('resize')); } catch (_) {}
+        }, 100);
+    }, true);
 
     function scanAndMarkAll() {
         const gallery = document.getElementById('gallery');
@@ -1217,26 +1158,7 @@ function setupGalleryDragToJson() {
 
     const observer = new MutationObserver(() => { scanAndMarkAll(); });
     observer.observe(document.body, { childList: true, subtree: true });
-
     setInterval(scanAndMarkAll, 1000);
-
-    // サムネイル以外の dragstart はキャンセル（パネル移動防止）
-    document.addEventListener('dragstart', (e) => {
-        const gallery = document.getElementById('gallery');
-        if (!gallery || !gallery.contains(e.target)) return;
-        if (!e.target.closest(GALLERY_THUMB_SELECTOR)) e.preventDefault();
-    }, true);
-
-    // ★ ドキュメントレベルの dragend 保険（thumb の dragend が発火しない場合に備える）
-    document.addEventListener('dragend', () => {
-        if (!window.__gicDragInProgress) return;
-        window.__gicDragInProgress = false;
-        document.body.classList.remove('gic-dragging');
-        unlockGallery();
-        document.querySelectorAll('.gic-dragging-to-json').forEach(el => {
-            el.classList.remove('gic-dragging-to-json');
-        });
-    }, true);
 
     console.log('[GIC] 🖼️ ギャラリーサムネイルの個別ドラッグを有効化しました');
 }
@@ -1340,7 +1262,6 @@ function hideGalleryUploadMessage() {
     }
 }
 
-// ★ 全ての #gallery 要素に対してスタイルを適用する（防御的）
 function applyGalleryWindowLayout() {
     for (const sel of GALLERY_WINDOW_SELECTORS) {
         const elements = document.querySelectorAll(sel);
@@ -1673,9 +1594,6 @@ function applyPageNumbers() {
     positionPager(pager);
 }
 
-// ============================================================
-// ★ 拡大プレビューを JSON編集画面(10001) より手前に表示
-// ============================================================
 function fitPreviewToViewport(panel) {
     if (!panel) return;
 
@@ -2441,7 +2359,6 @@ function setupBulkDelete() {
 
 function applyGalleryLayout() {
     if (isApplyingLayout) return;
-    // ★ ドラッグ中はレイアウト更新をスキップ（チラつき防止）
     if (window.__gicDragInProgress) return;
     isApplyingLayout = true;
     try {
@@ -3413,7 +3330,6 @@ function setupListeners() {
     console.log('[GIC] ✅ イベントリスナーを登録しました');
 }
 
-// ===== デバッグ: ギャラリーDOM構造のダンプ =====
 window.GicDumpGallery = function () {
     const gallery = document.getElementById('gallery');
     if (!gallery) {
@@ -3442,9 +3358,6 @@ window.GicDumpGallery = function () {
     console.log('[GicDumpGallery] ギャラリーDOM構造:\n' + lines.join('\n'));
 };
 
-// ============================================================
-// ★ 外部公開API（stj_editor.js から呼ばれる）
-// ============================================================
 function exposeGicApi() {
     window.GicApi = {
         openGallery: () => openGalleryFromGic(),
@@ -3467,7 +3380,6 @@ function initializeGIC() {
 
     setupGalleryDedupeObserver();
 
-    // ★ ギャラリーサムネイルの個別ドラッグを有効化
     setupGalleryDragToJson();
 
     createReleaseButton();
@@ -3506,7 +3418,6 @@ function initializeGIC() {
     applyGalleryLayout();
 }
 
-// ★ APP_READY を待ってから初期化
 function bootstrapGIC() {
     let started = false;
     const startOnce = () => {
@@ -3540,8 +3451,6 @@ function bootstrapGIC() {
 
 bootstrapGIC();
 
-// ===== activate フック =====
-
 export async function activate() {
     console.log('[GIC] activate() が呼ばれました');
     loadPersistedState();
@@ -3551,7 +3460,6 @@ export async function activate() {
 
     setupGalleryDedupeObserver();
 
-    // ★ ギャラリーサムネイルの個別ドラッグを有効化
     setupGalleryDragToJson();
 
     createReleaseButton();
