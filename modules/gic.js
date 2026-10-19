@@ -1081,6 +1081,10 @@ function closeAllPreviews() {
     console.log(`[GIC] ギャラリーが閉じたため ${previews.length} 個のプレビューを閉じました`);
 }
 
+// ============================================================
+// ★ ギャラリーウインドウの❌ボタンを非表示
+//    （拡大プレビューの❌は残す）
+// ============================================================
 function styleGalleryWindowCloseButton() {
     const galleryEls = document.querySelectorAll('#gallery');
     galleryEls.forEach(galleryEl => {
@@ -1088,20 +1092,11 @@ function styleGalleryWindowCloseButton() {
         closeButtons.forEach(btn => {
             if (btn.closest('.galleryImageDraggable')) return;
 
-            btn.style.setProperty('position', 'fixed', 'important');
-            btn.style.setProperty('right', '5px', 'important');
-            btn.style.setProperty('bottom', '30px', 'important');
-            btn.style.setProperty('top', 'auto', 'important');
-            btn.style.setProperty('left', 'auto', 'important');
-            btn.style.setProperty(
-                'transform',
-                `scale(${GALLERY_WINDOW_CLOSE_SCALE})`,
-                'important'
-            );
-            btn.style.setProperty('transform-origin', 'bottom right', 'important');
-            btn.style.setProperty('z-index', '100', 'important');
-            btn.style.setProperty('margin', '0', 'important');
-            btn.style.setProperty('pointer-events', 'auto', 'important');
+            // ギャラリーウインドウ本体の❌は非表示（JSON編集画面のキャンセルのみで閉じる）
+            btn.style.setProperty('display', 'none', 'important');
+            btn.style.setProperty('visibility', 'hidden', 'important');
+            btn.style.setProperty('pointer-events', 'none', 'important');
+            btn.style.setProperty('opacity', '0', 'important');
         });
     });
 }
@@ -2310,9 +2305,15 @@ function applyGalleryLayout() {
 
 let lastGalleryStateForGic = null;
 
+// ============================================================
+// ★ ギャラリー開閉と JSON編集画面 を連動させる
+//   開: ギャラリー → JSON編集画面を自動で開く（ウォームアップ中は除く）
+//   閉: ギャラリー → JSON編集画面も閉じる（保険）
+// ============================================================
 function syncGalleryButtonVisibility() {
     const galleryOpen = isGalleryOpen();
     if (galleryOpen === lastGalleryStateForGic) return;
+    const wasOpen = lastGalleryStateForGic === true;
     lastGalleryStateForGic = galleryOpen;
 
     if (_galleryOpenInFlight) {
@@ -2320,7 +2321,6 @@ function syncGalleryButtonVisibility() {
         clearGalleryOpenInFlight();
     }
 
-    // ★ ギャラリーが開いた瞬間に重複排除
     if (galleryOpen) {
         dedupeGalleryElements();
     }
@@ -2338,9 +2338,33 @@ function syncGalleryButtonVisibility() {
 
     if (galleryOpen) {
         applyGalleryLayout();
+
+        // ★ ギャラリーが開いた → JSON編集画面も自動で開く（ウォームアップ中は除く）
+        if (warmupState !== 'running') {
+            setTimeout(() => {
+                if (isGalleryOpen() && window.STJEditor?.open) {
+                    try {
+                        window.STJEditor.open();
+                        console.log('[GIC] 📝 ギャラリーと連動して JSON編集画面を開きました');
+                    } catch (e) {
+                        console.warn('[GIC] STJEditor.open エラー:', e);
+                    }
+                }
+            }, 300);
+        }
     } else {
         resetGalleryHeightCache();
         closeAllPreviews();
+
+        // ★ ギャラリーが閉じた → JSON編集画面も閉じる（保険）
+        if (wasOpen && window.STJEditor?.isOpen?.()) {
+            try {
+                window.STJEditor.close({ fromGallery: true, force: true });
+                console.log('[GIC] 📝 ギャラリーと連動して JSON編集画面を閉じました');
+            } catch (e) {
+                console.warn('[GIC] STJEditor.close エラー:', e);
+            }
+        }
     }
 }
 
@@ -2432,7 +2456,7 @@ function openGalleryFromGic() {
 }
 
 // ============================================================
-// ★ ギャラリー閉じる時に付属UI（ページャー・プレビュー）を
+// ★ ギャラリー閉じる時に付属UI（ページャー・プレビュー・JSON編集画面）を
 //    ギャラリー本体と完全に同じタイミングで消す
 // ============================================================
 function hideGalleryAttachmentsImmediately(reason = '') {
@@ -2482,11 +2506,22 @@ function hideGalleryAttachmentsImmediately(reason = '') {
     _paginationWindowStart = 0;
     _paginationWindowManual = false;
     _galleryTotalPagesCache = 0;
+
+    // 7. ★ JSON編集画面も閉じる（fromGallery: true でループ防止）
+    if (window.STJEditor?.isOpen?.()) {
+        try {
+            window.STJEditor.close({ fromGallery: true, force: true });
+            console.log('[GIC] 📝 ギャラリーと連動して JSON編集画面を閉じました');
+        } catch (e) {
+            console.warn('[GIC] STJEditor.close エラー:', e);
+        }
+    }
 }
 
 // ============================================================
 // ★ ギャラリー閉じるボタンの押下をキャプチャフェーズで横取りし、
 //    ST本体がギャラリーを閉じる前に付属UIを同期的に消す。
+//    ※ ギャラリー❌は非表示にしているが、Escape押下などの経路もカバー
 // ============================================================
 function installGalleryCloseInterceptor() {
     if (window.__gicCloseInterceptorInstalled) return;
@@ -2525,26 +2560,15 @@ function installGalleryCloseInterceptor() {
     console.log('[GIC] 🚪 ギャラリー閉じるインターセプタを設置しました');
 }
 
-// ===== 公式ギャラリーを閉じる（プログラム的） =====
-
+// ============================================================
+// ★ 公式ギャラリーを閉じる（プログラム的）
+//    ※❌非表示のため Escape をプライマリにする
+// ============================================================
 function closeGalleryProgrammatically() {
     hideGalleryAttachmentsImmediately('closeGalleryProgrammatically');
 
-    const g = document.getElementById('gallery');
-    if (g) {
-        const closeBtn = g.querySelector(':scope > .dragClose') ||
-                         g.querySelector(':scope > .panelControlBar .dragClose') ||
-                         g.querySelector('.dragClose');
-        if (closeBtn && typeof closeBtn.click === 'function') {
-            try {
-                closeBtn.click();
-                console.log('[GIC] ギャラリーを閉じました (dragClose)');
-                clearGalleryOpenInFlight();
-                return true;
-            } catch (e) { /* fallthrough */ }
-        }
-    }
-
+    // プライマリ: Escape キー
+    let closed = false;
     try {
         const esc = new KeyboardEvent('keydown', {
             key: 'Escape',
@@ -2555,13 +2579,31 @@ function closeGalleryProgrammatically() {
             cancelable: true,
         });
         document.dispatchEvent(esc);
-        console.log('[GIC] ギャラリーを閉じました (Escape)');
         clearGalleryOpenInFlight();
-        return true;
+        closed = true;
+        console.log('[GIC] ギャラリーを閉じました (Escape)');
     } catch (e) {
-        console.warn('[GIC] ギャラリーを閉じるのに失敗:', e);
-        return false;
+        console.warn('[GIC] Escape 発火失敗:', e);
     }
+
+    // 保険: まだ開いていれば .dragClose も試す（遅延）
+    if (closed) {
+        setTimeout(() => {
+            if (!isGalleryOpen()) return;
+            const g = document.getElementById('gallery');
+            if (!g) return;
+            const btn = g.querySelector(':scope > .dragClose') ||
+                        g.querySelector(':scope > .panelControlBar .dragClose');
+            if (btn) {
+                try {
+                    btn.click();
+                    console.log('[GIC] ギャラリーを閉じました (dragClose fallback)');
+                } catch (e) { /* ignore */ }
+            }
+        }, 100);
+    }
+
+    return closed;
 }
 
 // ===== ギャラリー画像のプリロード =====
@@ -3227,6 +3269,18 @@ window.GicDumpGallery = function () {
     console.log('[GicDumpGallery] ギャラリーDOM構造:\n' + lines.join('\n'));
 };
 
+// ============================================================
+// ★ 外部公開API（stj_editor.js から呼ばれる）
+// ============================================================
+function exposeGicApi() {
+    window.GicApi = {
+        openGallery: () => openGalleryFromGic(),
+        closeGallery: () => closeGalleryProgrammatically(),
+        isOpen: () => isGalleryOpen(),
+    };
+    console.log('[GIC] ✅ window.GicApi を公開しました');
+}
+
 // ===== 初期化 =====
 
 function initializeGIC() {
@@ -3247,6 +3301,9 @@ function initializeGIC() {
     setupListeners();
     setupTextStylingObserver();
     setupGalleryObserverForGic();
+
+    // ★ 外部公開API（stj_editor.js から呼ばれる）
+    exposeGicApi();
 
     validatePersistedState().catch(e => {
         console.warn('[GIC] 永続化状態の検証に失敗:', e);
@@ -3328,6 +3385,9 @@ export async function activate() {
     createGalleryButton();
     setupGalleryObserverForGic();
     applyGalleryLayout();
+
+    // ★ 外部公開API（stj_editor.js から呼ばれる）
+    exposeGicApi();
 
     // ★ activate でも SDソース整合性チェック
     ensureSdSourceConsistency().catch(e => {
