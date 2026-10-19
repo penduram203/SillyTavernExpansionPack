@@ -1020,7 +1020,7 @@
                     <button id="stj_export_json">JSON出力</button>
                 </div>
                 <div class="stj-button-group-right">
-                    <button id="stj_add_keyword">キーワード追加</button>
+                    <button id="stj_add_keyword">セル追加</button>
                     <button id="stj_bulk_delete">一括削除</button>
                     <button id="stj_delete_cancel" style="display:none;">削除キャンセル</button>
                     <button id="stj_delete_execute" style="display:none;">削除実行</button>
