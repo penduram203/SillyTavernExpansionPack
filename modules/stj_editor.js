@@ -7,7 +7,7 @@
     const MEDIA_CHECK_TIMEOUT_MS = 5000;
 
     let stjModalEl = null;
-    let stjButtonEl = null; // 未使用（互換性のため残置）
+    let stjButtonEl = null;
     let outsideClickHandlerInstalled = false;
     let helpOutsideHandlerInstalled = false;
     let modalOpenedTimestamp = 0;
@@ -724,17 +724,6 @@
         });
     }
 
-    // ============================================================
-    // ★ キャラ編集画面の「JSONデータ編集」ボタンは廃止
-    //   ギャラリー開閉と連動して自動で開閉する方式に変更
-    // ============================================================
-
-    function handleExportButtonClick(e) {
-        e.stopImmediatePropagation();
-        e.preventDefault();
-        openExportModal();
-    }
-
     function openExportModal() {
         if (!stjModalEl) return;
         if (stjModalEl.style.display === 'block') return;
@@ -898,16 +887,10 @@
         `;
     }
 
-    // ============================================================
-    // ★ グローバル drop インターセプタ
-    //    - window capture phase で最速で捕捉
-    //    - SillyTavern のキャラクターインポート誤発動を完全に防止
-    // ============================================================
     function installGlobalDropInterceptor() {
         if (window.__gicDropInterceptorInstalled) return;
         window.__gicDropInterceptorInstalled = true;
 
-        // ★ dragover: セル以外でも常に preventDefault して SillyTavern 側をブロック
         window.addEventListener('dragover', (e) => {
             if (!window.__gicDragInProgress) return;
             e.preventDefault();
@@ -922,7 +905,6 @@
             cell.classList.add('stj-drop-target');
         }, true);
 
-        // ★ dragenter も常にブロック
         window.addEventListener('dragenter', (e) => {
             if (!window.__gicDragInProgress) return;
             e.preventDefault();
@@ -930,7 +912,6 @@
             e.stopImmediatePropagation();
         }, true);
 
-        // ★ drop: セル以外でも常にブロック
         window.addEventListener('drop', (e) => {
             if (!window.__gicDragInProgress) return;
             e.preventDefault();
@@ -944,7 +925,6 @@
             handleCellDrop(cell, e);
         }, true);
 
-        // dragleave は通常通り（ビジュアルフィードバック解除用）
         window.addEventListener('dragleave', (e) => {
             if (!window.__gicDragInProgress) return;
             const cell = e.target && e.target.closest
@@ -958,9 +938,6 @@
         console.log('[STJ Editor] 🌐 グローバル drop インターセプタを設置しました');
     }
 
-    // ============================================================
-    // ★ セルへのドロップ処理を一元化
-    // ============================================================
     function handleCellDrop(cell, e) {
         if (!cell) return;
         cell.classList.remove('stj-drop-target');
@@ -989,10 +966,15 @@
             console.log(`[STJ Editor] ${fileName} は既に含まれています`);
             return;
         }
+
+        // ★ 編集モードでなければスナップショットを保存（キャンセル時の復元用）
+        if (!cell.classList.contains('editing')) {
+            saveEditSnapshot(cell);
+            cell.classList.add('editing');
+        }
+
         current.push(fileName);
         inputEl.value = current.join(',');
-
-        cell.classList.add('editing');
 
         const charName = document.getElementById('stj_char_name_display')?.textContent || '';
         const previewEl = cell.querySelector('.stj-image-preview');
@@ -1007,10 +989,6 @@
         console.log(`[STJ Editor] 🖼️ ドロップで追加: ${fileName} → ${inputEl.value}`);
     }
 
-    // ============================================================
-    // ★ セル単位のドロップターゲット（ビジュアルフィードバック補助）
-    //   drop 本体はグローバルインターセプタが処理する
-    // ============================================================
     function setupCellDropTargets(container) {
         if (!container) container = document;
 
@@ -1315,17 +1293,23 @@
             });
         });
 
+        // ★ 特殊セルのキャンセル: スナップショット復元 + プレビュー更新
         modal.querySelectorAll('.stj-cancel-special').forEach(btn => {
             btn.addEventListener('click', function(e) {
                 e.stopPropagation();
                 if (isBulkDeleteMode || isDialogActive) return;
                 const item = this.closest('.stj-special-item');
                 if (!item) return;
-                const inputEl = item.querySelector('.stj-image-input');
-                if (inputEl && item.dataset.originalImage !== undefined) {
-                    inputEl.value = item.dataset.originalImage;
-                }
+
+                restoreEditSnapshot(item);
                 item.classList.remove('editing');
+
+                const charName = document.getElementById('stj_char_name_display')?.textContent || '';
+                const previewEl = item.querySelector('.stj-image-preview');
+                const inputEl = item.querySelector('.stj-image-input');
+                if (previewEl && charName && inputEl) {
+                    updateImagePreview(previewEl.id, charName, inputEl.value);
+                }
             });
         });
 
@@ -1340,10 +1324,7 @@
 
                 modal.querySelectorAll('.stj-special-item.editing').forEach(other => {
                     if (other === item) return;
-                    const oi = other.querySelector('.stj-image-input');
-                    if (oi && other.dataset.originalImage !== undefined) {
-                        oi.value = other.dataset.originalImage;
-                    }
+                    restoreEditSnapshot(other);
                     other.classList.remove('editing');
                 });
 
@@ -1352,7 +1333,7 @@
                 e.preventDefault();
                 e.stopPropagation();
 
-                item.dataset.originalImage = inputEl.value;
+                saveEditSnapshot(item);
 
                 item.classList.add('editing');
                 setTimeout(() => { try { inputEl.focus(); } catch (err) {} }, 50);
@@ -1370,10 +1351,8 @@
 
         installPointerDragHandlers();
 
-        // ★ 既存セルにドロップターゲット（ビジュアル補助）を設定
         setupCellDropTargets(modal);
 
-        // ★ グローバル drop インターセプタを設置
         installGlobalDropInterceptor();
     }
 
@@ -1483,6 +1462,7 @@
             });
         }
 
+        // ★ キャンセル: スナップショット復元 + プレビュー更新
         const cancelButton = item.querySelector('.stj-cancel-row');
         if (cancelButton) {
             cancelButton.addEventListener('click', function(e) {
@@ -1490,6 +1470,7 @@
                 if (isBulkDeleteMode || isDialogActive) return;
                 restoreEditSnapshot(item);
                 item.classList.remove('editing');
+                updateSinglePreviewByItem(item);
                 runLiveTest();
             });
         }
@@ -1604,7 +1585,6 @@
         attachKeywordRowListeners(newItem, itemCount);
         saveEditSnapshot(newItem);
 
-        // ★ 新規セルにドロップターゲットを設定
         setupCellDropTargets(newItem);
 
         modal.scrollTop = modal.scrollHeight;
@@ -2126,14 +2106,9 @@
 
         attachKeywordRowListeners(newItem, index);
 
-        // ★ 復元されたセルにもドロップターゲットを設定
         setupCellDropTargets(newItem);
     }
 
-    // ============================================================
-    // ★ 初期化: キャラ編集画面のボタンは作らない。モーダルDOMのみ準備し、
-    //   window.STJEditor API を公開する（ギャラリー側から開閉制御）
-    // ============================================================
     function initStjEditor() {
         const context = getSTContext();
         if (!context) {
@@ -2141,12 +2116,10 @@
             return;
         }
 
-        // モーダルDOMのみ先に作成（ボタンは作成しない）
         if (!stjModalEl || !document.body.contains(stjModalEl)) {
             createExportModal();
         }
 
-        // 外部公開API（ギャラリー側から開閉制御される）
         window.STJEditor = {
             open: function () {
                 try {
