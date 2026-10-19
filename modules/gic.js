@@ -1047,6 +1047,10 @@ function setupGalleryDragToJson() {
     window.__gicGalleryDragInstalled = true;
 
     const GALLERY_THUMB_SELECTOR = '.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item';
+    const DRAG_THRESHOLD = 5; // px
+
+    let dragState = null;   // { startX, startY, thumb, path, isDragging }
+    let ghostEl = null;
 
     function getPathFromThumb(thumb) {
         if (!thumb) return null;
@@ -1064,103 +1068,176 @@ function setupGalleryDragToJson() {
         return url ? urlToServerPath(url) : null;
     }
 
-    function markDraggable(thumb) {
-        if (!thumb || thumb.dataset.gicDragReady === '1') return;
-        thumb.dataset.gicDragReady = '1';
-        thumb.setAttribute('draggable', 'true');
-        thumb.querySelectorAll('img').forEach(img => {
-            img.setAttribute('draggable', 'false');
-            img.style.pointerEvents = 'none';
-            try { img.style.webkitUserDrag = 'none'; } catch (_) {}
+    function createGhost(thumb, x, y) {
+        const w = thumb.offsetWidth || 100;
+        const h = thumb.offsetHeight || 100;
+        const imgEl = thumb.querySelector('img');
+
+        const ghost = document.createElement('div');
+        ghost.id = 'gic-drag-ghost';
+        ghost.style.cssText = `
+            position: fixed;
+            left: ${x - w / 2}px;
+            top: ${y - h / 2}px;
+            width: ${w}px;
+            height: ${h}px;
+            pointer-events: none;
+            z-index: 2147483647;
+            border: 3px solid #ffd54f;
+            border-radius: 6px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+            overflow: hidden;
+            opacity: 0.85;
+            user-select: none;
+        `;
+        if (imgEl) {
+            const img = document.createElement('img');
+            img.src = imgEl.currentSrc || imgEl.src;
+            img.style.cssText = 'width:100%;height:100%;object-fit:cover;pointer-events:none;';
+            ghost.appendChild(img);
+        } else {
+            ghost.style.backgroundColor = 'rgba(30,30,30,0.9)';
+        }
+        document.body.appendChild(ghost);
+        return ghost;
+    }
+
+    function moveGhost(x, y) {
+        if (!ghostEl) return;
+        ghostEl.style.left = (x - ghostEl.offsetWidth / 2) + 'px';
+        ghostEl.style.top = (y - ghostEl.offsetHeight / 2) + 'px';
+    }
+
+    function cleanup() {
+        if (ghostEl) { ghostEl.remove(); ghostEl = null; }
+        dragState = null;
+        window.__gicDragInProgress = false;
+        document.body.classList.remove('gic-dragging');
+        // ドロップターゲット強調をすべて解除
+        document.querySelectorAll('.stj-drop-target').forEach(el => {
+            el.classList.remove('stj-drop-target');
         });
     }
 
-    // ★ document キャプチャフェーズで dragstart を完全掌握
-    document.addEventListener('dragstart', (e) => {
+    function handleDrop(x, y) {
+        if (!dragState) return;
+        const targetEl = document.elementFromPoint(x, y);
+        const cell = targetEl ? targetEl.closest('.stj-keyword-item, .stj-special-item') : null;
+        if (!cell) return;
+        window.dispatchEvent(new CustomEvent('gic-drop-file', {
+            detail: { path: dragState.path, cell }
+        }));
+    }
+
+    // サムネイルを draggable=false に固定（ネイティブD&Dを完全に無効化）
+    function markThumb(thumb) {
+        if (!thumb || thumb.dataset.gicDragReady === '1') return;
+        thumb.dataset.gicDragReady = '1';
+        thumb.setAttribute('draggable', 'false');
+        thumb.querySelectorAll('img, a').forEach(el => {
+            el.setAttribute('draggable', 'false');
+            el.style.pointerEvents = 'none';
+            try { el.style.webkitUserDrag = 'none'; } catch (_) {}
+        });
+    }
+
+    // mousedown: 起点を記録（preventDefaultしない → クリック検出は維持）
+    document.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
         const gallery = document.getElementById('gallery');
         if (!gallery || !gallery.contains(e.target)) return;
-
         const thumb = e.target.closest(GALLERY_THUMB_SELECTOR);
-        if (!thumb) {
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            return;
-        }
-
-        // ★ nGY2 に dragstart を見せない
-        e.stopImmediatePropagation();
+        if (!thumb) return;
 
         const path = getPathFromThumb(thumb);
-        if (!path) { e.preventDefault(); return; }
+        if (!path) return;
 
-        window.__gicDragInProgress = true;
-        document.body.classList.add('gic-dragging');
-
-        try {
-            e.dataTransfer.effectAllowed = 'copy';
-            e.dataTransfer.setData('application/x-gic-path', path);
-            e.dataTransfer.setData('text/plain', path);
-            e.dataTransfer.setData('text/uri-list', path);
-
-            const w = thumb.offsetWidth || 100;
-            const h = thumb.offsetHeight || 100;
-            if (w > 0 && h > 0) {
-                try {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = w;
-                    canvas.height = h;
-                    const ctx = canvas.getContext('2d');
-                    const imgEl = thumb.querySelector('img');
-                    if (imgEl && imgEl.complete && imgEl.naturalWidth > 0) {
-                        try { ctx.drawImage(imgEl, 0, 0, w, h); }
-                        catch (_) {
-                            ctx.fillStyle = 'rgba(30,30,30,0.9)';
-                            ctx.fillRect(0, 0, w, h);
-                        }
-                    } else {
-                        ctx.fillStyle = 'rgba(30,30,30,0.9)';
-                        ctx.fillRect(0, 0, w, h);
-                    }
-                    ctx.strokeStyle = '#ffd54f';
-                    ctx.lineWidth = 3;
-                    ctx.strokeRect(1.5, 1.5, w - 3, h - 3);
-                    e.dataTransfer.setDragImage(canvas, w / 2, h / 2);
-                } catch (err) {
-                    console.warn('[GIC] setDragImage 失敗:', err);
-                }
-            }
-        } catch (err) {
-            console.warn('[GIC] dragstart エラー:', err);
-        }
-
-        thumb.classList.add('gic-dragging-to-json');
+        dragState = {
+            startX: e.clientX,
+            startY: e.clientY,
+            thumb,
+            path,
+            isDragging: false
+        };
     }, true);
 
-    // dragend: 状態リセット + nGY2 に再レイアウトを促す
-    document.addEventListener('dragend', (e) => {
-        if (!window.__gicDragInProgress) return;
-        window.__gicDragInProgress = false;
-        document.body.classList.remove('gic-dragging');
-        document.querySelectorAll('.gic-dragging-to-json').forEach(el => {
-            el.classList.remove('gic-dragging-to-json');
-        });
+    // mousemove: トラッキング中はすべて遮断（nGY2のdrag-reorderを完全抑止）
+    document.addEventListener('mousemove', (e) => {
+        if (!dragState) return;
 
-        setTimeout(() => {
-            try { window.dispatchEvent(new Event('resize')); } catch (_) {}
-        }, 100);
+        // ★ 最重要: nGY2のmousemoveハンドラに一切見せない
+        e.stopImmediatePropagation();
+
+        if (!dragState.isDragging) {
+            const dx = e.clientX - dragState.startX;
+            const dy = e.clientY - dragState.startY;
+            if (dx * dx + dy * dy < DRAG_THRESHOLD * DRAG_THRESHOLD) return;
+
+            dragState.isDragging = true;
+            ghostEl = createGhost(dragState.thumb, e.clientX, e.clientY);
+            window.__gicDragInProgress = true;
+            document.body.classList.add('gic-dragging');
+        }
+
+        moveGhost(e.clientX, e.clientY);
+
+        // ドロップターゲット強調
+        const targetEl = document.elementFromPoint(e.clientX, e.clientY);
+        const cell = targetEl ? targetEl.closest('.stj-keyword-item, .stj-special-item') : null;
+        document.querySelectorAll('.stj-drop-target').forEach(el => {
+            if (el !== cell) el.classList.remove('stj-drop-target');
+        });
+        if (cell) cell.classList.add('stj-drop-target');
+    }, true);
+
+    // pointermove: ブラウザが生成する同義イベントも遮断
+    document.addEventListener('pointermove', (e) => {
+        if (!dragState) return;
+        e.stopImmediatePropagation();
+    }, true);
+
+    // mouseup: ドラッグ時のみブロック、クリック時は素通し
+    document.addEventListener('mouseup', (e) => {
+        if (!dragState) return;
+
+        const wasDragging = dragState.isDragging;
+
+        if (wasDragging) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            handleDrop(e.clientX, e.clientY);
+        }
+        // クリック時は nGY2 の mouseup ハンドラが拡大表示を実行できるよう素通し
+
+        cleanup();
+    }, true);
+
+    // pointerup もドラッグ時のみ遮断
+    document.addEventListener('pointerup', (e) => {
+        if (!dragState || !dragState.isDragging) return;
+        e.stopImmediatePropagation();
+    }, true);
+
+    // ネイティブ dragstart は完全阻止
+    document.addEventListener('dragstart', (e) => {
+        const gallery = document.getElementById('gallery');
+        if (gallery && gallery.contains(e.target) && e.target.closest(GALLERY_THUMB_SELECTOR)) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+        }
     }, true);
 
     function scanAndMarkAll() {
         const gallery = document.getElementById('gallery');
         if (!gallery) return;
-        gallery.querySelectorAll(GALLERY_THUMB_SELECTOR).forEach(markDraggable);
+        gallery.querySelectorAll(GALLERY_THUMB_SELECTOR).forEach(markThumb);
     }
 
     const observer = new MutationObserver(() => { scanAndMarkAll(); });
     observer.observe(document.body, { childList: true, subtree: true });
     setInterval(scanAndMarkAll, 1000);
 
-    console.log('[GIC] 🖼️ ギャラリーサムネイルの個別ドラッグを有効化しました');
+    console.log('[GIC] 🖼️ ギャラリーサムネイルの個別ドラッグを有効化しました（カスタムポインター方式）');
 }
 
 // ===== ギャラリー配置・プレビュー制御 =====
