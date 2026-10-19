@@ -165,6 +165,9 @@
   background-color: #b8860b;
   color: white;
 }
+#stj_add_keyword:hover {
+  background-color: #96700a;
+}
 #stj_bulk_delete {
   background-color: #dd6b20;
   color: white;
