@@ -130,10 +130,12 @@
   background-color: #2d3748;
 }
 
-/* ===== ボタングループ ===== */
+/* ===== ボタングループ（すべて左寄せ・グループ間は 16px） ===== */
 .stj-button-group {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 16px;
   margin-top: 20px;
   padding: 15px 0;
 }
@@ -144,14 +146,11 @@
   cursor: pointer;
   font-weight: bold;
   font-size: 14px;
-  margin-right: 8px;
-}
-.stj-button-group button:last-child {
-  margin-right: 0;
 }
 .stj-button-group > div {
   display: flex;
   align-items: center;
+  gap: 8px;
 }
 #stj_export_json {
   background-color: #48bb78;
