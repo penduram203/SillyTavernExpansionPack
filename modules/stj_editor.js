@@ -750,7 +750,7 @@
     function handleExportButtonClick(e) {
         e.stopImmediatePropagation();
         e.preventDefault();
-        ();
+        openExportModal();
     }
 
     // ============================================================
