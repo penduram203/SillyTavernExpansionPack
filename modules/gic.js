@@ -1359,7 +1359,11 @@ function setupGalleryDragToJson() {
             // クリック判定 → nGY2 のクリック動作を手動でシミュレート
             e.stopImmediatePropagation();
             e.preventDefault();
-            simulateClick(thumb, e.clientX, e.clientY);
+            // ★ 一括削除モードでは合成クリックを発火しない
+            //    （自然クリックだけで選択をトグルさせる）
+            if (!_bulkDeleteMode) {
+                simulateClick(thumb, e.clientX, e.clientY);
+            }
         }
         cleanup(wasDragging);
     }, true);
@@ -2294,6 +2298,8 @@ function installBulkDeleteDocumentHandlers() {
     };
 
     window.addEventListener('click', (e) => {
+        // ★ 合成クリック（simulateClick 由来）は無視。自然クリックのみ処理する
+        if (!e.isTrusted) return;
         if (!inGallery(e.target)) return;
         const isBulkBtn = e.target.closest('.gic-bulk-delete-button');
         const trash = e.target.closest(TRASH_SELECTOR);
@@ -2309,7 +2315,12 @@ function installBulkDeleteDocumentHandlers() {
         if (_bulkDeleteMode) {
             if (e.target.closest(SKIP_UI_SELECTOR)) return;
             const item = findItem(e.target, e.clientX, e.clientY);
-            if (item) toggleBulkSelection(item, e);
+            if (item) {
+                // ★ 一括削除モードでは nGY2 のプレビューが開かないよう伝播を止める
+                e.stopPropagation();
+                e.preventDefault();
+                toggleBulkSelection(item, e);
+            }
         }
     }, true);
 
