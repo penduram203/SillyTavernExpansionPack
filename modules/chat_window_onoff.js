@@ -4,6 +4,59 @@
 const MODULE_NAME = 'chat_window_onoff';
 const OLD_STORAGE_KEY = 'chatWindowHiddenState';
 
+// ============================================================
+// ★ 設定準備完了フラグ（Settings not ready 対策）
+//   SillyTavern の SETTINGS_LOADED 前は saveSettingsDebounced を呼ばず、
+//   準備完了後に保留分をまとめて保存する。
+// ============================================================
+let _stSettingsReady = false;
+let _pendingSaveRequested = false;
+
+function _markSettingsReady() {
+    if (_stSettingsReady) return;
+    _stSettingsReady = true;
+    if (_pendingSaveRequested) {
+        _pendingSaveRequested = false;
+        try {
+            const context = SillyTavern.getContext();
+            if (context && typeof context.saveSettingsDebounced === 'function') {
+                context.saveSettingsDebounced();
+                console.log('[Chat Window On/Off] 保留していた設定保存を実行しました');
+            }
+        } catch (e) {
+            console.error('[Chat Window On/Off] 保留保存の実行に失敗:', e);
+        }
+    }
+}
+
+(function _setupSettingsReadyHook() {
+    try {
+        if (typeof SillyTavern !== 'undefined' && typeof SillyTavern.getContext === 'function') {
+            const ctx = SillyTavern.getContext();
+            if (ctx && ctx.eventSource && ctx.eventTypes && ctx.eventTypes.SETTINGS_LOADED) {
+                ctx.eventSource.on(ctx.eventTypes.SETTINGS_LOADED, _markSettingsReady);
+            }
+        }
+    } catch (e) { /* ignore */ }
+    // 保険: SETTINGS_LOADED が取れない環境でも 3 秒後に準備完了扱い
+    setTimeout(_markSettingsReady, 3000);
+})();
+
+function safeSaveSettingsDebounced() {
+    if (!_stSettingsReady) {
+        _pendingSaveRequested = true;
+        return;
+    }
+    try {
+        const context = SillyTavern.getContext();
+        if (context && typeof context.saveSettingsDebounced === 'function') {
+            context.saveSettingsDebounced();
+        }
+    } catch (e) {
+        console.error('[Chat Window On/Off] saveSettingsDebounced 呼び出しに失敗:', e);
+    }
+}
+
 const GALLERY_HIDDEN_SELECTORS = [
     '#window-control-buttons',
     '#restore-panel-button',
@@ -35,7 +88,8 @@ function getSettings() {
         const oldState = localStorage.getItem(OLD_STORAGE_KEY);
         if (oldState !== null) {
             settings.isHidden = (oldState === 'true');
-            context.saveSettingsDebounced();
+            // ★ ガード付き保存（準備前は保留）
+            safeSaveSettingsDebounced();
             localStorage.removeItem(OLD_STORAGE_KEY);
             console.log('[Chat Window On/Off] 旧localStorageからextensionSettingsへの移行を完了しました。');
         }
@@ -50,7 +104,8 @@ function saveSettings(settings) {
     try {
         const context = SillyTavern.getContext();
         context.extensionSettings[MODULE_NAME] = settings;
-        context.saveSettingsDebounced();
+        // ★ ガード付き保存（準備前は保留）
+        safeSaveSettingsDebounced();
     } catch (e) {
         console.error('[Chat Window On/Off] 設定の保存に失敗:', e);
     }
