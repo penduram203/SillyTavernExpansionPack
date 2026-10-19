@@ -42,7 +42,7 @@
   box-sizing: border-box;
 }
 
-/* ===== ボタングループ（すべて左寄せ） ===== */
+/* ===== ボタングループ ===== */
 .stj-button-group {
   display: flex;
   justify-content: flex-start;
@@ -81,7 +81,7 @@
   pointer-events: none !important;
 }
 
-/* ===== リアルタイムキーワード反応テスト セクション ===== */
+/* ===== リアルタイムテスト ===== */
 #stj_test_section {
   position: sticky;
   top: 0;
@@ -204,7 +204,7 @@
 }
 .stj-info-guide b { color: #aed581; }
 
-/* ===== デフォルト/サムネイル セル（縦積み） ===== */
+/* ===== 特殊セル ===== */
 .stj-special-item {
   display: flex;
   flex-direction: column;
@@ -299,7 +299,6 @@
   z-index: 15;
 }
 
-/* セーブボタン */
 #stj_save_data {
   background-color: #4299e1;
   color: white;
@@ -335,10 +334,7 @@
   pointer-events: none;
   user-select: none;
 }
-.stj-image-preview video {
-  pointer-events: none;
-  user-select: none;
-}
+.stj-image-preview video { pointer-events: none; user-select: none; }
 .stj-preview-text {
   color: #a0aec0;
   font-size: 14px;
@@ -356,7 +352,7 @@
   font-weight: bold;
 }
 
-/* ===== キーワード表示（セル内） ===== */
+/* ===== キーワード表示 ===== */
 .stj-keyword-display {
   position: absolute;
   bottom: 0;
@@ -380,14 +376,12 @@
   display: block;
 }
 
-/* ===== カーソル（セルドラッグ用） ===== */
+/* ===== カーソル ===== */
 .stj-keyword-item .stj-image-preview { cursor: grab; }
 .stj-keyword-item .stj-image-preview:active { cursor: grabbing; }
-
-/* ===== 一括削除モード ===== */
 #stj_export_modal.stj-bulk-delete-mode .stj-keyword-item .stj-image-preview { cursor: pointer; }
 
-/* ===== ドラッグ中のソースセル ===== */
+/* ===== ドラッグ中 ===== */
 .stj-keyword-item.stj-dragging .stj-image-preview {
   border-color: #ff8c00;
   border-style: solid;
@@ -395,7 +389,7 @@
   opacity: 0.35;
 }
 
-/* ===== ドロップ先のセル ===== */
+/* ===== ドロップ先 ===== */
 .stj-keyword-item.stj-drag-over,
 .stj-special-item.stj-drag-over {
   outline: 4px solid #ff2d2d;
@@ -409,7 +403,7 @@
   border-style: solid;
 }
 
-/* ===== ドラッグオーバー（ギャラリーからのドロップターゲット） ===== */
+/* ===== ギャラリーからのドロップターゲット ===== */
 .stj-keyword-item.stj-drop-target,
 .stj-special-item.stj-drop-target {
   outline: 4px dashed #ffd54f !important;
@@ -422,7 +416,7 @@
   border-style: solid !important;
 }
 
-/* ===== 一括削除モードで削除候補のセル ===== */
+/* ===== 一括削除候補 ===== */
 .stj-keyword-item.stj-marked-for-delete {
   outline: 4px solid #ff2d2d;
   outline-offset: -4px;
@@ -430,13 +424,10 @@
   border-radius: 8px;
 }
 
-/* ===== ドラッグ中はテスト枠を無視 ===== */
 #stj_export_modal.stj-drag-active #stj_test_section {
   visibility: hidden;
   pointer-events: none;
 }
-
-/* ===== 一括削除モード時はテスト枠を非表示 ===== */
 #stj_export_modal.stj-bulk-delete-mode #stj_test_section {
   display: none;
 }
@@ -455,9 +446,7 @@
   padding: 20px;
   box-sizing: border-box;
 }
-.stj-cell-modal.visible {
-  display: flex;
-}
+.stj-cell-modal.visible { display: flex; }
 
 .stj-cell-modal-content {
   width: min(780px, calc(100vw - 40px), calc(100vh - 40px));
@@ -561,16 +550,18 @@
   user-select: none;
 }
 
+/* ★ 3×3グリッド → 10枚目以降はスクロールで表示 */
 .stj-cell-modal-grid {
   flex: 1;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  grid-template-rows: repeat(3, 1fr);
+  grid-auto-rows: 244px;
   gap: 2px;
   padding: 2px;
   background: #0d1117;
   min-height: 0;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   box-sizing: border-box;
 }
 
@@ -633,8 +624,7 @@
 /* ===== カスタムアラート ===== */
 #stj_custom_alert {
   position: fixed;
-  top: 50%;
-  left: 50%;
+  top: 50%; left: 50%;
   transform: translate(-50%, -50%) scale(0.9);
   padding: 30px 60px;
   background-color: rgba(0, 0, 0, 0.85);
