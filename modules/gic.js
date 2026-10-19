@@ -634,6 +634,13 @@ function getCurrentCharacterName() {
             opacity: 0.2 !important;
             background-color: #444 !important;
         }
+
+        /* ★ ドラッグ中のサムネイルの強調表示 */
+        .gic-dragging-to-json {
+            opacity: 0.5 !important;
+            outline: 3px solid #ffd54f !important;
+            outline-offset: -3px !important;
+        }
     `;
     document.head.appendChild(style);
     console.log('[GIC] 🖼️ ギャラリー配置CSSを注入しました');
@@ -1045,6 +1052,108 @@ function setupGalleryDedupeObserver() {
 
     observer.observe(document.body, { childList: true, subtree: true });
     console.log('[GIC] 🧹 #gallery 重複排除オブザーバを設置しました');
+}
+
+// ============================================================
+// ★ ギャラリーサムネイルを個別にドラッグ可能にする
+//    JSON編集画面のセルへドロップしてファイル名を追加できる
+//    ※ クリック（拡大表示）は一切妨害しない
+// ============================================================
+function setupGalleryDragToJson() {
+    if (window.__gicGalleryDragInstalled) return;
+    window.__gicGalleryDragInstalled = true;
+
+    const GALLERY_THUMB_SELECTOR = '.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item';
+
+    function getPathFromThumb(thumb) {
+        if (!thumb) return null;
+        let url = thumb.getAttribute('data-ngsrc')
+               || thumb.getAttribute('data-src')
+               || thumb.getAttribute('data-image');
+        if (!url) {
+            const img = thumb.querySelector('img');
+            if (img) {
+                url = img.getAttribute('data-src') || img.getAttribute('src');
+            }
+        }
+        if (!url) {
+            const a = thumb.querySelector('a');
+            if (a) url = a.getAttribute('href');
+        }
+        return url ? urlToServerPath(url) : null;
+    }
+
+    function markDraggable(thumb) {
+        if (!thumb || thumb.dataset.gicDragReady === '1') return;
+        thumb.dataset.gicDragReady = '1';
+        thumb.setAttribute('draggable', 'true');
+
+        // サムネイル内部の img は個別に draggable を切る（親で制御）
+        const img = thumb.querySelector('img');
+        if (img) img.setAttribute('draggable', 'false');
+
+        thumb.addEventListener('dragstart', (e) => {
+            const path = getPathFromThumb(thumb);
+            if (!path) {
+                // パス不明の場合はドラッグ自体をキャンセル（パネル移動を防ぐ）
+                e.preventDefault();
+                return;
+            }
+
+            // 親要素の dragstart（パネル移動）を完全に止める
+            e.stopPropagation();
+
+            try {
+                e.dataTransfer.effectAllowed = 'copy';
+                e.dataTransfer.setData('text/plain', path);
+                e.dataTransfer.setData('text/uri-list', path);
+
+                const dragImg = thumb.querySelector('img');
+                if (dragImg) {
+                    try { e.dataTransfer.setDragImage(dragImg, 20, 20); } catch (_) {}
+                }
+            } catch (err) {
+                console.warn('[GIC] dragstart setData エラー:', err);
+            }
+
+            thumb.classList.add('gic-dragging-to-json');
+        }, true);
+
+        thumb.addEventListener('dragend', () => {
+            thumb.classList.remove('gic-dragging-to-json');
+        }, true);
+    }
+
+    function scanAndMarkAll() {
+        const gallery = document.getElementById('gallery');
+        if (!gallery) return;
+        gallery.querySelectorAll(GALLERY_THUMB_SELECTOR).forEach(markDraggable);
+    }
+
+    // サムネイルが動的に生成されるため、MutationObserver + 定期スキャンの二段構え
+    const observer = new MutationObserver(() => {
+        scanAndMarkAll();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    setInterval(scanAndMarkAll, 1000);
+
+    // ★ パネル本体（サムネイル以外）の dragstart はキャンセル
+    //    → 「1ページ全体がドラッグで移動」を防止
+    document.addEventListener('dragstart', (e) => {
+        const gallery = document.getElementById('gallery');
+        if (!gallery || !gallery.contains(e.target)) return;
+
+        const thumb = e.target.closest(GALLERY_THUMB_SELECTOR);
+        if (!thumb) {
+            // サムネイル以外（ヘッダー・ギャラリー本体など）の dragstart を抑止
+            e.preventDefault();
+            return;
+        }
+        // サムネイル内のドラッグは thumb 側のハンドラが処理
+    }, true);
+
+    console.log('[GIC] 🖼️ ギャラリーサムネイルの個別ドラッグを有効化しました');
 }
 
 // ===== ギャラリー配置・プレビュー制御 =====
@@ -3296,6 +3405,9 @@ function initializeGIC() {
     // ★ 新しい #gallery の追加を監視して重複排除
     setupGalleryDedupeObserver();
 
+    // ★ ギャラリーサムネイルの個別ドラッグを有効化
+    setupGalleryDragToJson();
+
     createReleaseButton();
     createGalleryButton();
     setupListeners();
@@ -3380,6 +3492,9 @@ export async function activate() {
 
     // ★ 新しい #gallery の追加を監視して重複排除
     setupGalleryDedupeObserver();
+
+    // ★ ギャラリーサムネイルの個別ドラッグを有効化
+    setupGalleryDragToJson();
 
     createReleaseButton();
     createGalleryButton();
