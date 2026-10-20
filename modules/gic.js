@@ -23,7 +23,6 @@
     }, 50);
 })();
 
-// ★ 最初に comfy_boot.js を読み込む（fetch インターセプタを最速で設置）
 import './comfy_boot.js';
 import './gic_lorebook.js';
 import { eventSource, event_types, saveChat, printMessages, getRequestHeaders } from '../../../../../script.js';
@@ -134,7 +133,7 @@ function wait(ms) {
     return new Promise(r => setTimeout(r, ms));
 }
 
-// ★ 動画判定ヘルパー（拡大表示時のモード切替に使用）
+// ★ 動画判定（拡大オーバーレイのモード切替に使用）
 function isVideoFile(url) {
     if (!url || typeof url !== 'string') return false;
     return /\.(mp4|webm)(\?|#|$)/i.test(url);
@@ -339,7 +338,6 @@ function getCurrentCharacterName() {
 
 // ============================================================
 // ★ ギャラリー拡大プレビューを JSON編集画面(10001) より手前に表示
-//   ＋ ドラッグ中のチラつき・クリック誤発動抑制
 // ============================================================
 (function injectGalleryLayoutStyle() {
     if (document.getElementById('gic-gallery-layout-style')) return;
@@ -688,59 +686,14 @@ function getCurrentCharacterName() {
 })();
 
 // ============================================================
-// ★ ギャラリー 🔍 拡大表示ボタンのスタイル
-//   （サムネイル上のホバー時に表示するだけ）
+// ★ ギャラリー拡大表示オーバーレイのスタイル
+//   （サムネイルには一切スタイルを当てない）
 // ============================================================
-(function injectGalleryZoomStyle() {
-    if (document.getElementById('gic-gallery-zoom-style')) return;
+(function injectGalleryMediaOverlayStyle() {
+    if (document.getElementById('gic-gallery-media-overlay-style')) return;
     const style = document.createElement('style');
-    style.id = 'gic-gallery-zoom-style';
+    style.id = 'gic-gallery-media-overlay-style';
     style.textContent = `
-        /* 🔍 ボタン配置のため position: relative のみ付与 */
-        .nGY2GThumbnail,
-        .nGY2GThumbnail_l1 {
-            position: relative !important;
-        }
-
-        .gic-gallery-zoom-btn {
-            position: absolute !important;
-            top: 50% !important;
-            left: 50% !important;
-            transform: translate(-50%, -50%) !important;
-            width: 36px !important;
-            height: 36px !important;
-            padding: 0 !important;
-            background: rgba(0, 0, 0, 0.45) !important;
-            color: #ffffff !important;
-            border: none !important;
-            border-radius: 4px !important;
-            cursor: zoom-in !important;
-            font-size: 18px !important;
-            font-weight: bold !important;
-            display: none;
-            align-items: center !important;
-            justify-content: center !important;
-            z-index: 100 !important;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6) !important;
-            pointer-events: auto !important;
-            line-height: 1 !important;
-            user-select: none !important;
-        }
-        .nGY2GThumbnail:hover .gic-gallery-zoom-btn,
-        .nGY2GThumbnail_l1:hover .gic-gallery-zoom-btn {
-            display: flex !important;
-        }
-        .gic-gallery-zoom-btn:hover {
-            background: rgba(0, 0, 0, 0.8) !important;
-        }
-
-        /* 一括選択モード中は 🔍 を非表示 */
-        body.gic-bulk-delete-mode .gic-gallery-zoom-btn {
-            display: none !important;
-            pointer-events: none !important;
-        }
-
-        /* ギャラリー拡大表示オーバーレイ（🔍 クリック時） */
         .gic-gallery-media-overlay {
             position: fixed !important;
             top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
@@ -788,8 +741,6 @@ function getCurrentCharacterName() {
         .gic-gallery-media-overlay-close:hover {
             background: #c53030 !important;
         }
-
-        /* 拡大中はページャーを隠す */
         body.gic-zoom-active .gic-pagination-pager,
         body.gic-zoom-active .gic-pagination-pager * {
             display: none !important;
@@ -799,7 +750,7 @@ function getCurrentCharacterName() {
         }
     `;
     document.head.appendChild(style);
-    console.log('[GIC] 🔍 ギャラリー拡大ボタンCSSを注入しました');
+    console.log('[GIC] 🔍 ギャラリー拡大オーバーレイCSSを注入しました');
 })();
 
 // ===== ユーティリティ =====
@@ -829,8 +780,6 @@ function setButtonLabel(label) {
     }
 }
 
-// ===== DOMマーキング =====
-
 function markGeneratedMessagesInDom() {
     const context = getContext();
     if (!context?.chat) return;
@@ -843,8 +792,6 @@ function markGeneratedMessagesInDom() {
         }
     }
 }
-
-// ===== Text_stylingパネル開閉監視 =====
 
 function isTextStylingPanelOpen() {
     const panel = document.getElementById('text-styling-panel');
@@ -877,8 +824,6 @@ function setupTextStylingObserver() {
     setInterval(syncButtonVisibilityForTextStyling, 300);
     console.log('[GIC] 📝 Text_stylingパネル監視を開始しました（ポーリング方式）');
 }
-
-// ===== 生成画像のスキャン =====
 
 async function scanForGeneratedImages() {
     const context = getContext();
@@ -965,8 +910,6 @@ async function scanForGeneratedImages() {
 
     markGeneratedMessagesInDom();
 }
-
-// ===== ボタンのアクション =====
 
 async function handleButtonAction() {
     console.log(`[GIC] ボタンアクション: 現在=${isOverrideLocal ? '背景生成' : '事前設定'}, lastUrl=${lastGeneratedImageUrl}`);
@@ -1082,8 +1025,6 @@ function positionGalleryButton() {
     positionStatusMessage();
 }
 
-// ===== 公式ギャラリーの開閉検知 =====
-
 function isGalleryOpen() {
     const now = performance.now();
     if (now - _galleryOpenCache.timestamp < GALLERY_OPEN_CACHE_TTL) {
@@ -1133,9 +1074,6 @@ function isGalleryOpen() {
     return result;
 }
 
-// ============================================================
-// ★ #gallery 重複排除（コンテンツ持ち優先）
-// ============================================================
 function dedupeGalleryElements() {
     const galleries = Array.from(document.querySelectorAll('#gallery'));
     if (galleries.length <= 1) return galleries[0] || null;
@@ -1190,39 +1128,116 @@ function setupGalleryDedupeObserver() {
 }
 
 // ============================================================
-// ★ ギャラリーサムネイルへの 🔍 ボタン追加
-//   （表示のみ。既存のクリック挙動・レイアウトは触らない）
+// ★ ギャラリー拡大ボタン（固定オーバーレイ方式）
+//   - サムネイルの DOM には一切触れない
+//   - サムネイルの CSS も変更しない
+//   - 🔍 ボタンは document.body 直下の position: fixed 要素
+//   - mouseover で表示、mousemove で位置追従、マウスが離れたら非表示
 // ============================================================
-function enhanceGalleryThumb(thumb) {
-    if (!thumb) return;
-    if (thumb.querySelector(':scope > .gic-gallery-zoom-btn')) return;
+function setupGalleryZoomButton() {
+    if (window.__gicGalleryZoomBtnInstalled) return;
+    window.__gicGalleryZoomBtnInstalled = true;
 
-    const zoomBtn = document.createElement('button');
-    zoomBtn.className = 'gic-gallery-zoom-btn';
-    zoomBtn.type = 'button';
-    zoomBtn.textContent = '🔍';
-    zoomBtn.title = '拡大表示';
+    const GALLERY_THUMB_SELECTOR = '.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item';
+    let zoomBtn = null;
+    let currentThumb = null;
 
-    // ドラッグ機構・一括選択モードに拾われないよう、キャプチャ段階で停止
-    zoomBtn.addEventListener('pointerdown', (e) => {
-        e.stopImmediatePropagation();
-        e.stopPropagation();
+    function ensureBtn() {
+        if (zoomBtn) return zoomBtn;
+        zoomBtn = document.createElement('button');
+        zoomBtn.className = 'gic-gallery-zoom-btn';
+        zoomBtn.type = 'button';
+        zoomBtn.textContent = '🔍';
+        zoomBtn.title = '拡大表示';
+
+        const s = zoomBtn.style;
+        s.setProperty('position', 'fixed', 'important');
+        s.setProperty('width', '36px', 'important');
+        s.setProperty('height', '36px', 'important');
+        s.setProperty('padding', '0', 'important');
+        s.setProperty('margin', '0', 'important');
+        s.setProperty('background', 'rgba(0, 0, 0, 0.55)', 'important');
+        s.setProperty('color', '#ffffff', 'important');
+        s.setProperty('border', 'none', 'important');
+        s.setProperty('border-radius', '4px', 'important');
+        s.setProperty('cursor', 'zoom-in', 'important');
+        s.setProperty('font-size', '18px', 'important');
+        s.setProperty('font-weight', 'bold', 'important');
+        s.setProperty('align-items', 'center', 'important');
+        s.setProperty('justify-content', 'center', 'important');
+        s.setProperty('z-index', '2147483647', 'important');
+        s.setProperty('box-shadow', '0 2px 8px rgba(0, 0, 0, 0.6)', 'important');
+        s.setProperty('pointer-events', 'auto', 'important');
+        s.setProperty('line-height', '1', 'important');
+        s.setProperty('user-select', 'none', 'important');
+        s.setProperty('transform', 'translate(-50%, -50%)', 'important');
+        s.setProperty('display', 'none', 'important');
+
+        zoomBtn.addEventListener('pointerdown', (e) => {
+            e.stopImmediatePropagation();
+            e.stopPropagation();
+        }, true);
+        zoomBtn.addEventListener('mousedown', (e) => {
+            e.stopImmediatePropagation();
+            e.stopPropagation();
+        }, true);
+        zoomBtn.addEventListener('click', (e) => {
+            e.stopImmediatePropagation();
+            e.stopPropagation();
+            e.preventDefault();
+            if (!currentThumb) return;
+            const path = extractPathFromThumbEl(currentThumb);
+            if (!path) return;
+            showGalleryMediaOverlay(fullUrlFromPath(path), isVideoFile(path));
+        });
+
+        document.body.appendChild(zoomBtn);
+        return zoomBtn;
+    }
+
+    function showFor(thumb) {
+        if (_bulkDeleteMode) { hide(); return; }
+        const gallery = document.getElementById('gallery');
+        if (!gallery || !gallery.contains(thumb)) { hide(); return; }
+        const rect = thumb.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) { hide(); return; }
+
+        currentThumb = thumb;
+        const btn = ensureBtn();
+        btn.style.setProperty('left', (rect.left + rect.width / 2) + 'px', 'important');
+        btn.style.setProperty('top', (rect.top + rect.height / 2) + 'px', 'important');
+        btn.style.setProperty('display', 'flex', 'important');
+    }
+
+    function hide() {
+        if (zoomBtn) zoomBtn.style.setProperty('display', 'none', 'important');
+        currentThumb = null;
+    }
+
+    document.addEventListener('mouseover', (e) => {
+        if (!e.target || !e.target.closest) return;
+        if (e.target.closest('.gic-gallery-zoom-btn')) return;
+        const thumb = e.target.closest(GALLERY_THUMB_SELECTOR);
+        if (!thumb) return;
+        showFor(thumb);
     }, true);
-    zoomBtn.addEventListener('mousedown', (e) => {
-        e.stopImmediatePropagation();
-        e.stopPropagation();
-    }, true);
-    zoomBtn.addEventListener('click', (e) => {
-        e.stopImmediatePropagation();
-        e.stopPropagation();
-        e.preventDefault();
-        const path = extractPathFromThumbEl(thumb);
-        if (!path) return;
-        const fullUrl = fullUrlFromPath(path);
-        showGalleryMediaOverlay(fullUrl, isVideoFile(path));
-    });
 
-    thumb.appendChild(zoomBtn);
+    document.addEventListener('mousemove', (e) => {
+        if (!zoomBtn) return;
+        const cs = zoomBtn.style.display;
+        if (cs === 'none' || !cs) return;
+        if (e.target === zoomBtn || zoomBtn.contains(e.target)) return;
+        if (currentThumb) {
+            const rect = currentThumb.getBoundingClientRect();
+            if (e.clientX >= rect.left && e.clientX <= rect.right &&
+                e.clientY >= rect.top && e.clientY <= rect.bottom) return;
+        }
+        hide();
+    }, true);
+
+    document.addEventListener('scroll', () => hide(), true);
+
+    console.log('[GIC] 🔍 ギャラリー拡大ボタン（fixed overlay 方式）を有効化しました');
 }
 
 function extractPathFromThumbEl(thumb) {
@@ -1240,16 +1255,8 @@ function extractPathFromThumbEl(thumb) {
     return url ? urlToServerPath(url) : null;
 }
 
-function setupGalleryZoomButtons() {
-    const gallery = document.getElementById('gallery');
-    if (!gallery) return;
-    gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item')
-        .forEach(enhanceGalleryThumb);
-}
-
 // ============================================================
 // ★ 🔍 ボタンからのギャラリー拡大表示オーバーレイ
-//   （画像・動画のフル解像度表示）
 // ============================================================
 function showGalleryMediaOverlay(url, isVideo) {
     const existing = document.getElementById('gic-gallery-media-overlay');
@@ -1495,7 +1502,6 @@ function setupGalleryDragToJson() {
         if (!dragState) return;
         const cell = findDropCell(x, y);
 
-        // ★ 一括選択モードで選択中の画像があれば、それらをまとめてドロップ
         let paths = [dragState.path];
         if (_bulkDeleteMode && _bulkDeleteSelected.size > 0) {
             const selectedPaths = [];
@@ -1508,7 +1514,6 @@ function setupGalleryDragToJson() {
         }));
     }
 
-    // ★ クリックを手動シミュレート（再帰防止フラグ付き）
     function simulateClick(thumb, x, y) {
         if (!thumb) return;
         if (isSimulatingClick) return;
@@ -1633,8 +1638,6 @@ function setupGalleryDragToJson() {
         } else if (thumb) {
             e.stopImmediatePropagation();
             e.preventDefault();
-            // ★ 通常クリック: nGY2 標準プレビューを開くため合成クリック
-            //   （一括選択モードでは合成クリックを発火しない）
             if (!_bulkDeleteMode) {
                 simulateClick(thumb, e.clientX, e.clientY);
             }
@@ -1708,8 +1711,6 @@ function setupGalleryDragToJson() {
 
     console.log('[GIC] 🖼️ ギャラリーサムネイルの個別ドラッグを有効化しました（nGY2完全遮断モード・再帰防止）');
 }
-
-// ===== ギャラリー配置・プレビュー制御 =====
 
 function getAllPreviews() {
     const selector = GALLERY_PREVIEW_SELECTORS.join(', ');
@@ -2171,8 +2172,6 @@ function fitPreviewToViewport(panel) {
         }
     }
 }
-
-// ===== 一括選択機能 =====
 
 function findGalleryHeaderControls() {
     const result = { header: null, trashIcon: null, checkIcon: null, refreshIcon: null, dropdown: null, folderInput: null, folderRow: null };
@@ -2644,9 +2643,6 @@ function setupBulkDelete() {
     }
 }
 
-// ============================================================
-// ★ applyGalleryLayout
-// ============================================================
 function applyGalleryLayout() {
     if (isApplyingLayout) return;
 
@@ -2672,7 +2668,6 @@ function applyGalleryLayout() {
         }
 
         dedupeGalleryElements();
-        try { setupGalleryZoomButtons(); } catch (e) { /* ignore */ }
         applyGalleryWindowLayout();
         styleGalleryWindowCloseButton();
 
@@ -2827,10 +2822,12 @@ function hideGalleryAttachmentsImmediately(reason = '') {
     currentPreviewEl = null;
     hideStatusMessage();
 
-    // ★ ギャラリー拡大オーバーレイも閉じる
     const overlay = document.getElementById('gic-gallery-media-overlay');
     if (overlay) overlay.remove();
     document.body.classList.remove('gic-zoom-active');
+
+    const zoomBtn = document.querySelector('.gic-gallery-zoom-btn');
+    if (zoomBtn) zoomBtn.style.setProperty('display', 'none', 'important');
 
     if (_bulkDeleteMode) {
         document.body.classList.remove('gic-bulk-delete-mode');
@@ -3026,7 +3023,6 @@ async function warmUpGallery() {
     }
 }
 
-// ===== ステータスメッセージ =====
 const STATUS_MESSAGE_ID = 'gic-status-message';
 const STATUS_MESSAGE_STYLE_ID = 'gic-status-message-style';
 let _statusMessageHideTimer = null;
@@ -3111,7 +3107,6 @@ function hideStatusMessage() {
     if (el) el.classList.remove('gic-visible');
 }
 
-// ===== ギャラリー準備 =====
 let _galleryPreloadState = 'idle';
 let _galleryPreparedFor = null;
 let _galleryPrepareRetries = 0;
@@ -3175,7 +3170,6 @@ async function prepareGalleryForCharacter() {
     }
 }
 
-// ===== ボタン生成 =====
 function createReleaseButton() {
     const existing = document.getElementById(BUTTON_ID);
     if (existing) existing.remove();
@@ -3297,7 +3291,6 @@ function createGalleryButton() {
     syncGalleryButtonVisibility();
 }
 
-// ===== イベント登録 =====
 function setupListeners() {
     const safeOn = (type, handler) => { if (type && eventSource?.on) eventSource.on(type, handler); };
     safeOn(event_types.MESSAGE_RECEIVED, scanForGeneratedImages);
@@ -3359,6 +3352,7 @@ function initializeGIC() {
     installGalleryCloseInterceptor();
     setupGalleryDedupeObserver();
     setupGalleryDragToJson();
+    setupGalleryZoomButton();
 
     createReleaseButton();
     createGalleryButton();
@@ -3401,7 +3395,6 @@ function initializeGIC() {
     syncButtonVisibilityForTextStyling();
     syncGalleryButtonVisibility();
     applyGalleryLayout();
-    try { setupGalleryZoomButtons(); } catch (e) { /* ignore */ }
 }
 
 function bootstrapGIC() {
@@ -3438,6 +3431,7 @@ export async function activate() {
     installGalleryCloseInterceptor();
     setupGalleryDedupeObserver();
     setupGalleryDragToJson();
+    setupGalleryZoomButton();
     createReleaseButton();
     createGalleryButton();
     setupGalleryObserverForGic();
