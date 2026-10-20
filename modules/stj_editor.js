@@ -132,7 +132,6 @@
     async function loadWorldInfoEntries(worldName) {
         if (!worldName) return null;
 
-        // Lorebook_Expansion.js の公開APIを優先
         if (window.LorebookExpansion?.loadWorldInfoEntriesByName) {
             try {
                 const entries = await window.LorebookExpansion.loadWorldInfoEntriesByName(worldName);
@@ -140,7 +139,6 @@
             } catch (e) { /* ignore */ }
         }
 
-        // フォールバック: /api/worldinfo/get
         try {
             const ctx = getSTContext();
             const headers = (ctx && typeof ctx.getRequestHeaders === 'function')
@@ -219,7 +217,6 @@
         const btn = modal.querySelector('.stj-cell-modal-choices');
         if (!btn) return;
 
-        // デフォルト: 半透明・クリック不可
         btn.classList.add('stj-choices-disabled');
         btn.disabled = true;
         btn.title = '';
@@ -236,7 +233,6 @@
             entries = await loadWorldInfoEntries(worldName);
         } catch (e) { return; }
 
-        // モーダルが閉じられた or 別のセルに切り替わった
         if (currentCellModal !== modal || currentModalCell !== cell) return;
         if (!entries) return;
 
@@ -282,14 +278,12 @@
         const rows = [];
         const seen = new Set([kw]);
 
-        // 自分自身のエントリ
         rows.push({
             label: '',
             num: kw,
             text: String(targetEntry.content || '').trim(),
         });
 
-        // 各選択肢
         for (const c of choices) {
             const num = String(c.num).trim();
             if (!num || seen.has(num)) continue;
@@ -717,7 +711,6 @@
                     else src.classList.add('stj-marked-for-delete');
                     return;
                 }
-                // ドラッグしていなければポップアップを開く
                 openCellModal(src);
             }
         });
@@ -869,7 +862,6 @@
             closeCellModal(true);
         });
 
-        // ★ 選択肢ボタン
         const choicesBtn = modal.querySelector('.stj-cell-modal-choices');
         if (choicesBtn) {
             choicesBtn.addEventListener('click', (e) => {
@@ -889,7 +881,6 @@
             }
         });
 
-        // ★ キーワード入力欄で Enter → 決定と同じ動作で閉じる
         const kwInput = modal.querySelector('.stj-cell-modal-keyword');
         if (kwInput) {
             kwInput.addEventListener('keydown', (e) => {
@@ -901,7 +892,6 @@
             });
         }
 
-        // ★ イベント委譲：動的に増えるスロット削除ボタンに対応
         modal.querySelector('.stj-cell-modal-grid').addEventListener('click', (e) => {
             const btn = e.target.closest('.stj-cell-modal-slot-remove');
             if (!btn) return;
@@ -945,12 +935,10 @@
             numberEl.textContent = String(allCells.indexOf(cell) + 1);
             if (choicesBtn) {
                 choicesBtn.style.display = '';
-                // ★ ロアブック検証＋choices一致判定（非同期）
                 updateChoicesButtonState(cell).catch(e => console.warn('[STJ Editor] choices state error:', e));
             }
         }
 
-        // ★ グリッドを毎回リセット（セルに応じたスロット数で開く）
         const grid = currentCellModal.querySelector('.stj-cell-modal-grid');
         grid.innerHTML = '';
         grid.scrollTop = 0;
@@ -958,7 +946,6 @@
         renderCellModalGrid(cell);
         currentCellModal.classList.add('visible');
 
-        // ★ キーワード入力欄にフォーカス（Enterで決定しやすく）
         if (!isSpecial && kwInput) {
             setTimeout(() => {
                 try { kwInput.focus(); } catch (e) { /* ignore */ }
@@ -968,9 +955,11 @@
 
     function closeCellModal(revert) {
         if (!currentCellModal) return;
-        // ★ 選択肢ポップアップも閉じる
         const popup = document.getElementById('stj_choices_popup');
         if (popup) popup.remove();
+        const zoom = document.getElementById('stj_media_zoom');
+        if (zoom) zoom.remove();
+
         if (revert && currentModalCell) {
             if (!currentModalCell.classList.contains('stj-special-item')) {
                 setCellKeyword(currentModalCell, modalOriginalKeyword);
@@ -993,9 +982,10 @@
         }
         updateCellPreview(cell);
         runLiveTest();
-        // ★ 選択肢ポップアップも閉じる
         const popup = document.getElementById('stj_choices_popup');
         if (popup) popup.remove();
+        const zoom = document.getElementById('stj_media_zoom');
+        if (zoom) zoom.remove();
         currentCellModal.classList.remove('visible');
         currentModalCell = null;
         modalOriginalKeyword = '';
@@ -1036,6 +1026,13 @@
                 path = `user/images/${charName}/${fileName}`;
             }
 
+            // ★ クリックで拡大表示
+            const openZoom = (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                showMediaZoom(path, isVideoUrl(fileName));
+            };
+
             if (isVideoUrl(fileName)) {
                 const v = document.createElement('video');
                 v.src = path;
@@ -1043,16 +1040,66 @@
                 v.loop = true;
                 v.playsInline = true;
                 v.preload = 'metadata';
-                v.style.cssText = 'width:100%;height:100%;object-fit:contain;pointer-events:none;';
+                v.style.cssText = 'width:100%;height:100%;object-fit:contain;pointer-events:auto;cursor:zoom-in;';
+                v.addEventListener('click', openZoom);
                 slot.insertBefore(v, slot.firstChild);
             } else {
                 const img = document.createElement('img');
                 img.src = path;
                 img.alt = fileName;
-                img.style.cssText = 'width:100%;height:100%;object-fit:contain;pointer-events:none;';
+                img.style.cssText = 'width:100%;height:100%;object-fit:contain;pointer-events:auto;cursor:zoom-in;';
+                img.addEventListener('click', openZoom);
                 slot.insertBefore(img, slot.firstChild);
             }
         });
+    }
+
+    // ★ メディア拡大表示（セルポップアップ内の画像/動画クリック）
+    function showMediaZoom(src, isVideo) {
+        const existing = document.getElementById('stj_media_zoom');
+        if (existing) existing.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'stj_media_zoom';
+        overlay.className = 'stj-media-zoom';
+
+        let mediaEl;
+        if (isVideo) {
+            mediaEl = document.createElement('video');
+            mediaEl.src = src;
+            mediaEl.autoplay = true;
+            mediaEl.loop = true;
+            mediaEl.muted = true;
+            mediaEl.playsInline = true;
+            mediaEl.preload = 'auto';
+        } else {
+            mediaEl = document.createElement('img');
+            mediaEl.src = src;
+            mediaEl.alt = '';
+        }
+        mediaEl.className = 'stj-media-zoom-content';
+        overlay.appendChild(mediaEl);
+
+        const close = () => {
+            overlay.remove();
+            document.removeEventListener('keydown', onKeyDown);
+        };
+        const onKeyDown = (e) => {
+            if (e.key === 'Escape') close();
+        };
+
+        overlay.addEventListener('click', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            close();
+        });
+        document.addEventListener('keydown', onKeyDown);
+
+        document.body.appendChild(overlay);
+
+        if (isVideo) {
+            mediaEl.play().catch(() => {});
+        }
     }
 
     function updateCellPreview(cell) {
@@ -1911,7 +1958,6 @@
             saveData();
         });
 
-        // 特殊セル（デフォルト・サムネイル）のクリックでポップアップ
         modal.querySelectorAll('.stj-special-item').forEach(item => {
             item.addEventListener('click', (e) => {
                 if (e.target.closest('button')) return;
