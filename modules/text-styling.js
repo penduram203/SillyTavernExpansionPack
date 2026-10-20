@@ -1,3 +1,4 @@
+// text-styling.js
 // SillyTavern.getContext() を実行時に呼び出す方式（公式ドキュメント推奨）
 function initTextStyling() {
     console.log('テキストスタイル拡張機能 (修正版): 初期化開始');
