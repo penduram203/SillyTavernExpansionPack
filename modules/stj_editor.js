@@ -110,6 +110,255 @@
         return null;
     }
 
+    // ============================================================
+    // ★ ロアブック連携ヘルパー（選択肢ボタン用）
+    // ============================================================
+    function getCharacterWorldInfoName() {
+        const ctx = getSTContext();
+        if (!ctx) return null;
+        let char = null;
+        if (ctx.characters && ctx.characterId !== undefined && ctx.characterId !== null) {
+            char = ctx.characters[ctx.characterId];
+        }
+        if (!char && ctx.character) char = ctx.character;
+        if (!char) return null;
+        const fromExt = char.data?.extensions?.world;
+        if (fromExt && typeof fromExt === 'string') return fromExt;
+        const fromData = char.data?.world;
+        if (fromData && typeof fromData === 'string') return fromData;
+        return null;
+    }
+
+    async function loadWorldInfoEntries(worldName) {
+        if (!worldName) return null;
+
+        // Lorebook_Expansion.js の公開APIを優先
+        if (window.LorebookExpansion?.loadWorldInfoEntriesByName) {
+            try {
+                const entries = await window.LorebookExpansion.loadWorldInfoEntriesByName(worldName);
+                if (entries) return entries;
+            } catch (e) { /* ignore */ }
+        }
+
+        // フォールバック: /api/worldinfo/get
+        try {
+            const ctx = getSTContext();
+            const headers = (ctx && typeof ctx.getRequestHeaders === 'function')
+                ? ctx.getRequestHeaders()
+                : { 'Content-Type': 'application/json' };
+            const resp = await fetch('/api/worldinfo/get', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ name: worldName }),
+            });
+            if (resp.ok) {
+                const data = await resp.json();
+                if (data && data.entries) return data.entries;
+            }
+        } catch (e) { /* ignore */ }
+
+        return null;
+    }
+
+    function getEntryKeys(entry) {
+        if (!entry) return [];
+        if (Array.isArray(entry.keys) && entry.keys.length) return entry.keys;
+        if (Array.isArray(entry.key) && entry.key.length) return entry.key;
+        if (typeof entry.keys === 'string' && entry.keys.trim()) return [entry.keys];
+        if (typeof entry.key === 'string' && entry.key.trim()) return [entry.key];
+        return [];
+    }
+
+    function getLexDataFor(worldName, uid, entry) {
+        if (window.LorebookExpansion?.getDataFor) {
+            try {
+                const data = window.LorebookExpansion.getDataFor(worldName, uid, entry);
+                if (data && Array.isArray(data.choices)) {
+                    return {
+                        img_prompt: typeof data.img_prompt === 'string' ? data.img_prompt : '',
+                        choices: data.choices,
+                    };
+                }
+            } catch (e) { /* ignore */ }
+        }
+        const ext = entry && entry.extensions && entry.extensions.lorebook_expansion;
+        if (ext && typeof ext === 'object') {
+            return {
+                img_prompt: typeof ext.img_prompt === 'string' ? ext.img_prompt : '',
+                choices: Array.isArray(ext.choices)
+                    ? ext.choices
+                        .filter(c => c && typeof c === 'object')
+                        .map(c => ({
+                            num: typeof c.num === 'string' ? c.num : String(c.num ?? ''),
+                            text: typeof c.text === 'string' ? c.text : '',
+                        }))
+                    : [],
+            };
+        }
+        return { img_prompt: '', choices: [] };
+    }
+
+    function findEntryByKeyword(entries, kw) {
+        if (!entries || !kw) return null;
+        const list = Array.isArray(entries) ? entries : Object.values(entries);
+        const target = String(kw).trim();
+        if (!target) return null;
+        for (const entry of list) {
+            if (!entry) continue;
+            const keys = getEntryKeys(entry);
+            for (const k of keys) {
+                if (String(k).trim() === target) return entry;
+            }
+        }
+        return null;
+    }
+
+    async function updateChoicesButtonState(cell) {
+        const modal = currentCellModal;
+        if (!modal || !cell) return;
+        const btn = modal.querySelector('.stj-cell-modal-choices');
+        if (!btn) return;
+
+        // デフォルト: 半透明・クリック不可
+        btn.classList.add('stj-choices-disabled');
+        btn.disabled = true;
+        btn.title = '';
+
+        if (cell.classList.contains('stj-special-item')) return;
+        const kw = getCellKeyword(cell).trim();
+        if (!kw) return;
+
+        const worldName = getCharacterWorldInfoName();
+        if (!worldName) return;
+
+        let entries = null;
+        try {
+            entries = await loadWorldInfoEntries(worldName);
+        } catch (e) { return; }
+
+        // モーダルが閉じられた or 別のセルに切り替わった
+        if (currentCellModal !== modal || currentModalCell !== cell) return;
+        if (!entries) return;
+
+        const targetEntry = findEntryByKeyword(entries, kw);
+        if (!targetEntry) return;
+
+        const lex = getLexDataFor(worldName, targetEntry.uid, targetEntry);
+        const choices = Array.isArray(lex.choices)
+            ? lex.choices.filter(c => c && String(c.num || '').trim())
+            : [];
+        if (choices.length === 0) return;
+
+        if (currentCellModal !== modal || currentModalCell !== cell) return;
+
+        btn.classList.remove('stj-choices-disabled');
+        btn.disabled = false;
+        btn.title = `選択肢を表示 (${choices.length}件)`;
+    }
+
+    async function showChoicesPopup() {
+        const cell = currentModalCell;
+        if (!cell) return;
+        if (cell.classList.contains('stj-special-item')) return;
+
+        const kw = getCellKeyword(cell).trim();
+        if (!kw) return;
+
+        const worldName = getCharacterWorldInfoName();
+        if (!worldName) return;
+
+        const entries = await loadWorldInfoEntries(worldName);
+        if (!entries) return;
+
+        const targetEntry = findEntryByKeyword(entries, kw);
+        if (!targetEntry) return;
+
+        const lex = getLexDataFor(worldName, targetEntry.uid, targetEntry);
+        const choices = Array.isArray(lex.choices)
+            ? lex.choices.filter(c => c && String(c.num || '').trim())
+            : [];
+        if (choices.length === 0) return;
+
+        const rows = [];
+        const seen = new Set([kw]);
+
+        // 自分自身のエントリ
+        rows.push({
+            label: '',
+            num: kw,
+            text: String(targetEntry.content || '').trim(),
+        });
+
+        // 各選択肢
+        for (const c of choices) {
+            const num = String(c.num).trim();
+            if (!num || seen.has(num)) continue;
+            seen.add(num);
+            const choiceEntry = findEntryByKeyword(entries, num);
+            const content = choiceEntry ? String(choiceEntry.content || '').trim() : '';
+            rows.push({
+                label: '選択肢',
+                num,
+                text: content || (typeof c.text === 'string' ? c.text : ''),
+            });
+        }
+
+        showChoicesOverlay(rows);
+    }
+
+    function showChoicesOverlay(rows) {
+        const existing = document.getElementById('stj_choices_popup');
+        if (existing) existing.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'stj_choices_popup';
+        overlay.className = 'stj-choices-popup';
+
+        const box = document.createElement('div');
+        box.className = 'stj-choices-popup-box';
+
+        for (const row of rows) {
+            const line = document.createElement('div');
+            line.className = 'stj-choices-popup-line';
+
+            if (row.label) {
+                const labelEl = document.createElement('span');
+                labelEl.className = 'stj-choices-popup-label';
+                labelEl.textContent = row.label + '　';
+                line.appendChild(labelEl);
+            }
+
+            const numEl = document.createElement('span');
+            numEl.className = 'stj-choices-popup-num';
+            numEl.textContent = row.num + '　';
+            line.appendChild(numEl);
+
+            const textEl = document.createElement('span');
+            textEl.className = 'stj-choices-popup-text';
+            textEl.textContent = row.text;
+            line.appendChild(textEl);
+
+            box.appendChild(line);
+        }
+
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+
+        const onKeyDown = (e) => {
+            if (e.key === 'Escape') {
+                overlay.remove();
+                document.removeEventListener('keydown', onKeyDown);
+            }
+        };
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) {
+                overlay.remove();
+                document.removeEventListener('keydown', onKeyDown);
+            }
+        });
+        document.addEventListener('keydown', onKeyDown);
+    }
+
     function checkMediaExists(mediaUrl) {
         if (!mediaUrl || typeof mediaUrl !== 'string' || !mediaUrl.trim()) return Promise.resolve(false);
         const cleanUrl = mediaUrl.trim();
@@ -378,7 +627,6 @@
         const rect = previewEl.getBoundingClientRect();
         const ghost = document.createElement('div');
         ghost.className = 'stj-drag-ghost';
-        // セル番号は表示しない
         const media = previewEl.querySelector('img, video');
         if (media) {
             const cloned = media.cloneNode(true);
@@ -600,6 +848,7 @@
                     <button type="button" class="stj-cell-modal-apply">決定</button>
                     <button type="button" class="stj-cell-modal-cancel">キャンセル</button>
                     <input type="text" class="stj-cell-modal-keyword" placeholder="キーワード">
+                    <button type="button" class="stj-cell-modal-choices stj-choices-disabled" disabled title="">選択肢</button>
                     <span class="stj-cell-modal-number"></span>
                 </div>
                 <div class="stj-cell-modal-grid"></div>
@@ -619,6 +868,18 @@
             e.stopPropagation();
             closeCellModal(true);
         });
+
+        // ★ 選択肢ボタン
+        const choicesBtn = modal.querySelector('.stj-cell-modal-choices');
+        if (choicesBtn) {
+            choicesBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                if (choicesBtn.disabled) return;
+                showChoicesPopup().catch(err => console.warn('[STJ Editor] showChoicesPopup error:', err));
+            });
+        }
+
         modal.addEventListener('click', (e) => {
             if (e.target === modal) closeCellModal(true);
         });
@@ -670,16 +931,23 @@
         const isSpecial = cell.classList.contains('stj-special-item');
         const kwInput = currentCellModal.querySelector('.stj-cell-modal-keyword');
         const numberEl = currentCellModal.querySelector('.stj-cell-modal-number');
+        const choicesBtn = currentCellModal.querySelector('.stj-cell-modal-choices');
 
         if (isSpecial) {
             kwInput.style.display = 'none';
             numberEl.style.display = 'none';
+            if (choicesBtn) choicesBtn.style.display = 'none';
         } else {
             kwInput.style.display = '';
             numberEl.style.display = '';
             kwInput.value = modalOriginalKeyword;
             const allCells = Array.from(document.querySelectorAll('#stj_keywords_container .stj-keyword-item'));
             numberEl.textContent = String(allCells.indexOf(cell) + 1);
+            if (choicesBtn) {
+                choicesBtn.style.display = '';
+                // ★ ロアブック検証＋choices一致判定（非同期）
+                updateChoicesButtonState(cell).catch(e => console.warn('[STJ Editor] choices state error:', e));
+            }
         }
 
         // ★ グリッドを毎回リセット（セルに応じたスロット数で開く）
@@ -700,6 +968,9 @@
 
     function closeCellModal(revert) {
         if (!currentCellModal) return;
+        // ★ 選択肢ポップアップも閉じる
+        const popup = document.getElementById('stj_choices_popup');
+        if (popup) popup.remove();
         if (revert && currentModalCell) {
             if (!currentModalCell.classList.contains('stj-special-item')) {
                 setCellKeyword(currentModalCell, modalOriginalKeyword);
@@ -722,6 +993,9 @@
         }
         updateCellPreview(cell);
         runLiveTest();
+        // ★ 選択肢ポップアップも閉じる
+        const popup = document.getElementById('stj_choices_popup');
+        if (popup) popup.remove();
         currentCellModal.classList.remove('visible');
         currentModalCell = null;
         modalOriginalKeyword = '';
@@ -909,7 +1183,6 @@
 
         window.addEventListener('gic-drop-file', (e) => {
             const { path, paths, cell, x, y } = e.detail || {};
-            // ★ paths 配列を優先、なければ単一 path
             const pathList = (Array.isArray(paths) && paths.length > 0)
                 ? paths
                 : (path ? [path] : []);
@@ -922,7 +1195,6 @@
                 return;
             }
 
-            // ポップアップ上へのドロップ
             if (currentModalCell && currentCellModal && currentCellModal.classList.contains('visible')) {
                 const contentEl = currentCellModal.querySelector('.stj-cell-modal-content');
                 if (contentEl && typeof x === 'number' && typeof y === 'number') {
@@ -986,7 +1258,6 @@
             });
         }
 
-        // キーワード表示側のクリックでもポップアップを開ける
         item.addEventListener('click', (e) => {
             if (e.target.closest('button')) return;
             if (isBulkDeleteMode || isDialogActive) return;
