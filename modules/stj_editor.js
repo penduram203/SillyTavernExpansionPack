@@ -514,18 +514,21 @@
         );
     }
 
-    function showDeleteConfirmDialog(message, onConfirm, onCancel) {
+    function showDeleteConfirmDialog(message, onConfirm, onCancel, options = {}) {
         if (!confirmDialogEl) return;
         const msgEl = confirmDialogEl.querySelector('.stj-confirm-message');
         if (msgEl) msgEl.textContent = message || '本当に削除しますか？';
         pendingDeleteCallback = onConfirm;
         pendingCancelCallback = onCancel || null;
+        // セルポップアップ(z-index 20000)より前面に表示する必要がある場合は highZ を指定
+        confirmDialogEl.style.zIndex = options.highZ ? '25000' : '';
         confirmDialogEl.style.display = 'flex';
     }
 
     function hideDeleteConfirmDialog() {
         if (!confirmDialogEl) return;
         confirmDialogEl.style.display = 'none';
+        confirmDialogEl.style.zIndex = '';
         pendingDeleteCallback = null;
         pendingCancelCallback = null;
     }
@@ -834,10 +837,10 @@
         const modal = document.createElement('div');
         modal.id = 'stj_cell_modal';
         modal.className = 'stj-cell-modal';
+        // ★ ❌（close）ボタンはヘッダーから削除。閉じるには「キャンセル」または画面外クリック / Escape を使用
         modal.innerHTML = `
             <div class="stj-cell-modal-content">
                 <div class="stj-cell-modal-header">
-                    <button type="button" class="stj-cell-modal-close" title="閉じる">×</button>
                     <button type="button" class="stj-cell-modal-apply">決定</button>
                     <button type="button" class="stj-cell-modal-cancel">キャンセル</button>
                     <input type="text" class="stj-cell-modal-keyword" placeholder="キーワード">
@@ -849,10 +852,6 @@
         `;
         document.body.appendChild(modal);
 
-        modal.querySelector('.stj-cell-modal-close').addEventListener('click', (e) => {
-            e.stopPropagation();
-            closeCellModal(true);
-        });
         modal.querySelector('.stj-cell-modal-apply').addEventListener('click', (e) => {
             e.stopPropagation();
             applyCellModal();
@@ -959,6 +958,7 @@
         if (popup) popup.remove();
         const zoom = document.getElementById('stj_media_zoom');
         if (zoom) zoom.remove();
+        document.body.classList.remove('stj-zoom-active');
 
         if (revert && currentModalCell) {
             if (!currentModalCell.classList.contains('stj-special-item')) {
@@ -973,7 +973,30 @@
         modalOriginalImages = [];
     }
 
+    // ★ 決定ボタン: 画像削除がある場合は確認ダイアログを挟む
     function applyCellModal() {
+        if (!currentCellModal || !currentModalCell) return;
+
+        const cell = currentModalCell;
+        const currentImages = getCellImages(cell);
+        const currentSet = new Set(currentImages);
+        // modalOriginalImages にあって現在は無い = 登録解除された画像
+        const removedFiles = modalOriginalImages.filter(f => !currentSet.has(f));
+
+        if (removedFiles.length > 0) {
+            showDeleteConfirmDialog(
+                `${removedFiles.length}枚の画像をキーワードから登録解除しますか？`,
+                () => { doApplyCellModal(); },
+                () => { /* いいえ: モーダルに留まる */ },
+                { highZ: true }
+            );
+            return;
+        }
+
+        doApplyCellModal();
+    }
+
+    function doApplyCellModal() {
         if (!currentCellModal || !currentModalCell) return;
         const cell = currentModalCell;
         if (!cell.classList.contains('stj-special-item')) {
@@ -986,6 +1009,7 @@
         if (popup) popup.remove();
         const zoom = document.getElementById('stj_media_zoom');
         if (zoom) zoom.remove();
+        document.body.classList.remove('stj-zoom-active');
         currentCellModal.classList.remove('visible');
         currentModalCell = null;
         modalOriginalKeyword = '';
@@ -1082,6 +1106,7 @@
 
         const close = () => {
             overlay.remove();
+            document.body.classList.remove('stj-zoom-active');
             document.removeEventListener('keydown', onKeyDown);
         };
         const onKeyDown = (e) => {
@@ -1094,6 +1119,9 @@
             close();
         });
         document.addEventListener('keydown', onKeyDown);
+
+        // ★ ギャラリーのページャー等の最前面UIを非表示にする
+        document.body.classList.add('stj-zoom-active');
 
         document.body.appendChild(overlay);
 
