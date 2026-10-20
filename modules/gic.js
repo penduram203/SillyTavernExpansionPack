@@ -2912,18 +2912,20 @@ function installGalleryCloseInterceptor() {
 // ★ ギャラリーフォルダ変更ボタン（チェックマーク）クリック後の
 //    ギャラリー＋JSON編集画面の再オープンを保証するガード
 //
-//    ST本体の「ギャラリーを閉じる → フォルダ再読込 → ギャラリーを開く」
-//    処理は、ネットワークエラー時に「making new container」だけ出して
-//    #gallery要素を生成しないままハングすることがある。
+//    【重要な知見】
+//    ST本体のギャラリー再構築（画像ロード + 動画サムネイル生成）は、
+//    ネットワーク状況や動画混在数により最大30秒以上かかることがある。
+//    この間 #gallery 要素はDOMに現れない（ST内部でメモリ上に構築中）。
 //
-//    旧パラメータの問題:
-//      - FORCE_WAIT=20秒は長すぎた。1回目の強制オープン失敗後、
-//        次の試行まで20秒待つため、合計30秒以上かかっていた。
+//    旧実装は5秒で強制オープンしていたが、これは ST の内部キューに
+//    余計な showCharGallery を積み、逆に ST の処理を遅延・多重化させる。
+//    ログ観察でも「force=0 のケースは全て成功」「force>0 のケースは
+//    全て大幅な遅延」という相関が確認された。
 //
-//    新パラメータ:
-//      - 1回の強制オープンで8秒待機、最大3回まで試行
-//      - 最悪ケース: 5秒(初期) + 8秒×3 = 29秒
-//      - 通常ケース: 2秒程度で完了（force=0）
+//    新実装:
+//      - ST本体を信頼し、45秒まで辛抱強く待つ
+//      - どうしてもダメな時だけ1回だけ強制オープン（多重化防止）
+//      - 5秒ごとに進捗ログを出してデバッグしやすくする
 // ============================================================
 function installFolderChangeReopenGuard() {
     if (window.__gicFolderReopenGuardInstalled) return;
@@ -2943,14 +2945,16 @@ function installFolderChangeReopenGuard() {
         const myToken = ++reopenToken;
         const startTime = Date.now();
         const POLL = 250;
-        const ABSENT_TIMEOUT = 5000;     // #gallery要素が一切出現しない場合
-        const LOADING_TIMEOUT = 30000;   // #gallery要素は出現したが可視化しない場合
-        const FORCE_WAIT = 8000;         // 強制オープン後の待機時間（短縮）
-        const MAX_FORCE = 3;             // 最大強制オープン回数（増加）
+        const ABSENT_TIMEOUT = 45000;    // 45s: STの長考を辛抱強く待つ
+        const LOADING_TIMEOUT = 20000;   // 20s: #gallery出現後の追加待機
+        const FORCE_WAIT = 15000;        // 15s: 強制オープン1回の待機
+        const MAX_FORCE = 1;             // 1回のみ（多重化防止）
+        const LOG_INTERVAL = 5000;       // 5s毎に進捗ログ
 
         let firstSeenAt = 0;
         let forceCount = 0;
         let forceStartedAt = 0;
+        let lastLogAt = 0;
 
         function success(elapsed) {
             lastGalleryStateForGic = null;
@@ -2966,17 +2970,23 @@ function installFolderChangeReopenGuard() {
             console.log(`[GIC] 📁 再オープン完了 (force=${forceCount}, elapsed=${elapsed}ms)`);
         }
 
+        function giveUp() {
+            console.error(
+                `[GIC] 📁 再オープン失敗 (${forceCount}回の強制オープン後、` +
+                `${Date.now() - startTime}ms 経過)`
+            );
+        }
+
         function tryForce() {
             if (myToken !== reopenToken) return;
             if (forceCount >= MAX_FORCE) {
-                console.error(`[GIC] 📁 再オープン失敗 (${forceCount}回の強制オープン後)`);
+                giveUp();
                 return;
             }
             forceCount++;
             clearGalleryOpenInFlight();
             _galleryOpenCache = { value: false, timestamp: 0 };
             lastGalleryStateForGic = null;
-            // 強制オープン前に既存コンテナを掃除（多重化防止）
             try { dedupeGalleryElements(); } catch (e) { /* ignore */ }
             const dispatched = openGalleryFromGic();
             forceStartedAt = Date.now();
@@ -2992,10 +3002,20 @@ function installFolderChangeReopenGuard() {
             const now = Date.now();
             _galleryOpenCache = { value: false, timestamp: 0 };
 
-            // 開いた？
             if (isGalleryOpen()) {
                 success(now - startTime);
                 return;
+            }
+
+            // 5秒ごとに進捗ログ
+            if (now - lastLogAt > LOG_INTERVAL) {
+                lastLogAt = now;
+                const el = document.getElementById('gallery');
+                const phase = forceStartedAt > 0 ? `force${forceCount}` : 'wait';
+                console.log(
+                    `[GIC] 📁 再オープン待機中 (phase=${phase}, elapsed=${now - startTime}ms, ` +
+                    `#gallery=${el ? 'あり' : 'なし'})`
+                );
             }
 
             // ===== 強制オープンフェーズ =====
@@ -3004,7 +3024,6 @@ function installFolderChangeReopenGuard() {
                     setTimeout(tick, POLL);
                     return;
                 }
-                // 待機タイムアウト → もう一度強制 or 諦める
                 tryForce();
                 return;
             }
