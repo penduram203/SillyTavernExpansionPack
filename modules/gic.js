@@ -2908,6 +2908,111 @@ function installGalleryCloseInterceptor() {
     console.log('[GIC] 🚪 ギャラリー閉じるインターセプタを設置しました');
 }
 
+// ============================================================
+// ★ ギャラリーフォルダ変更ボタン（チェックマーク）クリック後の
+//    ギャラリー＋JSON編集画面の再オープンを保証するガード
+//
+//    チェックマークを押すと ST本体は「ギャラリーを閉じる → フォルダ再読込
+//    → ギャラリーを開く」を行うが、閉→開の遷移が速すぎて
+//    syncGalleryButtonVisibility() のポーリングが変化を検知できず、
+//    JSON編集画面が開き直らない場合がある。
+//    ここではクリックを検知して明示的に再オープンを保証する。
+// ============================================================
+function installFolderChangeReopenGuard() {
+    if (window.__gicFolderReopenGuardInstalled) return;
+    window.__gicFolderReopenGuardInstalled = true;
+
+    const FOLDER_CHANGE_SELECTOR = [
+        '.right_menu_button.fa-check',
+        '.right_menu_button.fa-solid.fa-check',
+        '[title="Change gallery folder"]',
+        '[title="ギャラリーフォルダを変更"]',
+        '[title="フォルダを変更"]',
+    ].join(',');
+
+    let reopenToken = 0;
+
+    function forceReopen() {
+        const myToken = ++reopenToken;
+        let attempts = 0;
+        const MAX_ATTEMPTS = 24;   // 24 * 250ms = 6秒
+        const INTERVAL = 250;
+
+        const tryReopen = () => {
+            if (myToken !== reopenToken) return; // 新しいクリックが来たら中断
+            attempts++;
+
+            // キャッシュをクリアして最新状態を取得
+            _galleryOpenCache = { value: false, timestamp: 0 };
+            const galleryOpen = isGalleryOpen();
+
+            if (galleryOpen) {
+                // ギャラリーが開いている → JSON編集画面を開く
+                lastGalleryStateForGic = null;
+                clearGalleryOpenInFlight();
+                applyGalleryLayout();
+                syncGalleryButtonVisibility();
+                // syncGalleryButtonVisibility 内で STJEditor.open() が呼ばれるが、
+                // 念のため明示的にも呼ぶ
+                setTimeout(() => {
+                    if (myToken !== reopenToken) return;
+                    if (window.STJEditor?.open && !window.STJEditor.isOpen?.()) {
+                        try { window.STJEditor.open(); } catch (e) { /* ignore */ }
+                    }
+                }, 400);
+                console.log(`[GIC] 📁 再オープン完了 (attempt ${attempts})`);
+                return;
+            }
+
+            if (attempts < MAX_ATTEMPTS) {
+                setTimeout(tryReopen, INTERVAL);
+                return;
+            }
+
+            // タイムアウト → 強制オープン
+            console.warn('[GIC] 📁 再オープンタイムアウト → 強制オープン');
+            clearGalleryOpenInFlight();
+            _galleryOpenCache = { value: false, timestamp: 0 };
+            lastGalleryStateForGic = null;
+            const ok = openGalleryFromGic();
+            if (!ok) {
+                // 失敗したら少し待ってリトライ
+                setTimeout(() => {
+                    if (myToken !== reopenToken) return;
+                    clearGalleryOpenInFlight();
+                    _galleryOpenCache = { value: false, timestamp: 0 };
+                    openGalleryFromGic();
+                }, 800);
+            }
+            setTimeout(() => {
+                if (myToken !== reopenToken) return;
+                if (isGalleryOpen() && window.STJEditor?.open && !window.STJEditor.isOpen?.()) {
+                    try { window.STJEditor.open(); } catch (e) { /* ignore */ }
+                }
+            }, 1200);
+        };
+
+        // クリック直後の閉じる処理を待ってから開始
+        setTimeout(tryReopen, 250);
+    }
+
+    document.addEventListener('click', (e) => {
+        if (!e.isTrusted) return;
+        const target = e.target;
+        if (!target || !target.closest) return;
+        const btn = target.closest(FOLDER_CHANGE_SELECTOR);
+        if (!btn) return;
+        const gallery = document.getElementById('gallery');
+        if (!gallery || !gallery.contains(btn)) return;
+
+        // 既存の閉じる処理は妨げない（preventDefault / stopPropagation をしない）
+        console.log('[GIC] 📁 フォルダ変更ボタン検知 → 再オープンガードを起動');
+        forceReopen();
+    }, true);
+
+    console.log('[GIC] 📁 フォルダ変更ボタンの再オープンガードを設置しました');
+}
+
 function closeGalleryProgrammatically() {
     hideGalleryAttachmentsImmediately('closeGalleryProgrammatically');
 
@@ -3372,6 +3477,7 @@ function initializeGIC() {
     loadPersistedState();
     installBulkDeleteDocumentHandlers();
     installGalleryCloseInterceptor();
+    installFolderChangeReopenGuard();
     setupGalleryDedupeObserver();
     setupGalleryDragToJson();
 
@@ -3451,6 +3557,7 @@ export async function activate() {
     loadPersistedState();
     installBulkDeleteDocumentHandlers();
     installGalleryCloseInterceptor();
+    installFolderChangeReopenGuard();
     setupGalleryDedupeObserver();
     setupGalleryDragToJson();
     createReleaseButton();
