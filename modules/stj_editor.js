@@ -889,22 +889,6 @@
 
         // ★ スロット内ボタン（拡大表示 / 登録解除）のイベント委譲
         modal.querySelector('.stj-cell-modal-grid').addEventListener('click', (e) => {
-            // 拡大表示ボタン
-            const zoomBtn = e.target.closest('.stj-cell-modal-slot-zoom');
-            if (zoomBtn) {
-                e.stopPropagation();
-                e.preventDefault();
-                const slot = zoomBtn.closest('.stj-cell-modal-slot');
-                const fileName = slot.dataset.fileName;
-                if (!fileName) return;
-                const charName = document.getElementById('stj_char_name_display')?.textContent || '';
-                let path = fileName;
-                if (charName && !fileName.startsWith('user/images/') && !fileName.startsWith('/')) {
-                    path = `user/images/${charName}/${fileName}`;
-                }
-                showMediaZoom(path, isVideoUrl(fileName));
-                return;
-            }
             // 登録解除ボタン
             const btn = e.target.closest('.stj-cell-modal-slot-remove');
             if (!btn) return;
@@ -1046,7 +1030,6 @@
             slot.dataset.index = String(i);
             // ★ 拡大表示（🔍）ボタンと登録解除（×）ボタンを配置
             slot.innerHTML = `
-                <button type="button" class="stj-cell-modal-slot-zoom" title="拡大表示">🔍</button>
                 <button type="button" class="stj-cell-modal-slot-remove" title="登録解除">×</button>
             `;
             grid.appendChild(slot);
