@@ -2912,20 +2912,18 @@ function installGalleryCloseInterceptor() {
 // ★ ギャラリーフォルダ変更ボタン（チェックマーク）クリック後の
 //    ギャラリー＋JSON編集画面の再オープンを保証するガード
 //
-//    チェックマークを押すと ST本体は「ギャラリーを閉じる → フォルダ再読込
-//    → ギャラリーを開く」を行う。この再構築（特に画像のロードと
-//    nanogallery2 のレンダリング）はネットワーク状況により数秒〜
-//    30秒程度かかることがある。
+//    ST本体の「ギャラリーを閉じる → フォルダ再読込 → ギャラリーを開く」
+//    処理は、ネットワークエラー時に「making new container」だけ出して
+//    #gallery要素を生成しないままハングすることがある。
 //
-//    旧実装の問題:
-//      - 強制オープン後の判定が1.5秒と短く、ST本体の処理完了を待てず
-//      - 1秒間隔で3回の openGallery() を発火 → 3つのギャラリーが多重生成
-//      - 「openGalleryFromGic が true を返した」= 「ギャラリーが開いた」と誤認
+//    旧パラメータの問題:
+//      - FORCE_WAIT=20秒は長すぎた。1回目の強制オープン失敗後、
+//        次の試行まで20秒待つため、合計30秒以上かかっていた。
 //
-//    新実装:
-//      - 強制オープンは1回だけ発火し、その後20秒間ポーリングで完了を待つ
-//      - それでもダメならもう1回だけ強制オープン → さらに20秒待つ
-//      - 強制オープン前に dedupeGalleryElements() で既存コンテナを掃除
+//    新パラメータ:
+//      - 1回の強制オープンで8秒待機、最大3回まで試行
+//      - 最悪ケース: 5秒(初期) + 8秒×3 = 29秒
+//      - 通常ケース: 2秒程度で完了（force=0）
 // ============================================================
 function installFolderChangeReopenGuard() {
     if (window.__gicFolderReopenGuardInstalled) return;
@@ -2944,11 +2942,11 @@ function installFolderChangeReopenGuard() {
     function forceReopen() {
         const myToken = ++reopenToken;
         const startTime = Date.now();
-        const POLL = 300;
-        const ABSENT_TIMEOUT = 8000;     // #gallery要素が一切出現しない場合の待機
-        const LOADING_TIMEOUT = 45000;   // #gallery要素は出現したが可視化しない場合の待機
-        const FORCE_WAIT = 20000;        // 強制オープン後の待機時間
-        const MAX_FORCE = 2;             // 最大強制オープン回数
+        const POLL = 250;
+        const ABSENT_TIMEOUT = 5000;     // #gallery要素が一切出現しない場合
+        const LOADING_TIMEOUT = 30000;   // #gallery要素は出現したが可視化しない場合
+        const FORCE_WAIT = 8000;         // 強制オープン後の待機時間（短縮）
+        const MAX_FORCE = 3;             // 最大強制オープン回数（増加）
 
         let firstSeenAt = 0;
         let forceCount = 0;
