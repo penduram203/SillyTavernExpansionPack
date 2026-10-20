@@ -1,3 +1,4 @@
+// image-display.js
 (function () {
     console.log("Image Display: 初期化を開始します。");
     const MODULE_NAME = 'image_display';
