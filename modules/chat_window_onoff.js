@@ -1,3 +1,4 @@
+// chat_window_onoff.js
 // このファイルは SillyTavern の公式拡張機能ローダー（動的 import）経由で読み込まれる前提。
 // classic <script> タグでの直接読み込みは行わないこと（export構文が構文エラーになるため）。
 
