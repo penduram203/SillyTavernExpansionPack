@@ -41,7 +41,12 @@
             const raw = cell.getAttribute('data-image-list');
             if (!raw) return [];
             const arr = JSON.parse(raw);
-            return Array.isArray(arr) ? arr : [];
+            if (!Array.isArray(arr)) return [];
+            // ★ 有効な拡張子を持つファイル名のみ返す（Z / 9k= 等を除外）
+            return arr.filter(name =>
+                typeof name === 'string' &&
+                /\.(png|jpe?g|gif|webp|avif|bmp|mp4|webm)$/i.test(name)
+            );
         } catch (e) { return []; }
     }
 
