@@ -2,7 +2,12 @@
 
 import './comfy_boot.js';
 import './gic_lorebook.js';
-import { prewarmVideoResources, setupVideoWarmupObserver } from './gic_video_cache.js';
+import {
+    prewarmVideoResources,
+    setupVideoWarmupObserver,
+    collectVideoUrlsFromDOM,
+    fetchVideoUrlsForCharacter,
+} from './gic_video_cache.js';
 import { eventSource, event_types, saveChat, printMessages, getRequestHeaders } from '../../../../../script.js';
 import { getContext } from '../../../../extensions.js';
 
@@ -45,13 +50,7 @@ const PAGINATION_PAGE_SIZE = 10;
 const PAGINATION_MAX_VISIBLE = 10;
 const PAGINATION_OFFSET_LEFT = 15;
 const PAGINATION_OFFSET_UP = 20;
-const GALLERY_WARMUP_DELAY_MS = 2000;
-const GALLERY_WARMUP_RENDER_WAIT_MS = 1000;
-const GALLERY_WARMUP_PRELOAD_TIMEOUT_MS = 20000;
-const GALLERY_WARMUP_HOLD_MS = 3000;
 const PAGINATION_STABLE_DELAY_MS = 600;
-const GALLERY_PREPARE_RETRY_INTERVAL_MS = 800;
-const GALLERY_PREPARE_MAX_RETRIES = 15;
 
 // ===== 状態 =====
 let lastGeneratedImageUrl = null;
@@ -94,8 +93,6 @@ function isGalleryOpenInFlight() {
     }
     return true;
 }
-
-let warmupState = 'idle';
 
 // ===== 一括選択機能の状態 =====
 let _bulkDeleteMode = false;
@@ -298,6 +295,18 @@ function getCurrentCharacterName() {
     } catch (e) { /* ignore */ }
 
     return null;
+}
+
+// ★追加: ギャラリーを開かずに動画だけをバックグラウンドでプリウォーム
+async function prefetchGalleryVideos() {
+    const charName = getCurrentCharacterName();
+    if (!charName) return;
+    try {
+        const urls = await fetchVideoUrlsForCharacter(charName);
+        if (urls.length > 0) {
+            await prewarmVideoResources(urls);
+        }
+    } catch (e) { /* ignore */ }
 }
 
 // ===== スタイル注入 =====
@@ -2767,17 +2776,18 @@ function syncGalleryButtonVisibility() {
 
     if (galleryOpen) {
         applyGalleryLayout();
-        // ★追加: 動画プリウォームを遅延実行（ブラウザキャッシュ・デコーダーキャッシュを温める）
+        // ★変更: ギャラリーが開いたら DOM から動画URLを抽出してプリウォーム
         setTimeout(() => {
-            try { prewarmVideoResources().catch(() => {}); } catch (e) { /* ignore */ }
+            try {
+                const urls = collectVideoUrlsFromDOM();
+                if (urls.length > 0) prewarmVideoResources(urls).catch(() => {});
+            } catch (e) { /* ignore */ }
         }, 500);
-        if (warmupState !== 'running') {
-            setTimeout(() => {
-                if (isGalleryOpen() && window.STJEditor?.open) {
-                    try { window.STJEditor.open(); } catch (e) { /* ignore */ }
-                }
-            }, 300);
-        }
+        setTimeout(() => {
+            if (isGalleryOpen() && window.STJEditor?.open) {
+                try { window.STJEditor.open(); } catch (e) { /* ignore */ }
+            }
+        }, 300);
     } else {
         const previewsAll = getAllPreviews();
         if (previewsAll.length > 0) return;
@@ -2804,6 +2814,7 @@ function setupGalleryObserverForGic() {
 
 // ============================================================
 // ★ ギャラリーを開く（描画完了までの計測ログ付き）
+//    ★ 修正: タイムアウトを15秒に短縮し、1回だけ自動リトライ
 // ============================================================
 function openGalleryFromGic() {
     if (isGalleryOpen()) { clearGalleryOpenInFlight(); return true; }
@@ -2812,21 +2823,29 @@ function openGalleryFromGic() {
 
     const t0 = performance.now();
     window.__gicLastOpenStart = t0;
+    let retried = false;
+
     const checkVisible = () => {
         const elapsed = performance.now() - t0;
-        // 200ms より古いキャッシュのみ無効化（他ポーリングへの影響を抑える）
         if (performance.now() - _galleryOpenCache.timestamp > 200) {
             _galleryOpenCache = { value: false, timestamp: 0 };
         }
         if (isGalleryOpen()) {
             if (elapsed > 2000) {
                 console.warn(`[GIC] ⚠️ ギャラリー描画 ${elapsed.toFixed(0)}ms（ST本体の遅延）`);
-                if (elapsed > 10000) {
-                    console.warn('[GIC] ⚠️ ST本体の showCharGallery が動画サムネイル生成で詰まっている可能性');
-                }
             } else {
                 console.log(`[GIC] ✅ ギャラリー描画 ${elapsed.toFixed(0)}ms`);
             }
+            return;
+        }
+        if (elapsed > 15000 && !retried) {
+            retried = true;
+            console.warn('[GIC] ⚠️ ギャラリー描画が15秒経過 → 自動リトライ');
+            clearGalleryOpenInFlight();
+            setTimeout(() => {
+                _galleryOpenCache = { value: false, timestamp: 0 };
+                if (!isGalleryOpen()) openGalleryFromGic();
+            }, 1000);
             return;
         }
         if (elapsed > 30000) {
@@ -3180,7 +3199,6 @@ function installFolderChangeReopenGuard() {
 // ★ ギャラリーをプログラム的に閉じる
 // ============================================================
 function closeGalleryProgrammatically() {
-    // GIC側のUI後始末を実行
     hideGalleryAttachmentsImmediately('closeGalleryProgrammatically');
 
     _galleryOpenCache = { value: false, timestamp: 0 };
@@ -3208,148 +3226,6 @@ function closeGalleryProgrammatically() {
         if (btn) { try { btn.click(); } catch (e) { /* ignore */ } }
     }, 100);
     return true;
-}
-
-// ============================================================
-// ★ ギャラリー画像/動画のプリロード
-// ============================================================
-async function preloadGalleryImages(timeoutMs = GALLERY_WARMUP_PRELOAD_TIMEOUT_MS) {
-    const galleryEl = document.getElementById('gallery');
-    if (!galleryEl) return 0;
-
-    const imgUrls = new Set();
-    const videoUrls = new Set();
-    const collectUrls = () => {
-        galleryEl.querySelectorAll('img').forEach(img => {
-            if (img.src && img.src.startsWith('http')) imgUrls.add(img.src);
-            if (img.dataset && img.dataset.src) imgUrls.add(img.dataset.src);
-        });
-        const charName = getCurrentCharacterName();
-        galleryEl.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1').forEach(thumb => {
-            const title = (thumb.getAttribute('title') || '').trim();
-            if (title && isVideoFile(title) && charName) {
-                videoUrls.add('/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(title));
-            }
-        });
-    };
-    collectUrls();
-
-    if (imgUrls.size === 0 && videoUrls.size === 0) {
-        for (let i = 0; i < 5 && imgUrls.size === 0 && videoUrls.size === 0; i++) {
-            await wait(300);
-            collectUrls();
-        }
-    }
-
-    let loaded = 0;
-    const tasks = [];
-
-    if (imgUrls.size > 0) {
-        const imgPromises = [...imgUrls].map(url => new Promise(resolve => {
-            const img = new Image();
-            const timer = setTimeout(() => resolve(), timeoutMs);
-            img.onload = () => { clearTimeout(timer); loaded++; resolve(); };
-            img.onerror = () => { clearTimeout(timer); resolve(); };
-            img.src = url;
-        }));
-        tasks.push(Promise.all(imgPromises));
-    }
-
-    if (videoUrls.size > 0) {
-        console.log(`[GIC] 🎬 ${videoUrls.size}本の動画をプリロード（STの再取得高速化）`);
-        const videoPromises = [...videoUrls].map(url => new Promise(resolve => {
-            const video = document.createElement('video');
-            video.preload = 'metadata';
-            video.muted = true;
-            const timer = setTimeout(() => resolve(), 3000);
-            video.onloadedmetadata = () => { clearTimeout(timer); loaded++; resolve(); };
-            video.onerror = () => { clearTimeout(timer); resolve(); };
-            video.src = url;
-        }));
-        tasks.push(Promise.all(videoPromises));
-    }
-
-    if (tasks.length === 0) return 0;
-    await Promise.race([Promise.all(tasks), wait(timeoutMs)]);
-    return loaded;
-}
-
-async function warmUpGallery() {
-    if (warmupState !== 'idle') return;
-    if (isGalleryOpen()) { warmupState = 'done'; return; }
-
-    warmupState = 'running';
-
-    const hideStyle = document.createElement('style');
-    hideStyle.id = 'gic-gallery-warmup-hide';
-    hideStyle.textContent = `
-        #gallery, .nGY2Gallery, .nGY2GalleryTop, .nGY2GalleryBottom, [forchar="gallery"] {
-            visibility: hidden !important;
-            opacity: 0 !important;
-            pointer-events: none !important;
-        }
-    `;
-    document.head.appendChild(hideStyle);
-
-    try {
-        if (!openGalleryFromGic()) {
-            warmupState = 'idle';
-            hideStyle.remove();
-            return;
-        }
-
-        let galleryEl = null;
-        for (let round = 0; round < 3 && !galleryEl; round++) {
-            if (warmupState === 'aborted') { hideStyle.remove(); return; }
-            const appearStart = Date.now();
-            while (Date.now() - appearStart < 8000) {
-                if (warmupState === 'aborted') { hideStyle.remove(); return; }
-                galleryEl = document.getElementById('gallery');
-                if (galleryEl) break;
-                await wait(200);
-            }
-            if (galleryEl) break;
-            closeGalleryProgrammatically();
-            await wait(700);
-            clearGalleryOpenInFlight();
-            _galleryOpenCache = { value: false, timestamp: 0 };
-            lastGalleryStateForGic = null;
-            openGalleryFromGic();
-            await wait(1500);
-        }
-
-        if (!galleryEl) {
-            warmupState = 'idle';
-            hideStyle.remove();
-            closeGalleryProgrammatically();
-            return;
-        }
-
-        const contentStart = Date.now();
-        while (Date.now() - contentStart < 15000) {
-            if (warmupState === 'aborted') { hideStyle.remove(); return; }
-            const ng2 = galleryEl.querySelector('.nGY2Gallery');
-            const thumbs = galleryEl.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1');
-            if (ng2 || thumbs.length > 0) break;
-            await wait(200);
-        }
-
-        await preloadGalleryImages();
-        if (warmupState === 'aborted') { hideStyle.remove(); return; }
-
-        await wait(GALLERY_WARMUP_HOLD_MS);
-        if (warmupState === 'aborted') { hideStyle.remove(); return; }
-
-        closeGalleryProgrammatically();
-        setTimeout(() => {
-            hideStyle.remove();
-            hideGalleryUploadMessage();
-        }, 500);
-        warmupState = 'done';
-    } catch (e) {
-        warmupState = 'idle';
-        try { hideStyle.remove(); } catch (_) {}
-    }
 }
 
 const STATUS_MESSAGE_ID = 'gic-status-message';
@@ -3434,69 +3310,6 @@ function hideStatusMessage() {
     if (_statusMessageHideTimer) { clearTimeout(_statusMessageHideTimer); _statusMessageHideTimer = null; }
     const el = document.getElementById(STATUS_MESSAGE_ID);
     if (el) el.classList.remove('gic-visible');
-}
-
-let _galleryPreloadState = 'idle';
-let _galleryPreparedFor = null;
-let _galleryPrepareRetries = 0;
-
-function setGalleryButtonLoading(loading) {
-    const btn = document.getElementById(GALLERY_BUTTON_ID);
-    if (!btn) return;
-    if (loading) {
-        btn.classList.add('gic-gallery-loading');
-        btn.disabled = true;
-        btn.title = 'ギャラリーを読み込み中です…';
-    } else {
-        btn.classList.remove('gic-gallery-loading');
-        btn.disabled = false;
-        btn.title = 'SillyTavern公式ギャラリーを開く';
-    }
-}
-
-async function prepareGalleryForCharacter() {
-    if (_galleryPreloadState === 'loading') return;
-    if (_galleryPreloadState !== 'ready') {
-        setGalleryButtonLoading(true);
-        showStatusMessage('ギャラリーを読み込み中です…', 0);
-    }
-
-    let charName = getCurrentCharacterName();
-    _galleryPrepareRetries = 0;
-    while (!charName && _galleryPrepareRetries < GALLERY_PREPARE_MAX_RETRIES) {
-        _galleryPrepareRetries++;
-        await wait(GALLERY_PREPARE_RETRY_INTERVAL_MS);
-        charName = getCurrentCharacterName();
-    }
-
-    if (!charName) {
-        hideStatusMessage();
-        _galleryPreloadState = 'idle';
-        setGalleryButtonLoading(true);
-        return;
-    }
-
-    if (_galleryPreparedFor === charName && _galleryPreloadState === 'ready') {
-        setGalleryButtonLoading(false);
-        hideStatusMessage();
-        return;
-    }
-
-    _galleryPreloadState = 'loading';
-    try {
-        while (warmupState === 'running') await wait(100);
-        warmupState = 'idle';
-        await warmUpGallery();
-        clearGalleryOpenInFlight();
-        _galleryPreparedFor = charName;
-        _galleryPreloadState = 'ready';
-        showStatusMessage('読み込み完了', 1500);
-        setGalleryButtonLoading(false);
-    } catch (e) {
-        _galleryPreloadState = 'idle';
-        showStatusMessage('読み込みに失敗しました', 2000);
-        setGalleryButtonLoading(false);
-    }
 }
 
 function createReleaseButton() {
@@ -3601,12 +3414,6 @@ function createGalleryButton() {
         const now = Date.now();
         if (now - lastActionTime < 200) return;
         lastActionTime = now;
-        if (warmupState === 'running') {
-            warmupState = 'aborted';
-            clearGalleryOpenInFlight();
-            const hs = document.getElementById('gic-gallery-warmup-hide');
-            if (hs) hs.remove();
-        }
         _galleryOpenCache = { value: false, timestamp: 0 };
         clearGalleryOpenInFlight();
         flashBlue();
@@ -3652,16 +3459,13 @@ function setupListeners() {
     if (event_types.CHAT_CHANGED) {
         safeOn(event_types.CHAT_CHANGED, () => {
             scanForGeneratedImages();
-            _galleryPreparedFor = null;
-            _galleryPreloadState = 'idle';
-            setTimeout(() => prepareGalleryForCharacter().catch(() => {}), 500);
+            // ★変更: ギャラリーを開かずに動画だけをバックグラウンドでプリウォーム
+            setTimeout(() => prefetchGalleryVideos().catch(() => {}), 1000);
         });
     }
     if (event_types.CHARACTER_SELECTED) {
         safeOn(event_types.CHARACTER_SELECTED, () => {
-            _galleryPreparedFor = null;
-            _galleryPreloadState = 'idle';
-            setTimeout(() => prepareGalleryForCharacter().catch(() => {}), 300);
+            setTimeout(() => prefetchGalleryVideos().catch(() => {}), 800);
         });
     }
 }
@@ -3709,7 +3513,6 @@ function initializeGIC() {
     setupListeners();
     setupTextStylingObserver();
     setupGalleryObserverForGic();
-    // ★追加: 動画ウォームアップオブザーバ
     try { setupVideoWarmupObserver(); } catch (e) { /* ignore */ }
     exposeGicApi();
 
@@ -3788,7 +3591,6 @@ export async function activate() {
     createReleaseButton();
     createGalleryButton();
     setupGalleryObserverForGic();
-    // ★追加: 動画ウォームアップオブザーバ
     try { setupVideoWarmupObserver(); } catch (e) { /* ignore */ }
     applyGalleryLayout();
     exposeGicApi();
