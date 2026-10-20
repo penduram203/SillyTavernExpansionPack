@@ -696,6 +696,35 @@
   color: #e2e8f0;
 }
 
+/* ============================================================
+   ★ メディア拡大表示（セルポップアップ内の画像/動画クリック）
+   ============================================================ */
+.stj-media-zoom {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.92);
+  z-index: 22000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+  box-sizing: border-box;
+  cursor: zoom-out;
+}
+
+.stj-media-zoom-content {
+  max-width: 95vw;
+  max-height: 95vh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  display: block;
+  cursor: zoom-out;
+  user-select: none;
+  border-radius: 4px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8);
+}
+
 /* ===== カスタムアラート ===== */
 #stj_custom_alert {
   position: fixed;
