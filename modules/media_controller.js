@@ -1,3 +1,4 @@
+// media_controller.js
 /**
  * Media Controller（最小構成）
  * 残存機能:
