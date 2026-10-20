@@ -395,7 +395,7 @@
         return exists ? path : null;
     }
 
-    // ★ base64 データURIとクエリ・フラグメントを除外
+    // ★ base64 データURI・クエリ・フラグメント・拡張子なし断片を除外
     function extractFileNameFromPath(path) {
         if (!path || typeof path !== 'string') return '';
         if (path.startsWith('data:')) return '';
@@ -403,6 +403,7 @@
         const parts = clean.split('/');
         let name = parts[parts.length - 1];
         if (!name || name.startsWith('data:')) return '';
+        if (!/\.(png|jpe?g|gif|webp|avif|bmp|mp4|webm)$/i.test(name)) return '';
         return name;
     }
 
@@ -950,11 +951,9 @@
             _cellVideoIORoot = null;
         }
 
-        // ★ モーダルを先に表示（display: none 内での video 生成を避ける）
         currentCellModal.classList.add('visible');
         document.body.classList.add('stj-cell-modal-active');
 
-        // ★ requestAnimationFrame を二重化してレイアウト確定後にレンダリング
         requestAnimationFrame(() => {
             requestAnimationFrame(() => {
                 if (!currentCellModal || currentModalCell !== cell) return;
@@ -1001,7 +1000,6 @@
         }
     }
 
-    // ★ 決定ボタン: 画像削除がある場合は確認ダイアログを挟む
     function applyCellModal() {
         if (!currentCellModal || !currentModalCell) return;
 
@@ -1093,14 +1091,12 @@
         return '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(fileName);
     }
 
-    // ★ 動的スロット生成（画像・動画両対応）＋診断ログ
     function renderCellModalGrid(cell) {
         if (!currentCellModal || !cell) return;
         const images = getCellImages(cell);
         const grid = currentCellModal.querySelector('.stj-cell-modal-grid');
         if (!grid) return;
 
-        // ★ 診断ログ
         console.log('[STJ Grid] renderCellModalGrid called, images=', images);
 
         const neededSlots = Math.max(9, Math.ceil(images.length / 3) * 3);
@@ -1120,7 +1116,6 @@
         slots.forEach((slot, i) => {
             const fileName = images[i];
 
-            // ★ 診断ログ
             console.log(`[STJ Grid] slot[${i}] fileName=`, fileName, 'isVideo=', fileName ? isVideoUrl(fileName) : false);
 
             if (!fileName) {
@@ -1140,7 +1135,6 @@
             const isVideo = isVideoUrl(fileName);
             slot.dataset.fileName = fileName;
 
-            // ★ 診断ログ
             console.log(`[STJ Grid] slot[${i}] fullPath=`, fullPath, 'isVideo=', isVideo);
 
             const existing = slot.querySelector(':scope > img, :scope > video');
@@ -1171,7 +1165,6 @@
                 v.className = 'gic-cell-video';
                 v.dataset.src = fullPath;
 
-                // ★ 属性は src より前にすべて設定（Firefox autoplay の要件）
                 v.setAttribute('muted', '');
                 v.setAttribute('loop', '');
                 v.setAttribute('playsinline', '');
@@ -1214,7 +1207,6 @@
                 const p = v.play();
                 if (p && typeof p.catch === 'function') p.catch(() => {});
 
-                // ★ 3秒後にまだ readyState 0 なら警告 + 再試行
                 setTimeout(() => {
                     if (v.parentNode && v.readyState === 0) {
                         console.warn('[STJ Video] still not loaded after 3s:', fullPath, 'error=', v.error);
@@ -1241,7 +1233,6 @@
         });
     }
 
-    // ★ メディア拡大表示（画像・動画両対応）
     function showMediaZoom(src, isVideo) {
         const existing = document.getElementById('stj_media_zoom');
         if (existing) existing.remove();
@@ -1346,7 +1337,14 @@
         if (!cell || !path) return;
         cell.classList.remove('stj-drop-target');
         const fileName = extractFileNameFromPath(path);
-        if (!fileName) return;
+        if (!fileName) {
+            console.log(`[STJ Editor] 無効なファイル名のためスキップ: ${String(path).slice(0, 80)}`);
+            return;
+        }
+        if (!/\.(png|jpe?g|gif|webp|avif|bmp|mp4|webm)$/i.test(fileName)) {
+            console.log(`[STJ Editor] 拡張子なしのためスキップ: ${fileName}`);
+            return;
+        }
 
         const added = addImageToCell(cell, fileName);
         if (!added) {
@@ -1733,6 +1731,12 @@
         previewEl.dataset.currentIndex = currentIndex;
 
         const fileName = extractFileNameFromPath(imageNames[currentIndex]);
+        if (!fileName) {
+            removeMedia(); removeLoading();
+            placeholderShowError();
+            previewEl.dataset.currentPath = '__missing__';
+            return;
+        }
         const fullPath = await detectImageExtension(charName, fileName);
         if (_previewLoadGen.get(previewEl) !== myGen) return;
 
