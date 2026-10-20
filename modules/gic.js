@@ -2799,18 +2799,21 @@ function setupGalleryObserverForGic() {
 
 // ============================================================
 // ★ ギャラリーを開く（描画完了までの計測ログ付き）
+//    ★ 修正C: _galleryOpenCache の破壊を最小化
 // ============================================================
 function openGalleryFromGic() {
     if (isGalleryOpen()) { clearGalleryOpenInFlight(); return true; }
     if (isGalleryOpenInFlight()) return false;
     markGalleryOpenInFlight();
 
-    // ★ 描画完了までの時間を計測（ST本体の遅延を可視化）
     const t0 = performance.now();
     window.__gicLastOpenStart = t0;
     const checkVisible = () => {
         const elapsed = performance.now() - t0;
-        _galleryOpenCache = { value: false, timestamp: 0 };
+        // 200ms より古いキャッシュのみ無効化（他ポーリングへの影響を抑える）
+        if (performance.now() - _galleryOpenCache.timestamp > 200) {
+            _galleryOpenCache = { value: false, timestamp: 0 };
+        }
         if (isGalleryOpen()) {
             if (elapsed > 2000) {
                 console.warn(`[GIC] ⚠️ ギャラリー描画 ${elapsed.toFixed(0)}ms（ST本体の遅延）`);
@@ -2961,6 +2964,9 @@ function installGalleryCloseInterceptor() {
 // ============================================================
 // ★ ギャラリーフォルダ変更ボタン（チェックマーク）クリック後の
 //    ギャラリー＋JSON編集画面の再オープンを保証するガード
+//
+//    ★ 修正A: クリックリスナーをギャラリーオープン時のみ動作させる
+//      ことで、🎨ボタン押下時の副作用を完全排除
 // ============================================================
 function installFolderChangeReopenGuard() {
     if (window.__gicFolderReopenGuardInstalled) return;
@@ -3152,6 +3158,11 @@ function installFolderChangeReopenGuard() {
 
     document.addEventListener('click', (e) => {
         if (!e.isTrusted) return;
+        // ★ 修正A: ギャラリーが開いていない時は完全無視
+        //    🎨ボタン押下直後（ギャラリー構築中）の干渉を防ぐ
+        _galleryOpenCache = { value: false, timestamp: 0 };
+        if (!isGalleryOpen()) return;
+
         const target = e.target;
         if (!target || !target.closest) return;
         const btn = target.closest(FOLDER_CHANGE_SELECTOR);
@@ -3167,21 +3178,17 @@ function installFolderChangeReopenGuard() {
 }
 
 // ============================================================
-// ★ ギャラリーをプログラム的に閉じる（冗長クローズ削減）
+// ★ ギャラリーをプログラム的に閉じる
+//    ★ 修正B: 冒頭の getComputedStyle を削除（reflow防止）
 // ============================================================
 function closeGalleryProgrammatically() {
-    // 既に閉じているかを判定
-    const galleryEls = document.querySelectorAll('#gallery');
-    const anyVisible = Array.from(galleryEls).some(g => {
-        const s = window.getComputedStyle(g);
-        return s.display !== 'none' && s.visibility !== 'hidden' &&
-               parseFloat(s.opacity) !== 0;
-    });
-
-    // GIC側のUI後始末は常に実行
+    // GIC側のUI後始末を実行
     hideGalleryAttachmentsImmediately('closeGalleryProgrammatically');
 
-    // ST側で「まだ開いてる」と思われている場合のみ、状態リセットを実行
+    // isGalleryOpen() は 100msキャッシュ付きだが reflow はしない
+    _galleryOpenCache = { value: false, timestamp: 0 };
+    const anyVisible = isGalleryOpen();
+
     if (!anyVisible) {
         clearGalleryOpenInFlight();
         return true;
@@ -3208,8 +3215,6 @@ function closeGalleryProgrammatically() {
 
 // ============================================================
 // ★ ギャラリー画像/動画のプリロード
-//    ST本体の getVideoThumbnail 再取得を高速化するため、
-//    動画URLも metadata プリロードでキャッシュに乗せる
 // ============================================================
 async function preloadGalleryImages(timeoutMs = GALLERY_WARMUP_PRELOAD_TIMEOUT_MS) {
     const galleryEl = document.getElementById('gallery');
@@ -3594,7 +3599,6 @@ function createGalleryButton() {
         }, 250);
     };
 
-    // ★ 修正: キャッシュクリア + 即座に openGalleryFromGic + ⏳ローディング表示 + 計測
     let lastActionTime = 0;
     const triggerAction = () => {
         if (btn.classList.contains('gic-gallery-loading') || btn.disabled) return;
