@@ -2,6 +2,7 @@
 
 import './comfy_boot.js';
 import './gic_lorebook.js';
+import { prewarmVideoResources, setupVideoWarmupObserver } from './gic_video_cache.js';
 import { eventSource, event_types, saveChat, printMessages, getRequestHeaders } from '../../../../../script.js';
 import { getContext } from '../../../../extensions.js';
 
@@ -2766,6 +2767,10 @@ function syncGalleryButtonVisibility() {
 
     if (galleryOpen) {
         applyGalleryLayout();
+        // ★追加: 動画プリウォームを遅延実行（ブラウザキャッシュ・デコーダーキャッシュを温める）
+        setTimeout(() => {
+            try { prewarmVideoResources().catch(() => {}); } catch (e) { /* ignore */ }
+        }, 500);
         if (warmupState !== 'running') {
             setTimeout(() => {
                 if (isGalleryOpen() && window.STJEditor?.open) {
@@ -2799,7 +2804,6 @@ function setupGalleryObserverForGic() {
 
 // ============================================================
 // ★ ギャラリーを開く（描画完了までの計測ログ付き）
-//    ★ 修正C: _galleryOpenCache の破壊を最小化
 // ============================================================
 function openGalleryFromGic() {
     if (isGalleryOpen()) { clearGalleryOpenInFlight(); return true; }
@@ -2964,9 +2968,6 @@ function installGalleryCloseInterceptor() {
 // ============================================================
 // ★ ギャラリーフォルダ変更ボタン（チェックマーク）クリック後の
 //    ギャラリー＋JSON編集画面の再オープンを保証するガード
-//
-//    ★ 修正A: クリックリスナーをギャラリーオープン時のみ動作させる
-//      ことで、🎨ボタン押下時の副作用を完全排除
 // ============================================================
 function installFolderChangeReopenGuard() {
     if (window.__gicFolderReopenGuardInstalled) return;
@@ -3158,8 +3159,6 @@ function installFolderChangeReopenGuard() {
 
     document.addEventListener('click', (e) => {
         if (!e.isTrusted) return;
-        // ★ 修正A: ギャラリーが開いていない時は完全無視
-        //    🎨ボタン押下直後（ギャラリー構築中）の干渉を防ぐ
         _galleryOpenCache = { value: false, timestamp: 0 };
         if (!isGalleryOpen()) return;
 
@@ -3179,13 +3178,11 @@ function installFolderChangeReopenGuard() {
 
 // ============================================================
 // ★ ギャラリーをプログラム的に閉じる
-//    ★ 修正B: 冒頭の getComputedStyle を削除（reflow防止）
 // ============================================================
 function closeGalleryProgrammatically() {
     // GIC側のUI後始末を実行
     hideGalleryAttachmentsImmediately('closeGalleryProgrammatically');
 
-    // isGalleryOpen() は 100msキャッシュ付きだが reflow はしない
     _galleryOpenCache = { value: false, timestamp: 0 };
     const anyVisible = isGalleryOpen();
 
@@ -3227,7 +3224,6 @@ async function preloadGalleryImages(timeoutMs = GALLERY_WARMUP_PRELOAD_TIMEOUT_M
             if (img.src && img.src.startsWith('http')) imgUrls.add(img.src);
             if (img.dataset && img.dataset.src) imgUrls.add(img.dataset.src);
         });
-        // 動画URLも収集（STのgetVideoThumbnail再取得を高速化）
         const charName = getCurrentCharacterName();
         galleryEl.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1').forEach(thumb => {
             const title = (thumb.getAttribute('title') || '').trim();
@@ -3615,14 +3611,12 @@ function createGalleryButton() {
         clearGalleryOpenInFlight();
         flashBlue();
 
-        // 即座に ⏳ 表示（20秒待ちの視覚的フィードバック）
         const origText = btn.textContent;
         btn.textContent = '⏳';
         const t0 = performance.now();
         const ok = openGalleryFromGic();
         console.log(`[GIC] 🎨 ボタン押下 → openGalleryFromGic (ok=${ok}, ${(performance.now() - t0).toFixed(1)}ms)`);
 
-        // ギャラリー描画完了（または8秒経過）で元に戻す
         const restoreText = () => {
             if (btn.textContent === '⏳') {
                 btn.textContent = origText || '🎨';
@@ -3715,6 +3709,8 @@ function initializeGIC() {
     setupListeners();
     setupTextStylingObserver();
     setupGalleryObserverForGic();
+    // ★追加: 動画ウォームアップオブザーバ
+    try { setupVideoWarmupObserver(); } catch (e) { /* ignore */ }
     exposeGicApi();
 
     validatePersistedState().catch(e => console.warn('[GIC] 永続化状態の検証に失敗:', e));
@@ -3792,6 +3788,8 @@ export async function activate() {
     createReleaseButton();
     createGalleryButton();
     setupGalleryObserverForGic();
+    // ★追加: 動画ウォームアップオブザーバ
+    try { setupVideoWarmupObserver(); } catch (e) { /* ignore */ }
     applyGalleryLayout();
     exposeGicApi();
     ensureSdSourceConsistency().catch(() => {});
