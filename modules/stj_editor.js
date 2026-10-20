@@ -80,7 +80,7 @@
 
     function isVideoUrl(url) {
         if (!url || typeof url !== 'string') return false;
-        return !!url.match(/\.(mp4|webm)$/i);
+        return !!url.match(/\.(mp4|webm)(\?|#|$)/i);
     }
 
     function getSTContext() {
@@ -887,9 +887,7 @@
             });
         }
 
-        // ★ スロット内ボタン（拡大表示 / 登録解除）のイベント委譲
         modal.querySelector('.stj-cell-modal-grid').addEventListener('click', (e) => {
-            // 登録解除ボタン
             const btn = e.target.closest('.stj-cell-modal-slot-remove');
             if (!btn) return;
             e.stopPropagation();
@@ -940,6 +938,13 @@
         grid.innerHTML = '';
         grid.scrollTop = 0;
 
+        // ★ グリッドが変わったら IntersectionObserver を破棄
+        if (_cellVideoIO) {
+            try { _cellVideoIO.disconnect(); } catch (e) { /* ignore */ }
+            _cellVideoIO = null;
+            _cellVideoIORoot = null;
+        }
+
         renderCellModalGrid(cell);
         currentCellModal.classList.add('visible');
         document.body.classList.add('stj-cell-modal-active');
@@ -971,6 +976,13 @@
         modalOriginalKeyword = '';
         modalOriginalImages = [];
         document.body.classList.remove('stj-cell-modal-active');
+
+        // ★ グリッド内の動画を停止し、IO も破棄
+        if (_cellVideoIO) {
+            try { _cellVideoIO.disconnect(); } catch (e) { /* ignore */ }
+            _cellVideoIO = null;
+            _cellVideoIORoot = null;
+        }
     }
 
     // ★ 決定ボタン: 画像削除がある場合は確認ダイアログを挟む
@@ -1013,9 +1025,59 @@
         modalOriginalKeyword = '';
         modalOriginalImages = [];
         document.body.classList.remove('stj-cell-modal-active');
+
+        if (_cellVideoIO) {
+            try { _cellVideoIO.disconnect(); } catch (e) { /* ignore */ }
+            _cellVideoIO = null;
+            _cellVideoIORoot = null;
+        }
     }
 
-    // ★ 動的スロット生成（9以上は3の倍数で拡張）
+    // ============================================================
+    // ★ セルモーダル用: 動画サムネイルの IntersectionObserver
+    // ============================================================
+    let _cellVideoIO = null;
+    let _cellVideoIORoot = null;
+
+    function ensureCellVideoIO(grid) {
+        if (_cellVideoIO && _cellVideoIORoot === grid) return _cellVideoIO;
+        if (_cellVideoIO) {
+            try { _cellVideoIO.disconnect(); } catch (e) { /* ignore */ }
+        }
+        _cellVideoIORoot = grid;
+        _cellVideoIO = new IntersectionObserver((entries) => {
+            for (const entry of entries) {
+                const v = entry.target.querySelector(':scope > video.gic-cell-video');
+                if (!v) continue;
+                if (entry.isIntersecting) {
+                    const p = v.play();
+                    if (p && typeof p.catch === 'function') {
+                        p.catch(() => {
+                            v.muted = true;
+                            v.play().catch(() => {});
+                        });
+                    }
+                } else {
+                    try { v.pause(); } catch (e) { /* ignore */ }
+                }
+            }
+        }, { threshold: 0.1, root: grid });
+        return _cellVideoIO;
+    }
+
+    // ============================================================
+    // ★ セルモーダル用パス解決（ギャラリーと同一方式）
+    // ============================================================
+    function resolveModalMediaPath(fileName, charName) {
+        if (!fileName || typeof fileName !== 'string') return '';
+        if (/^https?:\/\//i.test(fileName)) return fileName;
+        if (fileName.startsWith('/')) return fileName;
+        if (fileName.startsWith('user/images/')) return '/' + fileName;
+        if (!charName) return '/' + fileName;
+        return '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(fileName);
+    }
+
+    // ★ 動的スロット生成（画像・動画両対応）
     function renderCellModalGrid(cell) {
         if (!currentCellModal || !cell) return;
         const images = getCellImages(cell);
@@ -1028,60 +1090,102 @@
             const slot = document.createElement('div');
             slot.className = 'stj-cell-modal-slot';
             slot.dataset.index = String(i);
-            // ★ 拡大表示（🔍）ボタンと登録解除（×）ボタンを配置
-            slot.innerHTML = `
-                <button type="button" class="stj-cell-modal-slot-remove" title="登録解除">×</button>
-            `;
+            slot.innerHTML = `<button type="button" class="stj-cell-modal-slot-remove" title="登録解除">×</button>`;
             grid.appendChild(slot);
         }
 
         const slots = grid.querySelectorAll('.stj-cell-modal-slot');
         const charName = document.getElementById('stj_char_name_display')?.textContent || '';
+        const io = ensureCellVideoIO(grid);
 
         slots.forEach((slot, i) => {
-            // ボタン以外を除去（media だけ）
-            slot.querySelectorAll(':scope > img, :scope > video').forEach(el => el.remove());
-            slot.removeAttribute('data-file-name');
-            delete slot.dataset.fileName;
-
             const fileName = images[i];
-            if (!fileName) return;
-            slot.dataset.fileName = fileName;
 
-            let path = fileName;
-            if (charName && !fileName.startsWith('user/images/') && !fileName.startsWith('/')) {
-                path = `user/images/${charName}/${fileName}`;
+            if (!fileName) {
+                slot.querySelectorAll(':scope > img, :scope > video').forEach(el => {
+                    if (el.tagName === 'VIDEO') {
+                        try { el.pause(); } catch (e) { /* ignore */ }
+                    }
+                    el.remove();
+                });
+                try { io.unobserve(slot); } catch (e) { /* ignore */ }
+                slot.removeAttribute('data-file-name');
+                delete slot.dataset.fileName;
+                return;
             }
 
-            // メディア自体のクリックでも拡大表示（保険）
+            const fullPath = resolveModalMediaPath(fileName, charName);
+            const isVideo = isVideoUrl(fileName);
+            slot.dataset.fileName = fileName;
+
+            // ★ キャッシュ: src とタイプが一致すれば再利用
+            const existing = slot.querySelector(':scope > img, :scope > video');
+            if (existing) {
+                const existingSrc = existing.getAttribute('data-src') || existing.getAttribute('src');
+                const existingIsVideo = existing.tagName === 'VIDEO';
+                if (existingIsVideo === isVideo && existingSrc === fullPath) {
+                    if (isVideo && existing.paused) {
+                        existing.play().catch(() => {});
+                    }
+                    return;
+                }
+                if (existingIsVideo) {
+                    try { existing.pause(); } catch (e) { /* ignore */ }
+                    try { io.unobserve(slot); } catch (e) { /* ignore */ }
+                }
+                existing.remove();
+            }
+
             const openZoom = (e) => {
                 e.stopPropagation();
                 e.preventDefault();
-                showMediaZoom(path, isVideoUrl(fileName));
+                showMediaZoom(fullPath, isVideo);
             };
 
-            if (isVideoUrl(fileName)) {
+            if (isVideo) {
                 const v = document.createElement('video');
-                v.src = path;
+                v.className = 'gic-cell-video';
+                v.dataset.src = fullPath;
                 v.muted = true;
                 v.loop = true;
                 v.playsInline = true;
-                v.preload = 'metadata';
-                v.style.cssText = 'width:100%;height:100%;object-fit:contain;display:block;';
+                v.autoplay = true;
+                v.preload = 'auto';
+                v.setAttribute('muted', '');
+                v.setAttribute('loop', '');
+                v.setAttribute('playsinline', '');
+                v.setAttribute('webkit-playsinline', '');
+                v.setAttribute('autoplay', '');
+                v.setAttribute('disablepictureinpicture', '');
+                v.setAttribute('disableremoteplayback', '');
+                v.style.cssText = 'width:100%;height:100%;object-fit:contain;display:block;background:#000;pointer-events:auto;cursor:zoom-in;';
                 v.addEventListener('click', openZoom);
+                v.addEventListener('loadeddata', () => {
+                    console.log('[STJ Video] loaded:', fullPath);
+                }, { once: true });
+                v.addEventListener('error', () => {
+                    console.warn('[STJ Video] error:', fullPath, v.error?.code);
+                }, { once: true });
+                v.src = fullPath;
                 slot.insertBefore(v, slot.firstChild);
+
+                const p = v.play();
+                if (p && typeof p.catch === 'function') p.catch(() => {});
+
+                io.observe(slot);
             } else {
                 const img = document.createElement('img');
-                img.src = path;
+                img.src = fullPath;
+                img.dataset.src = fullPath;
                 img.alt = fileName;
-                img.style.cssText = 'width:100%;height:100%;object-fit:contain;display:block;';
+                img.style.cssText = 'width:100%;height:100%;object-fit:contain;display:block;pointer-events:auto;cursor:zoom-in;';
                 img.addEventListener('click', openZoom);
                 slot.insertBefore(img, slot.firstChild);
             }
         });
     }
 
-    // ★ メディア拡大表示（セルポップアップ内の画像/動画クリック / 🔍ボタン）
+    // ★ メディア拡大表示（画像・動画両対応）
     function showMediaZoom(src, isVideo) {
         const existing = document.getElementById('stj_media_zoom');
         if (existing) existing.remove();
@@ -1090,19 +1194,34 @@
         overlay.id = 'stj_media_zoom';
         overlay.className = 'stj-media-zoom';
 
+        const closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        closeBtn.className = 'stj-media-zoom-close';
+        closeBtn.textContent = '×';
+        closeBtn.title = '閉じる (Esc / 外側クリック)';
+        overlay.appendChild(closeBtn);
+
         let mediaEl;
         if (isVideo) {
             mediaEl = document.createElement('video');
-            mediaEl.src = src;
-            mediaEl.autoplay = true;
+            mediaEl.dataset.src = src;
+            mediaEl.controls = true;
             mediaEl.loop = true;
-            mediaEl.muted = true;
             mediaEl.playsInline = true;
+            mediaEl.autoplay = true;
+            mediaEl.muted = false;
             mediaEl.preload = 'auto';
+            mediaEl.setAttribute('controls', '');
+            mediaEl.setAttribute('playsinline', '');
+            mediaEl.setAttribute('webkit-playsinline', '');
+            mediaEl.setAttribute('autoplay', '');
+            mediaEl.setAttribute('loop', '');
+            mediaEl.src = src;
         } else {
             mediaEl = document.createElement('img');
             mediaEl.src = src;
             mediaEl.alt = '';
+            mediaEl.dataset.src = src;
         }
         mediaEl.className = 'stj-media-zoom-content';
         overlay.appendChild(mediaEl);
@@ -1111,23 +1230,47 @@
             overlay.remove();
             document.body.classList.remove('stj-zoom-active');
             document.removeEventListener('keydown', onKeyDown);
+            try { mediaEl.pause && mediaEl.pause(); } catch (e) { /* ignore */ }
         };
         const onKeyDown = (e) => {
             if (e.key === 'Escape') close();
         };
 
         overlay.addEventListener('click', (e) => {
+            if (e.target === closeBtn || closeBtn.contains(e.target)) {
+                e.stopPropagation();
+                e.preventDefault();
+                close();
+                return;
+            }
+            if (e.target === mediaEl) {
+                if (isVideo) return;
+                e.stopPropagation();
+                e.preventDefault();
+                close();
+                return;
+            }
             e.stopPropagation();
             e.preventDefault();
             close();
         });
-        document.addEventListener('keydown', onKeyDown);
 
+        closeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            close();
+        });
+
+        document.addEventListener('keydown', onKeyDown);
         document.body.classList.add('stj-zoom-active');
         document.body.appendChild(overlay);
 
         if (isVideo) {
-            mediaEl.play().catch(() => {});
+            mediaEl.play().catch((err) => {
+                console.warn('[STJ Video Zoom] autoplay failed, retrying muted:', err);
+                mediaEl.muted = true;
+                mediaEl.play().catch(() => {});
+            });
         }
     }
 
@@ -1792,9 +1935,6 @@
         `;
     }
 
-    // ============================================================
-    // 確認ダイアログ / メッセージダイアログを body 直下に作成
-    // ============================================================
     function createConfirmDialog() {
         const existing = document.getElementById('stj_confirm_dialog');
         if (existing) existing.remove();
