@@ -938,16 +938,25 @@
         grid.innerHTML = '';
         grid.scrollTop = 0;
 
-        // ★ グリッドが変わったら IntersectionObserver を破棄
         if (_cellVideoIO) {
             try { _cellVideoIO.disconnect(); } catch (e) { /* ignore */ }
             _cellVideoIO = null;
             _cellVideoIORoot = null;
         }
 
-        renderCellModalGrid(cell);
+        // ★ モーダルを先に表示（display: none 内での video 生成を避ける）
         currentCellModal.classList.add('visible');
         document.body.classList.add('stj-cell-modal-active');
+
+        // ★ 次フレームでレンダリング（レイアウト確定後）
+        requestAnimationFrame(() => {
+            if (!currentCellModal || currentModalCell !== cell) return;
+            try {
+                renderCellModalGrid(cell);
+            } catch (e) {
+                console.error('[STJ Editor] renderCellModalGrid error:', e);
+            }
+        });
 
         if (!isSpecial && kwInput) {
             setTimeout(() => {
@@ -977,7 +986,6 @@
         modalOriginalImages = [];
         document.body.classList.remove('stj-cell-modal-active');
 
-        // ★ グリッド内の動画を停止し、IO も破棄
         if (_cellVideoIO) {
             try { _cellVideoIO.disconnect(); } catch (e) { /* ignore */ }
             _cellVideoIO = null;
@@ -1146,31 +1154,63 @@
                 const v = document.createElement('video');
                 v.className = 'gic-cell-video';
                 v.dataset.src = fullPath;
-                v.muted = true;
-                v.loop = true;
-                v.playsInline = true;
-                v.autoplay = true;
-                v.preload = 'auto';
+
+                // ★ 属性は src より前にすべて設定（Firefox autoplay の要件）
                 v.setAttribute('muted', '');
                 v.setAttribute('loop', '');
                 v.setAttribute('playsinline', '');
                 v.setAttribute('webkit-playsinline', '');
                 v.setAttribute('autoplay', '');
+                v.setAttribute('preload', 'auto');
                 v.setAttribute('disablepictureinpicture', '');
                 v.setAttribute('disableremoteplayback', '');
+                v.muted = true;
+                v.loop = true;
+                v.playsInline = true;
+                v.autoplay = true;
+                v.preload = 'auto';
+
                 v.style.cssText = 'width:100%;height:100%;object-fit:contain;display:block;background:#000;pointer-events:auto;cursor:zoom-in;';
                 v.addEventListener('click', openZoom);
+
+                v.addEventListener('loadstart', () => {
+                    console.log('[STJ Video] loadstart:', fullPath);
+                }, { once: true });
+                v.addEventListener('loadedmetadata', () => {
+                    console.log('[STJ Video] metadata:', fullPath, `${v.videoWidth}x${v.videoHeight}`);
+                }, { once: true });
                 v.addEventListener('loadeddata', () => {
                     console.log('[STJ Video] loaded:', fullPath);
                 }, { once: true });
-                v.addEventListener('error', () => {
-                    console.warn('[STJ Video] error:', fullPath, v.error?.code);
+                v.addEventListener('canplay', () => {
+                    console.log('[STJ Video] canplay:', fullPath);
                 }, { once: true });
+                v.addEventListener('playing', () => {
+                    console.log('[STJ Video] playing:', fullPath);
+                }, { once: true });
+                v.addEventListener('error', () => {
+                    console.warn('[STJ Video] error:', fullPath, v.error?.code, v.error?.message);
+                }, { once: true });
+
                 v.src = fullPath;
                 slot.insertBefore(v, slot.firstChild);
 
                 const p = v.play();
                 if (p && typeof p.catch === 'function') p.catch(() => {});
+
+                // ★ 3秒後にまだ readyState 0 なら警告 + 再試行
+                setTimeout(() => {
+                    if (v.parentNode && v.readyState === 0) {
+                        console.warn('[STJ Video] still not loaded after 3s:', fullPath, 'error=', v.error);
+                        try {
+                            const retrySrc = v.src;
+                            v.src = '';
+                            v.src = retrySrc;
+                            v.load();
+                            v.play().catch(() => {});
+                        } catch (e) { /* ignore */ }
+                    }
+                }, 3000);
 
                 io.observe(slot);
             } else {
@@ -1205,17 +1245,17 @@
         if (isVideo) {
             mediaEl = document.createElement('video');
             mediaEl.dataset.src = src;
+            mediaEl.setAttribute('controls', '');
+            mediaEl.setAttribute('playsinline', '');
+            mediaEl.setAttribute('webkit-playsinline', '');
+            mediaEl.setAttribute('autoplay', '');
+            mediaEl.setAttribute('loop', '');
             mediaEl.controls = true;
             mediaEl.loop = true;
             mediaEl.playsInline = true;
             mediaEl.autoplay = true;
             mediaEl.muted = false;
             mediaEl.preload = 'auto';
-            mediaEl.setAttribute('controls', '');
-            mediaEl.setAttribute('playsinline', '');
-            mediaEl.setAttribute('webkit-playsinline', '');
-            mediaEl.setAttribute('autoplay', '');
-            mediaEl.setAttribute('loop', '');
             mediaEl.src = src;
         } else {
             mediaEl = document.createElement('img');
@@ -1639,7 +1679,12 @@
             placeholder.dataset.originalText = (placeholder.textContent || 'プレビュー').trim() || 'プレビュー';
         }
 
-        const removeMedia = () => previewEl.querySelectorAll(':scope > img, :scope > video').forEach(el => el.remove());
+        const removeMedia = () => previewEl.querySelectorAll(':scope > img, :scope > video').forEach(el => {
+            if (el.tagName === 'VIDEO') {
+                try { el.pause(); } catch (e) { /* ignore */ }
+            }
+            el.remove();
+        });
         const removeLoading = () => previewEl.querySelectorAll(':scope > .stj-preview-loading').forEach(el => el.remove());
         const placeholderShowNormal = () => {
             placeholder.textContent = placeholder.dataset.originalText;
@@ -1703,8 +1748,22 @@
 
         if (isVideoUrl(fullPath)) {
             const video = document.createElement('video');
-            video.muted = true; video.loop = true; video.playsInline = true;
-            video.preload = 'auto'; video.src = fullPath;
+
+            // ★ 属性を src より前にすべて設定（Firefox autoplay の要件）
+            video.setAttribute('muted', '');
+            video.setAttribute('loop', '');
+            video.setAttribute('playsinline', '');
+            video.setAttribute('webkit-playsinline', '');
+            video.setAttribute('autoplay', '');
+            video.setAttribute('preload', 'auto');
+            video.muted = true;
+            video.loop = true;
+            video.playsInline = true;
+            video.autoplay = true;
+            video.preload = 'auto';
+
+            video.src = fullPath;
+
             await new Promise((resolve) => {
                 let done = false;
                 const finish = () => { if (done) return; done = true; resolve(); };
@@ -1720,12 +1779,12 @@
                 previewEl.dataset.currentPath = '__missing__';
                 return;
             }
-            video.autoplay = true;
             video.style.width = '100%'; video.style.height = '100%';
             video.style.objectFit = 'contain'; video.style.display = 'block';
             video.style.backgroundColor = 'transparent';
             previewEl.appendChild(video);
-            video.play().catch(() => {});
+            const p = video.play();
+            if (p && typeof p.catch === 'function') p.catch(() => {});
             previewEl.dataset.currentPath = fullPath;
             removeLoading(); placeholderHide();
         } else {
