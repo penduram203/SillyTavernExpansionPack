@@ -1577,9 +1577,9 @@ function getAllPreviews() {
     return Array.from(document.querySelectorAll(selector));
 }
 
+// ★ closePreviewElement: pending はクリアしない（動画切り替えのため）
 function closePreviewElement(el) {
     if (!el || !el.parentNode) return;
-    window.__gicPendingPreview = null;
     const closeBtn = el.querySelector('.dragClose');
     if (closeBtn && typeof closeBtn.click === 'function') {
         try { closeBtn.click(); return; } catch (e) { /* fallback */ }
@@ -1587,8 +1587,10 @@ function closePreviewElement(el) {
     try { el.remove(); } catch (e) { /* ignore */ }
 }
 
+// ★ closeAllPreviews: ここで pending をクリア
 function closeAllPreviews() {
     const previews = getAllPreviews();
+    window.__gicPendingPreview = null;
     if (previews.length === 0) {
         currentPreviewEl = null;
         return;
@@ -1960,12 +1962,36 @@ function fitPreviewToViewport(panel) {
         return;
     }
 
+    // ★ 動画→画像切り替え時: 残った動画を完全削除
+    panel.querySelectorAll('video').forEach(v => {
+        try { v.pause(); } catch (e) { /* ignore */ }
+        try { v.remove(); } catch (e) { /* ignore */ }
+    });
+
     const img = panel.querySelector(':scope > img') || panel.querySelector('img');
     const header = panel.querySelector('.panelControlBar');
     const closeBtn = panel.querySelector('.dragClose');
     if (!img) return;
 
-    if (header) header.style.setProperty('flex', '0 0 auto', 'important');
+    // ★ 動画→画像切り替え時: ヘッダーを元に戻す
+    if (header) {
+        header.style.removeProperty('height');
+        header.style.removeProperty('min-height');
+        header.style.removeProperty('max-height');
+        header.style.removeProperty('padding');
+        header.style.removeProperty('margin');
+        header.style.removeProperty('overflow');
+        header.style.removeProperty('background');
+        header.style.removeProperty('border');
+        header.style.setProperty('flex', '0 0 auto', 'important');
+        header.querySelectorAll('*').forEach(child => {
+            child.style.removeProperty('display');
+        });
+    }
+    if (closeBtn) {
+        closeBtn.style.removeProperty('top');
+    }
+    img.style.setProperty('display', 'block', 'important');
 
     const applySize = () => {
         const nw = img.naturalWidth || 0;
@@ -2044,18 +2070,18 @@ function fitPreviewToViewport(panel) {
     }
 }
 
-// ★ 動画プレビュー: nGY2 のプレビュー内 img を video に置き換える（位置ズレ修正版）
+// ★ 動画プレビュー: nGY2 のプレビュー内 img を video に置き換える
 function fitVideoPreview(panel, pending) {
     if (!panel || !pending || !pending.title || !pending.charName) return;
 
     const expectedSrc = '/user/images/' + encodeURIComponent(pending.charName) + '/' + encodeURIComponent(pending.title);
 
-    // パネル内の img を非表示
+    // 既存の img を非表示
     panel.querySelectorAll('img').forEach(img => {
         img.style.setProperty('display', 'none', 'important');
     });
 
-    // ★ nGY2 が独自生成した video（当方のクラスを持たないもの）を完全削除
+    // nGY2 製 video を削除
     panel.querySelectorAll('video').forEach(v => {
         if (!v.classList.contains('gic-gallery-preview-video')) {
             try { v.pause(); } catch (e) { /* ignore */ }
@@ -2063,7 +2089,7 @@ function fitVideoPreview(panel, pending) {
         }
     });
 
-    // ★ 他パネルにある当方の video も削除（幽霊再生防止）
+    // 他パネルの当方 video を削除
     document.querySelectorAll('video.gic-gallery-preview-video').forEach(v => {
         if (!panel.contains(v)) {
             try { v.pause(); } catch (e) { /* ignore */ }
@@ -2071,7 +2097,7 @@ function fitVideoPreview(panel, pending) {
         }
     });
 
-    // ★ このパネル内の古い/別src の video を削除
+    // 別srcの当方 video を削除
     panel.querySelectorAll('video.gic-gallery-preview-video').forEach(v => {
         if (v.dataset.gicSrc !== expectedSrc) {
             try { v.pause(); } catch (e) { /* ignore */ }
@@ -2079,7 +2105,6 @@ function fitVideoPreview(panel, pending) {
         }
     });
 
-    // 該当する video を探す
     let video = null;
     panel.querySelectorAll('video.gic-gallery-preview-video').forEach(v => {
         if (v.dataset.gicSrc === expectedSrc) video = v;
@@ -2129,11 +2154,8 @@ function fitVideoPreview(panel, pending) {
     const fitScale = Math.min(availableW / nw, availableH / nh);
     const finalW = Math.max(1, Math.floor(nw * fitScale));
     const finalH = Math.max(1, Math.floor(nh * fitScale));
-
-    // ★ transform を使わず、明示的な top で中央配置
     const topPx = Math.max(0, Math.round((vh - finalH) / 2));
 
-    // パネル: 明示サイズ + overflow: hidden で確実にクリップ
     panel.style.setProperty('position', 'fixed', 'important');
     panel.style.setProperty('left', galleryRight + 'px', 'important');
     panel.style.setProperty('top', topPx + 'px', 'important');
@@ -2153,7 +2175,6 @@ function fitVideoPreview(panel, pending) {
     panel.style.setProperty('visibility', 'visible', 'important');
     panel.style.setProperty('z-index', '15000', 'important');
 
-    // video は panel の絶対領域全体
     video.style.setProperty('position', 'absolute', 'important');
     video.style.setProperty('left', '0', 'important');
     video.style.setProperty('top', '0', 'important');
@@ -2165,20 +2186,33 @@ function fitVideoPreview(panel, pending) {
     video.style.setProperty('display', 'block', 'important');
     video.style.setProperty('z-index', '1', 'important');
 
-    // ヘッダーバーを非表示
+    // ★ ヘッダーは消さず、透明化して❌だけ残す
     const header = panel.querySelector('.panelControlBar');
     if (header) {
-        header.style.setProperty('display', 'none', 'important');
+        header.style.setProperty('height', '0', 'important');
+        header.style.setProperty('min-height', '0', 'important');
+        header.style.setProperty('max-height', '0', 'important');
+        header.style.setProperty('padding', '0', 'important');
+        header.style.setProperty('margin', '0', 'important');
+        header.style.setProperty('overflow', 'visible', 'important');
+        header.style.setProperty('background', 'transparent', 'important');
+        header.style.setProperty('border', 'none', 'important');
+        header.querySelectorAll('*').forEach(child => {
+            if (!child.classList.contains('dragClose')) {
+                child.style.setProperty('display', 'none', 'important');
+            }
+        });
     }
 
-    // close ボタンはパネル左端に固定
+    // ★ ❌はパネル左端・縦中央に配置
     const closeBtn = panel.querySelector('.dragClose');
     if (closeBtn) {
+        closeBtn.style.setProperty('display', 'inline-block', 'important');
         closeBtn.style.setProperty('position', 'fixed', 'important');
         closeBtn.style.setProperty('left', '0', 'important');
-        closeBtn.style.setProperty('top', topPx + 'px', 'important');
-        closeBtn.style.setProperty('transform', `scale(${GALLERY_PREVIEW_CLOSE_SCALE})`, 'important');
-        closeBtn.style.setProperty('transform-origin', 'left top', 'important');
+        closeBtn.style.setProperty('top', (topPx + finalH / 2) + 'px', 'important');
+        closeBtn.style.setProperty('transform', `translateY(-50%) scale(${GALLERY_PREVIEW_CLOSE_SCALE})`, 'important');
+        closeBtn.style.setProperty('transform-origin', 'left center', 'important');
         closeBtn.style.setProperty('margin', '0', 'important');
         closeBtn.style.setProperty('z-index', '15001', 'important');
     }
