@@ -455,7 +455,7 @@
   overflow: hidden;
 }
 
-/* ★ ヘッダー: ❌ボタンを削除したため、決定→キャンセル→キーワード→選択肢 の順 */
+/* ★ ヘッダー: 決定→キャンセル→キーワード→選択肢 の順（❌ボタンなし） */
 .stj-cell-modal-header {
   height: 60px;
   min-height: 60px;
@@ -498,7 +498,6 @@
 }
 .stj-cell-modal-cancel:hover { background: #2d3748; }
 
-/* ★ キーワード入力欄の縦幅・フォント拡大 */
 .stj-cell-modal-keyword {
   width: 300px;
   height: 44px;
@@ -513,7 +512,6 @@
 }
 .stj-cell-modal-keyword::placeholder { color: #718096; }
 
-/* ★ 選択肢ボタン */
 .stj-cell-modal-choices {
   height: 44px;
   padding: 0 16px;
@@ -554,7 +552,7 @@
   user-select: none;
 }
 
-/* ★ 3×3グリッド → 10枚目以降はスクロールで表示 */
+/* ★ 3×3グリッド */
 .stj-cell-modal-grid {
   flex: 1;
   display: grid;
@@ -587,11 +585,9 @@
   border-style: solid;
   border-color: #2d3748;
   background: #0d1117;
-  /* ★ スロット自体にもズームインカーソル（余白領域対策） */
-  cursor: zoom-in;
 }
 
-/* ★ セルポップアップ内のメディア: クリック可能にし、ズームインカーソルを強制 */
+/* ★ セルポップアップ内のメディア: クリック可能に */
 .stj-cell-modal-slot > img,
 .stj-cell-modal-slot > video {
   max-width: 100%;
@@ -602,13 +598,44 @@
   cursor: zoom-in !important;
 }
 
-/* 万全を期すため body 直下からも強制 */
-body .stj-cell-modal .stj-cell-modal-grid .stj-cell-modal-slot > img,
-body .stj-cell-modal .stj-cell-modal-grid .stj-cell-modal-slot > video {
-  cursor: zoom-in !important;
-  pointer-events: auto !important;
+/* ============================================================
+   ★ 中央の拡大表示ボタン（🔍）
+      スロットにデータがある時だけホバーで表示
+      ❌ボタンと同じ仕組み
+   ============================================================ */
+.stj-cell-modal-slot-zoom {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 68px;
+  height: 68px;
+  padding: 0;
+  background: rgba(0, 0, 0, 0.65);
+  color: #ffffff;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  cursor: zoom-in;
+  font-size: 32px;
+  font-weight: bold;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 11;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.7);
+  pointer-events: auto;
+  user-select: none;
+  line-height: 1;
+}
+.stj-cell-modal-slot[data-file-name]:hover .stj-cell-modal-slot-zoom {
+  display: flex;
+}
+.stj-cell-modal-slot-zoom:hover {
+  background: rgba(0, 0, 0, 0.9);
+  transform: translate(-50%, -50%) scale(1.1);
 }
 
+/* ===== ❌（右下）登録解除ボタン ===== */
 .stj-cell-modal-slot-remove {
   position: absolute;
   bottom: 4px;
@@ -690,7 +717,7 @@ body .stj-cell-modal .stj-cell-modal-grid .stj-cell-modal-slot > video {
 }
 
 /* ============================================================
-   ★ メディア拡大表示（セルポップアップ内の画像/動画クリック）
+   ★ メディア拡大表示（セルポップアップ内の画像/動画クリック / 🔍ボタン）
    ============================================================ */
 .stj-media-zoom {
   position: fixed;
@@ -766,7 +793,7 @@ body.stj-zoom-active #gic-bulk-toast {
 }
 #stj_confirm_dialog {
   background-color: rgba(0, 0, 0, 0.6);
-  z-index: 25000;  /* セルポップアップ(20000)より前面 */
+  z-index: 25000;
 }
 #stj_message_dialog {
   background-color: rgba(0, 0, 0, 0.4);
