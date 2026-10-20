@@ -2914,15 +2914,18 @@ function installGalleryCloseInterceptor() {
 //
 //    チェックマークを押すと ST本体は「ギャラリーを閉じる → フォルダ再読込
 //    → ギャラリーを開く」を行う。この再構築（特に画像のロードと
-//    nanogallery2 のレンダリング）は最大で30秒程度かかることがある。
+//    nanogallery2 のレンダリング）はネットワーク状況により数秒〜
+//    30秒程度かかることがある。
 //
-//    旧実装は isGalleryOpen() の 6秒タイムアウトで強制オープンしていたため、
-//    ST本体の再構築と競合して二重リビルド → 合計30秒以上かかっていた。
+//    旧実装の問題:
+//      - 強制オープン後の判定が1.5秒と短く、ST本体の処理完了を待てず
+//      - 1秒間隔で3回の openGallery() を発火 → 3つのギャラリーが多重生成
+//      - 「openGalleryFromGic が true を返した」= 「ギャラリーが開いた」と誤認
 //
-//    新実装では #gallery 要素の存在を監視し、
-//      - 要素が出現していれば ST本体が作業中と判断 → 最長40秒待機
-//      - 要素が一切出現しなければ ST本体が失敗したと判断 → 6秒で強制オープン
-//    とすることで、ST本体の処理を妨げず、本当に必要な時だけ介入する。
+//    新実装:
+//      - 強制オープンは1回だけ発火し、その後20秒間ポーリングで完了を待つ
+//      - それでもダメならもう1回だけ強制オープン → さらに20秒待つ
+//      - 強制オープン前に dedupeGalleryElements() で既存コンテナを掃除
 // ============================================================
 function installFolderChangeReopenGuard() {
     if (window.__gicFolderReopenGuardInstalled) return;
@@ -2940,96 +2943,99 @@ function installFolderChangeReopenGuard() {
 
     function forceReopen() {
         const myToken = ++reopenToken;
-        const INTERVAL = 250;
-        const ABSENT_TIMEOUT_MS = 6000;    // #gallery要素が一切出現しない場合
-        const LOADING_TIMEOUT_MS = 40000;  // #gallery要素は出現したが可視化しない場合
         const startTime = Date.now();
+        const POLL = 300;
+        const ABSENT_TIMEOUT = 8000;     // #gallery要素が一切出現しない場合の待機
+        const LOADING_TIMEOUT = 45000;   // #gallery要素は出現したが可視化しない場合の待機
+        const FORCE_WAIT = 20000;        // 強制オープン後の待機時間
+        const MAX_FORCE = 2;             // 最大強制オープン回数
+
         let firstSeenAt = 0;
-        let attempts = 0;
+        let forceCount = 0;
+        let forceStartedAt = 0;
 
-        const tryReopen = () => {
-            if (myToken !== reopenToken) return; // 新しいクリックで中断
-            attempts++;
-            const now = Date.now();
+        function success(elapsed) {
+            lastGalleryStateForGic = null;
+            clearGalleryOpenInFlight();
+            applyGalleryLayout();
+            syncGalleryButtonVisibility();
+            setTimeout(() => {
+                if (myToken !== reopenToken) return;
+                if (window.STJEditor?.open && !window.STJEditor.isOpen?.()) {
+                    try { window.STJEditor.open(); } catch (e) { /* ignore */ }
+                }
+            }, 400);
+            console.log(`[GIC] 📁 再オープン完了 (force=${forceCount}, elapsed=${elapsed}ms)`);
+        }
 
-            // キャッシュをクリアして最新状態を取得
+        function tryForce() {
+            if (myToken !== reopenToken) return;
+            if (forceCount >= MAX_FORCE) {
+                console.error(`[GIC] 📁 再オープン失敗 (${forceCount}回の強制オープン後)`);
+                return;
+            }
+            forceCount++;
+            clearGalleryOpenInFlight();
             _galleryOpenCache = { value: false, timestamp: 0 };
+            lastGalleryStateForGic = null;
+            // 強制オープン前に既存コンテナを掃除（多重化防止）
+            try { dedupeGalleryElements(); } catch (e) { /* ignore */ }
+            const dispatched = openGalleryFromGic();
+            forceStartedAt = Date.now();
+            console.warn(
+                `[GIC] 📁 強制オープン ${forceCount}/${MAX_FORCE} ` +
+                `(dispatch=${dispatched}) → ${FORCE_WAIT}ms 待機`
+            );
+            setTimeout(tick, 500);
+        }
+
+        function tick() {
+            if (myToken !== reopenToken) return;
+            const now = Date.now();
+            _galleryOpenCache = { value: false, timestamp: 0 };
+
+            // 開いた？
             if (isGalleryOpen()) {
-                // ========== 成功 ==========
-                lastGalleryStateForGic = null;
-                clearGalleryOpenInFlight();
-                applyGalleryLayout();
-                syncGalleryButtonVisibility();
-                setTimeout(() => {
-                    if (myToken !== reopenToken) return;
-                    if (window.STJEditor?.open && !window.STJEditor.isOpen?.()) {
-                        try { window.STJEditor.open(); } catch (e) { /* ignore */ }
-                    }
-                }, 400);
-                console.log(`[GIC] 📁 再オープン完了 (attempts=${attempts}, elapsed=${now - startTime}ms)`);
+                success(now - startTime);
                 return;
             }
 
-            const galleryEl = document.getElementById('gallery');
+            // ===== 強制オープンフェーズ =====
+            if (forceStartedAt > 0) {
+                if (now - forceStartedAt < FORCE_WAIT) {
+                    setTimeout(tick, POLL);
+                    return;
+                }
+                // 待機タイムアウト → もう一度強制 or 諦める
+                tryForce();
+                return;
+            }
 
-            if (galleryEl) {
-                // #gallery要素が存在 = ST本体が再構築中。長めに待つ。
+            // ===== 通常待機フェーズ =====
+            const el = document.getElementById('gallery');
+            if (el) {
                 if (!firstSeenAt) {
                     firstSeenAt = now;
                     console.log('[GIC] 📁 #gallery 出現 - ST再構築の完了を待機');
                 }
-                if (now - firstSeenAt < LOADING_TIMEOUT_MS) {
-                    setTimeout(tryReopen, INTERVAL);
+                if (now - firstSeenAt < LOADING_TIMEOUT) {
+                    setTimeout(tick, POLL);
                     return;
                 }
-                console.warn(`[GIC] 📁 要素存在${LOADING_TIMEOUT_MS}ms経過 → 強制オープン`);
-            } else {
-                // #gallery要素が一切ない = ST本体が失敗した可能性。短めに待つ。
-                if (now - startTime < ABSENT_TIMEOUT_MS) {
-                    setTimeout(tryReopen, INTERVAL);
-                    return;
-                }
-                console.warn(`[GIC] 📁 要素不在${ABSENT_TIMEOUT_MS}ms経過 → 強制オープン`);
+                console.warn(`[GIC] 📁 要素存在 ${LOADING_TIMEOUT}ms 経過 → 強制オープン`);
+                tryForce();
+                return;
             }
-
-            // ========== 強制オープン（リトライ付き） ==========
-            let forceAttempts = 0;
-            const MAX_FORCE_ATTEMPTS = 3;
-
-            const doForceOpen = () => {
-                if (myToken !== reopenToken) return;
-                forceAttempts++;
-
-                clearGalleryOpenInFlight();
-                _galleryOpenCache = { value: false, timestamp: 0 };
-                lastGalleryStateForGic = null;
-                const ok = openGalleryFromGic();
-                console.log(`[GIC] 📁 強制オープン試行 ${forceAttempts}/${MAX_FORCE_ATTEMPTS} (ok=${ok})`);
-
-                setTimeout(() => {
-                    if (myToken !== reopenToken) return;
-                    if (isGalleryOpen()) {
-                        applyGalleryLayout();
-                        syncGalleryButtonVisibility();
-                        if (window.STJEditor?.open && !window.STJEditor.isOpen?.()) {
-                            try { window.STJEditor.open(); } catch (e) { /* ignore */ }
-                        }
-                        console.log(`[GIC] 📁 強制オープン成功 (attempt ${forceAttempts})`);
-                        return;
-                    }
-                    if (forceAttempts < MAX_FORCE_ATTEMPTS) {
-                        setTimeout(doForceOpen, 1000);
-                    } else {
-                        console.error('[GIC] 📁 強制オープン失敗');
-                    }
-                }, 1500);
-            };
-
-            doForceOpen();
-        };
+            if (now - startTime < ABSENT_TIMEOUT) {
+                setTimeout(tick, POLL);
+                return;
+            }
+            console.warn(`[GIC] 📁 要素不在 ${ABSENT_TIMEOUT}ms 経過 → 強制オープン`);
+            tryForce();
+        }
 
         // クリック直後の閉じる処理を待ってから開始
-        setTimeout(tryReopen, 300);
+        setTimeout(tick, 300);
     }
 
     document.addEventListener('click', (e) => {
