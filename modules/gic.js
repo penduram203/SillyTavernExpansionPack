@@ -133,7 +133,6 @@ function wait(ms) {
     return new Promise(r => setTimeout(r, ms));
 }
 
-// ★ 動画判定（拡大オーバーレイのモード切替に使用）
 function isVideoFile(url) {
     if (!url || typeof url !== 'string') return false;
     return /\.(mp4|webm)(\?|#|$)/i.test(url);
@@ -336,9 +335,6 @@ function getCurrentCharacterName() {
     document.head.appendChild(style);
 })();
 
-// ============================================================
-// ★ ギャラリー拡大プレビューを JSON編集画面(10001) より手前に表示
-// ============================================================
 (function injectGalleryLayoutStyle() {
     if (document.getElementById('gic-gallery-layout-style')) return;
     const style = document.createElement('style');
@@ -680,77 +676,22 @@ function getCurrentCharacterName() {
         body.gic-dragging #gallery * {
             pointer-events: none !important;
         }
+
+        /* 動画サムネイル（親の position は変更しない。video 自体のみ絶対配置） */
+        .gic-gallery-video {
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+            object-fit: cover !important;
+            pointer-events: none !important;
+            z-index: 1 !important;
+            background: transparent !important;
+        }
     `;
     document.head.appendChild(style);
     console.log('[GIC] 🖼️ ギャラリー配置CSSを注入しました');
-})();
-
-// ============================================================
-// ★ ギャラリー拡大表示オーバーレイのスタイル
-//   （サムネイルには一切スタイルを当てない）
-// ============================================================
-(function injectGalleryMediaOverlayStyle() {
-    if (document.getElementById('gic-gallery-media-overlay-style')) return;
-    const style = document.createElement('style');
-    style.id = 'gic-gallery-media-overlay-style';
-    style.textContent = `
-        .gic-gallery-media-overlay {
-            position: fixed !important;
-            top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
-            background: rgba(0, 0, 0, 0.92) !important;
-            z-index: 2147483647 !important;
-            display: flex !important;
-            justify-content: center !important;
-            align-items: center !important;
-            padding: 20px !important;
-            box-sizing: border-box !important;
-            cursor: zoom-out !important;
-        }
-        .gic-gallery-media-overlay-content {
-            max-width: 95vw !important;
-            max-height: 95vh !important;
-            width: auto !important;
-            height: auto !important;
-            object-fit: contain !important;
-            display: block !important;
-            cursor: default !important;
-            user-select: none !important;
-            border-radius: 4px !important;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8) !important;
-        }
-        .gic-gallery-media-overlay-close {
-            position: absolute !important;
-            top: 20px !important;
-            right: 20px !important;
-            width: 44px !important;
-            height: 44px !important;
-            padding: 0 !important;
-            background: #e53e3e !important;
-            color: #ffffff !important;
-            border: 2px solid #ffffff !important;
-            border-radius: 4px !important;
-            cursor: pointer !important;
-            font-size: 24px !important;
-            font-weight: bold !important;
-            display: flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-            z-index: 2147483647 !important;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6) !important;
-        }
-        .gic-gallery-media-overlay-close:hover {
-            background: #c53030 !important;
-        }
-        body.gic-zoom-active .gic-pagination-pager,
-        body.gic-zoom-active .gic-pagination-pager * {
-            display: none !important;
-            visibility: hidden !important;
-            pointer-events: none !important;
-            opacity: 0 !important;
-        }
-    `;
-    document.head.appendChild(style);
-    console.log('[GIC] 🔍 ギャラリー拡大オーバーレイCSSを注入しました');
 })();
 
 // ===== ユーティリティ =====
@@ -1128,11 +1069,10 @@ function setupGalleryDedupeObserver() {
 }
 
 // ============================================================
-// ★ ギャラリー拡大ボタン（固定オーバーレイ方式）
-//   - サムネイルの DOM には一切触れない
-//   - サムネイルの CSS も変更しない
-//   - 🔍 ボタンは document.body 直下の position: fixed 要素
-//   - mouseover で表示、mousemove で位置追従、マウスが離れたら非表示
+// ★ ギャラリー 🔍 アイコン（純粋な視覚オーバーレイ）
+//   - サムネイルの DOM/CSS は一切変更しない
+//   - document.body 直下の position: fixed 要素
+//   - pointer-events: none でクリックは nGY2 標準プレビューへ素通し
 // ============================================================
 function setupGalleryZoomButton() {
     if (window.__gicGalleryZoomBtnInstalled) return;
@@ -1144,11 +1084,9 @@ function setupGalleryZoomButton() {
 
     function ensureBtn() {
         if (zoomBtn) return zoomBtn;
-        zoomBtn = document.createElement('button');
+        zoomBtn = document.createElement('div');
         zoomBtn.className = 'gic-gallery-zoom-btn';
-        zoomBtn.type = 'button';
         zoomBtn.textContent = '🔍';
-        zoomBtn.title = '拡大表示';
 
         const s = zoomBtn.style;
         s.setProperty('position', 'fixed', 'important');
@@ -1160,36 +1098,17 @@ function setupGalleryZoomButton() {
         s.setProperty('color', '#ffffff', 'important');
         s.setProperty('border', 'none', 'important');
         s.setProperty('border-radius', '4px', 'important');
-        s.setProperty('cursor', 'zoom-in', 'important');
         s.setProperty('font-size', '18px', 'important');
         s.setProperty('font-weight', 'bold', 'important');
+        s.setProperty('display', 'none', 'important');
         s.setProperty('align-items', 'center', 'important');
         s.setProperty('justify-content', 'center', 'important');
         s.setProperty('z-index', '2147483647', 'important');
         s.setProperty('box-shadow', '0 2px 8px rgba(0, 0, 0, 0.6)', 'important');
-        s.setProperty('pointer-events', 'auto', 'important');
+        s.setProperty('pointer-events', 'none', 'important');  /* ★ クリック素通し */
         s.setProperty('line-height', '1', 'important');
         s.setProperty('user-select', 'none', 'important');
         s.setProperty('transform', 'translate(-50%, -50%)', 'important');
-        s.setProperty('display', 'none', 'important');
-
-        zoomBtn.addEventListener('pointerdown', (e) => {
-            e.stopImmediatePropagation();
-            e.stopPropagation();
-        }, true);
-        zoomBtn.addEventListener('mousedown', (e) => {
-            e.stopImmediatePropagation();
-            e.stopPropagation();
-        }, true);
-        zoomBtn.addEventListener('click', (e) => {
-            e.stopImmediatePropagation();
-            e.stopPropagation();
-            e.preventDefault();
-            if (!currentThumb) return;
-            const path = extractPathFromThumbEl(currentThumb);
-            if (!path) return;
-            showGalleryMediaOverlay(fullUrlFromPath(path), isVideoFile(path));
-        });
 
         document.body.appendChild(zoomBtn);
         return zoomBtn;
@@ -1216,7 +1135,6 @@ function setupGalleryZoomButton() {
 
     document.addEventListener('mouseover', (e) => {
         if (!e.target || !e.target.closest) return;
-        if (e.target.closest('.gic-gallery-zoom-btn')) return;
         const thumb = e.target.closest(GALLERY_THUMB_SELECTOR);
         if (!thumb) return;
         showFor(thumb);
@@ -1224,9 +1142,8 @@ function setupGalleryZoomButton() {
 
     document.addEventListener('mousemove', (e) => {
         if (!zoomBtn) return;
-        const cs = zoomBtn.style.display;
-        if (cs === 'none' || !cs) return;
-        if (e.target === zoomBtn || zoomBtn.contains(e.target)) return;
+        const disp = zoomBtn.style.display;
+        if (disp === 'none' || !disp) return;
         if (currentThumb) {
             const rect = currentThumb.getBoundingClientRect();
             if (e.clientX >= rect.left && e.clientX <= rect.right &&
@@ -1237,91 +1154,85 @@ function setupGalleryZoomButton() {
 
     document.addEventListener('scroll', () => hide(), true);
 
-    console.log('[GIC] 🔍 ギャラリー拡大ボタン（fixed overlay 方式）を有効化しました');
+    console.log('[GIC] 🔍 ギャラリー拡大アイコン（pointer-events: none）を有効化しました');
 }
 
-function extractPathFromThumbEl(thumb) {
-    let url = thumb.getAttribute('data-ngsrc')
-           || thumb.getAttribute('data-src')
-           || thumb.getAttribute('data-image');
-    if (!url) {
+// ============================================================
+// ★ 動画サムネイル（親要素の position は変更しない）
+//   - .nGY2GThumbnail が positioned の場合のみ video を追加
+//   - video は pointer-events: none でクリックは img/thumb に素通し
+//   - IntersectionObserver で可視時のみ再生
+// ============================================================
+function setupGalleryVideoThumbs() {
+    const gallery = document.getElementById('gallery');
+    if (!gallery) return;
+
+    gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1').forEach(thumb => {
+        if (thumb.querySelector(':scope > video.gic-gallery-video')) return;
+
+        let url = thumb.getAttribute('data-ngsrc')
+               || thumb.getAttribute('data-src')
+               || thumb.getAttribute('data-image');
+        if (!url) {
+            const img = thumb.querySelector('img');
+            if (img) url = img.getAttribute('data-src') || img.getAttribute('src');
+        }
+        if (!url) {
+            const a = thumb.querySelector('a');
+            if (a) url = a.getAttribute('href');
+        }
+        if (!url || !isVideoFile(url)) return;
+
+        // 親要素が static の場合はスキップ（レイアウト保護）
+        let pos = 'static';
+        try {
+            pos = window.getComputedStyle(thumb).position;
+        } catch (e) { /* ignore */ }
+        if (pos === 'static') return;
+
         const img = thumb.querySelector('img');
-        if (img) url = img.getAttribute('data-src') || img.getAttribute('src');
-    }
-    if (!url) {
-        const a = thumb.querySelector('a');
-        if (a) url = a.getAttribute('href');
-    }
-    return url ? urlToServerPath(url) : null;
-}
+        if (img) {
+            img.style.setProperty('opacity', '0', 'important');
+        }
 
-// ============================================================
-// ★ 🔍 ボタンからのギャラリー拡大表示オーバーレイ
-// ============================================================
-function showGalleryMediaOverlay(url, isVideo) {
-    const existing = document.getElementById('gic-gallery-media-overlay');
-    if (existing) existing.remove();
+        const video = document.createElement('video');
+        video.className = 'gic-gallery-video';
+        video.src = url;
+        video.muted = true;
+        video.loop = true;
+        video.playsInline = true;
+        video.preload = 'metadata';
+        video.setAttribute('muted', '');
+        video.setAttribute('playsinline', '');
+        video.setAttribute('webkit-playsinline', '');
+        video.setAttribute('disablepictureinpicture', '');
+        video.setAttribute('disableremoteplayback', '');
+        video.width = 200;
+        video.height = 200;
 
-    const overlay = document.createElement('div');
-    overlay.id = 'gic-gallery-media-overlay';
-    overlay.className = 'gic-gallery-media-overlay';
+        thumb.appendChild(video);
 
-    const closeBtn = document.createElement('button');
-    closeBtn.className = 'gic-gallery-media-overlay-close';
-    closeBtn.type = 'button';
-    closeBtn.textContent = '×';
-    closeBtn.title = '閉じる (Esc)';
-    overlay.appendChild(closeBtn);
-
-    let mediaEl;
-    if (isVideo) {
-        mediaEl = document.createElement('video');
-        mediaEl.src = url;
-        mediaEl.controls = true;
-        mediaEl.autoplay = true;
-        mediaEl.loop = true;
-        mediaEl.playsInline = true;
-        mediaEl.preload = 'auto';
-        mediaEl.muted = false;
-    } else {
-        mediaEl = document.createElement('img');
-        mediaEl.src = url;
-        mediaEl.alt = '';
-    }
-    mediaEl.className = 'gic-gallery-media-overlay-content';
-    overlay.appendChild(mediaEl);
-
-    const close = () => {
-        overlay.remove();
-        document.body.classList.remove('gic-zoom-active');
-        document.removeEventListener('keydown', onKeyDown);
-        try { mediaEl.pause && mediaEl.pause(); } catch (e) { /* ignore */ }
-    };
-    const onKeyDown = (e) => {
-        if (e.key === 'Escape') close();
-    };
-
-    closeBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        close();
+        if (!window.__gicGalleryVideoIO) {
+            window.__gicGalleryVideoIO = new IntersectionObserver((entries) => {
+                for (const entry of entries) {
+                    const v = entry.target.querySelector(':scope > video.gic-gallery-video');
+                    if (!v) continue;
+                    if (entry.isIntersecting) {
+                        const p = v.play();
+                        if (p && typeof p.catch === 'function') {
+                            p.catch(() => {
+                                v.muted = true;
+                                v.play().catch(() => {});
+                            });
+                        }
+                    } else {
+                        try { v.pause(); } catch (e) { /* ignore */ }
+                    }
+                }
+            }, { threshold: 0.1, rootMargin: '100px' });
+        }
+        window.__gicGalleryVideoIO.observe(thumb);
     });
-    overlay.addEventListener('click', (e) => {
-        if (e.target === mediaEl && isVideo) return;
-        if (e.target === closeBtn || closeBtn.contains(e.target)) return;
-        e.stopPropagation();
-        close();
-    });
-    document.addEventListener('keydown', onKeyDown);
-
-    document.body.classList.add('gic-zoom-active');
-    document.body.appendChild(overlay);
-
-    if (isVideo) {
-        mediaEl.play().catch(() => {
-            mediaEl.muted = true;
-            mediaEl.play().catch(() => {});
-        });
-    }
 }
 
 // ============================================================
@@ -1550,7 +1461,6 @@ function setupGalleryDragToJson() {
     document.addEventListener('pointerdown', (e) => {
         if (isSimulatingClick) return;
         if (e.button !== 0) return;
-        if (e.target.closest && e.target.closest('.gic-gallery-zoom-btn')) return;
         const gallery = document.getElementById('gallery');
         if (!gallery || !gallery.contains(e.target)) return;
         const thumb = e.target.closest(GALLERY_THUMB_SELECTOR);
@@ -1563,7 +1473,6 @@ function setupGalleryDragToJson() {
     document.addEventListener('mousedown', (e) => {
         if (isSimulatingClick) return;
         if (e.button !== 0) return;
-        if (e.target.closest && e.target.closest('.gic-gallery-zoom-btn')) return;
         const gallery = document.getElementById('gallery');
         if (!gallery || !gallery.contains(e.target)) return;
         const thumb = e.target.closest(GALLERY_THUMB_SELECTOR);
@@ -2553,7 +2462,7 @@ function installBulkDeleteDocumentHandlers() {
         '.dragTitle', '.panelControlBar', '.right_menu_button', '.menu_button',
         'button', 'input', 'select', '.nGY2GalleryBottom',
         '.nGY2ConsoleParent', '.gallery-sort-select',
-        '.gic-bulk-delete-button', '.gic-gallery-zoom-btn', '.dragClose'
+        '.gic-bulk-delete-button', '.dragClose'
     ].join(',');
 
     const findItem = (target, clientX, clientY) => {
@@ -2662,6 +2571,21 @@ function applyGalleryLayout() {
     if (Date.now() < (window.__gicNoLayoutUntil || 0)) return;
     isApplyingLayout = true;
     try {
+        // ★ プレビューが開いている場合は fit だけして終了（誤って閉じない）
+        const previewsAll = getAllPreviews();
+        if (previewsAll.length > 0) {
+            const latest = previewsAll[previewsAll.length - 1];
+            if (latest !== currentPreviewEl) {
+                for (const el of previewsAll) {
+                    if (el === latest) continue;
+                    closePreviewElement(el);
+                }
+                currentPreviewEl = latest;
+            }
+            fitPreviewToViewport(latest);
+            return;
+        }
+
         if (!isGalleryOpen()) {
             closeAllPreviews();
             return;
@@ -2670,6 +2594,7 @@ function applyGalleryLayout() {
         dedupeGalleryElements();
         applyGalleryWindowLayout();
         styleGalleryWindowCloseButton();
+        try { setupGalleryVideoThumbs(); } catch (e) { /* ignore */ }
 
         document.querySelectorAll('.nGY2paginationRectangle, .nGY2paginationRectangleCurrentPage').forEach(el => {
             el.style.setProperty('height', GALLERY_PAGINATION_HEIGHT + 'px', 'important');
@@ -2686,18 +2611,7 @@ function applyGalleryLayout() {
         try { setupBulkDelete(); } catch (e) { /* ignore */ }
         hideGalleryUploadMessage();
 
-        const previews = getAllPreviews();
-        if (previews.length === 0) { currentPreviewEl = null; return; }
-
-        const latest = previews[previews.length - 1];
-        if (latest !== currentPreviewEl) {
-            for (const el of previews) {
-                if (el === latest) continue;
-                closePreviewElement(el);
-            }
-            currentPreviewEl = latest;
-        }
-        fitPreviewToViewport(latest);
+        currentPreviewEl = null;
     } finally {
         setTimeout(() => { isApplyingLayout = false; }, 0);
     }
@@ -2734,6 +2648,10 @@ function syncGalleryButtonVisibility() {
             }, 300);
         }
     } else {
+        // プレビューが開いている間は gallery を閉じ扱いにしない
+        const previewsAll = getAllPreviews();
+        if (previewsAll.length > 0) return;
+
         resetGalleryHeightCache();
         closeAllPreviews();
         if (wasOpen && window.STJEditor?.isOpen?.()) {
@@ -2821,10 +2739,6 @@ function hideGalleryAttachmentsImmediately(reason = '') {
     }
     currentPreviewEl = null;
     hideStatusMessage();
-
-    const overlay = document.getElementById('gic-gallery-media-overlay');
-    if (overlay) overlay.remove();
-    document.body.classList.remove('gic-zoom-active');
 
     const zoomBtn = document.querySelector('.gic-gallery-zoom-btn');
     if (zoomBtn) zoomBtn.style.setProperty('display', 'none', 'important');
@@ -3395,6 +3309,7 @@ function initializeGIC() {
     syncButtonVisibilityForTextStyling();
     syncGalleryButtonVisibility();
     applyGalleryLayout();
+    try { setupGalleryVideoThumbs(); } catch (e) { /* ignore */ }
 }
 
 function bootstrapGIC() {
