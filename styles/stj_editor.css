@@ -526,6 +526,15 @@
   flex-shrink: 0;
   white-space: nowrap;
   transition: background-color 0.15s ease, opacity 0.15s ease;
+
+  /* ★ 黒い縁取り */
+  -webkit-text-stroke: 1px #000000;
+  paint-order: stroke fill;
+  text-shadow:
+    -1px -1px 0 #000,
+     1px -1px 0 #000,
+    -1px  1px 0 #000,
+     1px  1px 0 #000;
 }
 .stj-cell-modal-choices:hover:not(:disabled) {
   background: #1e3a8a;
