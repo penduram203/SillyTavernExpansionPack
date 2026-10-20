@@ -1185,22 +1185,32 @@ function setupGalleryDragToJson() {
     let startScroll = null;
     let isSimulatingClick = false;
 
+    // ★ title 属性を優先、data: URI は除外
     function getPathFromThumb(thumb) {
         if (!thumb) return null;
+
+        const title = (thumb.getAttribute('title') || '').trim();
+        if (title && !title.startsWith('data:')) {
+            return urlToServerPath(title);
+        }
+
         let url = thumb.getAttribute('data-ngsrc')
                || thumb.getAttribute('data-src')
                || thumb.getAttribute('data-image');
+        if (url && url.startsWith('data:')) url = null;
         if (!url) {
             const img = thumb.querySelector('img');
-            if (img) url = img.getAttribute('data-src') || img.getAttribute('src');
+            if (img) {
+                url = img.getAttribute('data-src') || img.getAttribute('src');
+                if (url && url.startsWith('data:')) url = null;
+            }
         }
         if (!url) {
             const a = thumb.querySelector('a');
-            if (a) url = a.getAttribute('href');
-        }
-        if (!url) {
-            const title = thumb.getAttribute('title');
-            if (title) url = title;
+            if (a) {
+                url = a.getAttribute('href');
+                if (url && url.startsWith('data:')) url = null;
+            }
         }
         return url ? urlToServerPath(url) : null;
     }
@@ -1491,7 +1501,6 @@ function setupGalleryDragToJson() {
             e.stopImmediatePropagation();
             e.preventDefault();
             if (!_bulkDeleteMode) {
-                // ★ クリックしたサムネイルが動画かを記録
                 const title = (thumb.getAttribute('title') || '').trim();
                 const isVid = isVideoFile(title);
                 const charName = getCurrentCharacterName();
@@ -1577,7 +1586,6 @@ function getAllPreviews() {
     return Array.from(document.querySelectorAll(selector));
 }
 
-// ★ closePreviewElement: pending はクリアしない（動画切り替えのため）
 function closePreviewElement(el) {
     if (!el || !el.parentNode) return;
     const closeBtn = el.querySelector('.dragClose');
@@ -1587,7 +1595,6 @@ function closePreviewElement(el) {
     try { el.remove(); } catch (e) { /* ignore */ }
 }
 
-// ★ closeAllPreviews: ここで pending をクリア
 function closeAllPreviews() {
     const previews = getAllPreviews();
     window.__gicPendingPreview = null;
@@ -1950,19 +1957,14 @@ function applyPageNumbers() {
     positionPager(pager);
 }
 
-// ============================================================
-// ★ プレビュー fit（画像 / 動画）
-// ============================================================
 function fitPreviewToViewport(panel) {
     if (!panel) return;
 
-    // ★ 動画クリック時は動画プレビューへ
     if (window.__gicPendingPreview) {
         fitVideoPreview(panel, window.__gicPendingPreview);
         return;
     }
 
-    // ★ 動画→画像切り替え時: 残った動画を完全削除
     panel.querySelectorAll('video').forEach(v => {
         try { v.pause(); } catch (e) { /* ignore */ }
         try { v.remove(); } catch (e) { /* ignore */ }
@@ -1973,7 +1975,6 @@ function fitPreviewToViewport(panel) {
     const closeBtn = panel.querySelector('.dragClose');
     if (!img) return;
 
-    // ★ 動画→画像切り替え時: ヘッダーを元に戻す
     if (header) {
         header.style.removeProperty('height');
         header.style.removeProperty('min-height');
@@ -2070,18 +2071,15 @@ function fitPreviewToViewport(panel) {
     }
 }
 
-// ★ 動画プレビュー: nGY2 のプレビュー内 img を video に置き換える
 function fitVideoPreview(panel, pending) {
     if (!panel || !pending || !pending.title || !pending.charName) return;
 
     const expectedSrc = '/user/images/' + encodeURIComponent(pending.charName) + '/' + encodeURIComponent(pending.title);
 
-    // 既存の img を非表示
     panel.querySelectorAll('img').forEach(img => {
         img.style.setProperty('display', 'none', 'important');
     });
 
-    // nGY2 製 video を削除
     panel.querySelectorAll('video').forEach(v => {
         if (!v.classList.contains('gic-gallery-preview-video')) {
             try { v.pause(); } catch (e) { /* ignore */ }
@@ -2089,7 +2087,6 @@ function fitVideoPreview(panel, pending) {
         }
     });
 
-    // 他パネルの当方 video を削除
     document.querySelectorAll('video.gic-gallery-preview-video').forEach(v => {
         if (!panel.contains(v)) {
             try { v.pause(); } catch (e) { /* ignore */ }
@@ -2097,7 +2094,6 @@ function fitVideoPreview(panel, pending) {
         }
     });
 
-    // 別srcの当方 video を削除
     panel.querySelectorAll('video.gic-gallery-preview-video').forEach(v => {
         if (v.dataset.gicSrc !== expectedSrc) {
             try { v.pause(); } catch (e) { /* ignore */ }
@@ -2186,7 +2182,6 @@ function fitVideoPreview(panel, pending) {
     video.style.setProperty('display', 'block', 'important');
     video.style.setProperty('z-index', '1', 'important');
 
-    // ★ ヘッダーは消さず、透明化して❌だけ残す
     const header = panel.querySelector('.panelControlBar');
     if (header) {
         header.style.setProperty('height', '0', 'important');
@@ -2204,7 +2199,6 @@ function fitVideoPreview(panel, pending) {
         });
     }
 
-    // ★ ❌はパネル左端・縦中央に配置
     const closeBtn = panel.querySelector('.dragClose');
     if (closeBtn) {
         closeBtn.style.setProperty('display', 'inline-block', 'important');
@@ -2286,8 +2280,10 @@ function extractImagePathFromItem(item) {
     return null;
 }
 
+// ★ data: URI を拒否
 function urlToServerPath(url) {
     if (!url || typeof url !== 'string') return null;
+    if (url.startsWith('data:')) return null;
     let path = url;
     try {
         const u = new URL(url, window.location.origin);
