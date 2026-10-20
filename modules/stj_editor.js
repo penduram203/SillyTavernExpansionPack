@@ -514,21 +514,18 @@
         );
     }
 
-    function showDeleteConfirmDialog(message, onConfirm, onCancel, options = {}) {
+    function showDeleteConfirmDialog(message, onConfirm, onCancel) {
         if (!confirmDialogEl) return;
         const msgEl = confirmDialogEl.querySelector('.stj-confirm-message');
         if (msgEl) msgEl.textContent = message || '本当に削除しますか？';
         pendingDeleteCallback = onConfirm;
         pendingCancelCallback = onCancel || null;
-        // セルポップアップ(z-index 20000)より前面に表示する必要がある場合は highZ を指定
-        confirmDialogEl.style.zIndex = options.highZ ? '25000' : '';
         confirmDialogEl.style.display = 'flex';
     }
 
     function hideDeleteConfirmDialog() {
         if (!confirmDialogEl) return;
         confirmDialogEl.style.display = 'none';
-        confirmDialogEl.style.zIndex = '';
         pendingDeleteCallback = null;
         pendingCancelCallback = null;
     }
@@ -837,7 +834,7 @@
         const modal = document.createElement('div');
         modal.id = 'stj_cell_modal';
         modal.className = 'stj-cell-modal';
-        // ★ ❌（close）ボタンはヘッダーから削除。閉じるには「キャンセル」または画面外クリック / Escape を使用
+        // ❌ ボタンはヘッダーに含めない（閉じるにはキャンセル / 画面外クリック / Escape）
         modal.innerHTML = `
             <div class="stj-cell-modal-content">
                 <div class="stj-cell-modal-header">
@@ -945,6 +942,9 @@
         renderCellModalGrid(cell);
         currentCellModal.classList.add('visible');
 
+        // ★ セルポップアップ表示中はギャラリーページャーを非表示・クリック無効にする
+        document.body.classList.add('stj-cell-modal-active');
+
         if (!isSpecial && kwInput) {
             setTimeout(() => {
                 try { kwInput.focus(); } catch (e) { /* ignore */ }
@@ -971,6 +971,7 @@
         currentModalCell = null;
         modalOriginalKeyword = '';
         modalOriginalImages = [];
+        document.body.classList.remove('stj-cell-modal-active');
     }
 
     // ★ 決定ボタン: 画像削除がある場合は確認ダイアログを挟む
@@ -980,15 +981,13 @@
         const cell = currentModalCell;
         const currentImages = getCellImages(cell);
         const currentSet = new Set(currentImages);
-        // modalOriginalImages にあって現在は無い = 登録解除された画像
         const removedFiles = modalOriginalImages.filter(f => !currentSet.has(f));
 
         if (removedFiles.length > 0) {
             showDeleteConfirmDialog(
                 `${removedFiles.length}枚の画像をキーワードから登録解除しますか？`,
                 () => { doApplyCellModal(); },
-                () => { /* いいえ: モーダルに留まる */ },
-                { highZ: true }
+                () => { /* いいえ: モーダルに留まる */ }
             );
             return;
         }
@@ -1014,6 +1013,7 @@
         currentModalCell = null;
         modalOriginalKeyword = '';
         modalOriginalImages = [];
+        document.body.classList.remove('stj-cell-modal-active');
     }
 
     // ★ 動的スロット生成（9以上は3の倍数で拡張）
@@ -1050,7 +1050,6 @@
                 path = `user/images/${charName}/${fileName}`;
             }
 
-            // ★ クリックで拡大表示
             const openZoom = (e) => {
                 e.stopPropagation();
                 e.preventDefault();
@@ -1064,14 +1063,19 @@
                 v.loop = true;
                 v.playsInline = true;
                 v.preload = 'metadata';
-                v.style.cssText = 'width:100%;height:100%;object-fit:contain;pointer-events:auto;cursor:zoom-in;';
+                v.style.cssText = 'width:100%;height:100%;object-fit:contain;display:block;';
+                // ★ !important 付きでカーソルとクリック可否を強制
+                v.style.setProperty('cursor', 'zoom-in', 'important');
+                v.style.setProperty('pointer-events', 'auto', 'important');
                 v.addEventListener('click', openZoom);
                 slot.insertBefore(v, slot.firstChild);
             } else {
                 const img = document.createElement('img');
                 img.src = path;
                 img.alt = fileName;
-                img.style.cssText = 'width:100%;height:100%;object-fit:contain;pointer-events:auto;cursor:zoom-in;';
+                img.style.cssText = 'width:100%;height:100%;object-fit:contain;display:block;';
+                img.style.setProperty('cursor', 'zoom-in', 'important');
+                img.style.setProperty('pointer-events', 'auto', 'important');
                 img.addEventListener('click', openZoom);
                 slot.insertBefore(img, slot.firstChild);
             }
@@ -1120,9 +1124,7 @@
         });
         document.addEventListener('keydown', onKeyDown);
 
-        // ★ ギャラリーのページャー等の最前面UIを非表示にする
         document.body.classList.add('stj-zoom-active');
-
         document.body.appendChild(overlay);
 
         if (isVideo) {
@@ -1791,6 +1793,57 @@
         `;
     }
 
+    // ============================================================
+    // 確認ダイアログ / メッセージダイアログを body 直下に作成
+    //   → セルポップアップ（z-index 20000）より前面に表示できる
+    // ============================================================
+    function createConfirmDialog() {
+        const existing = document.getElementById('stj_confirm_dialog');
+        if (existing) existing.remove();
+        const dialog = document.createElement('div');
+        dialog.id = 'stj_confirm_dialog';
+        dialog.innerHTML = `
+            <div class="stj-confirm-box">
+                <div class="stj-confirm-message">本当に削除しますか？</div>
+                <div class="stj-confirm-buttons">
+                    <button type="button" class="stj-confirm-yes">はい</button>
+                    <button type="button" class="stj-confirm-no">いいえ</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(dialog);
+        confirmDialogEl = dialog;
+
+        dialog.addEventListener('click', (e) => e.stopPropagation());
+        dialog.querySelector('.stj-confirm-yes').addEventListener('click', (e) => {
+            e.stopPropagation();
+            const cb = pendingDeleteCallback;
+            hideDeleteConfirmDialog();
+            if (typeof cb === 'function') { try { cb(); } catch (err) { console.error(err); } }
+        });
+        dialog.querySelector('.stj-confirm-no').addEventListener('click', (e) => {
+            e.stopPropagation();
+            const cb = pendingCancelCallback;
+            hideDeleteConfirmDialog();
+            if (typeof cb === 'function') { try { cb(); } catch (err) { console.error(err); } }
+        });
+    }
+
+    function createMessageDialog() {
+        const existing = document.getElementById('stj_message_dialog');
+        if (existing) existing.remove();
+        const dialog = document.createElement('div');
+        dialog.id = 'stj_message_dialog';
+        dialog.innerHTML = `
+            <div class="stj-message-box">
+                <div class="stj-message-text"></div>
+            </div>
+        `;
+        document.body.appendChild(dialog);
+        messageDialogEl = dialog;
+        dialog.addEventListener('click', (e) => { e.stopPropagation(); e.preventDefault(); });
+    }
+
     function createExportModal() {
         const existingModal = document.getElementById('stj_export_modal');
         if (existingModal) existingModal.remove();
@@ -1800,6 +1853,7 @@
         modal.style.display = 'none';
         modal.style.position = 'fixed';
         modal.style.zIndex = '10001';
+        // ★ 確認/メッセージダイアログはモーダル内に含めない（body 直下で個別作成）
         modal.innerHTML = `
             <div id="stj_test_section">
                 <div class="stj-test-header">
@@ -1869,47 +1923,13 @@
                     <button id="stj_delete_execute" style="display:none;">削除実行</button>
                 </div>
             </div>
-
-            <div id="stj_confirm_dialog">
-                <div class="stj-confirm-box">
-                    <div class="stj-confirm-message">本当に削除しますか？</div>
-                    <div class="stj-confirm-buttons">
-                        <button type="button" class="stj-confirm-yes">はい</button>
-                        <button type="button" class="stj-confirm-no">いいえ</button>
-                    </div>
-                </div>
-            </div>
-
-            <div id="stj_message_dialog">
-                <div class="stj-message-box">
-                    <div class="stj-message-text"></div>
-                </div>
-            </div>
         `;
         document.body.appendChild(modal);
         stjModalEl = modal;
-        confirmDialogEl = modal.querySelector('#stj_confirm_dialog');
-        messageDialogEl = modal.querySelector('#stj_message_dialog');
 
-        if (confirmDialogEl) {
-            confirmDialogEl.addEventListener('click', (e) => e.stopPropagation());
-            confirmDialogEl.querySelector('.stj-confirm-yes').addEventListener('click', (e) => {
-                e.stopPropagation();
-                const cb = pendingDeleteCallback;
-                hideDeleteConfirmDialog();
-                if (typeof cb === 'function') { try { cb(); } catch (err) { console.error(err); } }
-            });
-            confirmDialogEl.querySelector('.stj-confirm-no').addEventListener('click', (e) => {
-                e.stopPropagation();
-                const cb = pendingCancelCallback;
-                hideDeleteConfirmDialog();
-                if (typeof cb === 'function') { try { cb(); } catch (err) { console.error(err); } }
-            });
-        }
-
-        if (messageDialogEl) {
-            messageDialogEl.addEventListener('click', (e) => { e.stopPropagation(); e.preventDefault(); });
-        }
+        // ★ ダイアログは body 直下で作成
+        createConfirmDialog();
+        createMessageDialog();
 
         modal.addEventListener('click', (e) => e.stopPropagation());
 
