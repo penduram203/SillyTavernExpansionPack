@@ -608,42 +608,6 @@
   cursor: zoom-in !important;
 }
 
-/* ============================================================
-   ★ 中央の拡大表示ボタン（🔍）
-      スロットにデータがある時だけホバーで表示
-      丸枠なし・小さめの控えめなボタン
-   ============================================================ */
-.stj-cell-modal-slot-zoom {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  background: rgba(0, 0, 0, 0.45);
-  color: #ffffff;
-  border: none;
-  border-radius: 4px;
-  cursor: zoom-in;
-  font-size: 18px;
-  font-weight: bold;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  z-index: 11;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
-  pointer-events: auto;
-  user-select: none;
-  line-height: 1;
-}
-.stj-cell-modal-slot[data-file-name]:hover .stj-cell-modal-slot-zoom {
-  display: flex;
-}
-.stj-cell-modal-slot-zoom:hover {
-  background: rgba(0, 0, 0, 0.8);
-}
-
 /* ===== ❌（右下）登録解除ボタン ===== */
 .stj-cell-modal-slot-remove {
   position: absolute;
