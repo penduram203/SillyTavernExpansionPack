@@ -2,6 +2,12 @@
 // ST本体の getVideoThumbnail が動画デコードで詰まる問題への対策。
 // ギャラリー内の全動画を fetch + <video> で事前デコードし、
 // ブラウザのHTTPキャッシュ・デコーダーキャッシュを温める。
+//
+// ★ v2 変更:
+//   - prewarmVideoResources(urls) にシグネチャ変更（URL配列を引数に取る）
+//   - collectVideoUrlsFromDOM() をエクスポート（ギャラリーDOMから抽出）
+//   - fetchVideoUrlsForCharacter() をエクスポート（API経由で一覧取得）
+//     → ギャラリーを開かずにキャラ選択時にバックグラウンドでプリウォーム可能
 
 const GIC_CACHE_DB = 'gic_video_cache';
 const GIC_CACHE_STORE = 'thumbnails';
@@ -26,6 +32,18 @@ function getCharacterName() {
         }
     } catch (e) { /* ignore */ }
     return null;
+}
+
+function getRequestHeaders() {
+    try {
+        if (typeof SillyTavern !== 'undefined') {
+            const ctx = SillyTavern.getContext();
+            if (ctx && typeof ctx.getRequestHeaders === 'function') {
+                return ctx.getRequestHeaders();
+            }
+        }
+    } catch (e) { /* ignore */ }
+    return { 'Content-Type': 'application/json' };
 }
 
 // ============================================================
@@ -119,34 +137,72 @@ async function generateThumbnail(url) {
 }
 
 // ============================================================
-// 公開: ギャラリー内の全動画をプリウォーム
-//    (1) fetch(url, { cache: 'force-cache' }) でHTTPキャッシュに乗せる
-//    (2) <video preload="auto"> でデコード → デコーダーキャッシュに乗せる
-//    (3) IndexedDBにサムネイル(dataURL)を保存（GIC UI用）
+// 公開: ギャラリーDOMから動画URLを抽出
 // ============================================================
-export async function prewarmVideoResources() {
+export function collectVideoUrlsFromDOM() {
+    const urls = new Set();
+    const charName = getCharacterName();
+    if (!charName) return [];
+
+    const gallery = document.getElementById('gallery');
+    if (!gallery) return [];
+
+    gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1').forEach(thumb => {
+        const title = (thumb.getAttribute('title') || '').trim();
+        if (title && isVideoFile(title)) {
+            urls.add('/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(title));
+        }
+    });
+    return [...urls];
+}
+
+// ============================================================
+// 公開: API経由でキャラフォルダの動画URL一覧を取得
+//   ギャラリーを開かずに呼べる
+// ============================================================
+export async function fetchVideoUrlsForCharacter(charName) {
+    if (!charName) return [];
+    try {
+        const resp = await fetch('/api/images/list', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify({ folder: charName }),
+        });
+        if (!resp.ok) {
+            // 一部STバージョンは GET + query 形式
+            const resp2 = await fetch(
+                '/api/images/list?folder=' + encodeURIComponent(charName),
+                { method: 'GET', headers: getRequestHeaders() }
+            );
+            if (!resp2.ok) return [];
+            const data2 = await resp2.json();
+            const files2 = Array.isArray(data2?.files) ? data2.files
+                         : Array.isArray(data2) ? data2 : [];
+            return files2
+                .filter(f => isVideoFile(f))
+                .map(f => '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(f));
+        }
+        const data = await resp.json();
+        const files = Array.isArray(data?.files) ? data.files
+                    : Array.isArray(data) ? data : [];
+        return files
+            .filter(f => isVideoFile(f))
+            .map(f => '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(f));
+    } catch (e) {
+        return [];
+    }
+}
+
+// ============================================================
+// 公開: 指定URLの動画をプリウォーム（fetch + decode + IndexedDBサムネイル）
+// ============================================================
+export async function prewarmVideoResources(urls) {
     if (videoWarmupInFlight) return;
+    if (!Array.isArray(urls) || urls.length === 0) return;
     videoWarmupInFlight = true;
 
     try {
-        const charName = getCharacterName();
-        if (!charName) return;
-
-        const gallery = document.getElementById('gallery');
-        if (!gallery) return;
-
-        // ギャラリーのサムネイルから動画URLを抽出
-        const urls = new Set();
-        gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1').forEach(thumb => {
-            const title = (thumb.getAttribute('title') || '').trim();
-            if (title && isVideoFile(title)) {
-                urls.add('/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(title));
-            }
-        });
-
-        if (urls.size === 0) return;
-
-        const newUrls = [...urls].filter(u => !VIDEO_WARMUP_DONE.has(u));
+        const newUrls = urls.filter(u => u && !VIDEO_WARMUP_DONE.has(u));
         if (newUrls.length === 0) return;
 
         console.log(`[GIC-Cache] 🎬 ${newUrls.length}本の動画をプリウォーム開始`);
@@ -205,7 +261,7 @@ export async function getCachedThumbnail(url) {
 }
 
 // ============================================================
-// 公開: ギャラリーが開いたら自動でプリウォーム
+// 公開: ギャラリーが開いたら自動でプリウォーム（保険）
 // ============================================================
 export function setupVideoWarmupObserver() {
     if (window.__gicVideoWarmupInstalled) return;
@@ -219,7 +275,10 @@ export function setupVideoWarmupObserver() {
         if (s.display === 'none' || s.visibility === 'hidden') return;
         if (Date.now() - lastRunAt < 15000) return;
         lastRunAt = Date.now();
-        prewarmVideoResources().catch(() => {});
+        const urls = collectVideoUrlsFromDOM();
+        if (urls.length > 0) {
+            prewarmVideoResources(urls).catch(() => {});
+        }
     }, 5000);
 
     console.log('[GIC-Cache] 🎬 動画ウォームアップオブザーバを設置しました');
