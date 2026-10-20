@@ -2913,19 +2913,17 @@ function installGalleryCloseInterceptor() {
 //    ギャラリー＋JSON編集画面の再オープンを保証するガード
 //
 //    【重要な知見】
-//    ST本体のギャラリー再構築（画像ロード + 動画サムネイル生成）は、
-//    ネットワーク状況や動画混在数により最大30秒以上かかることがある。
-//    この間 #gallery 要素はDOMに現れない（ST内部でメモリ上に構築中）。
+//    ST本体のギャラリー拡張は内部に「isShown フラグ」を持つ（推定）。
+//    ネットワークエラーや動画サムネイル生成失敗で showCharGallery() が
+//    途中で例外を投げると、isShown が true のまま固着し、以降の
+//    ctx.openGallery() 呼び出しは「もう開いてる」と判断されて無視される。
 //
-//    旧実装は5秒で強制オープンしていたが、これは ST の内部キューに
-//    余計な showCharGallery を積み、逆に ST の処理を遅延・多重化させる。
-//    ログ観察でも「force=0 のケースは全て成功」「force>0 のケースは
-//    全て大幅な遅延」という相関が確認された。
+//    症状: ログでは「dispatch=true（送信できた）」なのに
+//    「making new container」すら出ない = STが完全に無視している。
 //
-//    新実装:
-//      - ST本体を信頼し、45秒まで辛抱強く待つ
-//      - どうしてもダメな時だけ1回だけ強制オープン（多重化防止）
-//      - 5秒ごとに進捗ログを出してデバッグしやすくする
+//    対策: 強制オープンの前に Escape キーを dispatch して ST本来の
+//    close ハンドラを発火させ、isShown フラグを強制的に false に戻す。
+//    これにより次の ctx.openGallery() が正常に動作する。
 // ============================================================
 function installFolderChangeReopenGuard() {
     if (window.__gicFolderReopenGuardInstalled) return;
@@ -2945,11 +2943,11 @@ function installFolderChangeReopenGuard() {
         const myToken = ++reopenToken;
         const startTime = Date.now();
         const POLL = 250;
-        const ABSENT_TIMEOUT = 45000;    // 45s: STの長考を辛抱強く待つ
-        const LOADING_TIMEOUT = 20000;   // 20s: #gallery出現後の追加待機
-        const FORCE_WAIT = 15000;        // 15s: 強制オープン1回の待機
-        const MAX_FORCE = 1;             // 1回のみ（多重化防止）
-        const LOG_INTERVAL = 5000;       // 5s毎に進捗ログ
+        const ABSENT_TIMEOUT = 45000;
+        const LOADING_TIMEOUT = 20000;
+        const FORCE_WAIT = 15000;
+        const MAX_FORCE = 1;
+        const LOG_INTERVAL = 5000;
 
         let firstSeenAt = 0;
         let forceCount = 0;
@@ -2971,10 +2969,29 @@ function installFolderChangeReopenGuard() {
         }
 
         function giveUp() {
-            console.error(
-                `[GIC] 📁 再オープン失敗 (${forceCount}回の強制オープン後、` +
-                `${Date.now() - startTime}ms 経過)`
-            );
+            const elapsed = Date.now() - startTime;
+            console.error(`[GIC] 📁 再オープン失敗 (force=${forceCount}, elapsed=${elapsed}ms)`);
+
+            // ギャラリー失敗でも JSON編集画面だけは開く
+            try {
+                if (window.STJEditor?.open && !window.STJEditor.isOpen?.()) {
+                    window.STJEditor.open();
+                    console.log('[GIC] 📁 ギャラリー失敗のため、JSON編集画面のみ開きました');
+                }
+            } catch (e) { /* ignore */ }
+
+            // ユーザーに可視通知
+            const msg = 'ギャラリーを開けませんでした。もう一度チェックマークを押すか、ページをリロードしてください。';
+            try {
+                if (typeof window.toastr !== 'undefined' && typeof window.toastr.error === 'function') {
+                    window.toastr.error(msg, 'Generate Image Controller', {
+                        timeOut: 8000,
+                        positionClass: 'toast-top-center',
+                    });
+                } else {
+                    showStatusMessage(msg, 8000);
+                }
+            } catch (e) { /* ignore */ }
         }
 
         function tryForce() {
@@ -2984,17 +3001,45 @@ function installFolderChangeReopenGuard() {
                 return;
             }
             forceCount++;
+
+            // ========== ST本体の内部状態をリセット ==========
+            // isShown フラグが true のまま固着していると ctx.openGallery()
+            // が無視される。Escape キーを送ることで ST 本来の close ハンドラ
+            // を発火させ、フラグを false に戻す。
+            try {
+                document.dispatchEvent(new KeyboardEvent('keydown', {
+                    key: 'Escape', code: 'Escape', keyCode: 27, which: 27,
+                    bubbles: true, cancelable: true,
+                }));
+                console.log('[GIC] 📁 ST内部状態リセットのため Escape を dispatch');
+            } catch (e) { /* ignore */ }
+
+            // 残骸の #gallery（中身なし）を除去
+            try {
+                document.querySelectorAll('#gallery').forEach(el => {
+                    if (!el.querySelector('.nGY2Gallery') &&
+                        el.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1').length === 0) {
+                        try { el.remove(); } catch (e) { /* ignore */ }
+                    }
+                });
+            } catch (e) { /* ignore */ }
+
             clearGalleryOpenInFlight();
             _galleryOpenCache = { value: false, timestamp: 0 };
             lastGalleryStateForGic = null;
             try { dedupeGalleryElements(); } catch (e) { /* ignore */ }
-            const dispatched = openGalleryFromGic();
-            forceStartedAt = Date.now();
-            console.warn(
-                `[GIC] 📁 強制オープン ${forceCount}/${MAX_FORCE} ` +
-                `(dispatch=${dispatched}) → ${FORCE_WAIT}ms 待機`
-            );
-            setTimeout(tick, 500);
+
+            // Escape ハンドラの完了を待ってから強制オープン
+            setTimeout(() => {
+                if (myToken !== reopenToken) return;
+                const dispatched = openGalleryFromGic();
+                forceStartedAt = Date.now();
+                console.warn(
+                    `[GIC] 📁 強制オープン ${forceCount}/${MAX_FORCE} ` +
+                    `(dispatch=${dispatched}) → ${FORCE_WAIT}ms 待機`
+                );
+                setTimeout(tick, 500);
+            }, 300);
         }
 
         function tick() {
@@ -3064,7 +3109,6 @@ function installFolderChangeReopenGuard() {
         const gallery = document.getElementById('gallery');
         if (!gallery || !gallery.contains(btn)) return;
 
-        // 既存の閉じる処理は妨げない（preventDefault / stopPropagation をしない）
         console.log('[GIC] 📁 フォルダ変更ボタン検知 → 再オープンガードを起動');
         forceReopen();
     }, true);
