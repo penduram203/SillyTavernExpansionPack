@@ -512,7 +512,7 @@
 }
 .stj-cell-modal-keyword::placeholder { color: #718096; }
 
-/* ★ 選択肢ボタン: 濃い青背景・白文字 */
+/* ★ 選択肢ボタン: 濃い青背景・白文字・黒縁取り */
 .stj-cell-modal-choices {
   height: 44px;
   padding: 0 16px;
@@ -527,7 +527,6 @@
   white-space: nowrap;
   transition: background-color 0.15s ease, opacity 0.15s ease;
 
-  /* ★ 黒い縁取り */
   -webkit-text-stroke: 1px #000000;
   paint-order: stroke fill;
   text-shadow:
@@ -604,6 +603,24 @@
   max-height: 100%;
   object-fit: contain;
   display: block;
+  pointer-events: auto !important;
+  cursor: zoom-in !important;
+}
+
+/* ★ セルモーダル内の動画サムネイル: 200x200 に固定 */
+.stj-cell-modal-slot > video.gic-cell-video {
+  position: absolute !important;
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  width: 200px !important;
+  height: 200px !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  object-fit: contain !important;
+  background: #000 !important;
+  border-radius: 4px !important;
+  display: block !important;
   pointer-events: auto !important;
   cursor: zoom-in !important;
 }
@@ -690,7 +707,7 @@
 }
 
 /* ============================================================
-   ★ メディア拡大表示（セルポップアップ内の画像/動画クリック / 🔍ボタン）
+   ★ メディア拡大表示（セルポップアップ内の画像/動画クリック）
    ============================================================ */
 .stj-media-zoom {
   position: fixed;
@@ -712,10 +729,36 @@
   height: auto;
   object-fit: contain;
   display: block;
-  cursor: zoom-out;
+  cursor: default !important;
+  pointer-events: auto !important;
   user-select: none;
   border-radius: 4px;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8);
+}
+
+/* ★ 拡大表示時の閉じるボタン */
+.stj-media-zoom-close {
+  position: absolute !important;
+  top: 20px !important;
+  right: 20px !important;
+  width: 44px !important;
+  height: 44px !important;
+  padding: 0 !important;
+  background: #e53e3e !important;
+  color: #ffffff !important;
+  border: 2px solid #ffffff !important;
+  border-radius: 4px !important;
+  cursor: pointer !important;
+  font-size: 24px !important;
+  font-weight: bold !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  z-index: 22001 !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6) !important;
+}
+.stj-media-zoom-close:hover {
+  background: #c53030 !important;
 }
 
 /* ============================================================
