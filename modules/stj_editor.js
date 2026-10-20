@@ -395,10 +395,15 @@
         return exists ? path : null;
     }
 
+    // ★ base64 データURIとクエリ・フラグメントを除外
     function extractFileNameFromPath(path) {
-        if (!path) return '';
-        const parts = path.split('/');
-        return parts[parts.length - 1];
+        if (!path || typeof path !== 'string') return '';
+        if (path.startsWith('data:')) return '';
+        const clean = path.split('?')[0].split('#')[0];
+        const parts = clean.split('/');
+        let name = parts[parts.length - 1];
+        if (!name || name.startsWith('data:')) return '';
+        return name;
     }
 
     function parseImageNames(input) {
@@ -904,6 +909,7 @@
         return modal;
     }
 
+    // ★ requestAnimationFrame 二重化でレイアウト確定後にレンダリング
     function openCellModal(cell) {
         if (!cell) return;
         if (isBulkDeleteMode || isDialogActive) return;
@@ -948,14 +954,16 @@
         currentCellModal.classList.add('visible');
         document.body.classList.add('stj-cell-modal-active');
 
-        // ★ 次フレームでレンダリング（レイアウト確定後）
+        // ★ requestAnimationFrame を二重化してレイアウト確定後にレンダリング
         requestAnimationFrame(() => {
-            if (!currentCellModal || currentModalCell !== cell) return;
-            try {
-                renderCellModalGrid(cell);
-            } catch (e) {
-                console.error('[STJ Editor] renderCellModalGrid error:', e);
-            }
+            requestAnimationFrame(() => {
+                if (!currentCellModal || currentModalCell !== cell) return;
+                try {
+                    renderCellModalGrid(cell);
+                } catch (e) {
+                    console.error('[STJ Editor] renderCellModalGrid error:', e);
+                }
+            });
         });
 
         if (!isSpecial && kwInput) {
@@ -1085,12 +1093,15 @@
         return '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(fileName);
     }
 
-    // ★ 動的スロット生成（画像・動画両対応）
+    // ★ 動的スロット生成（画像・動画両対応）＋診断ログ
     function renderCellModalGrid(cell) {
         if (!currentCellModal || !cell) return;
         const images = getCellImages(cell);
         const grid = currentCellModal.querySelector('.stj-cell-modal-grid');
         if (!grid) return;
+
+        // ★ 診断ログ
+        console.log('[STJ Grid] renderCellModalGrid called, images=', images);
 
         const neededSlots = Math.max(9, Math.ceil(images.length / 3) * 3);
         const currentCount = grid.children.length;
@@ -1109,6 +1120,9 @@
         slots.forEach((slot, i) => {
             const fileName = images[i];
 
+            // ★ 診断ログ
+            console.log(`[STJ Grid] slot[${i}] fileName=`, fileName, 'isVideo=', fileName ? isVideoUrl(fileName) : false);
+
             if (!fileName) {
                 slot.querySelectorAll(':scope > img, :scope > video').forEach(el => {
                     if (el.tagName === 'VIDEO') {
@@ -1126,7 +1140,9 @@
             const isVideo = isVideoUrl(fileName);
             slot.dataset.fileName = fileName;
 
-            // ★ キャッシュ: src とタイプが一致すれば再利用
+            // ★ 診断ログ
+            console.log(`[STJ Grid] slot[${i}] fullPath=`, fullPath, 'isVideo=', isVideo);
+
             const existing = slot.querySelector(':scope > img, :scope > video');
             if (existing) {
                 const existingSrc = existing.getAttribute('data-src') || existing.getAttribute('src');
@@ -1749,7 +1765,6 @@
         if (isVideoUrl(fullPath)) {
             const video = document.createElement('video');
 
-            // ★ 属性を src より前にすべて設定（Firefox autoplay の要件）
             video.setAttribute('muted', '');
             video.setAttribute('loop', '');
             video.setAttribute('playsinline', '');
