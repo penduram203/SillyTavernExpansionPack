@@ -12,7 +12,8 @@
   background-color: #2d3748;
   border: 1px solid #4a5568;
   border-radius: 8px;
-  padding: 20px;
+  /* ★ 下部に固定ボタングループ分の余白を確保 */
+  padding: 20px 20px 90px 20px;
   box-shadow: 0 4px 6px rgba(0,0,0,0.1);
   z-index: 10001;
   overflow-y: auto;
@@ -42,14 +43,28 @@
   box-sizing: border-box;
 }
 
-/* ===== ボタングループ ===== */
+/* ===== ボタングループ（画面下部に固定） ===== */
 .stj-button-group {
+  /* ★ モーダルと同じ位置・幅で画面下部に固定 */
+  position: fixed;
+  left: 480px;
+  bottom: 0;
+  width: calc(85vw - 200px);
+  z-index: 100;
+
   display: flex;
   justify-content: flex-start;
   align-items: center;
   gap: 16px;
-  margin-top: 20px;
-  padding: 15px 0;
+
+  margin: 0;
+  padding: 15px 20px;
+  background-color: #2d3748;
+  border-top: 1px solid #4a5568;
+  /* モーダルの角丸に合わせる */
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
+  box-sizing: border-box;
 }
 .stj-button-group button {
   padding: 10px 20px;
