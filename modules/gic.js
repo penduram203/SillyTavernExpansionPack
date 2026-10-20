@@ -2935,14 +2935,20 @@ function installGalleryCloseInterceptor() {
 // ★ ギャラリーフォルダ変更ボタン（チェックマーク）クリック後の
 //    ギャラリー＋JSON編集画面の再オープンを保証するガード
 //
-//    【重要な知見】
-//    ST本体のギャラリー拡張は内部に「isShown フラグ」を持つ（推定）。
-//    ネットワークエラーや動画サムネイル生成失敗で showCharGallery() が
-//    途中で例外を投げると、isShown が true のまま固着し、以降の
-//    ctx.openGallery() 呼び出しは「もう開いてる」と判断されて無視される。
+//    【ST本体のバグ】
+//    ネットワークエラー等で showCharGallery() が途中失敗すると、
+//    内部の isShown フラグが true のまま固着し、以降の
+//    ctx.openGallery() は「もう開いてる」と判断されて無視される。
+//    しかも ST の Escape ハンドラは #gallery 要素の存在を前提とする
+//    ため、#gallery が無い状態では Escape を送っても isShown が
+//    リセットされない。
 //
-//    対策: 強制オープンの前に Escape キーを dispatch して ST本来の
-//    close ハンドラを発火させ、isShown フラグを強制的に false に戻す。
+//    【対策】
+//    (1) Escape を body/document/window すべてに dispatch
+//    (2) スタブ #gallery を生成して .dragClose をクリック
+//        （ST の委譲ハンドラを発火させる）
+//    (3) その上で ctx.openGallery() を呼ぶ
+//    (4) 全て失敗時は明確なエラートースト + JSON編集画面のみ開く
 // ============================================================
 function installFolderChangeReopenGuard() {
     if (window.__gicFolderReopenGuardInstalled) return;
@@ -2962,10 +2968,10 @@ function installFolderChangeReopenGuard() {
         const myToken = ++reopenToken;
         const startTime = Date.now();
         const POLL = 250;
-        const ABSENT_TIMEOUT = 45000;
-        const LOADING_TIMEOUT = 20000;
-        const FORCE_WAIT = 15000;
-        const MAX_FORCE = 1;
+        const ABSENT_TIMEOUT = 20000;    // 20s: #gallery が一度も出ない場合
+        const LOADING_TIMEOUT = 20000;   // 20s: #gallery 出現後の追加待機
+        const FORCE_WAIT = 8000;         // 8s: 強制オープン1回の待機
+        const MAX_FORCE = 2;             // 最大2回
         const LOG_INTERVAL = 5000;
 
         let firstSeenAt = 0;
@@ -2991,6 +2997,7 @@ function installFolderChangeReopenGuard() {
             const elapsed = Date.now() - startTime;
             console.error(`[GIC] 📁 再オープン失敗 (force=${forceCount}, elapsed=${elapsed}ms)`);
 
+            // JSON編集画面だけは開く
             try {
                 if (window.STJEditor?.open && !window.STJEditor.isOpen?.()) {
                     window.STJEditor.open();
@@ -2998,17 +3005,72 @@ function installFolderChangeReopenGuard() {
                 }
             } catch (e) { /* ignore */ }
 
-            const msg = 'ギャラリーを開けませんでした。もう一度チェックマークを押すか、ページをリロードしてください。';
+            // ユーザーへの明確な通知
+            const msg = 'ギャラリーを開けませんでした。ページを再読み込み（F5）してください。';
             try {
                 if (typeof window.toastr !== 'undefined' && typeof window.toastr.error === 'function') {
                     window.toastr.error(msg, 'Generate Image Controller', {
-                        timeOut: 8000,
+                        timeOut: 15000,
                         positionClass: 'toast-top-center',
+                        closeButton: true,
                     });
                 } else {
-                    showStatusMessage(msg, 8000);
+                    showStatusMessage(msg, 15000);
                 }
             } catch (e) { /* ignore */ }
+        }
+
+        // ============================================================
+        // ST内部状態をリセットするための多重アプローチ
+        // ============================================================
+        function resetSTState() {
+            // (1) Escape を body / document / window すべてに dispatch
+            const esc = () => new KeyboardEvent('keydown', {
+                key: 'Escape', code: 'Escape', keyCode: 27, which: 27,
+                bubbles: true, cancelable: true,
+            });
+            try { document.body?.dispatchEvent(esc()); } catch (e) { /* ignore */ }
+            try { document.dispatchEvent(esc()); } catch (e) { /* ignore */ }
+            try { window.dispatchEvent(esc()); } catch (e) { /* ignore */ }
+            console.log('[GIC] 📁 Escape を body/document/window に dispatch');
+
+            // (2) スタブ #gallery を作って .dragClose をクリック
+            //     ST が $(document).on('click', '.dragClose', ...) で
+            //     委譲していれば closeGallery() → isShown=false になる
+            let stubGallery = null;
+            try {
+                stubGallery = document.createElement('div');
+                stubGallery.id = 'gallery';
+                stubGallery.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;overflow:hidden;';
+                stubGallery.innerHTML = '<button class="dragClose" type="button" style="position:absolute;left:-9999px;">X</button>';
+                document.body.appendChild(stubGallery);
+                const closeBtn = stubGallery.querySelector('.dragClose');
+                if (closeBtn) {
+                    closeBtn.click();
+                    console.log('[GIC] 📁 スタブ .dragClose をクリック');
+                }
+            } catch (e) { /* ignore */ }
+            setTimeout(() => {
+                if (stubGallery && stubGallery.parentNode) {
+                    try { stubGallery.remove(); } catch (e) { /* ignore */ }
+                }
+            }, 200);
+
+            // (3) 既存の空 #gallery を掃除（STが構築失敗した残骸）
+            try {
+                document.querySelectorAll('#gallery').forEach(el => {
+                    if (!el.querySelector('.nGY2Gallery') &&
+                        el.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1').length === 0) {
+                        try { el.remove(); } catch (e) { /* ignore */ }
+                    }
+                });
+            } catch (e) { /* ignore */ }
+
+            // (4) GIC 内部状態もクリア
+            clearGalleryOpenInFlight();
+            _galleryOpenCache = { value: false, timestamp: 0 };
+            lastGalleryStateForGic = null;
+            try { dedupeGalleryElements(); } catch (e) { /* ignore */ }
         }
 
         function tryForce() {
@@ -3019,29 +3081,9 @@ function installFolderChangeReopenGuard() {
             }
             forceCount++;
 
-            // ST本体の内部状態をリセット（isShown フラグ固着対策）
-            try {
-                document.dispatchEvent(new KeyboardEvent('keydown', {
-                    key: 'Escape', code: 'Escape', keyCode: 27, which: 27,
-                    bubbles: true, cancelable: true,
-                }));
-                console.log('[GIC] 📁 ST内部状態リセットのため Escape を dispatch');
-            } catch (e) { /* ignore */ }
+            resetSTState();
 
-            try {
-                document.querySelectorAll('#gallery').forEach(el => {
-                    if (!el.querySelector('.nGY2Gallery') &&
-                        el.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1').length === 0) {
-                        try { el.remove(); } catch (e) { /* ignore */ }
-                    }
-                });
-            } catch (e) { /* ignore */ }
-
-            clearGalleryOpenInFlight();
-            _galleryOpenCache = { value: false, timestamp: 0 };
-            lastGalleryStateForGic = null;
-            try { dedupeGalleryElements(); } catch (e) { /* ignore */ }
-
+            // STのハンドラが走る猶予を設けてから強制オープン
             setTimeout(() => {
                 if (myToken !== reopenToken) return;
                 const dispatched = openGalleryFromGic();
@@ -3051,7 +3093,7 @@ function installFolderChangeReopenGuard() {
                     `(dispatch=${dispatched}) → ${FORCE_WAIT}ms 待機`
                 );
                 setTimeout(tick, 500);
-            }, 300);
+            }, 400);
         }
 
         function tick() {
@@ -3074,6 +3116,7 @@ function installFolderChangeReopenGuard() {
                 );
             }
 
+            // 強制オープンフェーズ
             if (forceStartedAt > 0) {
                 if (now - forceStartedAt < FORCE_WAIT) {
                     setTimeout(tick, POLL);
@@ -3083,6 +3126,7 @@ function installFolderChangeReopenGuard() {
                 return;
             }
 
+            // 通常待機フェーズ
             const el = document.getElementById('gallery');
             if (el) {
                 if (!firstSeenAt) {
