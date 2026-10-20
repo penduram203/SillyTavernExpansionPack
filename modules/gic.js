@@ -2790,19 +2790,46 @@ function setupGalleryObserverForGic() {
         syncGalleryButtonVisibility();
         applyGalleryLayout();
         hideGalleryUploadMessage();
-    }, 500); // 300ms → 500ms
+    }, 500);
 
     syncGalleryButtonVisibility();
     applyGalleryLayout();
     hideGalleryUploadMessage();
 }
 
+// ============================================================
+// ★ ギャラリーを開く（描画完了までの計測ログ付き）
+// ============================================================
 function openGalleryFromGic() {
     if (isGalleryOpen()) { clearGalleryOpenInFlight(); return true; }
     if (isGalleryOpenInFlight()) return false;
     markGalleryOpenInFlight();
 
-    // ★ dedupe を次フレームに遅延（初回描画をブロックしない）
+    // ★ 描画完了までの時間を計測（ST本体の遅延を可視化）
+    const t0 = performance.now();
+    window.__gicLastOpenStart = t0;
+    const checkVisible = () => {
+        const elapsed = performance.now() - t0;
+        _galleryOpenCache = { value: false, timestamp: 0 };
+        if (isGalleryOpen()) {
+            if (elapsed > 2000) {
+                console.warn(`[GIC] ⚠️ ギャラリー描画 ${elapsed.toFixed(0)}ms（ST本体の遅延）`);
+                if (elapsed > 10000) {
+                    console.warn('[GIC] ⚠️ ST本体の showCharGallery が動画サムネイル生成で詰まっている可能性');
+                }
+            } else {
+                console.log(`[GIC] ✅ ギャラリー描画 ${elapsed.toFixed(0)}ms`);
+            }
+            return;
+        }
+        if (elapsed > 30000) {
+            console.error('[GIC] ⚠️ ギャラリー描画が30秒経過しても応答なし');
+            return;
+        }
+        setTimeout(checkVisible, 100);
+    };
+    setTimeout(checkVisible, 100);
+
     const scheduleDedupe = () => {
         requestAnimationFrame(() => {
             try { dedupeGalleryElements(); } catch (e) { /* ignore */ }
@@ -2934,21 +2961,6 @@ function installGalleryCloseInterceptor() {
 // ============================================================
 // ★ ギャラリーフォルダ変更ボタン（チェックマーク）クリック後の
 //    ギャラリー＋JSON編集画面の再オープンを保証するガード
-//
-//    【ST本体のバグ】
-//    ネットワークエラー等で showCharGallery() が途中失敗すると、
-//    内部の isShown フラグが true のまま固着し、以降の
-//    ctx.openGallery() は「もう開いてる」と判断されて無視される。
-//    しかも ST の Escape ハンドラは #gallery 要素の存在を前提とする
-//    ため、#gallery が無い状態では Escape を送っても isShown が
-//    リセットされない。
-//
-//    【対策】
-//    (1) Escape を body/document/window すべてに dispatch
-//    (2) スタブ #gallery を生成して .dragClose をクリック
-//        （ST の委譲ハンドラを発火させる）
-//    (3) その上で ctx.openGallery() を呼ぶ
-//    (4) 全て失敗時は明確なエラートースト + JSON編集画面のみ開く
 // ============================================================
 function installFolderChangeReopenGuard() {
     if (window.__gicFolderReopenGuardInstalled) return;
@@ -2968,10 +2980,10 @@ function installFolderChangeReopenGuard() {
         const myToken = ++reopenToken;
         const startTime = Date.now();
         const POLL = 250;
-        const ABSENT_TIMEOUT = 20000;    // 20s: #gallery が一度も出ない場合
-        const LOADING_TIMEOUT = 20000;   // 20s: #gallery 出現後の追加待機
-        const FORCE_WAIT = 8000;         // 8s: 強制オープン1回の待機
-        const MAX_FORCE = 2;             // 最大2回
+        const ABSENT_TIMEOUT = 20000;
+        const LOADING_TIMEOUT = 20000;
+        const FORCE_WAIT = 8000;
+        const MAX_FORCE = 2;
         const LOG_INTERVAL = 5000;
 
         let firstSeenAt = 0;
@@ -2997,7 +3009,6 @@ function installFolderChangeReopenGuard() {
             const elapsed = Date.now() - startTime;
             console.error(`[GIC] 📁 再オープン失敗 (force=${forceCount}, elapsed=${elapsed}ms)`);
 
-            // JSON編集画面だけは開く
             try {
                 if (window.STJEditor?.open && !window.STJEditor.isOpen?.()) {
                     window.STJEditor.open();
@@ -3005,7 +3016,6 @@ function installFolderChangeReopenGuard() {
                 }
             } catch (e) { /* ignore */ }
 
-            // ユーザーへの明確な通知
             const msg = 'ギャラリーを開けませんでした。ページを再読み込み（F5）してください。';
             try {
                 if (typeof window.toastr !== 'undefined' && typeof window.toastr.error === 'function') {
@@ -3020,11 +3030,7 @@ function installFolderChangeReopenGuard() {
             } catch (e) { /* ignore */ }
         }
 
-        // ============================================================
-        // ST内部状態をリセットするための多重アプローチ
-        // ============================================================
         function resetSTState() {
-            // (1) Escape を body / document / window すべてに dispatch
             const esc = () => new KeyboardEvent('keydown', {
                 key: 'Escape', code: 'Escape', keyCode: 27, which: 27,
                 bubbles: true, cancelable: true,
@@ -3034,9 +3040,6 @@ function installFolderChangeReopenGuard() {
             try { window.dispatchEvent(esc()); } catch (e) { /* ignore */ }
             console.log('[GIC] 📁 Escape を body/document/window に dispatch');
 
-            // (2) スタブ #gallery を作って .dragClose をクリック
-            //     ST が $(document).on('click', '.dragClose', ...) で
-            //     委譲していれば closeGallery() → isShown=false になる
             let stubGallery = null;
             try {
                 stubGallery = document.createElement('div');
@@ -3056,7 +3059,6 @@ function installFolderChangeReopenGuard() {
                 }
             }, 200);
 
-            // (3) 既存の空 #gallery を掃除（STが構築失敗した残骸）
             try {
                 document.querySelectorAll('#gallery').forEach(el => {
                     if (!el.querySelector('.nGY2Gallery') &&
@@ -3066,7 +3068,6 @@ function installFolderChangeReopenGuard() {
                 });
             } catch (e) { /* ignore */ }
 
-            // (4) GIC 内部状態もクリア
             clearGalleryOpenInFlight();
             _galleryOpenCache = { value: false, timestamp: 0 };
             lastGalleryStateForGic = null;
@@ -3083,7 +3084,6 @@ function installFolderChangeReopenGuard() {
 
             resetSTState();
 
-            // STのハンドラが走る猶予を設けてから強制オープン
             setTimeout(() => {
                 if (myToken !== reopenToken) return;
                 const dispatched = openGalleryFromGic();
@@ -3116,7 +3116,6 @@ function installFolderChangeReopenGuard() {
                 );
             }
 
-            // 強制オープンフェーズ
             if (forceStartedAt > 0) {
                 if (now - forceStartedAt < FORCE_WAIT) {
                     setTimeout(tick, POLL);
@@ -3126,7 +3125,6 @@ function installFolderChangeReopenGuard() {
                 return;
             }
 
-            // 通常待機フェーズ
             const el = document.getElementById('gallery');
             if (el) {
                 if (!firstSeenAt) {
@@ -3168,62 +3166,110 @@ function installFolderChangeReopenGuard() {
     console.log('[GIC] 📁 フォルダ変更ボタンの再オープンガードを設置しました');
 }
 
+// ============================================================
+// ★ ギャラリーをプログラム的に閉じる（冗長クローズ削減）
+// ============================================================
 function closeGalleryProgrammatically() {
+    // 既に閉じているかを判定
+    const galleryEls = document.querySelectorAll('#gallery');
+    const anyVisible = Array.from(galleryEls).some(g => {
+        const s = window.getComputedStyle(g);
+        return s.display !== 'none' && s.visibility !== 'hidden' &&
+               parseFloat(s.opacity) !== 0;
+    });
+
+    // GIC側のUI後始末は常に実行
     hideGalleryAttachmentsImmediately('closeGalleryProgrammatically');
 
-    let closed = false;
+    // ST側で「まだ開いてる」と思われている場合のみ、状態リセットを実行
+    if (!anyVisible) {
+        clearGalleryOpenInFlight();
+        return true;
+    }
+
     try {
-        const esc = new KeyboardEvent('keydown', {
+        document.dispatchEvent(new KeyboardEvent('keydown', {
             key: 'Escape', code: 'Escape', keyCode: 27, which: 27,
             bubbles: true, cancelable: true,
-        });
-        document.dispatchEvent(esc);
+        }));
         clearGalleryOpenInFlight();
-        closed = true;
     } catch (e) { /* ignore */ }
 
-    if (closed) {
-        setTimeout(() => {
-            if (!isGalleryOpen()) return;
-            const g = document.getElementById('gallery');
-            if (!g) return;
-            const btn = g.querySelector(':scope > .dragClose') || g.querySelector(':scope > .panelControlBar .dragClose');
-            if (btn) { try { btn.click(); } catch (e) { /* ignore */ } }
-        }, 100);
-    }
-    return closed;
+    setTimeout(() => {
+        const g = document.getElementById('gallery');
+        if (!g) return;
+        const s = window.getComputedStyle(g);
+        if (s.display === 'none' || s.visibility === 'hidden') return;
+        const btn = g.querySelector(':scope > .dragClose') || g.querySelector(':scope > .panelControlBar .dragClose');
+        if (btn) { try { btn.click(); } catch (e) { /* ignore */ } }
+    }, 100);
+    return true;
 }
 
+// ============================================================
+// ★ ギャラリー画像/動画のプリロード
+//    ST本体の getVideoThumbnail 再取得を高速化するため、
+//    動画URLも metadata プリロードでキャッシュに乗せる
+// ============================================================
 async function preloadGalleryImages(timeoutMs = GALLERY_WARMUP_PRELOAD_TIMEOUT_MS) {
     const galleryEl = document.getElementById('gallery');
     if (!galleryEl) return 0;
 
-    const urls = new Set();
+    const imgUrls = new Set();
+    const videoUrls = new Set();
     const collectUrls = () => {
         galleryEl.querySelectorAll('img').forEach(img => {
-            if (img.src && img.src.startsWith('http')) urls.add(img.src);
-            if (img.dataset && img.dataset.src) urls.add(img.dataset.src);
+            if (img.src && img.src.startsWith('http')) imgUrls.add(img.src);
+            if (img.dataset && img.dataset.src) imgUrls.add(img.dataset.src);
+        });
+        // 動画URLも収集（STのgetVideoThumbnail再取得を高速化）
+        const charName = getCurrentCharacterName();
+        galleryEl.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1').forEach(thumb => {
+            const title = (thumb.getAttribute('title') || '').trim();
+            if (title && isVideoFile(title) && charName) {
+                videoUrls.add('/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(title));
+            }
         });
     };
     collectUrls();
 
-    if (urls.size === 0) {
-        for (let i = 0; i < 5 && urls.size === 0; i++) {
+    if (imgUrls.size === 0 && videoUrls.size === 0) {
+        for (let i = 0; i < 5 && imgUrls.size === 0 && videoUrls.size === 0; i++) {
             await wait(300);
             collectUrls();
         }
     }
-    if (urls.size === 0) return 0;
 
     let loaded = 0;
-    const promises = [...urls].map(url => new Promise(resolve => {
-        const img = new Image();
-        const timer = setTimeout(() => resolve(), timeoutMs);
-        img.onload = () => { clearTimeout(timer); loaded++; resolve(); };
-        img.onerror = () => { clearTimeout(timer); resolve(); };
-        img.src = url;
-    }));
-    await Promise.race([Promise.all(promises), wait(timeoutMs)]);
+    const tasks = [];
+
+    if (imgUrls.size > 0) {
+        const imgPromises = [...imgUrls].map(url => new Promise(resolve => {
+            const img = new Image();
+            const timer = setTimeout(() => resolve(), timeoutMs);
+            img.onload = () => { clearTimeout(timer); loaded++; resolve(); };
+            img.onerror = () => { clearTimeout(timer); resolve(); };
+            img.src = url;
+        }));
+        tasks.push(Promise.all(imgPromises));
+    }
+
+    if (videoUrls.size > 0) {
+        console.log(`[GIC] 🎬 ${videoUrls.size}本の動画をプリロード（STの再取得高速化）`);
+        const videoPromises = [...videoUrls].map(url => new Promise(resolve => {
+            const video = document.createElement('video');
+            video.preload = 'metadata';
+            video.muted = true;
+            const timer = setTimeout(() => resolve(), 3000);
+            video.onloadedmetadata = () => { clearTimeout(timer); loaded++; resolve(); };
+            video.onerror = () => { clearTimeout(timer); resolve(); };
+            video.src = url;
+        }));
+        tasks.push(Promise.all(videoPromises));
+    }
+
+    if (tasks.length === 0) return 0;
+    await Promise.race([Promise.all(tasks), wait(timeoutMs)]);
     return loaded;
 }
 
@@ -3548,7 +3594,7 @@ function createGalleryButton() {
         }, 250);
     };
 
-    // ★ 修正: キャッシュクリア + 即座に openGalleryFromGic + 計測ログ
+    // ★ 修正: キャッシュクリア + 即座に openGalleryFromGic + ⏳ローディング表示 + 計測
     let lastActionTime = 0;
     const triggerAction = () => {
         if (btn.classList.contains('gic-gallery-loading') || btn.disabled) return;
@@ -3561,13 +3607,32 @@ function createGalleryButton() {
             const hs = document.getElementById('gic-gallery-warmup-hide');
             if (hs) hs.remove();
         }
-        // キャッシュをクリアして即座に最新状態で判定
         _galleryOpenCache = { value: false, timestamp: 0 };
         clearGalleryOpenInFlight();
         flashBlue();
+
+        // 即座に ⏳ 表示（20秒待ちの視覚的フィードバック）
+        const origText = btn.textContent;
+        btn.textContent = '⏳';
         const t0 = performance.now();
         const ok = openGalleryFromGic();
         console.log(`[GIC] 🎨 ボタン押下 → openGalleryFromGic (ok=${ok}, ${(performance.now() - t0).toFixed(1)}ms)`);
+
+        // ギャラリー描画完了（または8秒経過）で元に戻す
+        const restoreText = () => {
+            if (btn.textContent === '⏳') {
+                btn.textContent = origText || '🎨';
+            }
+        };
+        const watchOpen = () => {
+            _galleryOpenCache = { value: false, timestamp: 0 };
+            if (isGalleryOpen() || performance.now() - t0 > 8000) {
+                restoreText();
+                return;
+            }
+            setTimeout(watchOpen, 200);
+        };
+        setTimeout(watchOpen, 200);
     };
 
     btn.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); triggerAction(); }, true);
