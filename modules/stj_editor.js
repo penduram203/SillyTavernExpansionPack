@@ -1513,7 +1513,7 @@
             <div class="stj-button-group">
                 <div class="stj-button-group-left">
                     <button id="stj_save_data">セーブ</button>
-                    <button id="stj_cancel_export">キャンセル</button>
+                    <button id="stj_cancel_export">終了</button>
                     <button id="stj_export_json">JSON出力</button>
                 </div>
                 <div class="stj-button-group-right">
