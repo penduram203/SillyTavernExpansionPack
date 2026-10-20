@@ -272,7 +272,7 @@
   margin: 0 auto;
 }
 
-/* ===== ❌削除ボタン ===== */
+/* ===== ❌削除ボタン（セル一覧用） ===== */
 .stj-delete-row {
   position: absolute;
   top: 2px;
@@ -587,17 +587,26 @@
   border-style: solid;
   border-color: #2d3748;
   background: #0d1117;
+  /* ★ スロット自体にもズームインカーソル（余白領域対策） */
+  cursor: zoom-in;
 }
 
 /* ★ セルポップアップ内のメディア: クリック可能にし、ズームインカーソルを強制 */
-.stj-cell-modal-slot img,
-.stj-cell-modal-slot video {
+.stj-cell-modal-slot > img,
+.stj-cell-modal-slot > video {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
   display: block;
   pointer-events: auto !important;
   cursor: zoom-in !important;
+}
+
+/* 万全を期すため body 直下からも強制 */
+body .stj-cell-modal .stj-cell-modal-grid .stj-cell-modal-slot > img,
+body .stj-cell-modal .stj-cell-modal-grid .stj-cell-modal-slot > video {
+  cursor: zoom-in !important;
+  pointer-events: auto !important;
 }
 
 .stj-cell-modal-slot-remove {
@@ -709,7 +718,11 @@
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8);
 }
 
-/* ★ 拡大表示中は最前面のギャラリーUI（ページャー等）を隠してクリック不可にする */
+/* ============================================================
+   ★ セルポップアップ / 拡大表示中はギャラリーページャーを非表示・クリック無効
+   ============================================================ */
+body.stj-cell-modal-active .gic-pagination-pager,
+body.stj-cell-modal-active .gic-pagination-pager *,
 body.stj-zoom-active .gic-pagination-pager,
 body.stj-zoom-active .gic-pagination-pager *,
 body.stj-zoom-active #gic-bulk-toast {
@@ -740,18 +753,25 @@ body.stj-zoom-active #gic-bulk-toast {
   border: 3px solid #48bb78;
 }
 
-/* ===== 削除確認・メッセージダイアログ ===== */
+/* ============================================================
+   ★ 削除確認・メッセージダイアログ（body 直下・最前面）
+   ============================================================ */
 #stj_confirm_dialog,
 #stj_message_dialog {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
-  z-index: 10050;
   display: none;
   justify-content: center;
   align-items: center;
 }
-#stj_confirm_dialog { background-color: rgba(0, 0, 0, 0.6); }
-#stj_message_dialog { background-color: rgba(0, 0, 0, 0.4); z-index: 10060; }
+#stj_confirm_dialog {
+  background-color: rgba(0, 0, 0, 0.6);
+  z-index: 25000;  /* セルポップアップ(20000)より前面 */
+}
+#stj_message_dialog {
+  background-color: rgba(0, 0, 0, 0.4);
+  z-index: 24000;
+}
 #stj_confirm_dialog .stj-confirm-box {
   background-color: #2d3748;
   border: 2px solid #4a5568;
