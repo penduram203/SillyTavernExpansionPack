@@ -1,3 +1,4 @@
+// right_nav_kai.js
 (function () {
     const MODULE_NAME = 'right_nav_kai';
     const LOG_PREFIX = '[RightNavKai DEBUG]';
