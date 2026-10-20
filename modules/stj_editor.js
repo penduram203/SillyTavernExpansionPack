@@ -1,3 +1,4 @@
+// stj_editor.js
 (function() {
     const MODULE_NAME = 'stj_editor';
 
