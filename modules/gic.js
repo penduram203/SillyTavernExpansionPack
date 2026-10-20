@@ -1056,100 +1056,7 @@ function setupGalleryDedupeObserver() {
 }
 
 // ============================================================
-// ★ ギャラリー 🔍 アイコン（純粋な視覚オーバーレイ）
-//   - サムネイルの DOM/CSS は一切変更しない
-//   - document.body 直下の position: fixed 要素
-//   - pointer-events: none でクリックは nGY2 標準プレビューへ素通し
-// ============================================================
-function setupGalleryZoomButton() {
-    if (window.__gicGalleryZoomBtnInstalled) return;
-    window.__gicGalleryZoomBtnInstalled = true;
-
-    const GALLERY_THUMB_SELECTOR = '.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item';
-    let zoomBtn = null;
-    let currentThumb = null;
-
-    function ensureBtn() {
-        if (zoomBtn) return zoomBtn;
-        zoomBtn = document.createElement('div');
-        zoomBtn.className = 'gic-gallery-zoom-btn';
-        zoomBtn.textContent = '🔍';
-
-        const s = zoomBtn.style;
-        s.setProperty('position', 'fixed', 'important');
-        s.setProperty('width', '36px', 'important');
-        s.setProperty('height', '36px', 'important');
-        s.setProperty('padding', '0', 'important');
-        s.setProperty('margin', '0', 'important');
-        s.setProperty('background', 'rgba(0, 0, 0, 0.55)', 'important');
-        s.setProperty('color', '#ffffff', 'important');
-        s.setProperty('border', 'none', 'important');
-        s.setProperty('border-radius', '4px', 'important');
-        s.setProperty('font-size', '18px', 'important');
-        s.setProperty('font-weight', 'bold', 'important');
-        s.setProperty('display', 'none', 'important');
-        s.setProperty('align-items', 'center', 'important');
-        s.setProperty('justify-content', 'center', 'important');
-        s.setProperty('z-index', '2147483647', 'important');
-        s.setProperty('box-shadow', '0 2px 8px rgba(0, 0, 0, 0.6)', 'important');
-        s.setProperty('pointer-events', 'none', 'important');
-        s.setProperty('line-height', '1', 'important');
-        s.setProperty('user-select', 'none', 'important');
-        s.setProperty('transform', 'translate(-50%, -50%)', 'important');
-
-        document.body.appendChild(zoomBtn);
-        return zoomBtn;
-    }
-
-    function showFor(thumb) {
-        if (_bulkDeleteMode) { hide(); return; }
-        const gallery = document.getElementById('gallery');
-        if (!gallery || !gallery.contains(thumb)) { hide(); return; }
-        const rect = thumb.getBoundingClientRect();
-        if (rect.width <= 0 || rect.height <= 0) { hide(); return; }
-
-        currentThumb = thumb;
-        const btn = ensureBtn();
-        btn.style.setProperty('left', (rect.left + rect.width / 2) + 'px', 'important');
-        btn.style.setProperty('top', (rect.top + rect.height / 2) + 'px', 'important');
-        btn.style.setProperty('display', 'flex', 'important');
-    }
-
-    function hide() {
-        if (zoomBtn) zoomBtn.style.setProperty('display', 'none', 'important');
-        currentThumb = null;
-    }
-
-    document.addEventListener('mouseover', (e) => {
-        if (!e.target || !e.target.closest) return;
-        const thumb = e.target.closest(GALLERY_THUMB_SELECTOR);
-        if (!thumb) return;
-        showFor(thumb);
-    }, true);
-
-    document.addEventListener('mousemove', (e) => {
-        if (!zoomBtn) return;
-        const disp = zoomBtn.style.display;
-        if (disp === 'none' || !disp) return;
-        if (currentThumb) {
-            const rect = currentThumb.getBoundingClientRect();
-            if (e.clientX >= rect.left && e.clientX <= rect.right &&
-                e.clientY >= rect.top && e.clientY <= rect.bottom) return;
-        }
-        hide();
-    }, true);
-
-    document.addEventListener('scroll', () => hide(), true);
-
-    console.log('[GIC] 🔍 ギャラリー拡大アイコン（pointer-events: none）を有効化しました');
-}
-
-// ============================================================
 // ★ 動画サムネイル（nGY2 の title 属性からファイル名を取得）
-//   - title 属性 = ファイル名（defa.mp4, 3.webm 等）
-//   - キャラ名から /user/images/{charName}/{title} を構築
-//   - nGY2TnImg の background-image を opacity:0 で隠す
-//   - video を position:absolute; inset:0; z-index:5 で全面に重ねる
 // ============================================================
 function setupGalleryVideoThumbs() {
     const gallery = document.getElementById('gallery');
@@ -1160,22 +1067,18 @@ function setupGalleryVideoThumbs() {
     gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1').forEach(thumb => {
         if (thumb.dataset.gicVideoReady === '1') return;
 
-        // nGY2 は title 属性にファイル名を入れている
         const title = (thumb.getAttribute('title') || '').trim();
         if (!title || !isVideoFile(title)) return;
 
-        // 既に video があればスキップ
         if (thumb.querySelector(':scope > video.gic-gallery-video')) {
             thumb.dataset.gicVideoReady = '1';
             return;
         }
 
-        // 親の position が static の場合は nGY2 のレイアウトを壊さないようスキップ
         let pos = 'static';
         try { pos = window.getComputedStyle(thumb).position; } catch (e) { /* ignore */ }
         if (pos === 'static') return;
 
-        // URL 構築
         let url;
         if (/^https?:\/\//i.test(title) || title.startsWith('/')) {
             url = title;
@@ -1187,7 +1090,6 @@ function setupGalleryVideoThumbs() {
 
         thumb.dataset.gicVideoReady = '1';
 
-        // nGY2 のサムネイル画像（base64 background-image）を透明化
         const bgEls = thumb.querySelectorAll('.nGY2TnImg, .nGY2TnImgBack');
         bgEls.forEach(el => {
             el.dataset.gicOriginalOpacity = el.style.opacity || '';
@@ -1240,7 +1142,6 @@ function setupGalleryVideoThumbs() {
             if (video.readyState === 0 && video.parentNode) restore('timeout');
         }, 8000);
 
-        // 可視時のみ再生
         if (!window.__gicGalleryVideoIO) {
             window.__gicGalleryVideoIO = new IntersectionObserver((entries) => {
                 for (const entry of entries) {
@@ -1296,6 +1197,10 @@ function setupGalleryDragToJson() {
         if (!url) {
             const a = thumb.querySelector('a');
             if (a) url = a.getAttribute('href');
+        }
+        if (!url) {
+            const title = thumb.getAttribute('title');
+            if (title) url = title;
         }
         return url ? urlToServerPath(url) : null;
     }
@@ -1586,6 +1491,14 @@ function setupGalleryDragToJson() {
             e.stopImmediatePropagation();
             e.preventDefault();
             if (!_bulkDeleteMode) {
+                // ★ クリックしたサムネイルが動画かを記録
+                const title = (thumb.getAttribute('title') || '').trim();
+                const isVid = isVideoFile(title);
+                const charName = getCurrentCharacterName();
+                window.__gicPendingPreview = (isVid && charName && title) ? {
+                    title,
+                    charName,
+                } : null;
                 simulateClick(thumb, e.clientX, e.clientY);
             }
         }
@@ -1666,6 +1579,7 @@ function getAllPreviews() {
 
 function closePreviewElement(el) {
     if (!el || !el.parentNode) return;
+    window.__gicPendingPreview = null;
     const closeBtn = el.querySelector('.dragClose');
     if (closeBtn && typeof closeBtn.click === 'function') {
         try { closeBtn.click(); return; } catch (e) { /* fallback */ }
@@ -2034,9 +1948,19 @@ function applyPageNumbers() {
     positionPager(pager);
 }
 
+// ============================================================
+// ★ プレビュー fit（画像 / 動画）
+// ============================================================
 function fitPreviewToViewport(panel) {
     if (!panel) return;
-    const img = panel.querySelector('img');
+
+    // ★ 動画クリック時は動画プレビューへ
+    if (window.__gicPendingPreview) {
+        fitVideoPreview(panel, window.__gicPendingPreview);
+        return;
+    }
+
+    const img = panel.querySelector(':scope > img') || panel.querySelector('img');
     const header = panel.querySelector('.panelControlBar');
     const closeBtn = panel.querySelector('.dragClose');
     if (!img) return;
@@ -2120,6 +2044,110 @@ function fitPreviewToViewport(panel) {
     }
 }
 
+// ★ 動画プレビュー: nGY2 のプレビュー内 img を video に置き換える
+function fitVideoPreview(panel, pending) {
+    if (!panel || !pending || !pending.title || !pending.charName) return;
+
+    const header = panel.querySelector('.panelControlBar');
+    const closeBtn = panel.querySelector('.dragClose');
+    if (header) header.style.setProperty('flex', '0 0 auto', 'important');
+
+    // 既存の img を非表示（nGY2 が作った壊れた img を隠す）
+    panel.querySelectorAll('img').forEach(img => {
+        img.style.setProperty('display', 'none', 'important');
+    });
+
+    let video = panel.querySelector(':scope > video.gic-gallery-preview-video');
+
+    if (!video) {
+        video = document.createElement('video');
+        video.className = 'gic-gallery-preview-video';
+        video.src = '/user/images/' + encodeURIComponent(pending.charName) + '/' + encodeURIComponent(pending.title);
+        video.controls = true;
+        video.autoplay = true;
+        video.loop = true;
+        video.playsInline = true;
+        video.preload = 'auto';
+        video.muted = false;
+        video.style.cssText = 'display: block; background: transparent; flex: 0 0 auto;';
+
+        panel.appendChild(video);
+
+        video.play().catch(() => {
+            video.muted = true;
+            video.play().catch(() => {});
+        });
+
+        video.addEventListener('loadedmetadata', () => {
+            if (document.body.contains(panel)) fitVideoPreview(panel, pending);
+        }, { once: true });
+
+        video.addEventListener('error', () => {
+            console.warn('[GIC] 🎬 video preview failed:', video.src);
+        }, { once: true });
+
+        console.log('[GIC] 🎬 video preview created:', video.src);
+    }
+
+    const nw = video.videoWidth || 0;
+    const nh = video.videoHeight || 0;
+    if (!nw || !nh) return;
+
+    const galleryEl = document.getElementById('gallery');
+    let galleryRight = 0;
+    if (galleryEl) {
+        const gr = galleryEl.getBoundingClientRect();
+        galleryRight = Math.round(gr.right);
+    }
+
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    const availableW = Math.max(100, vw - galleryRight - GALLERY_PREVIEW_MARGIN_X);
+    const availableH = Math.max(100, vh - GALLERY_PREVIEW_MARGIN_Y * 2);
+
+    const fitScale = Math.min(availableW / nw, availableH / nh);
+    const finalW = Math.max(1, Math.floor(nw * fitScale));
+    const finalH = Math.max(1, Math.floor(nh * fitScale));
+
+    panel.style.setProperty('position', 'fixed', 'important');
+    panel.style.setProperty('left', galleryRight + 'px', 'important');
+    panel.style.setProperty('top', '50%', 'important');
+    panel.style.setProperty('right', 'auto', 'important');
+    panel.style.setProperty('bottom', 'auto', 'important');
+    panel.style.setProperty('transform', 'translateY(-50%)', 'important');
+    panel.style.setProperty('transform-origin', 'left center', 'important');
+    panel.style.setProperty('margin', '0', 'important');
+    panel.style.setProperty('padding', '0', 'important');
+    panel.style.setProperty('box-sizing', 'border-box', 'important');
+    panel.style.setProperty('overflow', 'visible', 'important');
+    panel.style.setProperty('display', 'flex', 'important');
+    panel.style.setProperty('flex-direction', 'column', 'important');
+    panel.style.setProperty('width', finalW + 'px', 'important');
+    panel.style.setProperty('height', 'auto', 'important');
+    panel.style.setProperty('max-width', 'none', 'important');
+    panel.style.setProperty('max-height', 'none', 'important');
+    panel.style.setProperty('visibility', 'visible', 'important');
+    panel.style.setProperty('z-index', '15000', 'important');
+
+    video.style.setProperty('width', finalW + 'px', 'important');
+    video.style.setProperty('height', finalH + 'px', 'important');
+    video.style.setProperty('max-width', 'none', 'important');
+    video.style.setProperty('max-height', 'none', 'important');
+    video.style.setProperty('object-fit', 'contain', 'important');
+    video.style.setProperty('display', 'block', 'important');
+
+    if (closeBtn) {
+        closeBtn.style.setProperty('position', 'fixed', 'important');
+        closeBtn.style.setProperty('left', '0', 'important');
+        closeBtn.style.setProperty('top', '50%', 'important');
+        closeBtn.style.setProperty('transform', `translateY(-50%) scale(${GALLERY_PREVIEW_CLOSE_SCALE})`, 'important');
+        closeBtn.style.setProperty('transform-origin', 'left center', 'important');
+        closeBtn.style.setProperty('margin', '0', 'important');
+        closeBtn.style.setProperty('z-index', '15001', 'important');
+    }
+}
+
 function findGalleryHeaderControls() {
     const result = { header: null, trashIcon: null, checkIcon: null, refreshIcon: null, dropdown: null, folderInput: null, folderRow: null };
     const gallery = document.getElementById('gallery');
@@ -2183,6 +2211,8 @@ function extractImagePathFromItem(item) {
     }
     const link = item.querySelector('a');
     if (link && link.getAttribute('href')) return urlToServerPath(link.getAttribute('href'));
+    const title = item.getAttribute('title');
+    if (title) return urlToServerPath(title);
     return null;
 }
 
@@ -2763,6 +2793,8 @@ function openGalleryFromGic() {
 function hideGalleryAttachmentsImmediately(reason = '') {
     if (reason) console.log(`[GIC] 🚪 付属UIを即座に非表示 (${reason})`);
 
+    window.__gicPendingPreview = null;
+
     const pager = document.querySelector('.gic-pagination-pager');
     if (pager) { pager.remove(); _lastPagerSignature = ''; }
 
@@ -2775,9 +2807,6 @@ function hideGalleryAttachmentsImmediately(reason = '') {
     }
     currentPreviewEl = null;
     hideStatusMessage();
-
-    const zoomBtn = document.querySelector('.gic-gallery-zoom-btn');
-    if (zoomBtn) zoomBtn.style.setProperty('display', 'none', 'important');
 
     if (_bulkDeleteMode) {
         document.body.classList.remove('gic-bulk-delete-mode');
@@ -3302,7 +3331,6 @@ function initializeGIC() {
     installGalleryCloseInterceptor();
     setupGalleryDedupeObserver();
     setupGalleryDragToJson();
-    setupGalleryZoomButton();
 
     createReleaseButton();
     createGalleryButton();
@@ -3382,7 +3410,6 @@ export async function activate() {
     installGalleryCloseInterceptor();
     setupGalleryDedupeObserver();
     setupGalleryDragToJson();
-    setupGalleryZoomButton();
     createReleaseButton();
     createGalleryButton();
     setupGalleryObserverForGic();
