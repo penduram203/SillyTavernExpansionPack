@@ -455,7 +455,7 @@
   overflow: hidden;
 }
 
-/* ★ ヘッダー高さ拡大（40px → 60px） */
+/* ★ ヘッダー: ❌ボタンを削除したため、決定→キャンセル→キーワード→選択肢 の順 */
 .stj-cell-modal-header {
   height: 60px;
   min-height: 60px;
@@ -469,24 +469,6 @@
   flex-shrink: 0;
   position: relative;
 }
-
-.stj-cell-modal-close {
-  width: 44px;
-  height: 44px;
-  padding: 0;
-  background: #e53e3e;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 22px;
-  font-weight: bold;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-.stj-cell-modal-close:hover { background: #c53030; }
 
 .stj-cell-modal-apply {
   height: 44px;
@@ -607,13 +589,15 @@
   background: #0d1117;
 }
 
+/* ★ セルポップアップ内のメディア: クリック可能にし、ズームインカーソルを強制 */
 .stj-cell-modal-slot img,
 .stj-cell-modal-slot video {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
-  pointer-events: none;
   display: block;
+  pointer-events: auto !important;
+  cursor: zoom-in !important;
 }
 
 .stj-cell-modal-slot-remove {
@@ -723,6 +707,16 @@
   user-select: none;
   border-radius: 4px;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8);
+}
+
+/* ★ 拡大表示中は最前面のギャラリーUI（ページャー等）を隠してクリック不可にする */
+body.stj-zoom-active .gic-pagination-pager,
+body.stj-zoom-active .gic-pagination-pager *,
+body.stj-zoom-active #gic-bulk-toast {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
 }
 
 /* ===== カスタムアラート ===== */
