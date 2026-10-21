@@ -164,10 +164,10 @@
             else if (typeof value === 'string' && value.trim()) urls.add(value.trim());
         }
         urls.forEach(url => {
-            if (isVideoUrl(url)) {
-                const v = document.createElement('video');
-                v.preload = 'auto'; v.muted = true; v.playsInline = true; v.src = url;
-            } else { const img = new Image(); img.src = url; }
+            // ★ 動画はプリロードしない（クリック時に初めて読み込む）
+            if (isVideoUrl(url)) return;
+            const img = new Image();
+            img.src = url;
         });
     }
 
