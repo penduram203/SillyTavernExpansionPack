@@ -148,7 +148,6 @@
 
     async function ensureThumbForEditor(videoFileName, charName) {
         if (!videoFileName || !charName) return null;
-        // GIC側のキャッシュ・生成器を優先利用
         if (window.GicApi?.ensureThumbnailForVideo) {
             try {
                 const url = await window.GicApi.ensureThumbnailForVideo(videoFileName, charName);
@@ -957,7 +956,7 @@
             const fileName = slot.dataset.fileName;
             if (fileName && currentModalCell) {
                 removeImageFromCell(currentModalCell, fileName);
-                renderCellModalGrid(currentModalCell);
+                renderCellModalGrid(currentModalCell).catch(err => console.warn('[STJ Editor] render error:', err));
                 updateCellPreview(currentModalCell);
             }
         });
@@ -1012,7 +1011,7 @@
             requestAnimationFrame(() => {
                 if (!currentCellModal || currentModalCell !== cell) return;
                 try {
-                    renderCellModalGrid(cell);
+                    renderCellModalGrid(cell).catch(e => console.warn('[STJ Editor] renderCellModalGrid error:', e));
                 } catch (e) {
                     console.error('[STJ Editor] renderCellModalGrid error:', e);
                 }
@@ -1132,7 +1131,18 @@
 
     async function renderCellModalGrid(cell) {
         if (!currentCellModal || !cell) return;
-        const images = getCellImages(cell);
+
+        // ★ _thum.png → 元の動画名に変換（表示用）
+        //   セルに保存される名前は _thum.png か動画名のどちらの可能性もある
+        const rawImages = getCellImages(cell);
+        const images = rawImages.map(f => {
+            if (typeof f === 'string' && /_thum\.png$/i.test(f)) {
+                const m = f.match(/^(.+)_(mp4|webm)_thum\.png$/i);
+                if (m) return `${m[1]}.${m[2].toLowerCase()}`;
+            }
+            return f;
+        });
+
         const grid = currentCellModal.querySelector('.stj-cell-modal-grid');
         if (!grid) return;
 
@@ -1160,7 +1170,8 @@
 
         for (let i = 0; i < slots.length; i++) {
             const slot = slots[i];
-            const fileName = images[i];
+            const fileName = images[i];         // 変換後の名前（表示・動画判定用）
+            const rawFileName = rawImages[i];   // 元の名前（削除操作用）
 
             if (!fileName) {
                 slot.querySelectorAll(':scope > img, :scope > video').forEach(el => {
@@ -1177,7 +1188,9 @@
 
             const fullPath = resolveModalMediaPath(fileName, charName);
             const isVideo = isVideoUrl(fileName);
-            slot.dataset.fileName = fileName;
+
+            // ★ 削除操作用には data-image-list に格納されている元の名前を保持
+            slot.dataset.fileName = rawFileName || fileName;
 
             const existing = slot.querySelector(':scope > img, :scope > video');
             if (existing) {
@@ -1200,7 +1213,7 @@
             };
 
             if (isVideo) {
-                // ★ サムネイル画像が存在すれば <img> で表示し、動画は一切読み込まない
+                // ★ サムネイル画像が存在すれば <img> で表示
                 const thumbUrl = await thumbPromises.get(i);
                 if (thumbUrl) {
                     const img = document.createElement('img');
@@ -1363,11 +1376,19 @@
     function handleCellDropFromPath(cell, path) {
         if (!cell || !path) return;
         cell.classList.remove('stj-drop-target');
-        const fileName = extractFileNameFromPath(path);
-        if (!fileName) {
+        const rawName = extractFileNameFromPath(path);
+        if (!rawName) {
             console.log(`[STJ Editor] 無効なファイル名のためスキップ: ${String(path).slice(0, 80)}`);
             return;
         }
+
+        // ★ _thum.png → 元の動画名に変換（セルには動画名で保存）
+        let fileName = rawName;
+        const m = rawName.match(/^(.+)_(mp4|webm)_thum\.png$/i);
+        if (m) {
+            fileName = `${m[1]}.${m[2].toLowerCase()}`;
+        }
+
         if (!/\.(png|jpe?g|gif|webp|avif|bmp|mp4|webm)$/i.test(fileName)) {
             console.log(`[STJ Editor] 拡張子なしのためスキップ: ${fileName}`);
             return;
@@ -1794,7 +1815,6 @@
         previewEl.appendChild(loadingEl);
 
         if (isVideoUrl(fullPath)) {
-            // ★ キャッシュサムネイルがあれば <img> を優先（動画はロードしない）
             const thumbUrl = await ensureThumbForEditor(fileName, charName);
             if (_previewLoadGen.get(previewEl) !== myGen) { removeLoading(); return; }
             if (thumbUrl) {
@@ -1815,7 +1835,6 @@
                 }
             }
 
-            // フォールバック: 静止画動画（第一フレーム）
             const video = document.createElement('video');
             video.setAttribute('muted', '');
             video.setAttribute('loop', '');
@@ -1890,7 +1909,15 @@
 
     function buildImageMapFromForm(charName) {
         const imageMap = {};
-        const toPaths = (names) => names.map(name => `user/images/${charName}/${extractFileNameFromPath(name)}`);
+        const toPaths = (names) => names.map(name => {
+            const cleaned = extractFileNameFromPath(name);
+            // ★ _thum.png → 元の動画名に変換（エクスポート用）
+            const m = cleaned.match(/^(.+)_(mp4|webm)_thum\.png$/i);
+            if (m) {
+                return `user/images/${charName}/${m[1]}.${m[2].toLowerCase()}`;
+            }
+            return `user/images/${charName}/${cleaned}`;
+        });
 
         const defaultCell = document.querySelector('.stj-special-item:nth-child(1)');
         const defaultImages = defaultCell ? getCellImages(defaultCell) : [];
