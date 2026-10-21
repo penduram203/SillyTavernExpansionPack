@@ -284,14 +284,44 @@ html body.no-blur #send_form #nonQRFormItems {
       chat_window_onoff.css が担当する
    ============================================================ */
 
+/* ============================================================
+   ▼ window-control-buttons（中央/左右/手動ボタン）
+   Tボタン（#restore-panel-button）の右隣に固定配置
+   ============================================================ */
+#window-control-buttons {
+  position: fixed !important;
+  left: 45px !important;      /* Tボタン右端(1+32=33px) + 余白(12px) */
+  bottom: 11px !important;    /* Tボタンの視覚的な底辺(3+8=11px)に揃える */
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 6px !important;
+  z-index: 15000 !important;
+  pointer-events: auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  transform: none !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  opacity: 1 !important;
+}
+
+#window-control-buttons > button {
+  position: static !important;
+  transform: none !important;
+  margin: 0 !important;
+  flex: 0 0 auto !important;
+  pointer-events: auto !important;
+}
+
 #center-button,
 #right-half-button,
 #manual-settings-button {
-  transform: translate(-35px, -8px) !important;
+  transform: none !important;
 }
 
-#image-control-container,
-#window-control-buttons {
+#image-control-container {
   opacity: 1 !important;
 }
 
