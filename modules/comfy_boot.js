@@ -151,7 +151,7 @@
     console.info('[GIC-Boot] ComfyUI fetch インターセプタをインストールしました');
 })();
 
-// comfy_boot.js の末尾、既存の fetch インターセプタの後に追加
+// comfy_boot.js の末尾（既存の fetch/XHR インターセプタの後）
 
 (function installGalleryListInterceptor() {
     if (window.__gicGalleryListInterceptorInstalled) return;
@@ -164,6 +164,13 @@
         if (!url.includes('/api/images/list')) {
             return originalFetch.apply(this, arguments);
         }
+
+        // リクエストボディから charName(=folder) を抽出
+        let charName = null;
+        try {
+            const reqBody = init?.body ? JSON.parse(init.body) : null;
+            charName = reqBody?.folder || null;
+        } catch (e) { /* ignore */ }
 
         const resp = await originalFetch.apply(this, arguments);
         if (!resp.ok) return resp;
@@ -180,17 +187,64 @@
             }
 
             if (videos.length === 0) return resp;
+            if (!charName) {
+                console.debug('[GIC-Boot] charName 未取得のため置換をスキップ');
+                return resp;
+            }
 
-            // 動画を除外し、対応する _thum.png を画像扱いで注入
+            // ★ GIC API が利用可能になるまで少し待つ（通常は既にロード済み）
+            for (let i = 0; i < 50 && !window.GicApi?.ensureThumbnailForVideo; i++) {
+                await new Promise(r => setTimeout(r, 100));
+            }
+
+            if (!window.GicApi?.ensureThumbnailForVideo) {
+                console.warn('[GIC-Boot] GicApi.ensureThumbnailForVideo が利用不可。置換をスキップ');
+                return resp;
+            }
+
+            // ★ サムネイル生成を待つ（並列・各タイムアウト付き）
+            console.info(`[GIC-Boot] 🎬 ${videos.length}本の動画サムネイルを準備中...`);
+            const genStart = Date.now();
+            const tasks = videos.map(v =>
+                window.GicApi.ensureThumbnailForVideo(v, charName).catch(e => {
+                    console.warn('[GIC-Boot] thumb gen failed:', v, e);
+                    return null;
+                })
+            );
+            // 全生成完了を待つ（最大20秒。8本×2並列×約1秒 = 約4秒想定）
+            await Promise.race([
+                Promise.all(tasks),
+                new Promise(r => setTimeout(r, 20000)),
+            ]);
+            console.info(`[GIC-Boot] 🎬 サムネイル準備完了 (${Date.now() - genStart}ms)`);
+
+            // ★ ディスクに存在するものだけをリストに追加（HEADで確認）
             const modified = [...images];
-            for (const v of videos) {
+            const results = await Promise.all(videos.map(async (v) => {
                 const m = v.match(/^(.+)\.(mp4|webm)$/i);
-                if (m) {
-                    modified.push(`${m[1]}_${m[2].toLowerCase()}_thum.png`);
+                if (!m) return null;
+                const thumbName = `${m[1]}_${m[2].toLowerCase()}_thum.png`;
+                const thumbUrl = `/user/images/${encodeURIComponent(charName)}/${encodeURIComponent(thumbName)}`;
+                try {
+                    const head = await originalFetch.call(window, thumbUrl, { method: 'HEAD' });
+                    if (!head.ok) return null;
+                    const ct = (head.headers.get('content-type') || '').toLowerCase();
+                    if (ct.includes('text/html')) return null;
+                    return thumbName;
+                } catch (e) {
+                    return null;
+                }
+            }));
+
+            let added = 0;
+            for (const thumbName of results) {
+                if (thumbName) {
+                    modified.push(thumbName);
+                    added++;
                 }
             }
 
-            console.debug(`[GIC-Boot] /api/images/list 書換: 動画 ${videos.length}件を _thum.png に置換`);
+            console.debug(`[GIC-Boot] /api/images/list 書換: 動画 ${videos.length}件 → ${added}件の _thum.png を追加`);
             return new Response(JSON.stringify(modified), {
                 status: resp.status,
                 statusText: resp.statusText,
