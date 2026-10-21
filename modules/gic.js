@@ -1399,7 +1399,7 @@ async function setupGalleryVideoThumbs() {
         gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item').forEach(thumb => {
             const title = (thumb.getAttribute('title') || '').trim();
             if (isThumbFileName(title)) {
-                thumb.style.display = 'none';
+                thumb.remove();  // ★ display:none → remove() に変更
                 thumb.dataset.gicThumbHidden = '1';
             }
         });
