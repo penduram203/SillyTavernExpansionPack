@@ -1306,16 +1306,24 @@ function getUploadHeaders() {
 }
 
 async function uploadThumbnailBlob(charName, blob, thumbName) {
-    // 旧形式互換用（サーバー保存）。IndexedDB 経路では使用しない。
     if (!blob || !thumbName || !charName) return false;
     try {
-        const formData = new FormData();
-        formData.append('char_name', charName);
-        formData.append('avatar', blob, thumbName);
+        const dataUrl = await blobToBase64(blob);
+        const base64Data = String(dataUrl).split(',')[1];
+        if (!base64Data) return false;
+
+        // "test_mp4_thum.png" → filename="test_mp4_thum" (拡張子なし)
+        const filenameNoExt = thumbName.replace(/\.png$/i, '');
+
         const resp = await fetch('/api/images/upload', {
             method: 'POST',
-            headers: getUploadHeaders(),
-            body: formData,
+            headers: getRequestHeaders(),
+            body: JSON.stringify({
+                image: base64Data,
+                format: 'png',
+                filename: filenameNoExt,
+                ch_name: charName,
+            }),
         });
         if (!resp.ok) {
             let text = '';
@@ -1323,7 +1331,7 @@ async function uploadThumbnailBlob(charName, blob, thumbName) {
             console.warn(`[GIC] thumbnail upload failed: ${resp.status} body="${text.slice(0, 300)}"`);
             return false;
         }
-        console.log(`[GIC] 🖼️ thumbnail uploaded: ${thumbName}`);
+        console.log(`[GIC] ✅ thumbnail uploaded: ${charName}/${thumbName}`);
         return true;
     } catch (e) {
         console.warn('[GIC] thumbnail upload error:', e);
@@ -1338,7 +1346,6 @@ async function ensureThumbnailForVideo(videoFileName, charName = getCurrentChara
     if (_thumbUrlCache.has(cacheKey)) {
         const cached = _thumbUrlCache.get(cacheKey);
         if (cached) return cached;
-        // ★ null キャッシュは破棄してリトライ可能にする
         _thumbUrlCache.delete(cacheKey);
     }
 
@@ -1348,16 +1355,26 @@ async function ensureThumbnailForVideo(videoFileName, charName = getCurrentChara
         const url = URL.createObjectURL(cachedBlob);
         _thumbUrlCache.set(cacheKey, url);
         console.log(`[GIC] ⚡ thumbnail from IndexedDB: ${cacheKey}`);
+
+        // ★ IndexedDB にあるがディスクに無い場合は書き出す（フェッチインターセプタ対策）
+        const thumbName = videoFileToThumbName(videoFileName);
+        if (thumbName) {
+            const diskUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(thumbName);
+            if (!(await checkFileExists(diskUrl))) {
+                console.log(`[GIC] 💾 IndexedDB → ディスク書き出し: ${charName}/${thumbName}`);
+                await uploadThumbnailBlob(charName, cachedBlob, thumbName);
+                _thumbExistCache.delete(diskUrl); // 次回 HEAD で再確認させる
+            }
+        }
         return url;
     }
 
-    // ② 旧形式 _thum.png（互換）
+    // ② 旧形式 _thum.png（互換）— 既にある場合はそのまま使う
     const thumbName = videoFileToThumbName(videoFileName);
     if (thumbName) {
         const thumbUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(thumbName);
         if (await checkFileExists(thumbUrl)) {
             _thumbUrlCache.set(cacheKey, thumbUrl);
-            console.log(`[GIC] ⚡ thumbnail from legacy file: ${cacheKey}`);
             return thumbUrl;
         }
     }
@@ -1367,15 +1384,21 @@ async function ensureThumbnailForVideo(videoFileName, charName = getCurrentChara
     console.log(`[GIC] 🎬 generating thumbnail: ${cacheKey}`);
     const blob = await generateVideoThumbnailBlob(videoUrl, THUMB_SIZE);
     if (!blob) {
-        console.warn(`[GIC] ❌ thumbnail generation failed (will retry next time): ${cacheKey}`);
-        // ★ null はキャッシュしない（次回リトライ）
+        console.warn(`[GIC] ❌ thumbnail generation failed: ${cacheKey}`);
         return null;
     }
 
     // ④ IndexedDB 保存
     const saved = await putThumbInDB(cacheKey, blob);
-    if (!saved) {
-        console.warn(`[GIC] ⚠️ IndexedDB save failed: ${cacheKey}`);
+    if (!saved) console.warn(`[GIC] ⚠️ IndexedDB save failed: ${cacheKey}`);
+
+    // ⑤ ディスク保存（フェッチインターセプタ用）
+    if (thumbName) {
+        const ok = await uploadThumbnailBlob(charName, blob, thumbName);
+        if (ok) {
+            const diskUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(thumbName);
+            _thumbExistCache.delete(diskUrl);
+        }
     }
 
     const url = URL.createObjectURL(blob);
