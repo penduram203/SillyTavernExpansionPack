@@ -3093,13 +3093,7 @@ function syncGalleryButtonVisibility() {
             btn.style.removeProperty('display');
         }
     }
-    
-    if (galleryOpen) {
-        applyGalleryLayout();
-        setTimeout(() => {
-            setupGalleryVideoThumbs().catch(() => {});
-        }, 500);  // レイアウト安定後に1回だけ実行
-    
+
     if (galleryOpen) {
         applyGalleryLayout();
         if (warmupState !== 'running') {
