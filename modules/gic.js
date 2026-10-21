@@ -1439,6 +1439,11 @@ async function setupGalleryVideoThumbs() {
 }
 
 async function processGalleryVideoThumb(thumb, videoFileName, charName) {
+    // 既存の動画要素をすべて削除
+    thumb.querySelectorAll('video').forEach(v => {
+        try { v.pause(); } catch (e) {}
+        v.remove();
+    });
     // STネイティブのサムネイルレイヤーを隠す
     const bgEls = thumb.querySelectorAll('.nGY2TnImg, .nGY2TnImgBack');
     bgEls.forEach(el => {
