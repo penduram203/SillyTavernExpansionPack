@@ -672,12 +672,6 @@ function getCurrentCharacterName() {
             pointer-events: none !important;
         }
 
-        /* _thum.png キャッシュ画像をギャラリー一覧から隠す（旧形式互換） */
-        .nGY2GThumbnail[title$="_thum.png"],
-        .nGY2GThumbnail_l1[title$="_thum.png"],
-        .nGY2Item[title$="_thum.png"] {
-            display: none !important;
-        }
     `;
     document.head.appendChild(style);
     console.log('[GIC] 🖼️ ギャラリー配置CSSを注入しました');
@@ -1425,15 +1419,6 @@ async function setupGalleryVideoThumbs() {
 
     _thumbProcessingActive = true;
     try {
-        // 1) _thum.png アイテムをDOM上からも非表示
-        gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item').forEach(thumb => {
-            const title = (thumb.getAttribute('title') || '').trim();
-            if (isThumbFileName(title)) {
-                thumb.remove();  // ★ display:none → remove() に変更
-                thumb.dataset.gicThumbHidden = '1';
-            }
-        });
-
         // 2) 未処理の動画 thumb を収集
         const videos = [];
         gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1').forEach(thumb => {
