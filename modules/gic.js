@@ -56,7 +56,7 @@ const GALLERY_PREPARE_MAX_RETRIES = 15;
 const THUMB_SIZE = 200;
 const THUMB_SUFFIX = '_thum.png';
 const THUMB_CONCURRENCY = 2;
-const THUMB_GEN_TIMEOUT_MS = 8000;
+const THUMB_GEN_TIMEOUT_MS = 30000;
 const THUMB_EXIST_CACHE_TTL_MS = 60000;
 
 // === IndexedDB Thumbnail Cache ===
@@ -1101,47 +1101,99 @@ async function generateVideoThumbnailBlob(videoUrl, size = THUMB_SIZE) {
         video.playsInline = true;
         video.setAttribute('muted', '');
         video.setAttribute('playsinline', '');
-        video.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;';
+        video.setAttribute('webkit-playsinline', '');
+        video.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:100px;height:100px;opacity:0.01;pointer-events:none;';
         document.body.appendChild(video);
 
         let done = false;
+        let frameExtracted = false;
+
         const cleanup = () => {
             try { video.pause(); } catch (e) { /* ignore */ }
-            // ★ src='' は Firefox で「URI が正しくありません」警告を出すため削除
             try { video.remove(); } catch (e) { /* ignore */ }
         };
-        const finish = (r) => { if (done) return; done = true; cleanup(); resolve(r); };
+        const finish = (r) => {
+            if (done) return;
+            done = true;
+            cleanup();
+            resolve(r);
+        };
 
-        const timeout = setTimeout(() => finish(null), THUMB_GEN_TIMEOUT_MS);
-        const done2 = (r) => { clearTimeout(timeout); finish(r); };
+        const timeout = setTimeout(() => {
+            console.warn(`[GIC] ❌ thumbnail gen timeout (${THUMB_GEN_TIMEOUT_MS}ms): ${videoUrl} (readyState=${video.readyState}, networkState=${video.networkState})`);
+            finish(null);
+        }, THUMB_GEN_TIMEOUT_MS);
 
-        video.addEventListener('loadeddata', () => {
-            try {
-                if (Number.isFinite(video.duration) && video.duration > 0.1) {
-                    video.currentTime = Math.min(1, video.duration * 0.1);
-                } else {
-                    video.currentTime = 0;
-                }
-            } catch (e) { /* ignore */ }
-        }, { once: true });
-
-        video.addEventListener('seeked', () => {
+        const extractFrame = () => {
+            if (frameExtracted || done) return;
+            frameExtracted = true;
             try {
                 const vw = video.videoWidth || 0;
                 const vh = video.videoHeight || 0;
-                if (!vw || !vh) return done2(null);
+                if (!vw || !vh) {
+                    console.warn('[GIC] ❌ video dimensions are 0:', videoUrl, `(${vw}x${vh})`);
+                    clearTimeout(timeout);
+                    return finish(null);
+                }
                 const scale = Math.min(size / vw, size / vh);
                 const w = Math.max(1, Math.round(vw * scale));
                 const h = Math.max(1, Math.round(vh * scale));
                 const canvas = document.createElement('canvas');
                 canvas.width = w; canvas.height = h;
-                canvas.getContext('2d').drawImage(video, 0, 0, w, h);
-                canvas.toBlob((blob) => done2(blob), 'image/png', 0.85);
-            } catch (e) { done2(null); }
+                const ctx = canvas.getContext('2d');
+                if (!ctx) {
+                    console.warn('[GIC] ❌ canvas 2d context unavailable');
+                    clearTimeout(timeout);
+                    return finish(null);
+                }
+                ctx.drawImage(video, 0, 0, w, h);
+                canvas.toBlob((blob) => {
+                    clearTimeout(timeout);
+                    if (!blob) {
+                        console.warn('[GIC] ❌ canvas.toBlob returned null:', videoUrl);
+                        return finish(null);
+                    }
+                    console.log(`[GIC] ✅ thumbnail generated: ${videoUrl} → ${w}x${h}, ${blob.size} bytes`);
+                    finish(blob);
+                }, 'image/png', 0.85);
+            } catch (e) {
+                console.warn('[GIC] ❌ extractFrame error:', e);
+                clearTimeout(timeout);
+                finish(null);
+            }
+        };
+
+        // ★ loadeddata 到着時点で最初のフレームが描画可能（readyState >= 2）
+        video.addEventListener('loadeddata', () => {
+            console.log(`[GIC] 📹 loadeddata: ${videoUrl}, readyState=${video.readyState}, duration=${video.duration}`);
+            if (video.readyState >= 2) extractFrame();
         }, { once: true });
 
-        video.addEventListener('error', () => done2(null), { once: true });
+        // canplay フォールバック
+        video.addEventListener('canplay', () => {
+            if (!frameExtracted) {
+                console.log(`[GIC] 📹 canplay fallback: ${videoUrl}`);
+                extractFrame();
+            }
+        }, { once: true });
+
+        // seeked フォールバック（念のため）
+        video.addEventListener('seeked', () => {
+            if (!frameExtracted) {
+                console.log(`[GIC] 📹 seeked fallback: ${videoUrl}`);
+                extractFrame();
+            }
+        }, { once: true });
+
+        video.addEventListener('error', () => {
+            console.warn(`[GIC] ❌ video error: ${videoUrl}`, video.error?.code, video.error?.message);
+            clearTimeout(timeout);
+            finish(null);
+        }, { once: true });
+
         video.src = videoUrl;
+        // ★ 最重要: 明示的に load() を呼ぶ（Firefox で必須）
+        try { video.load(); } catch (e) { /* ignore */ }
     });
 }
 
@@ -1282,9 +1334,15 @@ async function uploadThumbnailBlob(charName, blob, thumbName) {
 async function ensureThumbnailForVideo(videoFileName, charName = getCurrentCharacterName()) {
     if (!videoFileName || !charName) return null;
     const cacheKey = `${charName}:${videoFileName}`;
-    if (_thumbUrlCache.has(cacheKey)) return _thumbUrlCache.get(cacheKey);
 
-    // ① IndexedDB にキャッシュがあれば即返す（最速パス）
+    if (_thumbUrlCache.has(cacheKey)) {
+        const cached = _thumbUrlCache.get(cacheKey);
+        if (cached) return cached;
+        // ★ null キャッシュは破棄してリトライ可能にする
+        _thumbUrlCache.delete(cacheKey);
+    }
+
+    // ① IndexedDB
     const cachedBlob = await getThumbFromDB(cacheKey);
     if (cachedBlob) {
         const url = URL.createObjectURL(cachedBlob);
@@ -1293,28 +1351,31 @@ async function ensureThumbnailForVideo(videoFileName, charName = getCurrentChara
         return url;
     }
 
-    // ② 旧形式の _thum.png がディスクに残っていればそれを使う（互換）
+    // ② 旧形式 _thum.png（互換）
     const thumbName = videoFileToThumbName(videoFileName);
     if (thumbName) {
         const thumbUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(thumbName);
         if (await checkFileExists(thumbUrl)) {
             _thumbUrlCache.set(cacheKey, thumbUrl);
+            console.log(`[GIC] ⚡ thumbnail from legacy file: ${cacheKey}`);
             return thumbUrl;
         }
     }
 
-    // ③ 無ければ動画から生成
+    // ③ 生成
     const videoUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(videoFileName);
+    console.log(`[GIC] 🎬 generating thumbnail: ${cacheKey}`);
     const blob = await generateVideoThumbnailBlob(videoUrl, THUMB_SIZE);
     if (!blob) {
-        _thumbUrlCache.set(cacheKey, null);
+        console.warn(`[GIC] ❌ thumbnail generation failed (will retry next time): ${cacheKey}`);
+        // ★ null はキャッシュしない（次回リトライ）
         return null;
     }
 
-    // ④ IndexedDB に永続保存
+    // ④ IndexedDB 保存
     const saved = await putThumbInDB(cacheKey, blob);
     if (!saved) {
-        console.warn(`[GIC] ⚠️ IndexedDB 保存失敗（セッション限定で表示）: ${cacheKey}`);
+        console.warn(`[GIC] ⚠️ IndexedDB save failed: ${cacheKey}`);
     }
 
     const url = URL.createObjectURL(blob);
