@@ -59,6 +59,11 @@ const THUMB_CONCURRENCY = 2;
 const THUMB_GEN_TIMEOUT_MS = 8000;
 const THUMB_EXIST_CACHE_TTL_MS = 60000;
 
+// === IndexedDB Thumbnail Cache ===
+const THUMB_DB_NAME = 'gic_thumbnails';
+const THUMB_DB_STORE = 'thumbs';
+const THUMB_DB_VERSION = 1;
+
 // ===== 状態 =====
 let lastGeneratedImageUrl = null;
 let isOverrideLocal = false;
@@ -116,6 +121,7 @@ let _sdSourceChecked = false;
 const _thumbExistCache = new Map();
 const _thumbUrlCache = new Map();
 let _thumbProcessingActive = false;
+let _thumbDbPromise = null;
 
 // ===== ユーティリティ =====
 function wait(ms) {
@@ -666,7 +672,7 @@ function getCurrentCharacterName() {
             pointer-events: none !important;
         }
 
-        /* _thum.png キャッシュ画像をギャラリー一覧から隠す */
+        /* _thum.png キャッシュ画像をギャラリー一覧から隠す（旧形式互換） */
         .nGY2GThumbnail[title$="_thum.png"],
         .nGY2GThumbnail_l1[title$="_thum.png"],
         .nGY2Item[title$="_thum.png"] {
@@ -1053,10 +1059,11 @@ function setupGalleryDedupeObserver() {
 
 // ============================================================
 // ★ 動画サムネイル・キャッシュ機構
-//    - test.mp4 → test_mp4_thum.png（200x200の第一フレームPNG）
-//    - 初回生成時のみ /api/images/upload で charName フォルダに保存
-//    - 以後は <img> のみ表示し、動画は一切ロードしない
+//    - test.mp4 → IndexedDB に 200x200 PNG でキャッシュ
+//    - 初回生成時のみ <video> → canvas → Blob で抽出
+//    - 2回目以降は IndexedDB から瞬時に読み込み、動画は一切ロードしない
 //    - クリック時に本体動画を初めてロードする
+//    - 旧形式 _thum.png がディスクにあれば互換のため優先参照
 // ============================================================
 function videoFileToThumbName(videoFileName) {
     if (!videoFileName || typeof videoFileName !== 'string') return null;
@@ -1100,7 +1107,7 @@ async function generateVideoThumbnailBlob(videoUrl, size = THUMB_SIZE) {
         let done = false;
         const cleanup = () => {
             try { video.pause(); } catch (e) { /* ignore */ }
-            try { video.src = ''; video.load(); } catch (e) { /* ignore */ }
+            // ★ src='' は Firefox で「URI が正しくありません」警告を出すため削除
             try { video.remove(); } catch (e) { /* ignore */ }
         };
         const finish = (r) => { if (done) return; done = true; cleanup(); resolve(r); };
@@ -1138,6 +1145,104 @@ async function generateVideoThumbnailBlob(videoUrl, size = THUMB_SIZE) {
     });
 }
 
+// ============================================================
+// ★ IndexedDB ベースのサムネイル永続キャッシュ
+//    - サーバー依存なし・セッションを跨いで永続
+//    - Blob をそのまま保存（PNG 200x200, 約10〜40KB/枚）
+// ============================================================
+function openThumbDB() {
+    if (_thumbDbPromise) return _thumbDbPromise;
+    _thumbDbPromise = new Promise((resolve, reject) => {
+        try {
+            const req = indexedDB.open(THUMB_DB_NAME, THUMB_DB_VERSION);
+            req.onupgradeneeded = () => {
+                const db = req.result;
+                if (!db.objectStoreNames.contains(THUMB_DB_STORE)) {
+                    db.createObjectStore(THUMB_DB_STORE);
+                }
+            };
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => { _thumbDbPromise = null; reject(req.error); };
+        } catch (e) {
+            _thumbDbPromise = null;
+            reject(e);
+        }
+    });
+    return _thumbDbPromise;
+}
+
+async function getThumbFromDB(key) {
+    try {
+        const db = await openThumbDB();
+        return await new Promise((resolve, reject) => {
+            const tx = db.transaction(THUMB_DB_STORE, 'readonly');
+            const req = tx.objectStore(THUMB_DB_STORE).get(key);
+            req.onsuccess = () => resolve(req.result || null);
+            req.onerror = () => reject(req.error);
+        });
+    } catch (e) { return null; }
+}
+
+async function putThumbInDB(key, blob) {
+    try {
+        const db = await openThumbDB();
+        return await new Promise((resolve, reject) => {
+            const tx = db.transaction(THUMB_DB_STORE, 'readwrite');
+            tx.objectStore(THUMB_DB_STORE).put(blob, key);
+            tx.oncomplete = () => resolve(true);
+            tx.onerror = () => reject(tx.error);
+        });
+    } catch (e) { return false; }
+}
+
+async function deleteThumbFromDB(key) {
+    try {
+        const db = await openThumbDB();
+        return await new Promise((resolve, reject) => {
+            const tx = db.transaction(THUMB_DB_STORE, 'readwrite');
+            tx.objectStore(THUMB_DB_STORE).delete(key);
+            tx.oncomplete = () => resolve(true);
+            tx.onerror = () => reject(tx.error);
+        });
+    } catch (e) { return false; }
+}
+
+// ★ メンテナンス用: キャッシュ全消去 / 統計
+async function clearAllThumbCache() {
+    try {
+        const db = await openThumbDB();
+        await new Promise((resolve, reject) => {
+            const tx = db.transaction(THUMB_DB_STORE, 'readwrite');
+            tx.objectStore(THUMB_DB_STORE).clear();
+            tx.oncomplete = () => resolve(true);
+            tx.onerror = () => reject(tx.error);
+        });
+        _thumbUrlCache.clear();
+        console.log('[GIC] 🧹 IndexedDB サムネイルキャッシュを全消去しました');
+        return true;
+    } catch (e) {
+        console.warn('[GIC] サムネイルキャッシュ消去に失敗:', e);
+        return false;
+    }
+}
+
+async function getThumbCacheStats() {
+    try {
+        const db = await openThumbDB();
+        return await new Promise((resolve, reject) => {
+            const tx = db.transaction(THUMB_DB_STORE, 'readonly');
+            const store = tx.objectStore(THUMB_DB_STORE);
+            const keysReq = store.getAllKeys();
+            const countReq = store.count();
+            let keys = [], count = 0;
+            keysReq.onsuccess = () => { keys = keysReq.result || []; };
+            countReq.onsuccess = () => { count = countReq.result || 0; };
+            tx.oncomplete = () => resolve({ count, keys });
+            tx.onerror = () => reject(tx.error);
+        });
+    } catch (e) { return { count: 0, keys: [] }; }
+}
+
 function getUploadHeaders() {
     try {
         const headers = { ...getRequestHeaders() };
@@ -1149,6 +1254,7 @@ function getUploadHeaders() {
 }
 
 async function uploadThumbnailBlob(charName, blob, thumbName) {
+    // 旧形式互換用（サーバー保存）。IndexedDB 経路では使用しない。
     if (!blob || !thumbName || !charName) return false;
     try {
         const formData = new FormData();
@@ -1160,7 +1266,9 @@ async function uploadThumbnailBlob(charName, blob, thumbName) {
             body: formData,
         });
         if (!resp.ok) {
-            console.warn(`[GIC] thumbnail upload failed: ${resp.status}`);
+            let text = '';
+            try { text = await resp.text(); } catch (e) { /* ignore */ }
+            console.warn(`[GIC] thumbnail upload failed: ${resp.status} body="${text.slice(0, 300)}"`);
             return false;
         }
         console.log(`[GIC] 🖼️ thumbnail uploaded: ${thumbName}`);
@@ -1176,29 +1284,42 @@ async function ensureThumbnailForVideo(videoFileName, charName = getCurrentChara
     const cacheKey = `${charName}:${videoFileName}`;
     if (_thumbUrlCache.has(cacheKey)) return _thumbUrlCache.get(cacheKey);
 
+    // ① IndexedDB にキャッシュがあれば即返す（最速パス）
+    const cachedBlob = await getThumbFromDB(cacheKey);
+    if (cachedBlob) {
+        const url = URL.createObjectURL(cachedBlob);
+        _thumbUrlCache.set(cacheKey, url);
+        console.log(`[GIC] ⚡ thumbnail from IndexedDB: ${cacheKey}`);
+        return url;
+    }
+
+    // ② 旧形式の _thum.png がディスクに残っていればそれを使う（互換）
     const thumbName = videoFileToThumbName(videoFileName);
-    if (!thumbName) return null;
+    if (thumbName) {
+        const thumbUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(thumbName);
+        if (await checkFileExists(thumbUrl)) {
+            _thumbUrlCache.set(cacheKey, thumbUrl);
+            return thumbUrl;
+        }
+    }
 
-    const thumbUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(thumbName);
+    // ③ 無ければ動画から生成
     const videoUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(videoFileName);
-
-    if (await checkFileExists(thumbUrl)) {
-        _thumbUrlCache.set(cacheKey, thumbUrl);
-        return thumbUrl;
-    }
-
     const blob = await generateVideoThumbnailBlob(videoUrl, THUMB_SIZE);
-    if (!blob) { _thumbUrlCache.set(cacheKey, null); return null; }
-
-    if (await uploadThumbnailBlob(charName, blob, thumbName)) {
-        _thumbUrlCache.set(cacheKey, thumbUrl);
-        return thumbUrl;
+    if (!blob) {
+        _thumbUrlCache.set(cacheKey, null);
+        return null;
     }
 
-    // アップロード失敗時はセッション限定のBlob URLでフォールバック
-    const localUrl = URL.createObjectURL(blob);
-    _thumbUrlCache.set(cacheKey, localUrl);
-    return localUrl;
+    // ④ IndexedDB に永続保存
+    const saved = await putThumbInDB(cacheKey, blob);
+    if (!saved) {
+        console.warn(`[GIC] ⚠️ IndexedDB 保存失敗（セッション限定で表示）: ${cacheKey}`);
+    }
+
+    const url = URL.createObjectURL(blob);
+    _thumbUrlCache.set(cacheKey, url);
+    return url;
 }
 
 // ============================================================
@@ -3531,6 +3652,10 @@ function exposeGicApi() {
         isThumbFileName,
         getUploadHeaders,
         getCharName: getCurrentCharacterName,
+
+        // ★ IndexedDB キャッシュ管理
+        clearThumbCache: clearAllThumbCache,
+        getThumbCacheStats: getThumbCacheStats,
     };
     console.log('[GIC] ✅ window.GicApi を公開しました');
 }
