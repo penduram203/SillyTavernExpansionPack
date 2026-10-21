@@ -3096,6 +3096,12 @@ function syncGalleryButtonVisibility() {
 
     if (galleryOpen) {
         applyGalleryLayout();
+        // ★ ギャラリーを開いた直後に1回だけ動画サムネイルをセットアップ
+        //   （applyGalleryLayout の 300ms ポーリングからは切り離した）
+        setTimeout(() => {
+            if (!isGalleryOpen()) return;
+            setupGalleryVideoThumbs().catch(e => console.warn('[GIC] video thumbs setup error:', e));
+        }, 500);
         if (warmupState !== 'running') {
             setTimeout(() => {
                 if (isGalleryOpen() && window.STJEditor?.open) {
