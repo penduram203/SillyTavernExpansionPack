@@ -123,6 +123,13 @@ const _thumbUrlCache = new Map();
 let _thumbProcessingActive = false;
 let _thumbDbPromise = null;
 
+// ★ ギャラリーの開閉状態追跡（syncGalleryButtonVisibility 用）
+//   モジュール評価順序に依存しないよう、他より先に宣言しておく。
+let lastGalleryStateForGic = null;
+
+// ★ STJEditor 再オープンの状態
+let _stjReopenScheduled = false;
+
 // ===== ユーティリティ =====
 function wait(ms) {
     return new Promise(r => setTimeout(r, ms));
@@ -671,7 +678,6 @@ function getCurrentCharacterName() {
         body.gic-dragging #gallery * {
             pointer-events: none !important;
         }
-
     `;
     document.head.appendChild(style);
     console.log('[GIC] 🖼️ ギャラリー配置CSSを注入しました');
@@ -1053,11 +1059,6 @@ function setupGalleryDedupeObserver() {
 
 // ============================================================
 // ★ 動画サムネイル・キャッシュ機構
-//    - test.mp4 → IndexedDB に 200x200 PNG でキャッシュ
-//    - 初回生成時のみ <video> → canvas → Blob で抽出
-//    - 2回目以降は IndexedDB から瞬時に読み込み、動画は一切ロードしない
-//    - クリック時に本体動画を初めてロードする
-//    - 旧形式 _thum.png がディスクにあれば互換のため優先参照
 // ============================================================
 function videoFileToThumbName(videoFileName) {
     if (!videoFileName || typeof videoFileName !== 'string') return null;
@@ -1157,13 +1158,11 @@ async function generateVideoThumbnailBlob(videoUrl, size = THUMB_SIZE) {
             }
         };
 
-        // ★ loadeddata 到着時点で最初のフレームが描画可能（readyState >= 2）
         video.addEventListener('loadeddata', () => {
             console.log(`[GIC] 📹 loadeddata: ${videoUrl}, readyState=${video.readyState}, duration=${video.duration}`);
             if (video.readyState >= 2) extractFrame();
         }, { once: true });
 
-        // canplay フォールバック
         video.addEventListener('canplay', () => {
             if (!frameExtracted) {
                 console.log(`[GIC] 📹 canplay fallback: ${videoUrl}`);
@@ -1171,7 +1170,6 @@ async function generateVideoThumbnailBlob(videoUrl, size = THUMB_SIZE) {
             }
         }, { once: true });
 
-        // seeked フォールバック（念のため）
         video.addEventListener('seeked', () => {
             if (!frameExtracted) {
                 console.log(`[GIC] 📹 seeked fallback: ${videoUrl}`);
@@ -1186,15 +1184,12 @@ async function generateVideoThumbnailBlob(videoUrl, size = THUMB_SIZE) {
         }, { once: true });
 
         video.src = videoUrl;
-        // ★ 最重要: 明示的に load() を呼ぶ（Firefox で必須）
         try { video.load(); } catch (e) { /* ignore */ }
     });
 }
 
 // ============================================================
 // ★ IndexedDB ベースのサムネイル永続キャッシュ
-//    - サーバー依存なし・セッションを跨いで永続
-//    - Blob をそのまま保存（PNG 200x200, 約10〜40KB/枚）
 // ============================================================
 function openThumbDB() {
     if (_thumbDbPromise) return _thumbDbPromise;
@@ -1253,7 +1248,6 @@ async function deleteThumbFromDB(key) {
     } catch (e) { return false; }
 }
 
-// ★ メンテナンス用: キャッシュ全消去 / 統計
 async function clearAllThumbCache() {
     try {
         const db = await openThumbDB();
@@ -1357,7 +1351,7 @@ async function ensureThumbnailForVideo(videoFileName, charName = getCurrentChara
         _thumbUrlCache.set(cacheKey, url);
         console.log(`[GIC] ⚡ thumbnail from IndexedDB: ${cacheKey}`);
 
-        // ★ IndexedDB にあるがディスクに無い場合は書き出す
+        // IndexedDB にあるがディスクに無い場合は書き出す
         const thumbName = videoFileToThumbName(videoFileName);
         if (thumbName) {
             const diskUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(thumbName);
@@ -1393,7 +1387,7 @@ async function ensureThumbnailForVideo(videoFileName, charName = getCurrentChara
     const saved = await putThumbInDB(cacheKey, blob);
     if (!saved) console.warn(`[GIC] ⚠️ IndexedDB save failed: ${cacheKey}`);
 
-    // ★ ⑤ ディスク保存（フェッチインターセプタ用の実ファイル）
+    // ⑤ ディスク保存
     if (thumbName) {
         const ok = await uploadThumbnailBlob(charName, blob, thumbName);
         if (ok) {
@@ -1419,7 +1413,9 @@ async function setupGalleryVideoThumbs() {
 
     _thumbProcessingActive = true;
     try {
-        // 2) 未処理の動画 thumb を収集
+        // 未処理の動画 thumb を収集
+        //   ※ インターセプタが /api/images/list を _thum.png に置換済みのため
+        //     通常ここには何も入らない（旧形式互換のため残置）
         const videos = [];
         gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1').forEach(thumb => {
             const title = (thumb.getAttribute('title') || '').trim();
@@ -1431,7 +1427,7 @@ async function setupGalleryVideoThumbs() {
 
         videos.forEach(v => { v.thumb.dataset.gicVideoReady = '1'; });
 
-        // 3) 同時実行数制限つきで処理
+        // 同時実行数制限つきで処理
         const queue = [...videos];
         const workers = [];
         for (let i = 0; i < THUMB_CONCURRENCY; i++) {
@@ -1456,17 +1452,16 @@ async function setupGalleryVideoThumbs() {
 async function processGalleryVideoThumb(thumb, videoFileName, charName) {
     // 既存の動画要素をすべて削除
     thumb.querySelectorAll('video').forEach(v => {
-        try { v.pause(); } catch (e) {}
+        try { v.pause(); } catch (e) { /* ignore */ }
         v.remove();
     });
-    // STネイティブのサムネイルレイヤーを隠す
+
     const bgEls = thumb.querySelectorAll('.nGY2TnImg, .nGY2TnImgBack');
     bgEls.forEach(el => {
         el.dataset.gicOriginalOpacity = el.style.opacity || '';
         el.style.setProperty('opacity', '0', 'important');
     });
 
-    // キャッシュサムネイルが取得できるか
     const thumbUrl = await ensureThumbnailForVideo(videoFileName, charName);
 
     thumb.querySelectorAll('.gic-gallery-thumb-img, .gic-gallery-video').forEach(el => el.remove());
@@ -1482,7 +1477,7 @@ async function processGalleryVideoThumb(thumb, videoFileName, charName) {
         return;
     }
 
-    // フォールバック: 静止画動画（従来挙動、キャッシュ生成失敗時のみ）
+    // フォールバック: 静止画動画
     const videoUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(videoFileName);
     const video = document.createElement('video');
     video.className = 'gic-gallery-video';
@@ -1524,7 +1519,6 @@ function setupGalleryDragToJson() {
     let startScroll = null;
     let isSimulatingClick = false;
 
-    // ★ title 属性を優先、data: URI は除外
     function getPathFromThumb(thumb) {
         if (!thumb) return null;
 
@@ -2630,7 +2624,6 @@ function extractImagePathFromItem(item) {
     return null;
 }
 
-// ★ data: URI を拒否
 function urlToServerPath(url) {
     if (!url || typeof url !== 'string') return null;
     if (url.startsWith('data:')) return null;
@@ -3099,7 +3092,53 @@ function applyGalleryLayout() {
     }
 }
 
-let lastGalleryStateForGic = null;
+// ============================================================
+// ★ STJEditor 再オープンを確実に行う
+//    ギャラリーの再オープンと STJEditor.open() のタイミングを
+//    リトライループで吸収する。ギャラリーが開くまで最大5秒待つ。
+// ============================================================
+function scheduleSTJEditorReopen() {
+    if (_stjReopenScheduled) return;
+    _stjReopenScheduled = true;
+
+    const startTime = Date.now();
+    const MAX_WAIT_MS = 5000;
+
+    const tryOpen = () => {
+        if (Date.now() - startTime > MAX_WAIT_MS) {
+            console.warn('[GIC] ⚠️ STJEditor reopen timeout');
+            _stjReopenScheduled = false;
+            return;
+        }
+
+        if (!isGalleryOpen()) {
+            setTimeout(tryOpen, 200);
+            return;
+        }
+
+        if (!window.STJEditor?.open) {
+            _stjReopenScheduled = false;
+            return;
+        }
+
+        if (window.STJEditor?.isOpen?.()) {
+            console.log('[GIC] ✅ STJEditor は既に開いています');
+            _stjReopenScheduled = false;
+            return;
+        }
+
+        try {
+            window.STJEditor.open();
+            console.log('[GIC] ✅ STJEditor を再オープンしました');
+            _stjReopenScheduled = false;
+        } catch (e) {
+            console.warn('[GIC] STJEditor 再オープン失敗（リトライ）:', e);
+            setTimeout(tryOpen, 200);
+        }
+    };
+
+    setTimeout(tryOpen, 300);
+}
 
 function syncGalleryButtonVisibility() {
     const galleryOpen = isGalleryOpen();
@@ -3122,18 +3161,16 @@ function syncGalleryButtonVisibility() {
 
     if (galleryOpen) {
         applyGalleryLayout();
+
         // ★ ギャラリーを開いた直後に1回だけ動画サムネイルをセットアップ
-        //   （applyGalleryLayout の 300ms ポーリングからは切り離した）
         setTimeout(() => {
             if (!isGalleryOpen()) return;
             setupGalleryVideoThumbs().catch(e => console.warn('[GIC] video thumbs setup error:', e));
         }, 500);
+
+        // ★ STJEditor の再オープン（リトライ付きで確実に行う）
         if (warmupState !== 'running') {
-            setTimeout(() => {
-                if (isGalleryOpen() && window.STJEditor?.open) {
-                    try { window.STJEditor.open(); } catch (e) { /* ignore */ }
-                }
-            }, 300);
+            scheduleSTJEditorReopen();
         }
     } else {
         const previewsAll = getAllPreviews();
@@ -3152,7 +3189,7 @@ function setupGalleryObserverForGic() {
         syncGalleryButtonVisibility();
         applyGalleryLayout();
         hideGalleryUploadMessage();
-    }, 1000);
+    }, 300);
 
     syncGalleryButtonVisibility();
     applyGalleryLayout();
@@ -3250,6 +3287,13 @@ function hideGalleryAttachmentsImmediately(reason = '') {
     if (window.STJEditor?.isOpen?.()) {
         try { window.STJEditor.close({ fromGallery: true, force: true }); } catch (e) { /* ignore */ }
     }
+
+    // ★ 状態キャッシュを無効化:
+    //   次の syncGalleryButtonVisibility で閉→開の遷移を確実に検出させる。
+    //   これがないと、ギャラリーが高速に再オープンした場合に遷移が
+    //   collapse して STJEditor の再オープンがスケジュールされない。
+    lastGalleryStateForGic = null;
+    _galleryOpenCache = { value: false, timestamp: 0 };
 }
 
 function installGalleryCloseInterceptor() {
@@ -3754,6 +3798,7 @@ function exposeGicApi() {
         clearThumbCache: clearAllThumbCache,
         getThumbCacheStats: getThumbCacheStats,
 
+        // ★ デバッグ用
         debugThumbState: async (charName) => {
             charName = charName || getCurrentCharacterName();
             if (!charName) return { error: 'no charName' };
@@ -3765,7 +3810,7 @@ function exposeGicApi() {
                 indexedDBKeys: charKeys,
                 urlCacheSize: _thumbUrlCache.size,
             };
-        },        
+        },
     };
     console.log('[GIC] ✅ window.GicApi を公開しました');
 }
