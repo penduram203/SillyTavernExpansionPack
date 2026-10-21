@@ -3051,7 +3051,6 @@ function applyGalleryLayout() {
         dedupeGalleryElements();
         applyGalleryWindowLayout();
         styleGalleryWindowCloseButton();
-        try { setupGalleryVideoThumbs(); } catch (e) { /* ignore */ }
 
         document.querySelectorAll('.nGY2paginationRectangle, .nGY2paginationRectangleCurrentPage').forEach(el => {
             el.style.setProperty('height', GALLERY_PAGINATION_HEIGHT + 'px', 'important');
@@ -3094,7 +3093,13 @@ function syncGalleryButtonVisibility() {
             btn.style.removeProperty('display');
         }
     }
-
+    
+    if (galleryOpen) {
+        applyGalleryLayout();
+        setTimeout(() => {
+            setupGalleryVideoThumbs().catch(() => {});
+        }, 500);  // レイアウト安定後に1回だけ実行
+    
     if (galleryOpen) {
         applyGalleryLayout();
         if (warmupState !== 'running') {
