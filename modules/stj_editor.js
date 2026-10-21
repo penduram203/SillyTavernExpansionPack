@@ -6,6 +6,12 @@
     const MEDIA_CACHE_FALSE_TTL_MS = 3000;
     const MEDIA_CHECK_TIMEOUT_MS = 5000;
 
+    // ===== 動画サムネイルキャッシュ =====
+    const THUMB_SUFFIX = '_thum.png';
+    const THUMB_EXIST_CACHE_TTL_MS = 60000;
+    const _stjThumbUrlCache = new Map();
+    const _stjThumbExistCache = new Map();
+
     let stjModalEl = null;
     let outsideClickHandlerInstalled = false;
     let helpOutsideHandlerInstalled = false;
@@ -43,7 +49,6 @@
             if (!raw) return [];
             const arr = JSON.parse(raw);
             if (!Array.isArray(arr)) return [];
-            // ★ 有効な拡張子を持つファイル名のみ返す（Z / 9k= 等を除外）
             return arr.filter(name =>
                 typeof name === 'string' &&
                 /\.(png|jpe?g|gif|webp|avif|bmp|mp4|webm)$/i.test(name)
@@ -117,6 +122,54 @@
     }
 
     // ============================================================
+    // ★ 動画サムネイルキャッシュ用ヘルパー
+    // ============================================================
+    function videoFileToThumbName(videoFileName) {
+        if (!videoFileName || typeof videoFileName !== 'string') return null;
+        const m = videoFileName.match(/^(.+)\.(mp4|webm)$/i);
+        if (!m) return null;
+        return `${m[1]}_${m[2].toLowerCase()}${THUMB_SUFFIX}`;
+    }
+
+    async function stjCheckThumbExists(thumbUrl) {
+        const c = _stjThumbExistCache.get(thumbUrl);
+        if (c && Date.now() - c.ts < THUMB_EXIST_CACHE_TTL_MS) return c.exists;
+        let exists = false;
+        try {
+            const resp = await fetch(thumbUrl, { method: 'HEAD' });
+            if (resp.ok) {
+                const ct = (resp.headers.get('content-type') || '').toLowerCase();
+                exists = !ct.includes('text/html');
+            }
+        } catch (e) { /* ignore */ }
+        _stjThumbExistCache.set(thumbUrl, { exists, ts: Date.now() });
+        return exists;
+    }
+
+    async function ensureThumbForEditor(videoFileName, charName) {
+        if (!videoFileName || !charName) return null;
+        // GIC側のキャッシュ・生成器を優先利用
+        if (window.GicApi?.ensureThumbnailForVideo) {
+            try {
+                const url = await window.GicApi.ensureThumbnailForVideo(videoFileName, charName);
+                if (url) return url;
+            } catch (e) { /* fall through */ }
+        }
+        const key = `${charName}:${videoFileName}`;
+        if (_stjThumbUrlCache.has(key)) return _stjThumbUrlCache.get(key);
+
+        const thumbName = videoFileToThumbName(videoFileName);
+        if (!thumbName) return null;
+        const thumbUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(thumbName);
+        if (await stjCheckThumbExists(thumbUrl)) {
+            _stjThumbUrlCache.set(key, thumbUrl);
+            return thumbUrl;
+        }
+        _stjThumbUrlCache.set(key, null);
+        return null;
+    }
+
+    // ============================================================
     // ★ ロアブック連携ヘルパー（選択肢ボタン用）
     // ============================================================
     function getCharacterWorldInfoName() {
@@ -137,14 +190,12 @@
 
     async function loadWorldInfoEntries(worldName) {
         if (!worldName) return null;
-
         if (window.LorebookExpansion?.loadWorldInfoEntriesByName) {
             try {
                 const entries = await window.LorebookExpansion.loadWorldInfoEntriesByName(worldName);
                 if (entries) return entries;
             } catch (e) { /* ignore */ }
         }
-
         try {
             const ctx = getSTContext();
             const headers = (ctx && typeof ctx.getRequestHeaders === 'function')
@@ -160,7 +211,6 @@
                 if (data && data.entries) return data.entries;
             }
         } catch (e) { /* ignore */ }
-
         return null;
     }
 
@@ -401,7 +451,6 @@
         return exists ? path : null;
     }
 
-    // ★ base64 データURI・クエリ・フラグメント・拡張子なし断片を除外
     function extractFileNameFromPath(path) {
         if (!path || typeof path !== 'string') return '';
         if (path.startsWith('data:')) return '';
@@ -916,7 +965,6 @@
         return modal;
     }
 
-    // ★ requestAnimationFrame 二重化でレイアウト確定後にレンダリング
     function openCellModal(cell) {
         if (!cell) return;
         if (isBulkDeleteMode || isDialogActive) return;
@@ -1054,8 +1102,8 @@
     }
 
     // ============================================================
-    // ★ セルモーダル用: 動画サムネイルの IntersectionObserver
-    //    ★ 静止画サムネイル化: play/pause 制御は行わない（no-op）
+    // セルモーダル用: 動画サムネイルの IntersectionObserver
+    //   静止画サムネイル化のため no-op（互換維持のため残置）
     // ============================================================
     let _cellVideoIO = null;
     let _cellVideoIORoot = null;
@@ -1066,7 +1114,6 @@
             try { _cellVideoIO.disconnect(); } catch (e) { /* ignore */ }
         }
         _cellVideoIORoot = grid;
-        // ★ 静止画サムネイルのため、IntersectionObserver による play/pause は行わない
         _cellVideoIO = new IntersectionObserver(() => { /* no-op */ }, {
             threshold: 0.1,
             root: grid,
@@ -1074,9 +1121,6 @@
         return _cellVideoIO;
     }
 
-    // ============================================================
-    // ★ セルモーダル用パス解決（ギャラリーと同一方式）
-    // ============================================================
     function resolveModalMediaPath(fileName, charName) {
         if (!fileName || typeof fileName !== 'string') return '';
         if (/^https?:\/\//i.test(fileName)) return fileName;
@@ -1086,13 +1130,11 @@
         return '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(fileName);
     }
 
-    function renderCellModalGrid(cell) {
+    async function renderCellModalGrid(cell) {
         if (!currentCellModal || !cell) return;
         const images = getCellImages(cell);
         const grid = currentCellModal.querySelector('.stj-cell-modal-grid');
         if (!grid) return;
-
-        console.log('[STJ Grid] renderCellModalGrid called, images=', images);
 
         const neededSlots = Math.max(9, Math.ceil(images.length / 3) * 3);
         const currentCount = grid.children.length;
@@ -1108,10 +1150,17 @@
         const charName = document.getElementById('stj_char_name_display')?.textContent || '';
         const io = ensureCellVideoIO(grid);
 
-        slots.forEach((slot, i) => {
+        // キャッシュ問い合わせを並列化
+        const thumbPromises = new Map();
+        for (let i = 0; i < images.length; i++) {
             const fileName = images[i];
+            if (!fileName || !isVideoUrl(fileName)) continue;
+            thumbPromises.set(i, ensureThumbForEditor(fileName, charName));
+        }
 
-            console.log(`[STJ Grid] slot[${i}] fileName=`, fileName, 'isVideo=', fileName ? isVideoUrl(fileName) : false);
+        for (let i = 0; i < slots.length; i++) {
+            const slot = slots[i];
+            const fileName = images[i];
 
             if (!fileName) {
                 slot.querySelectorAll(':scope > img, :scope > video').forEach(el => {
@@ -1123,22 +1172,19 @@
                 try { io.unobserve(slot); } catch (e) { /* ignore */ }
                 slot.removeAttribute('data-file-name');
                 delete slot.dataset.fileName;
-                return;
+                continue;
             }
 
             const fullPath = resolveModalMediaPath(fileName, charName);
             const isVideo = isVideoUrl(fileName);
             slot.dataset.fileName = fileName;
 
-            console.log(`[STJ Grid] slot[${i}] fullPath=`, fullPath, 'isVideo=', isVideo);
-
             const existing = slot.querySelector(':scope > img, :scope > video');
             if (existing) {
                 const existingSrc = existing.getAttribute('data-src') || existing.getAttribute('src');
                 const existingIsVideo = existing.tagName === 'VIDEO';
                 if (existingIsVideo === isVideo && existingSrc === fullPath) {
-                    // ★ 静止画化: 既存動画が paused でも再開しない
-                    return;
+                    continue;
                 }
                 if (existingIsVideo) {
                     try { existing.pause(); } catch (e) { /* ignore */ }
@@ -1154,10 +1200,27 @@
             };
 
             if (isVideo) {
+                // ★ サムネイル画像が存在すれば <img> で表示し、動画は一切読み込まない
+                const thumbUrl = await thumbPromises.get(i);
+                if (thumbUrl) {
+                    const img = document.createElement('img');
+                    img.src = thumbUrl;
+                    img.dataset.src = thumbUrl;
+                    img.dataset.videoSrc = fullPath;
+                    img.alt = fileName;
+                    img.className = 'gic-cell-thumb';
+                    img.style.cssText =
+                        'width:100%;height:100%;object-fit:contain;display:block;' +
+                        'pointer-events:auto;cursor:zoom-in;background:#000;';
+                    img.addEventListener('click', openZoom);
+                    slot.insertBefore(img, slot.firstChild);
+                    continue;
+                }
+
+                // フォールバック: 静止画動画（第一フレーム）
                 const v = document.createElement('video');
                 v.className = 'gic-cell-video';
                 v.dataset.src = fullPath;
-
                 v.setAttribute('muted', '');
                 v.setAttribute('loop', '');
                 v.setAttribute('playsinline', '');
@@ -1169,59 +1232,32 @@
                 v.loop = true;
                 v.playsInline = true;
                 v.preload = 'auto';
-
-                v.style.cssText = 'width:100%;height:100%;object-fit:contain;display:block;background:#000;pointer-events:auto;cursor:zoom-in;';
+                v.style.cssText =
+                    'width:100%;height:100%;object-fit:contain;display:block;' +
+                    'background:#000;pointer-events:auto;cursor:zoom-in;';
                 v.addEventListener('click', openZoom);
-
-                v.addEventListener('loadstart', () => {
-                    console.log('[STJ Video] loadstart:', fullPath);
-                }, { once: true });
-                v.addEventListener('loadedmetadata', () => {
-                    console.log('[STJ Video] metadata:', fullPath, `${v.videoWidth}x${v.videoHeight}`);
-                }, { once: true });
                 v.addEventListener('loadeddata', () => {
-                    // ★ 静止画サムネイル: 第一フレーム（冒頭10%・最大1秒）へシーク
                     try {
                         if (Number.isFinite(v.duration) && v.duration > 0.1) {
                             v.currentTime = Math.min(1, v.duration * 0.1);
-                        } else {
-                            v.currentTime = 0;
                         }
                     } catch (e) { /* ignore */ }
-                    console.log('[STJ Video] loaded (static):', fullPath);
                 }, { once: true });
-                v.addEventListener('error', () => {
-                    console.warn('[STJ Video] error:', fullPath, v.error?.code, v.error?.message);
-                }, { once: true });
-
                 v.src = fullPath;
                 slot.insertBefore(v, slot.firstChild);
-
-                // ★ 自動再生しない（静止画サムネイル）
-
-                setTimeout(() => {
-                    if (v.parentNode && v.readyState === 0) {
-                        console.warn('[STJ Video] still not loaded after 3s:', fullPath, 'error=', v.error);
-                        try {
-                            const retrySrc = v.src;
-                            v.src = '';
-                            v.src = retrySrc;
-                            v.load();
-                        } catch (e) { /* ignore */ }
-                    }
-                }, 3000);
-
                 io.observe(slot);
             } else {
                 const img = document.createElement('img');
                 img.src = fullPath;
                 img.dataset.src = fullPath;
                 img.alt = fileName;
-                img.style.cssText = 'width:100%;height:100%;object-fit:contain;display:block;pointer-events:auto;cursor:zoom-in;';
+                img.style.cssText =
+                    'width:100%;height:100%;object-fit:contain;display:block;' +
+                    'pointer-events:auto;cursor:zoom-in;';
                 img.addEventListener('click', openZoom);
                 slot.insertBefore(img, slot.firstChild);
             }
-        });
+        }
     }
 
     function showMediaZoom(src, isVideo) {
@@ -1303,7 +1339,6 @@
         document.body.classList.add('stj-zoom-active');
         document.body.appendChild(overlay);
 
-        // ★ 拡大表示はユーザー操作起点なので再生を許可
         if (isVideo) {
             mediaEl.play().catch((err) => {
                 console.warn('[STJ Video Zoom] autoplay failed, retrying muted:', err);
@@ -1346,7 +1381,7 @@
         updateCellPreview(cell);
 
         if (currentModalCell === cell && currentCellModal && currentCellModal.classList.contains('visible')) {
-            renderCellModalGrid(cell);
+            renderCellModalGrid(cell).catch(e => console.warn('[STJ Editor] render error:', e));
         }
 
         try { runLiveTest(); } catch (_) {}
@@ -1759,9 +1794,29 @@
         previewEl.appendChild(loadingEl);
 
         if (isVideoUrl(fullPath)) {
-            // ★ 静止画プレビュー: 第一フレームのみ表示し、再生しない
-            const video = document.createElement('video');
+            // ★ キャッシュサムネイルがあれば <img> を優先（動画はロードしない）
+            const thumbUrl = await ensureThumbForEditor(fileName, charName);
+            if (_previewLoadGen.get(previewEl) !== myGen) { removeLoading(); return; }
+            if (thumbUrl) {
+                const img = new Image();
+                img.src = thumbUrl;
+                try {
+                    if (typeof img.decode === 'function') await img.decode();
+                    else await new Promise((res, rej) => { img.onload = res; img.onerror = rej; });
+                } catch (e) { /* fall through to video */ }
+                if (_previewLoadGen.get(previewEl) === myGen) {
+                    img.style.width = '100%'; img.style.height = '100%';
+                    img.style.objectFit = 'contain'; img.style.display = 'block';
+                    img.style.backgroundColor = 'transparent';
+                    previewEl.appendChild(img);
+                    previewEl.dataset.currentPath = fullPath;
+                    removeLoading(); placeholderHide();
+                    return;
+                }
+            }
 
+            // フォールバック: 静止画動画（第一フレーム）
+            const video = document.createElement('video');
             video.setAttribute('muted', '');
             video.setAttribute('loop', '');
             video.setAttribute('playsinline', '');
@@ -1771,14 +1826,12 @@
             video.loop = true;
             video.playsInline = true;
             video.preload = 'auto';
-
             video.src = fullPath;
 
             await new Promise((resolve) => {
                 let done = false;
                 const finish = () => { if (done) return; done = true; resolve(); };
                 video.addEventListener('loadeddata', () => {
-                    // ★ 第一フレーム（冒頭10%・最大1秒）へシーク
                     try {
                         if (Number.isFinite(video.duration) && video.duration > 0.1) {
                             video.currentTime = Math.min(1, video.duration * 0.1);
@@ -1802,7 +1855,6 @@
             video.style.objectFit = 'contain'; video.style.display = 'block';
             video.style.backgroundColor = 'transparent';
             previewEl.appendChild(video);
-            // ★ 再生しない（静止画プレビュー）
             previewEl.dataset.currentPath = fullPath;
             removeLoading(); placeholderHide();
         } else {
