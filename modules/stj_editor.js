@@ -1055,6 +1055,7 @@
 
     // ============================================================
     // ★ セルモーダル用: 動画サムネイルの IntersectionObserver
+    //    ★ 静止画サムネイル化: play/pause 制御は行わない（no-op）
     // ============================================================
     let _cellVideoIO = null;
     let _cellVideoIORoot = null;
@@ -1065,23 +1066,11 @@
             try { _cellVideoIO.disconnect(); } catch (e) { /* ignore */ }
         }
         _cellVideoIORoot = grid;
-        _cellVideoIO = new IntersectionObserver((entries) => {
-            for (const entry of entries) {
-                const v = entry.target.querySelector(':scope > video.gic-cell-video');
-                if (!v) continue;
-                if (entry.isIntersecting) {
-                    const p = v.play();
-                    if (p && typeof p.catch === 'function') {
-                        p.catch(() => {
-                            v.muted = true;
-                            v.play().catch(() => {});
-                        });
-                    }
-                } else {
-                    try { v.pause(); } catch (e) { /* ignore */ }
-                }
-            }
-        }, { threshold: 0.1, root: grid });
+        // ★ 静止画サムネイルのため、IntersectionObserver による play/pause は行わない
+        _cellVideoIO = new IntersectionObserver(() => { /* no-op */ }, {
+            threshold: 0.1,
+            root: grid,
+        });
         return _cellVideoIO;
     }
 
@@ -1148,9 +1137,7 @@
                 const existingSrc = existing.getAttribute('data-src') || existing.getAttribute('src');
                 const existingIsVideo = existing.tagName === 'VIDEO';
                 if (existingIsVideo === isVideo && existingSrc === fullPath) {
-                    if (isVideo && existing.paused) {
-                        existing.play().catch(() => {});
-                    }
+                    // ★ 静止画化: 既存動画が paused でも再開しない
                     return;
                 }
                 if (existingIsVideo) {
@@ -1175,14 +1162,12 @@
                 v.setAttribute('loop', '');
                 v.setAttribute('playsinline', '');
                 v.setAttribute('webkit-playsinline', '');
-                v.setAttribute('autoplay', '');
                 v.setAttribute('preload', 'auto');
                 v.setAttribute('disablepictureinpicture', '');
                 v.setAttribute('disableremoteplayback', '');
                 v.muted = true;
                 v.loop = true;
                 v.playsInline = true;
-                v.autoplay = true;
                 v.preload = 'auto';
 
                 v.style.cssText = 'width:100%;height:100%;object-fit:contain;display:block;background:#000;pointer-events:auto;cursor:zoom-in;';
@@ -1195,13 +1180,15 @@
                     console.log('[STJ Video] metadata:', fullPath, `${v.videoWidth}x${v.videoHeight}`);
                 }, { once: true });
                 v.addEventListener('loadeddata', () => {
-                    console.log('[STJ Video] loaded:', fullPath);
-                }, { once: true });
-                v.addEventListener('canplay', () => {
-                    console.log('[STJ Video] canplay:', fullPath);
-                }, { once: true });
-                v.addEventListener('playing', () => {
-                    console.log('[STJ Video] playing:', fullPath);
+                    // ★ 静止画サムネイル: 第一フレーム（冒頭10%・最大1秒）へシーク
+                    try {
+                        if (Number.isFinite(v.duration) && v.duration > 0.1) {
+                            v.currentTime = Math.min(1, v.duration * 0.1);
+                        } else {
+                            v.currentTime = 0;
+                        }
+                    } catch (e) { /* ignore */ }
+                    console.log('[STJ Video] loaded (static):', fullPath);
                 }, { once: true });
                 v.addEventListener('error', () => {
                     console.warn('[STJ Video] error:', fullPath, v.error?.code, v.error?.message);
@@ -1210,8 +1197,7 @@
                 v.src = fullPath;
                 slot.insertBefore(v, slot.firstChild);
 
-                const p = v.play();
-                if (p && typeof p.catch === 'function') p.catch(() => {});
+                // ★ 自動再生しない（静止画サムネイル）
 
                 setTimeout(() => {
                     if (v.parentNode && v.readyState === 0) {
@@ -1221,7 +1207,6 @@
                             v.src = '';
                             v.src = retrySrc;
                             v.load();
-                            v.play().catch(() => {});
                         } catch (e) { /* ignore */ }
                     }
                 }, 3000);
@@ -1318,6 +1303,7 @@
         document.body.classList.add('stj-zoom-active');
         document.body.appendChild(overlay);
 
+        // ★ 拡大表示はユーザー操作起点なので再生を許可
         if (isVideo) {
             mediaEl.play().catch((err) => {
                 console.warn('[STJ Video Zoom] autoplay failed, retrying muted:', err);
@@ -1773,18 +1759,17 @@
         previewEl.appendChild(loadingEl);
 
         if (isVideoUrl(fullPath)) {
+            // ★ 静止画プレビュー: 第一フレームのみ表示し、再生しない
             const video = document.createElement('video');
 
             video.setAttribute('muted', '');
             video.setAttribute('loop', '');
             video.setAttribute('playsinline', '');
             video.setAttribute('webkit-playsinline', '');
-            video.setAttribute('autoplay', '');
             video.setAttribute('preload', 'auto');
             video.muted = true;
             video.loop = true;
             video.playsInline = true;
-            video.autoplay = true;
             video.preload = 'auto';
 
             video.src = fullPath;
@@ -1792,8 +1777,17 @@
             await new Promise((resolve) => {
                 let done = false;
                 const finish = () => { if (done) return; done = true; resolve(); };
-                video.addEventListener('loadeddata', finish, { once: true });
-                video.addEventListener('canplay', finish, { once: true });
+                video.addEventListener('loadeddata', () => {
+                    // ★ 第一フレーム（冒頭10%・最大1秒）へシーク
+                    try {
+                        if (Number.isFinite(video.duration) && video.duration > 0.1) {
+                            video.currentTime = Math.min(1, video.duration * 0.1);
+                        } else {
+                            video.currentTime = 0;
+                        }
+                    } catch (e) { /* ignore */ }
+                    finish();
+                }, { once: true });
                 video.addEventListener('error', finish, { once: true });
                 setTimeout(finish, 2500);
             });
@@ -1808,8 +1802,7 @@
             video.style.objectFit = 'contain'; video.style.display = 'block';
             video.style.backgroundColor = 'transparent';
             previewEl.appendChild(video);
-            const p = video.play();
-            if (p && typeof p.catch === 'function') p.catch(() => {});
+            // ★ 再生しない（静止画プレビュー）
             previewEl.dataset.currentPath = fullPath;
             removeLoading(); placeholderHide();
         } else {
