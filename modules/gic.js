@@ -1841,10 +1841,21 @@ function setupGalleryDragToJson() {
             e.preventDefault();
             if (!_bulkDeleteMode) {
                 const title = (thumb.getAttribute('title') || '').trim();
-                const isVid = isVideoFile(title);
+                let previewTitle = title;
+                let isVid = isVideoFile(title);
+
+                // ★ _thum.png を元の動画名にマッピング
+                if (!isVid && title.match(/_thum\.png$/i)) {
+                    const m = title.match(/^(.+)_(mp4|webm)_thum\.png$/i);
+                    if (m) {
+                        previewTitle = `${m[1]}.${m[2].toLowerCase()}`;
+                        isVid = true;
+                    }
+                }
+
                 const charName = getCurrentCharacterName();
-                window.__gicPendingPreview = (isVid && charName && title) ? {
-                    title,
+                window.__gicPendingPreview = (isVid && charName && previewTitle) ? {
+                    title: previewTitle,
                     charName,
                 } : null;
                 simulateClick(thumb, e.clientX, e.clientY);
