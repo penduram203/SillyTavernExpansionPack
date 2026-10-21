@@ -150,3 +150,57 @@
 
     console.info('[GIC-Boot] ComfyUI fetch インターセプタをインストールしました');
 })();
+
+// comfy_boot.js の末尾、既存の fetch インターセプタの後に追加
+
+(function installGalleryListInterceptor() {
+    if (window.__gicGalleryListInterceptorInstalled) return;
+    window.__gicGalleryListInterceptorInstalled = true;
+
+    const originalFetch = window.fetch;
+
+    window.fetch = async function(input, init) {
+        const url = typeof input === 'string' ? input : (input && input.url) || '';
+        if (!url.includes('/api/images/list')) {
+            return originalFetch.apply(this, arguments);
+        }
+
+        const resp = await originalFetch.apply(this, arguments);
+        if (!resp.ok) return resp;
+
+        try {
+            const data = await resp.clone().json();
+            if (!Array.isArray(data)) return resp;
+
+            const images = [];
+            const videos = [];
+            for (const f of data) {
+                if (/\.(mp4|webm)$/i.test(f)) videos.push(f);
+                else images.push(f);
+            }
+
+            if (videos.length === 0) return resp;
+
+            // 動画を除外し、対応する _thum.png を画像扱いで注入
+            const modified = [...images];
+            for (const v of videos) {
+                const m = v.match(/^(.+)\.(mp4|webm)$/i);
+                if (m) {
+                    modified.push(`${m[1]}_${m[2].toLowerCase()}_thum.png`);
+                }
+            }
+
+            console.debug(`[GIC-Boot] /api/images/list 書換: 動画 ${videos.length}件を _thum.png に置換`);
+            return new Response(JSON.stringify(modified), {
+                status: resp.status,
+                statusText: resp.statusText,
+                headers: resp.headers,
+            });
+        } catch (e) {
+            console.warn('[GIC-Boot] /api/images/list 書換失敗:', e);
+            return resp;
+        }
+    };
+
+    console.info('[GIC-Boot] 🖼️ ギャラリー動画サムネイル・インターセプタを設置しました');
+})();
