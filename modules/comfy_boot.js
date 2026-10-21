@@ -7,6 +7,8 @@
 //        /api/sd/comfy/* への fetch を早期にインターセプトする
 //     2. 次回ロード時に ST本体の SD 拡張が ComfyUI へリクエストするのを防ぐ
 //     3. キャッシュ済みなら sd.source を "none" に同期設定する
+//     4. /api/images/list をインターセプトし、動画を _thum.png に置換する
+//        （ST本体の getVideoThumbnail をスキップして高速化）
 
 (function installComfyBoot() {
     if (window.__gicComfyBootInstalled) return;
@@ -151,8 +153,18 @@
     console.info('[GIC-Boot] ComfyUI fetch インターセプタをインストールしました');
 })();
 
-// comfy_boot.js の末尾（既存の fetch/XHR インターセプタの後）
-
+// ============================================================
+// ★ ギャラリー動画サムネイル・インターセプタ
+//    /api/images/list のレスポンスを書き換え、動画ファイルを
+//    _thum.png（GIC が生成・ディスク保存）に置換する。
+//    これにより ST 本体の getVideoThumbnail が呼ばれなくなり、
+//    ギャラリー表示が大幅に高速化される。
+//
+//    ★ 重複防止:
+//    ディスクに既に _thum.png が存在する場合、/api/images/list の
+//    生レスポンスにもそれが含まれる。インターセプタは既存分を
+//    existingThumbs として把握し、二重追加を防ぐ。
+// ============================================================
 (function installGalleryListInterceptor() {
     if (window.__gicGalleryListInterceptorInstalled) return;
     window.__gicGalleryListInterceptorInstalled = true;
@@ -181,9 +193,14 @@
 
             const images = [];
             const videos = [];
+            const existingThumbs = new Set();
             for (const f of data) {
-                if (/\.(mp4|webm)$/i.test(f)) videos.push(f);
-                else images.push(f);
+                if (/\.(mp4|webm)$/i.test(f)) {
+                    videos.push(f);
+                } else {
+                    images.push(f);
+                    if (/_thum\.png$/i.test(f)) existingThumbs.add(f);
+                }
             }
 
             if (videos.length === 0) return resp;
@@ -211,7 +228,6 @@
                     return null;
                 })
             );
-            // 全生成完了を待つ（最大20秒。8本×2並列×約1秒 = 約4秒想定）
             await Promise.race([
                 Promise.all(tasks),
                 new Promise(r => setTimeout(r, 20000)),
@@ -219,14 +235,21 @@
             console.info(`[GIC-Boot] 🎬 サムネイル準備完了 (${Date.now() - genStart}ms)`);
 
             // ★ ディスクに存在するものだけをリストに追加（HEADで確認）
-            const modified = [...images];
+            //   既に images に含まれているものはスキップして重複を防ぐ
             const results = await Promise.all(videos.map(async (v) => {
                 const m = v.match(/^(.+)\.(mp4|webm)$/i);
                 if (!m) return null;
                 const thumbName = `${m[1]}_${m[2].toLowerCase()}_thum.png`;
+
+                // ★ 既に画像リストに含まれているなら追加不要
+                if (existingThumbs.has(thumbName)) return null;
+
                 const thumbUrl = `/user/images/${encodeURIComponent(charName)}/${encodeURIComponent(thumbName)}`;
                 try {
-                    const head = await originalFetch.call(window, thumbUrl, { method: 'HEAD' });
+                    const head = await originalFetch.call(window, thumbUrl + '?t=' + Date.now(), {
+                        method: 'HEAD',
+                        cache: 'no-store',
+                    });
                     if (!head.ok) return null;
                     const ct = (head.headers.get('content-type') || '').toLowerCase();
                     if (ct.includes('text/html')) return null;
@@ -236,6 +259,7 @@
                 }
             }));
 
+            const modified = [...images];
             let added = 0;
             for (const thumbName of results) {
                 if (thumbName) {
@@ -244,7 +268,7 @@
                 }
             }
 
-            console.debug(`[GIC-Boot] /api/images/list 書換: 動画 ${videos.length}件 → ${added}件の _thum.png を追加`);
+            console.debug(`[GIC-Boot] /api/images/list 書換: 動画 ${videos.length}件 → 新規追加 ${added}件（既存 ${existingThumbs.size}件）`);
             return new Response(JSON.stringify(modified), {
                 status: resp.status,
                 statusText: resp.statusText,
