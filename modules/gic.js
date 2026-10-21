@@ -1312,9 +1312,7 @@ async function uploadThumbnailBlob(charName, blob, thumbName) {
         const base64Data = String(dataUrl).split(',')[1];
         if (!base64Data) return false;
 
-        // "test_mp4_thum.png" → filename="test_mp4_thum" (拡張子なし)
         const filenameNoExt = thumbName.replace(/\.png$/i, '');
-
         const resp = await fetch('/api/images/upload', {
             method: 'POST',
             headers: getRequestHeaders(),
@@ -1356,20 +1354,20 @@ async function ensureThumbnailForVideo(videoFileName, charName = getCurrentChara
         _thumbUrlCache.set(cacheKey, url);
         console.log(`[GIC] ⚡ thumbnail from IndexedDB: ${cacheKey}`);
 
-        // ★ IndexedDB にあるがディスクに無い場合は書き出す（フェッチインターセプタ対策）
+        // ★ IndexedDB にあるがディスクに無い場合は書き出す
         const thumbName = videoFileToThumbName(videoFileName);
         if (thumbName) {
             const diskUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(thumbName);
             if (!(await checkFileExists(diskUrl))) {
-                console.log(`[GIC] 💾 IndexedDB → ディスク書き出し: ${charName}/${thumbName}`);
+                console.log(`[GIC] 💾 IndexedDB → ディスク書き出し: ${thumbName}`);
                 await uploadThumbnailBlob(charName, cachedBlob, thumbName);
-                _thumbExistCache.delete(diskUrl); // 次回 HEAD で再確認させる
+                _thumbExistCache.delete(diskUrl);
             }
         }
         return url;
     }
 
-    // ② 旧形式 _thum.png（互換）— 既にある場合はそのまま使う
+    // ② 旧形式 _thum.png（互換）
     const thumbName = videoFileToThumbName(videoFileName);
     if (thumbName) {
         const thumbUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(thumbName);
@@ -1392,7 +1390,7 @@ async function ensureThumbnailForVideo(videoFileName, charName = getCurrentChara
     const saved = await putThumbInDB(cacheKey, blob);
     if (!saved) console.warn(`[GIC] ⚠️ IndexedDB save failed: ${cacheKey}`);
 
-    // ⑤ ディスク保存（フェッチインターセプタ用）
+    // ★ ⑤ ディスク保存（フェッチインターセプタ用の実ファイル）
     if (thumbName) {
         const ok = await uploadThumbnailBlob(charName, blob, thumbName);
         if (ok) {
@@ -3750,6 +3748,19 @@ function exposeGicApi() {
         // ★ IndexedDB キャッシュ管理
         clearThumbCache: clearAllThumbCache,
         getThumbCacheStats: getThumbCacheStats,
+
+        debugThumbState: async (charName) => {
+            charName = charName || getCurrentCharacterName();
+            if (!charName) return { error: 'no charName' };
+            const stats = await getThumbCacheStats();
+            const charKeys = stats.keys.filter(k => k.startsWith(charName + ':'));
+            return {
+                charName,
+                indexedDBCount: charKeys.length,
+                indexedDBKeys: charKeys,
+                urlCacheSize: _thumbUrlCache.size,
+            };
+        },        
     };
     console.log('[GIC] ✅ window.GicApi を公開しました');
 }
