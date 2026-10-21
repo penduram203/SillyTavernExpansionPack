@@ -3121,7 +3121,7 @@ function setupGalleryObserverForGic() {
         syncGalleryButtonVisibility();
         applyGalleryLayout();
         hideGalleryUploadMessage();
-    }, 300);
+    }, 1000);
 
     syncGalleryButtonVisibility();
     applyGalleryLayout();
