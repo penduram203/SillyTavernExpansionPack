@@ -1078,7 +1078,8 @@ function setupGalleryVideoThumbs() {
         video.muted = true;
         video.loop = true;
         video.playsInline = true;
-        video.preload = 'metadata';
+        // ★ 静止画サムネイル: preload='auto' で第一フレームを確実に取得
+        video.preload = 'auto';
         video.setAttribute('muted', '');
         video.setAttribute('playsinline', '');
         video.setAttribute('webkit-playsinline', '');
@@ -1110,39 +1111,32 @@ function setupGalleryVideoThumbs() {
             thumb.dataset.gicVideoReady = '';
         };
 
+        // ★ 再生せず、第一フレームへシークして静止表示
         video.addEventListener('loadeddata', () => {
-            console.log('[GIC] 🎬 video loaded:', url);
+            try {
+                if (Number.isFinite(video.duration) && video.duration > 0.1) {
+                    video.currentTime = Math.min(1, video.duration * 0.1);
+                } else {
+                    video.currentTime = 0;
+                }
+            } catch (e) { /* ignore */ }
+            console.log('[GIC] 🎬 video loaded (static thumbnail):', url);
         }, { once: true });
         video.addEventListener('error', () => restore('error'), { once: true });
         setTimeout(() => {
             if (video.readyState === 0 && video.parentNode) restore('timeout');
         }, 8000);
 
-        if (!window.__gicGalleryVideoIO) {
-            window.__gicGalleryVideoIO = new IntersectionObserver((entries) => {
-                for (const entry of entries) {
-                    const v = entry.target.querySelector(':scope > video.gic-gallery-video');
-                    if (!v) continue;
-                    if (entry.isIntersecting) {
-                        const p = v.play();
-                        if (p && typeof p.catch === 'function') {
-                            p.catch(() => {
-                                v.muted = true;
-                                v.play().catch(() => {});
-                            });
-                        }
-                    } else {
-                        try { v.pause(); } catch (e) { /* ignore */ }
-                    }
-                }
-            }, { threshold: 0.1, rootMargin: '200px' });
+        // ★ IntersectionObserver による play/pause 制御は廃止（静止画のため）
+        //    旧バージョンの IO が残っていれば破棄して再生挙動を排除する
+        if (window.__gicGalleryVideoIO) {
+            try { window.__gicGalleryVideoIO.disconnect(); } catch (e) { /* ignore */ }
+            window.__gicGalleryVideoIO = null;
         }
-        window.__gicGalleryVideoIO.observe(thumb);
 
-        console.log('[GIC] 🎬 video thumbnail added:', url, title);
+        console.log('[GIC] 🎬 static video thumbnail added:', url, title);
     });
 }
-
 // ============================================================
 // ★ ギャラリーサムネイルの個別ドラッグ
 // ============================================================
