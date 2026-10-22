@@ -2283,14 +2283,15 @@ function positionPager(pager) {
     const gr = galleryEl.getBoundingClientRect();
     if (gr.width === 0 || gr.height === 0) return;
 
-    const left = gr.left + PAGINATION_OFFSET_LEFT;
-    const bottom = (window.innerHeight - gr.bottom) + PAGINATION_OFFSET_UP;
+    /* ★ ギャラリー右端から何 px 内側に置くか */
+    const rightInset = (window.innerWidth - gr.right) + PAGINATION_OFFSET_LEFT;
+    const bottom     = (window.innerHeight - gr.bottom) + PAGINATION_OFFSET_UP;
 
     pager.style.setProperty('position', 'fixed', 'important');
-    pager.style.setProperty('left', Math.round(left) + 'px', 'important');
+    pager.style.setProperty('right', Math.round(rightInset) + 'px', 'important');
+    pager.style.setProperty('left', 'auto', 'important');
     pager.style.setProperty('bottom', Math.round(bottom) + 'px', 'important');
     pager.style.setProperty('top', 'auto', 'important');
-    pager.style.setProperty('right', 'auto', 'important');
     pager.style.setProperty('z-index', '2147483647', 'important');
 }
 
@@ -3222,20 +3223,32 @@ function enforceGalleryGridLayout() {
     const gallery = document.getElementById('gallery');
     if (!gallery) return;
 
+    /* ★ ヘッダー系要素を最前面に固定（クリック可能に） */
+    gallery.querySelectorAll(
+        '.dragTitle, .panelControlBar, .nGY2GalleryTop, .nGY2GalleryBottom, ' +
+        '.nGY2GalleryHeader, .gallery-folder-input, .gallery-sort-select, ' +
+        '.gic-bulk-delete-button'
+    ).forEach(h => {
+        h.style.setProperty('position', 'relative', 'important');
+        h.style.setProperty('z-index', '200', 'important');
+        h.style.setProperty('pointer-events', 'auto', 'important');
+    });
+
     const allThumbs = Array.from(gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item'));
     if (allThumbs.length === 0) return;
 
-    // Step 1: 自分で display:none にしたものを復元
+    /* ★ Step 1: 前回「画面外退避」したものを元の位置に戻す（display は触らない） */
     allThumbs.forEach(thumb => {
-        if (thumb.dataset.gicForcedHidden === '1') {
-            thumb.style.removeProperty('display');
-            delete thumb.dataset.gicForcedHidden;
+        if (thumb.dataset.gicOffscreen === '1') {
+            thumb.style.removeProperty('left');
+            thumb.style.removeProperty('top');
+            delete thumb.dataset.gicOffscreen;
         }
     });
 
-    // Step 2: 現在のページとして表示されているアイテムのみ抽出
+    /* ★ Step 2: nanogallery2 が「表示中」としている項目だけ抽出
+          display チェックのみ（=nanogallery2 の状態を尊重） */
     const visibleThumbs = allThumbs.filter(thumb => {
-        if (thumb.style.display === 'none') return false;
         const cs = window.getComputedStyle(thumb);
         if (cs.display === 'none') return false;
         if (thumb.offsetWidth === 0 || thumb.offsetHeight === 0) return false;
@@ -3244,59 +3257,55 @@ function enforceGalleryGridLayout() {
 
     if (visibleThumbs.length === 0) return;
 
-    /* ★ 4列 × 4行 + 中央配置 */
-    const THUMB   = 195;
-    const COLS    = 4;
+    /* ★ グリッド設定 */
+    const THUMB    = 190;
+    const COLS     = 4;
     const MAX_ROWS = 4;
-    const H_GAP   = 4;
-    const V_GAP   = 4;
+    const H_GAP    = 4;
+    const V_GAP    = 4;
 
     const totalRows = Math.min(Math.ceil(visibleThumbs.length / COLS), MAX_ROWS);
     const gridW = COLS * THUMB + (COLS - 1) * H_GAP;
     const gridH = totalRows * THUMB + Math.max(0, totalRows - 1) * V_GAP;
 
-    // #gallery の実寸（applyGalleryWindowLayout 後は vw × vh）
     const galleryRect = gallery.getBoundingClientRect();
-    const containerW = Math.max(gridW, Math.round(galleryRect.width) || gridW);
-    const containerH = Math.max(gridH, Math.round(galleryRect.height) || gridH);
+    const containerW  = Math.max(gridW, Math.round(galleryRect.width)  || gridW);
+    const containerH  = Math.max(gridH, Math.round(galleryRect.height) || gridH);
 
-    // 中央寄せオフセット
+    /* ヘッダー高さを考慮した中央寄せオフセット */
+    const headerEl = gallery.querySelector('.dragTitle') || gallery.querySelector('.panelControlBar');
+    const headerH  = headerEl ? headerEl.getBoundingClientRect().height : 0;
+    const usableH  = Math.max(gridH, containerH - headerH);
+
     const offsetX = Math.max(0, Math.floor((containerW - gridW) / 2));
-    const offsetY = Math.max(0, Math.floor((containerH - gridH) / 2));
+    const offsetY = headerH + Math.max(0, Math.floor((usableH - gridH) / 2));
 
-    // サムネイルの実際の親（.nGY2GallerySub 等）
-    const parent     = visibleThumbs[0].parentElement;
-    const galleryEl  = gallery.querySelector('.nGY2Gallery');
-    const subEl      = gallery.querySelector('.nGY2GallerySub');
+    /* ★ コンテナのサイズだけ更新（position / top は触らない） */
+    const parent    = visibleThumbs[0].parentElement;
+    const galleryEl = gallery.querySelector('.nGY2Gallery');
+    const subEl     = gallery.querySelector('.nGY2GallerySub');
 
-    /* ★ コンテナを #gallery 全高まで拡張 */
     [galleryEl, subEl, parent].filter(Boolean).forEach(el => {
-        el.style.setProperty('position', 'absolute', 'important');
-        el.style.setProperty('top', '0', 'important');
-        el.style.setProperty('left', '0', 'important');
-        el.style.setProperty('right', 'auto', 'important');
-        el.style.setProperty('bottom', 'auto', 'important');
         el.style.setProperty('width', containerW + 'px', 'important');
         el.style.setProperty('min-width', containerW + 'px', 'important');
         el.style.setProperty('max-width', containerW + 'px', 'important');
-        el.style.setProperty('height', containerH + 'px', 'important');
-        el.style.setProperty('min-height', containerH + 'px', 'important');
-        el.style.setProperty('max-height', containerH + 'px', 'important');
-        el.style.setProperty('display', 'block', 'important');
-        el.style.setProperty('transform', 'none', 'important');
-        el.style.setProperty('margin', '0', 'important');
-        el.style.setProperty('padding', '0', 'important');
+        el.style.setProperty('height', (containerH - headerH) + 'px', 'important');
+        el.style.setProperty('min-height', (containerH - headerH) + 'px', 'important');
+        el.style.setProperty('max-height', (containerH - headerH) + 'px', 'important');
         el.style.setProperty('overflow', 'hidden', 'important');
     });
 
-    /* ★ 現在のページのアイテムを 4×4 で中央配置 */
+    /* ★ Step 3: グリッド配置（16枚超は画面外退避・display は触らない） */
     visibleThumbs.forEach((thumb, i) => {
         const row = Math.floor(i / COLS);
         const col = i % COLS;
 
         if (row >= MAX_ROWS) {
-            thumb.style.setProperty('display', 'none', 'important');
-            thumb.dataset.gicForcedHidden = '1';
+            /* 画面外へ退避（display: none は使わない） */
+            thumb.style.setProperty('position', 'absolute', 'important');
+            thumb.style.setProperty('left', '-9999px', 'important');
+            thumb.style.setProperty('top', '-9999px', 'important');
+            thumb.dataset.gicOffscreen = '1';
             return;
         }
 
@@ -3336,15 +3345,10 @@ async function handlePageSwitchAsync() {
     _pageSwitchInProgress = true;
 
     const gallery = document.getElementById('gallery');
-    if (!gallery) {
-        _pageSwitchInProgress = false;
-        return;
-    }
+    if (!gallery) { _pageSwitchInProgress = false; return; }
 
-    // ★ #gallery を「スイッチ中」マーク（isGalleryOpen が true を返すようにする）
     gallery.classList.add('gic-page-switching');
 
-    // ★ サムネイルコンテナだけを隠す（#gallery は触らない）
     const thumbContainer = gallery.querySelector('.nGY2GallerySub')
                         || gallery.querySelector('.nGY2Gallery');
     let origVisibility = '';
@@ -3364,19 +3368,18 @@ async function handlePageSwitchAsync() {
 
             const allThumbs = Array.from(gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item'));
             const visibleThumbs = allThumbs.filter(thumb => {
-                if (thumb.style.display === 'none') return false;
                 const cs = window.getComputedStyle(thumb);
                 if (cs.display === 'none') return false;
                 if (thumb.offsetWidth === 0 || thumb.offsetHeight === 0) return false;
                 return true;
             });
 
-            const expected = Math.min(allThumbs.length, 12);
-            const sig = visibleThumbs.length + ':' + visibleThumbs
+            /* ★ 個数ではなく「安定した集合」で判定 */
+            const sig = visibleThumbs
                 .map(t => (t.getAttribute('title') || '').slice(0, 40))
                 .join('|');
 
-            if (visibleThumbs.length >= expected && sig === lastSig) {
+            if (visibleThumbs.length > 0 && sig === lastSig) {
                 stableFrames++;
                 if (stableFrames >= 3) break;
             } else {
