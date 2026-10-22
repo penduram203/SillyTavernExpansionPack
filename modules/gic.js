@@ -706,36 +706,69 @@ function getCurrentCharacterName() {
         }
 
         /* ============================================================
-           ★ ギャラリーサムネイル: 180×180 正方形・contain・黒背景
-           （位置・サイズは JS の enforceGalleryGridLayout() が担当）
+           ★ ギャラリーサムネイル: 180×180 正方形
+           （位置は JS の enforceGalleryGridLayout() が担当）
            ============================================================ */
         #gallery .nGY2GThumbnail,
         #gallery .nGY2GThumbnail_l1,
         #gallery .nGY2Item {
-            background-color: #000 !important;
             box-sizing: border-box !important;
             overflow: hidden !important;
         }
 
-        #gallery .nGY2TnImg,
-        #gallery .nGY2TnImgBack {
+        /* 黒背景は疑似要素で（.nGY2TnImg の background-image と干渉しない） */
+        #gallery .nGY2GThumbnail::before,
+        #gallery .nGY2GThumbnail_l1::before,
+        #gallery .nGY2Item::before {
+            content: '' !important;
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
             width: 100% !important;
             height: 100% !important;
+            background-color: #000 !important;
+            z-index: 0 !important;
+            pointer-events: none !important;
+        }
+
+        /* 背景画像レイヤー: 明示的に位置指定 + z-index 前面 */
+        #gallery .nGY2TnImg,
+        #gallery .nGY2TnImgBack {
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+            max-width: 100% !important;
+            max-height: 100% !important;
             background-size: contain !important;
             background-position: center center !important;
             background-repeat: no-repeat !important;
-            background-color: #000 !important;
+            z-index: 1 !important;
+            transform: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            box-sizing: border-box !important;
         }
 
+        /* サムネイル内の <img>（GIC の gic-gallery-thumb-img 含む） */
         #gallery .nGY2GThumbnail > img,
         #gallery .nGY2GThumbnail_l1 > img,
         #gallery .gic-gallery-thumb-img {
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
             width: 100% !important;
             height: 100% !important;
+            max-width: 100% !important;
+            max-height: 100% !important;
             object-fit: contain !important;
-            background-color: #000 !important;
             display: block !important;
+            z-index: 2 !important;
             pointer-events: none !important;
+            transform: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
         }
     `;
     document.head.appendChild(style);
@@ -1570,7 +1603,7 @@ async function processGalleryVideoThumb(thumb, videoFileName, charName) {
         img.src = thumbUrl;
         img.style.cssText =
             'position:absolute;top:0;left:0;width:100%;height:100%;' +
-            'object-fit:contain;pointer-events:none;z-index:5;background:#000;';
+            'object-fit:contain;pointer-events:none;z-index:2;background:transparent;';
         thumb.appendChild(img);
         return;
     }
@@ -1587,7 +1620,7 @@ async function processGalleryVideoThumb(thumb, videoFileName, charName) {
     video.setAttribute('playsinline', '');
     video.style.cssText =
         'position:absolute;top:0;left:0;width:100%;height:100%;' +
-        'object-fit:contain;pointer-events:none;z-index:5;background:#000;';
+        'object-fit:contain;pointer-events:none;z-index:2;background:transparent;';
     video.addEventListener('loadeddata', () => {
         try {
             if (Number.isFinite(video.duration) && video.duration > 0.1) {
@@ -3164,9 +3197,10 @@ function setupBulkDelete() {
 }
 
 // ============================================================
-// ★ ギャラリーサムネイルを 3列 × N行 の 180×180 グリッドに強制
-//    CSS では nanogallery2 の内部構造（.nGY2GallerySub 等）に
-//    対応しきれないため、JS で inline style を直接上書きする
+// ★ ギャラリーサムネイルを 3列 × 4行 の 180×180 グリッドに強制
+//    - MAX_ROWS = 4 で 4行目以降は display:none
+//    - 黒背景は CSS の ::before 疑似要素が担当するため
+//      inline で background-color は設定しない
 // ============================================================
 function enforceGalleryGridLayout() {
     const gallery = document.getElementById('gallery');
@@ -3177,6 +3211,7 @@ function enforceGalleryGridLayout() {
 
     const THUMB = 180;
     const COLS = 3;
+    const MAX_ROWS = 4;
     const PARENT_W = THUMB * COLS; // 540px
 
     // サムネイルの実際の親（.nGY2GallerySub 等）
@@ -3194,7 +3229,7 @@ function enforceGalleryGridLayout() {
         el.style.setProperty('transform', 'none', 'important');
         el.style.setProperty('margin', '0', 'important');
         el.style.setProperty('padding', '0', 'important');
-        el.style.setProperty('overflow', 'visible', 'important');
+        el.style.setProperty('overflow', 'hidden', 'important');
     });
 
     // 各サムネイルを絶対配置でグリッド状に並べる
@@ -3202,6 +3237,14 @@ function enforceGalleryGridLayout() {
     thumbs.forEach((thumb, i) => {
         const row = Math.floor(i / COLS);
         const col = i % COLS;
+
+        // ★ 4行を超える行は非表示（safety net）
+        if (row >= MAX_ROWS) {
+            thumb.style.setProperty('display', 'none', 'important');
+            return;
+        }
+        thumb.style.removeProperty('display');
+
         if (row > maxRow) maxRow = row;
 
         thumb.style.setProperty('position', 'absolute', 'important');
@@ -3218,18 +3261,18 @@ function enforceGalleryGridLayout() {
         thumb.style.setProperty('margin', '0', 'important');
         thumb.style.setProperty('padding', '0', 'important');
         thumb.style.setProperty('transform', 'none', 'important');
-        thumb.style.setProperty('background-color', '#000', 'important');
         thumb.style.setProperty('overflow', 'hidden', 'important');
         thumb.style.setProperty('box-sizing', 'border-box', 'important');
+        thumb.style.setProperty('background-color', 'transparent', 'important');
     });
 
-    // 絶対配置の子を持つ親は高さを明示する
-    const totalRows = maxRow + 1;
+    // 絶対配置の子を持つ親は高さを明示する（4行上限）
+    const totalRows = Math.min(maxRow + 1, MAX_ROWS);
     const totalH = totalRows * THUMB;
     [galleryEl, subEl, parent].filter(Boolean).forEach(el => {
         el.style.setProperty('height', totalH + 'px', 'important');
         el.style.setProperty('min-height', totalH + 'px', 'important');
-        el.style.setProperty('max-height', 'none', 'important');
+        el.style.setProperty('max-height', totalH + 'px', 'important');
     });
 }
 
@@ -4017,11 +4060,61 @@ function exposeGicApi() {
     console.log('[GIC] ✅ window.GicApi を公開しました');
 }
 
+// ============================================================
+// ★ nanogallery2 の galleryMaxRows を 4 に強制
+//    ST本体は galleryMaxRows = floor((innerHeight*0.9 - 75)/150) で
+//    通常5行(15個/ページ)を計算する。これを4行(12個/ページ)に固定し、
+//    分頁ドットの数も 12個/ページ に整合させる。
+// ============================================================
+(function patchNanogallery2For4Rows() {
+    if (window.__gicNG2Patched) return;
+    if (typeof window.$ === 'undefined' || !window.$.fn || typeof window.$.fn.nanogallery2 !== 'function') {
+        setTimeout(patchNanogallery2For4Rows, 500);
+        return;
+    }
+    window.__gicNG2Patched = true;
+    const orig = window.$.fn.nanogallery2;
+    window.$.fn.nanogallery2 = function(options) {
+        try {
+            if (options && typeof options === 'object' && !Array.isArray(options)) {
+                if (typeof options.galleryMaxRows === 'number' && options.galleryMaxRows > 4) {
+                    console.log('[GIC] 🎯 galleryMaxRows:', options.galleryMaxRows, '→ 4');
+                    options.galleryMaxRows = 4;
+                }
+            }
+        } catch (e) { /* ignore */ }
+        return orig.apply(this, arguments);
+    };
+    console.log('[GIC] ✅ nanogallery2 patch installed (galleryMaxRows ≤ 4)');
+})();
+
 function initializeGIC() {
     console.log('[GIC] 初期化開始');
     loadPersistedState();
     installBulkDeleteDocumentHandlers();
     installGalleryCloseInterceptor();
+
+    // ★ ページ切替直後にレイアウトを即座に再適用
+    document.addEventListener('click', (e) => {
+        if (!e.target) return;
+        const isPager = e.target.closest(
+            '.nGY2paginationRectangle, .nGY2paginationRectangleCurrentPage, .gic-pagination-page, .gic-pagination-nav'
+        );
+        if (!isPager) return;
+
+        // 即座に1回
+        try { enforceGalleryGridLayout(); } catch (_) {}
+        try { scanAndSyncVideoBadges(); } catch (_) {}
+
+        // 段階的にリトライ（画像ロード完了を待つ）
+        [80, 200, 400, 700, 1200].forEach(delay => {
+            setTimeout(() => {
+                try { enforceGalleryGridLayout(); } catch (_) {}
+                try { scanAndSyncVideoBadges(); } catch (_) {}
+            }, delay);
+        });
+    }, true);
+
     setupGalleryDedupeObserver();
     setupGalleryDragToJson();
 
