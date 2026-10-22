@@ -133,6 +133,10 @@ let lastGalleryStateForGic = null;
 // ★ STJEditor 再オープンの状態
 let _stjReopenScheduled = false;
 
+// ★ ページ切替時のレイアウトロック（バラバラな並びをユーザーに見せない）
+let _pageSwitchInProgress = false;
+let _pageSwitchOrigVisibility = '';
+
 // ===== ユーティリティ =====
 function wait(ms) {
     return new Promise(r => setTimeout(r, ms));
@@ -3213,8 +3217,7 @@ function setupBulkDelete() {
 // ============================================================
 // ★ ギャラリーサムネイルを 3列 × 4行 の 180×180 グリッドに強制
 //    - nanogallery2 が現在のページとして表示しているアイテムのみを対象
-//    - 非表示ページのアイテム（display:none）には触れない
-//    - これによりページ切替時に正しく現在ページのサムネイルが表示される
+//    - 非表示ページのアイテムには触れない
 // ============================================================
 function enforceGalleryGridLayout() {
     const gallery = document.getElementById('gallery');
@@ -3223,7 +3226,7 @@ function enforceGalleryGridLayout() {
     const allThumbs = Array.from(gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item'));
     if (allThumbs.length === 0) return;
 
-    // ★ Step 1: 自分で display:none にしたもののみ復元（nanogallery2のdisplay:noneには触らない）
+    // ★ Step 1: 自分で display:none にしたもののみ復元
     allThumbs.forEach(thumb => {
         if (thumb.dataset.gicForcedHidden === '1') {
             thumb.style.removeProperty('display');
@@ -3232,12 +3235,12 @@ function enforceGalleryGridLayout() {
     });
 
     // ★ Step 2: nanogallery2 が現在のページとして表示しているアイテムのみ抽出
-    //    - 非表示ページのアイテムは nanogallery2 が display:none か visibility:hidden で隠す
+    //    visibility ではなく display と offsetWidth で判定（親の visibility: hidden を無視）
     const visibleThumbs = allThumbs.filter(thumb => {
+        if (thumb.style.display === 'none') return false;
         const cs = window.getComputedStyle(thumb);
         if (cs.display === 'none') return false;
-        if (cs.visibility === 'hidden') return false;
-        if (thumb.offsetWidth === 0 && thumb.offsetHeight === 0) return false;
+        if (thumb.offsetWidth === 0 || thumb.offsetHeight === 0) return false;
         return true;
     });
 
@@ -3253,7 +3256,6 @@ function enforceGalleryGridLayout() {
     const galleryEl = gallery.querySelector('.nGY2Gallery');
     const subEl = gallery.querySelector('.nGY2GallerySub');
 
-    // 3つの候補すべてに「ブロック・相対配置・幅540px」を強制
     [galleryEl, subEl, parent].filter(Boolean).forEach(el => {
         el.style.setProperty('width', PARENT_W + 'px', 'important');
         el.style.setProperty('min-width', PARENT_W + 'px', 'important');
@@ -3272,7 +3274,6 @@ function enforceGalleryGridLayout() {
         const row = Math.floor(i / COLS);
         const col = i % COLS;
 
-        // ★ 4行を超える行は非表示（safety net）
         if (row >= MAX_ROWS) {
             thumb.style.setProperty('display', 'none', 'important');
             thumb.dataset.gicForcedHidden = '1';
@@ -3302,7 +3303,6 @@ function enforceGalleryGridLayout() {
         thumb.style.setProperty('visibility', 'visible', 'important');
     });
 
-    // 絶対配置の子を持つ親は高さを明示する（4行上限）
     const totalRows = Math.min(maxRow + 1, MAX_ROWS);
     const totalH = totalRows * THUMB;
     [galleryEl, subEl, parent].filter(Boolean).forEach(el => {
@@ -3312,8 +3312,84 @@ function enforceGalleryGridLayout() {
     });
 }
 
+// ============================================================
+// ★ ページ切替を「隠してから揃えてから見せる」方式で処理
+//    - クリック直後にギャラリーを visibility: hidden で隠す
+//    - 表示アイテム数が「12個 or 総数」で安定するまで待つ
+//    - enforceGalleryGridLayout を実行
+//    - 2フレーム待ってから visibility を復元
+// ============================================================
+async function handlePageSwitchAsync() {
+    if (_pageSwitchInProgress) return;
+    _pageSwitchInProgress = true;
+
+    const gallery = document.getElementById('gallery');
+    if (!gallery) {
+        _pageSwitchInProgress = false;
+        return;
+    }
+
+    // 元の visibility を保存して隠す
+    _pageSwitchOrigVisibility = gallery.style.getPropertyValue('visibility') || '';
+    gallery.style.setProperty('visibility', 'hidden', 'important');
+
+    try {
+        const MAX_ITEMS = 12;
+        const startTime = Date.now();
+        const MAX_WAIT = 2000;
+        let lastSig = '';
+        let stableFrames = 0;
+
+        while (Date.now() - startTime < MAX_WAIT) {
+            // 1フレーム待つ（レイアウト確定を促す）
+            await new Promise(r => requestAnimationFrame(r));
+
+            const allThumbs = Array.from(gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item'));
+
+            const visibleThumbs = allThumbs.filter(thumb => {
+                if (thumb.style.display === 'none') return false;
+                const cs = window.getComputedStyle(thumb);
+                if (cs.display === 'none') return false;
+                if (thumb.offsetWidth === 0 || thumb.offsetHeight === 0) return false;
+                return true;
+            });
+
+            const expected = Math.min(allThumbs.length, MAX_ITEMS);
+
+            const sig = visibleThumbs.length + ':' + visibleThumbs
+                .map(t => (t.getAttribute('title') || '').slice(0, 24))
+                .join('|');
+
+            if (visibleThumbs.length >= expected && sig === lastSig) {
+                stableFrames++;
+                if (stableFrames >= 2) break;
+            } else {
+                stableFrames = 0;
+            }
+            lastSig = sig;
+        }
+
+        // レイアウトを強制
+        try { enforceGalleryGridLayout(); } catch (_) {}
+        try { scanAndSyncVideoBadges(); } catch (_) {}
+
+        // 2フレーム待ってから表示
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+    } finally {
+        // visibility を復元
+        if (_pageSwitchOrigVisibility) {
+            gallery.style.setProperty('visibility', _pageSwitchOrigVisibility, 'important');
+        } else {
+            gallery.style.removeProperty('visibility');
+        }
+        _pageSwitchInProgress = false;
+    }
+}
+
 function applyGalleryLayout() {
     if (isApplyingLayout) return;
+    if (_pageSwitchInProgress) return;  // ★ ページ切替待機中はスキップ
 
     if (window.__gicDragInProgress) {
         if (!window.__gicDragStartTime) {
@@ -3354,7 +3430,6 @@ function applyGalleryLayout() {
         applyGalleryWindowLayout();
         styleGalleryWindowCloseButton();
 
-        // ★ 追加: 180×180 グリッドを強制
         try { enforceGalleryGridLayout(); } catch (e) { /* ignore */ }
 
         document.querySelectorAll('.nGY2paginationRectangle, .nGY2paginationRectangleCurrentPage').forEach(el => {
@@ -4090,11 +4165,9 @@ function exposeGicApi() {
             };
         },
 
-        // ★ デバッグ用: グリッド強制を手動実行
         forceGridLayout: () => enforceGalleryGridLayout(),
     };
 
-    // ★ デバッグ用: ページ切替後の黒化現象を診断
     window.GicDebugPageBlack = function() {
         const gallery = document.getElementById('gallery');
         if (!gallery) { console.log('[GicDebug] no gallery'); return; }
@@ -4174,23 +4247,15 @@ function initializeGIC() {
     installBulkDeleteDocumentHandlers();
     installGalleryCloseInterceptor();
 
-    // ★ ページ切替直後にレイアウトを即座に再適用
+    // ★ ページ切替時は「隠す→揃える→見せる」方式で処理
     document.addEventListener('click', (e) => {
         if (!e.target) return;
         const isPager = e.target.closest(
             '.nGY2paginationRectangle, .nGY2paginationRectangleCurrentPage, .gic-pagination-page, .gic-pagination-nav'
         );
         if (!isPager) return;
-
-        try { enforceGalleryGridLayout(); } catch (_) {}
-        try { scanAndSyncVideoBadges(); } catch (_) {}
-
-        [80, 200, 400, 700, 1200].forEach(delay => {
-            setTimeout(() => {
-                try { enforceGalleryGridLayout(); } catch (_) {}
-                try { scanAndSyncVideoBadges(); } catch (_) {}
-            }, delay);
-        });
+        // 非同期でロック→揃うまで待機→表示
+        handlePageSwitchAsync().catch(err => console.warn('[GIC] page switch error:', err));
     }, true);
 
     setupGalleryDedupeObserver();
