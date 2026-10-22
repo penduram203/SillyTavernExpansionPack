@@ -2227,7 +2227,7 @@ function applyGalleryWindowLayout() {
                 const baseW = galleryBaseWidthCache.get(el);
                 const maxW = Math.max(100, vw - GALLERY_WINDOW_MAX_VIEWPORT_MARGIN);
                 // ※ ここもご自身の拡張幅（+270 等）を維持してください
-                const targetW = Math.min(maxW, Math.round(baseW + 80));
+                const targetW = Math.min(maxW, Math.round(baseW + 270));
                 el.style.setProperty('width', targetW + 'px', 'important');
                 el.style.setProperty('max-width', targetW + 'px', 'important');
             }
