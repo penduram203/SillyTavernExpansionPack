@@ -1073,13 +1073,14 @@ function isGalleryOpen() {
     if (primary && primary.classList.contains('gic-page-switching')) {
         return true;
     }
+
+    const now = performance.now();
     if (now - _galleryOpenCache.timestamp < GALLERY_OPEN_CACHE_TTL) {
         return _galleryOpenCache.value;
     }
 
     let result = false;
 
-    const primary = document.getElementById('gallery');
     if (primary) {
         const style = window.getComputedStyle(primary);
         if (style.display !== 'none' &&
@@ -1654,7 +1655,6 @@ async function processGalleryVideoThumb(thumb, videoFileName, charName) {
     }, { once: true });
     thumb.appendChild(video);
 }
-
 // ============================================================
 // ★ ギャラリーサムネイルの個別ドラッグ
 // ============================================================
@@ -3224,6 +3224,8 @@ function setupBulkDelete() {
 // ★ ギャラリーサムネイルを 3列 × 4行 の 180×180 グリッドに強制
 //    - nanogallery2 が現在のページとして表示しているアイテムのみを対象
 //    - 非表示ページのアイテムには触れない
+//    - ページ切替中は内側コンテナ (.nGY2GallerySub) が visibility:hidden に
+//      なるが、thumb.style.display / computed display で判定するため影響なし
 // ============================================================
 function enforceGalleryGridLayout() {
     const gallery = document.getElementById('gallery');
@@ -3241,7 +3243,7 @@ function enforceGalleryGridLayout() {
     });
 
     // ★ Step 2: nanogallery2 が現在のページとして表示しているアイテムのみ抽出
-    //    visibility ではなく display と offsetWidth で判定（親の visibility: hidden を無視）
+    //    display:none で判定（visibility は親の hidden に影響されるため使わない）
     const visibleThumbs = allThumbs.filter(thumb => {
         if (thumb.style.display === 'none') return false;
         const cs = window.getComputedStyle(thumb);
@@ -3321,6 +3323,8 @@ function enforceGalleryGridLayout() {
 // ============================================================
 // ★ ページ切替を「内側コンテナを隠して揃えてから見せる」方式で処理
 //    #gallery 自体の visibility は触らない（isGalleryOpen を狂わせない）
+//    代わりに #gallery に gic-page-switching クラスを付与し、
+//    isGalleryOpen() がそのクラスを検出したら「開いている」とみなす。
 // ============================================================
 async function handlePageSwitchAsync() {
     if (_pageSwitchInProgress) return;
@@ -4223,7 +4227,8 @@ function exposeGicApi() {
 }
 
 // ============================================================
-// ★ nanogallery2 の galleryMaxRows を 4 に強制
+// ★ nanogallery2 の galleryMaxRows を 4 に強制し、
+//    thumbnailWidth を 180px 固定（3列を確実にする）
 // ============================================================
 (function patchNanogallery2For4Rows() {
     if (window.__gicNG2Patched) return;
@@ -4250,20 +4255,61 @@ function exposeGicApi() {
     console.log('[GIC] ✅ nanogallery2 patch installed (galleryMaxRows ≤ 4, thumbnailWidth = 180px)');
 })();
 
+// ============================================================
+// ★ #dragGallery 幅を 540px に事前固定
+//    ST の showCharGallery は makeMovable() → delay(100) → initGallery()
+//    の順で走る。MutationObserver は delay(100) より先に発火するので
+//    nanogallery2 init 時点で 3列計算に必要な幅が確定する。
+// ============================================================
+(function installDragGalleryWidthForcer() {
+    if (window.__gicDragGalleryWidthForcer) return;
+    window.__gicDragGalleryWidthForcer = true;
+
+    const PARENT_W = 540;
+
+    const forceWidth = (dg) => {
+        if (!dg) return;
+        dg.style.setProperty('width', PARENT_W + 'px', 'important');
+        dg.style.setProperty('min-width', PARENT_W + 'px', 'important');
+        dg.style.setProperty('max-width', PARENT_W + 'px', 'important');
+        dg.style.setProperty('box-sizing', 'border-box', 'important');
+    };
+
+    forceWidth(document.getElementById('dragGallery'));
+
+    const observer = new MutationObserver((mutations) => {
+        for (const m of mutations) {
+            for (const node of m.addedNodes) {
+                if (node.nodeType !== 1) continue;
+                if (node.id === 'dragGallery') {
+                    forceWidth(node);
+                    continue;
+                }
+                if (node.querySelector) {
+                    const dg = node.querySelector('#dragGallery');
+                    if (dg) forceWidth(dg);
+                }
+            }
+        }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    console.log('[GIC] ✅ #dragGallery 幅事前固定オブザーバを設置しました');
+})();
+
 function initializeGIC() {
     console.log('[GIC] 初期化開始');
     loadPersistedState();
     installBulkDeleteDocumentHandlers();
     installGalleryCloseInterceptor();
 
-    // ★ ページ切替時は「隠す→揃える→見せる」方式で処理
+    // ★ ページ切替時は「内側コンテナを隠す→揃える→見せる」方式で処理
     document.addEventListener('click', (e) => {
         if (!e.target) return;
         const isPager = e.target.closest(
             '.nGY2paginationRectangle, .nGY2paginationRectangleCurrentPage, .gic-pagination-page, .gic-pagination-nav'
         );
         if (!isPager) return;
-        // 非同期でロック→揃うまで待機→表示
         handlePageSwitchAsync().catch(err => console.warn('[GIC] page switch error:', err));
     }, true);
 
@@ -4357,46 +4403,3 @@ export async function activate() {
     validatePersistedState().catch(() => {});
     console.log('[GIC] ✅ Generate Image Controller: アクティベート完了');
 }
-// ============================================================
-// ★ #dragGallery 幅を 540px に事前固定
-//    ST の showCharGallery は makeMovable() → delay(100) → initGallery()
-//    の順で走る。MutationObserver は delay(100) より先に発火するので
-//    nanogallery2 init 時点で 3列計算に必要な幅が確定する。
-// ============================================================
-(function installDragGalleryWidthForcer() {
-    if (window.__gicDragGalleryWidthForcer) return;
-    window.__gicDragGalleryWidthForcer = true;
-
-    const PARENT_W = 540;
-
-    const forceWidth = (dg) => {
-        if (!dg) return;
-        dg.style.setProperty('width', PARENT_W + 'px', 'important');
-        dg.style.setProperty('min-width', PARENT_W + 'px', 'important');
-        dg.style.setProperty('max-width', PARENT_W + 'px', 'important');
-        dg.style.setProperty('box-sizing', 'border-box', 'important');
-    };
-
-    // 既に存在する場合に即時適用
-    forceWidth(document.getElementById('dragGallery'));
-
-    // 新規追加を監視
-    const observer = new MutationObserver((mutations) => {
-        for (const m of mutations) {
-            for (const node of m.addedNodes) {
-                if (node.nodeType !== 1) continue;
-                if (node.id === 'dragGallery') {
-                    forceWidth(node);
-                    continue;
-                }
-                if (node.querySelector) {
-                    const dg = node.querySelector('#dragGallery');
-                    if (dg) forceWidth(dg);
-                }
-            }
-        }
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-
-    console.log('[GIC] ✅ #dragGallery 幅事前固定オブザーバを設置しました');
-})();
