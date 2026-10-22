@@ -789,6 +789,16 @@ function getCurrentCharacterName() {
             padding: 0 !important;
             background-color: transparent !important;
         }
+        
+        /* ★ ページ切替中はサムネのアニメーション・トランジションを完全停止 */
+        #gallery.gic-page-switching .nGY2GThumbnail,
+        #gallery.gic-page-switching .nGY2GThumbnail_l1,
+        #gallery.gic-page-switching .nGY2Item,
+        #gallery.gic-page-switching .nGY2GallerySub,
+        #gallery.gic-page-switching .nGY2GallerySub * {
+            transition: none !important;
+            animation: none !important;
+        }
     `;
     document.head.appendChild(style);
     console.log('[GIC] 🖼️ ギャラリー配置CSSを注入しました');
@@ -3237,7 +3247,7 @@ function enforceGalleryGridLayout() {
     const allThumbs = Array.from(gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item'));
     if (allThumbs.length === 0) return;
 
-    /* ★ Step 1: 前回「画面外退避」したものを元の位置に戻す（display は触らない） */
+    /* ★ Step 1: 前回画面外退避したものを元に戻す */
     allThumbs.forEach(thumb => {
         if (thumb.dataset.gicOffscreen === '1') {
             thumb.style.removeProperty('left');
@@ -3246,62 +3256,86 @@ function enforceGalleryGridLayout() {
         }
     });
 
-    /* ★ Step 2: nanogallery2 が「表示中」としている項目だけ抽出
-          display チェックのみ（=nanogallery2 の状態を尊重） */
+    /* ★ Step 2: 現在表示中の項目のみ抽出 */
     const visibleThumbs = allThumbs.filter(thumb => {
         const cs = window.getComputedStyle(thumb);
         if (cs.display === 'none') return false;
         if (thumb.offsetWidth === 0 || thumb.offsetHeight === 0) return false;
         return true;
     });
-
     if (visibleThumbs.length === 0) return;
 
-    /* ★ グリッド設定 */
-    const THUMB    = 190;
-    const COLS     = 4;
-    const MAX_ROWS = 4;
-    const H_GAP    = 4;
-    const V_GAP    = 4;
+    /* ★ レイアウト定数 */
+    const COLS          = 4;
+    const MAX_ROWS      = 4;
+    const H_GAP         = 4;
+    const V_GAP         = 4;
+    const RIGHT_EXTRA   = 10;   /* 右側の余白を追加で10px広げる */
+    const TOP_PADDING   = 8;    /* 画面上端からの余白 */
+    const PAGER_RESERVE = 70;   /* 下部ページャー領域（ボタン45px + 余白） */
+    const THUMB_MAX     = 190;
+    const THUMB_MIN     = 120;
+
+    /* ヘッダー高さを取得 */
+    let headerH = 40;
+    const headerEl = gallery.querySelector('.dragTitle, .panelControlBar');
+    if (headerEl) {
+        const h = headerEl.getBoundingClientRect().height;
+        if (h > 0) headerH = h;
+    }
+
+    const galleryRect = gallery.getBoundingClientRect();
+    const containerW  = Math.max(100, Math.round(galleryRect.width)  || 830);
+    const containerH  = Math.max(100, Math.round(galleryRect.height) || 922);
+
+    /* ★ サムネサイズを画面高から動的決定（はみ出す場合のみ縮小） */
+    const availH       = containerH - headerH - PAGER_RESERVE;
+    const maxThumbByH  = Math.floor((availH - (MAX_ROWS - 1) * V_GAP) / MAX_ROWS);
+    const THUMB        = Math.min(THUMB_MAX, Math.max(THUMB_MIN, maxThumbByH));
 
     const totalRows = Math.min(Math.ceil(visibleThumbs.length / COLS), MAX_ROWS);
     const gridW = COLS * THUMB + (COLS - 1) * H_GAP;
     const gridH = totalRows * THUMB + Math.max(0, totalRows - 1) * V_GAP;
 
-    const galleryRect = gallery.getBoundingClientRect();
-    const containerW  = Math.max(gridW, Math.round(galleryRect.width)  || gridW);
-    const containerH  = Math.max(gridH, Math.round(galleryRect.height) || gridH);
+    /* ★ 水平: 右側余白を10px広げる（実効幅を10減らして中央寄せ） */
+    const usableW = Math.max(gridW, containerW - RIGHT_EXTRA);
+    const offsetX = Math.max(0, Math.floor((usableW - gridW) / 2));
 
-    /* ヘッダー高さを考慮した中央寄せオフセット */
-    const headerEl = gallery.querySelector('.dragTitle') || gallery.querySelector('.panelControlBar');
-    const headerH  = headerEl ? headerEl.getBoundingClientRect().height : 0;
-    const usableH  = Math.max(gridH, containerH - headerH);
+    /* ★ 垂直: 上端寄せ（中央寄せをやめる） */
+    const offsetY = TOP_PADDING;  /* コンテナ自体を headerH に置くので、ここは 0 基準 */
 
-    const offsetX = Math.max(0, Math.floor((containerW - gridW) / 2));
-    const offsetY = headerH + Math.max(0, Math.floor((usableH - gridH) / 2));
+    /* ★ コンテナサイズ（下部にページャー分を残す） */
+    const containerInnerH = Math.max(gridH, availH);
 
-    /* ★ コンテナのサイズだけ更新（position / top は触らない） */
     const parent    = visibleThumbs[0].parentElement;
     const galleryEl = gallery.querySelector('.nGY2Gallery');
     const subEl     = gallery.querySelector('.nGY2GallerySub');
 
+    /* ★ コンテナを「ヘッダー直下・左寄せ・ページャー上まで」に配置 */
     [galleryEl, subEl, parent].filter(Boolean).forEach(el => {
+        el.style.setProperty('position', 'absolute', 'important');
+        el.style.setProperty('top', headerH + 'px', 'important');
+        el.style.setProperty('left', '0', 'important');
+        el.style.setProperty('right', 'auto', 'important');
+        el.style.setProperty('bottom', 'auto', 'important');
         el.style.setProperty('width', containerW + 'px', 'important');
         el.style.setProperty('min-width', containerW + 'px', 'important');
         el.style.setProperty('max-width', containerW + 'px', 'important');
-        el.style.setProperty('height', (containerH - headerH) + 'px', 'important');
-        el.style.setProperty('min-height', (containerH - headerH) + 'px', 'important');
-        el.style.setProperty('max-height', (containerH - headerH) + 'px', 'important');
+        el.style.setProperty('height', containerInnerH + 'px', 'important');
+        el.style.setProperty('min-height', containerInnerH + 'px', 'important');
+        el.style.setProperty('max-height', containerInnerH + 'px', 'important');
+        el.style.setProperty('margin', '0', 'important');
+        el.style.setProperty('padding', '0', 'important');
         el.style.setProperty('overflow', 'hidden', 'important');
+        el.style.setProperty('box-sizing', 'border-box', 'important');
     });
 
-    /* ★ Step 3: グリッド配置（16枚超は画面外退避・display は触らない） */
+    /* ★ Step 3: グリッド配置 */
     visibleThumbs.forEach((thumb, i) => {
         const row = Math.floor(i / COLS);
         const col = i % COLS;
 
         if (row >= MAX_ROWS) {
-            /* 画面外へ退避（display: none は使わない） */
             thumb.style.setProperty('position', 'absolute', 'important');
             thumb.style.setProperty('left', '-9999px', 'important');
             thumb.style.setProperty('top', '-9999px', 'important');
@@ -3357,6 +3391,15 @@ async function handlePageSwitchAsync() {
         thumbContainer.style.setProperty('visibility', 'hidden', 'important');
     }
 
+    /* ★ サムネ個別にも visibility:hidden を強制
+          （enforceGalleryGridLayout が付けた visibility:visible !important を打ち消す） */
+    const hideThumbs = () => {
+        gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item').forEach(t => {
+            t.style.setProperty('visibility', 'hidden', 'important');
+        });
+    };
+    hideThumbs();
+
     try {
         const startTime = Date.now();
         const MAX_WAIT = 2000;
@@ -3366,7 +3409,12 @@ async function handlePageSwitchAsync() {
         while (Date.now() - startTime < MAX_WAIT) {
             await new Promise(r => requestAnimationFrame(r));
 
-            const allThumbs = Array.from(gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item'));
+            /* ★ 新しいサムネが挿入されても隠せるよう毎フレーム再適用 */
+            hideThumbs();
+
+            const allThumbs = Array.from(gallery.querySelectorAll(
+                '.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item'
+            ));
             const visibleThumbs = allThumbs.filter(thumb => {
                 const cs = window.getComputedStyle(thumb);
                 if (cs.display === 'none') return false;
@@ -3374,7 +3422,6 @@ async function handlePageSwitchAsync() {
                 return true;
             });
 
-            /* ★ 個数ではなく「安定した集合」で判定 */
             const sig = visibleThumbs
                 .map(t => (t.getAttribute('title') || '').slice(0, 40))
                 .join('|');
@@ -3388,9 +3435,11 @@ async function handlePageSwitchAsync() {
             lastSig = sig;
         }
 
+        /* ★ レイアウト適用（この中で visible に戻る） */
         try { enforceGalleryGridLayout(); } catch (_) {}
         try { scanAndSyncVideoBadges(); } catch (_) {}
 
+        /* ★ 2重 rAF で確実にペイント完了を待つ */
         await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     } finally {
         if (thumbContainer) {
