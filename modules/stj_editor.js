@@ -28,6 +28,10 @@
     const DRAG_THRESHOLD_PX = 5;   // ゴースト生成の閾値
     const CLICK_THRESHOLD_PX = 2;  // 「クリック扱いしない」閾値
 
+    // ★ ドラッグ直後の click を抑止するためのタイムスタンプ
+    //    mouseup で「少しでも動いた」と判定されたらこの時刻まで click を無視する
+    let _suppressCellClickUntil = 0;
+
     const AUTOSCROLL_EDGE_PX = 200;
     const AUTOSCROLL_MAX_SPEED = 35;
     let autoScrollRAF = null;
@@ -887,6 +891,13 @@
             if (s.currentTarget) s.currentTarget.classList.remove('stj-drag-over');
             removeDragGhost(s.ghostState);
 
+            // ★ 少しでも動いていたら、直後の click を抑止する
+            //   （mouseup の後にブラウザが独立して click を発火するため、
+            //     mouseup ハンドラの return だけでは click を防げない）
+            if (s.isDragging || s.hasMoved) {
+                _suppressCellClickUntil = Date.now() + 300;
+            }
+
             if (s.isDragging) {
                 if (s.currentTarget && s.currentTarget !== s.sourceItem) {
                     swapCells(s.sourceItem, s.currentTarget);
@@ -1509,13 +1520,12 @@
 
         overlay.addEventListener('click', (e) => {
             if (e.target === mediaEl) {
-                if (isVideo) return;  // 動画本体クリックは再生コントロール用に無視
+                if (isVideo) return;
                 e.stopPropagation();
                 e.preventDefault();
                 close();
                 return;
             }
-            // 外側クリック
             e.stopPropagation();
             e.preventDefault();
             close();
@@ -1756,6 +1766,14 @@
         item.addEventListener('click', (e) => {
             if (e.target.closest('button')) return;
             if (isBulkDeleteMode || isDialogActive) return;
+            // ★ ドラッグ直後の click を抑止
+            //   mouseup の後にブラウザが独立して click を発火するため、
+            //   mouseup 側の return だけでは防げない
+            if (Date.now() < _suppressCellClickUntil) {
+                e.stopPropagation();
+                e.preventDefault();
+                return;
+            }
             openCellModal(item);
         });
     }
@@ -2500,6 +2518,12 @@
             item.addEventListener('click', (e) => {
                 if (e.target.closest('button')) return;
                 if (isBulkDeleteMode || isDialogActive) return;
+                // ★ ドラッグ直後の click を抑止
+                if (Date.now() < _suppressCellClickUntil) {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    return;
+                }
                 openCellModal(item);
             });
         });
