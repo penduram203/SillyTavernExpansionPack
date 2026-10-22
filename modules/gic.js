@@ -128,7 +128,6 @@ let _thumbProcessingActive = false;
 let _thumbDbPromise = null;
 
 // ★ ギャラリーの開閉状態追跡（syncGalleryButtonVisibility 用）
-//   モジュール評価順序に依存しないよう、他より先に宣言しておく。
 let lastGalleryStateForGic = null;
 
 // ★ STJEditor 再オープンの状態
@@ -403,14 +402,6 @@ function getCurrentCharacterName() {
             margin-left: 0 !important;
             margin-right: auto !important;
             text-align: left !important;
-        }
-
-        /* ★ 3列制限: 180×3 = 540px に余裕を加えた幅。4列目は入らない */
-        .nGY2Gallery {
-            text-align: left !important;
-            max-width: 546px !important;
-            margin-left: 0 !important;
-            margin-right: auto !important;
         }
 
         .nGY2paginationNext,
@@ -715,62 +706,72 @@ function getCurrentCharacterName() {
         }
 
         /* ============================================================
-           ★ ギャラリーサムネイル: 180×180 正方形・contain・黒背景
+           ★ ギャラリーサムネイル: 3列グリッド × 180×180 正方形
+           ★ nanogallery2 の絶対配置を打ち消してグリッドに強制
            ============================================================ */
+        #gallery .nGY2Gallery {
+            display: grid !important;
+            grid-template-columns: repeat(3, 180px) !important;
+            grid-auto-rows: 180px !important;
+            gap: 0 !important;
+            max-width: 540px !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            text-align: left !important;
+            position: relative !important;
+        }
 
-        /* サムネイル外枠を 180×180 に固定 */
+        /* 各サムネイル: grid item として並べる */
         #gallery .nGY2GThumbnail,
-        #gallery .nGY2GThumbnail_l1,
-        #gallery .nGY2Item {
+        #gallery .nGY2GThumbnail_l1 {
+            /* nanogallery2 の絶対配置を無効化しつつ、
+               子の絶対配置（nGY2TnImg）用に positioning context を維持 */
+            position: relative !important;
+            left: 0 !important;
+            top: 0 !important;
             width: 180px !important;
             height: 180px !important;
             min-width: 180px !important;
             min-height: 180px !important;
             max-width: 180px !important;
             max-height: 180px !important;
-            padding: 0 !important;
             margin: 0 !important;
+            padding: 0 !important;
             background-color: #000 !important;
-            position: relative !important;
-            overflow: hidden !important;
             box-sizing: border-box !important;
-            float: none !important;
-            display: inline-block !important;
-            vertical-align: top !important;
+            transform: none !important;
+            overflow: hidden !important;
         }
 
-        /* 背景画像レイヤー（nGY2TnImg）を contain + 黒 */
+        /* 背景画像レイヤー: 親いっぱいに広げ、contain + center */
         #gallery .nGY2TnImg,
         #gallery .nGY2TnImgBack {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
             background-size: contain !important;
             background-position: center center !important;
             background-repeat: no-repeat !important;
             background-color: #000 !important;
+            transform: none !important;
         }
 
-        /* サムネイル内の <img> も contain */
-        #gallery .nGY2GThumbnail img,
-        #gallery .nGY2GThumbnail_l1 img {
+        /* サムネイル内の <img>（GIC の gic-gallery-thumb-img 含む） */
+        #gallery .nGY2GThumbnail > img,
+        #gallery .nGY2GThumbnail_l1 > img,
+        #gallery .gic-gallery-thumb-img {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
             width: 100% !important;
             height: 100% !important;
-            max-width: 100% !important;
-            max-height: 100% !important;
             object-fit: contain !important;
             background-color: #000 !important;
             display: block !important;
-        }
-
-        /* GIC が後付けする <img class="gic-gallery-thumb-img"> も contain */
-        #gallery .gic-gallery-thumb-img {
-            width: 100% !important;
-            height: 100% !important;
-            object-fit: contain !important;
-            background-color: #000 !important;
-            position: absolute !important;
-            top: 0 !important;
-            left: 0 !important;
-            pointer-events: none !important;
             z-index: 5 !important;
+            pointer-events: none !important;
         }
     `;
     document.head.appendChild(style);
@@ -1603,7 +1604,6 @@ async function processGalleryVideoThumb(thumb, videoFileName, charName) {
         const img = document.createElement('img');
         img.className = 'gic-gallery-thumb-img';
         img.src = thumbUrl;
-        // CSS 側で contain 等を指定済み。念のためインラインでも指定
         img.style.cssText =
             'position:absolute;top:0;left:0;width:100%;height:100%;' +
             'object-fit:contain;pointer-events:none;z-index:5;background:#000;';
@@ -2148,7 +2148,6 @@ function hideGalleryUploadMessage() {
 function applyGalleryWindowLayout() {
     const vw = window.innerWidth;
 
-    // ★ ウィンドウ幅が変わったら幅キャッシュを破棄（次のポーリングで再計測）
     if (vw !== _lastWindowWidthForGallery) {
         _lastWindowWidthForGallery = vw;
         for (const sel of GALLERY_WINDOW_SELECTORS) {
@@ -2178,7 +2177,6 @@ function applyGalleryWindowLayout() {
             el.style.setProperty('transform', 'translateY(-50%)', 'important');
             el.style.setProperty('margin', '0', 'important');
 
-            // ===== 高さ（既存） =====
             if (!galleryBaseHeightCache.has(el)) {
                 const h = el.getBoundingClientRect().height;
                 if (h > 0) {
@@ -2204,9 +2202,7 @@ function applyGalleryWindowLayout() {
             el.style.setProperty('min-height', targetH + 'px', 'important');
             el.style.setProperty('max-height', targetH + 'px', 'important');
 
-            // ===== ★ 幅 +80px =====
             if (!galleryBaseWidthCache.has(el)) {
-                // 初回計測: width の上書きを外して ST 本来の幅を取得
                 el.style.removeProperty('width');
                 el.style.removeProperty('max-width');
                 const w = el.getBoundingClientRect().width;
@@ -2235,11 +2231,9 @@ function resetGalleryHeightCache() {
                 galleryBaseHeightCache.delete(el);
                 console.log('[GIC] ギャラリー高さキャッシュをリセット');
             }
-            // ★ 幅キャッシュもクリア
             if (galleryBaseWidthCache.has(el)) {
                 galleryBaseWidthCache.delete(el);
             }
-            // ★ width の上書きも除去（次回開いた時に ST 本来の幅で再計測させる）
             el.style.removeProperty('width');
             el.style.removeProperty('max-width');
 
