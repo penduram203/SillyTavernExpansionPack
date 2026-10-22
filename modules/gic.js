@@ -706,41 +706,54 @@ function getCurrentCharacterName() {
         }
 
         /* ============================================================
-           ★ ギャラリーサムネイル: 3列グリッド × 180×180 正方形
-           ★ nanogallery2 の絶対配置を打ち消してグリッドに強制
+           ★ ギャラリーサムネイル: 3列 × 180×180 正方形
+           ★ nanogallery2 の絶対配置・transform を打ち消して
+              flex-wrap で確実に折り返す
            ============================================================ */
         #gallery .nGY2Gallery {
-            display: grid !important;
-            grid-template-columns: repeat(3, 180px) !important;
-            grid-auto-rows: 180px !important;
+            display: flex !important;
+            flex-wrap: wrap !important;
+            flex-direction: row !important;
+            justify-content: flex-start !important;
+            align-items: flex-start !important;
             gap: 0 !important;
+            width: 540px !important;
+            min-width: 540px !important;
             max-width: 540px !important;
+            height: auto !important;
+            max-height: none !important;
+            min-height: 0 !important;
             margin: 0 !important;
             padding: 0 !important;
-            text-align: left !important;
             position: relative !important;
+            overflow: visible !important;
+            text-align: left !important;
+            transform: none !important;
         }
 
-        /* 各サムネイル: grid item として並べる */
+        /* 各サムネイル: flex item として固定幅 180px */
         #gallery .nGY2GThumbnail,
-        #gallery .nGY2GThumbnail_l1 {
-            /* nanogallery2 の絶対配置を無効化しつつ、
-               子の絶対配置（nGY2TnImg）用に positioning context を維持 */
-            position: relative !important;
-            left: 0 !important;
-            top: 0 !important;
+        #gallery .nGY2GThumbnail_l1,
+        #gallery .nGY2Item {
+            flex: 0 0 180px !important;
             width: 180px !important;
-            height: 180px !important;
             min-width: 180px !important;
-            min-height: 180px !important;
             max-width: 180px !important;
+            height: 180px !important;
+            min-height: 180px !important;
             max-height: 180px !important;
             margin: 0 !important;
             padding: 0 !important;
+            position: relative !important;
+            left: 0 !important;
+            top: 0 !important;
+            transform: none !important;
             background-color: #000 !important;
             box-sizing: border-box !important;
-            transform: none !important;
             overflow: hidden !important;
+            display: block !important;
+            float: none !important;
+            vertical-align: top !important;
         }
 
         /* 背景画像レイヤー: 親いっぱいに広げ、contain + center */
@@ -749,13 +762,20 @@ function getCurrentCharacterName() {
             position: absolute !important;
             left: 0 !important;
             top: 0 !important;
+            right: auto !important;
+            bottom: auto !important;
             width: 100% !important;
             height: 100% !important;
+            max-width: 100% !important;
+            max-height: 100% !important;
             background-size: contain !important;
             background-position: center center !important;
             background-repeat: no-repeat !important;
             background-color: #000 !important;
             transform: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            box-sizing: border-box !important;
         }
 
         /* サムネイル内の <img>（GIC の gic-gallery-thumb-img 含む） */
@@ -767,11 +787,16 @@ function getCurrentCharacterName() {
             top: 0 !important;
             width: 100% !important;
             height: 100% !important;
+            max-width: 100% !important;
+            max-height: 100% !important;
             object-fit: contain !important;
             background-color: #000 !important;
             display: block !important;
             z-index: 5 !important;
             pointer-events: none !important;
+            transform: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
         }
     `;
     document.head.appendChild(style);
