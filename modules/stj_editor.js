@@ -25,11 +25,9 @@
 
     let pointerDragState = null;
     let pointerDragHandlerInstalled = false;
-    const DRAG_THRESHOLD_PX = 5;   // ゴースト生成の閾値
-    const CLICK_THRESHOLD_PX = 2;  // 「クリック扱いしない」閾値
+    const DRAG_THRESHOLD_PX = 5;
+    const CLICK_THRESHOLD_PX = 2;
 
-    // ★ ドラッグ直後の click を抑止するためのタイムスタンプ
-    //    mouseup で「少しでも動いた」と判定されたらこの時刻まで click を無視する
     let _suppressCellClickUntil = 0;
 
     const AUTOSCROLL_EDGE_PX = 200;
@@ -861,8 +859,6 @@
             const dx = e.clientX - s.startX;
             const dy = e.clientY - s.startY;
 
-            // ★ 微小移動を検出（クリック判定用）
-            //    2px 以上動いたら「クリック扱いしない」フラグを立てる
             if (!s.hasMoved && (dx * dx + dy * dy) > (CLICK_THRESHOLD_PX * CLICK_THRESHOLD_PX)) {
                 s.hasMoved = true;
             }
@@ -891,9 +887,6 @@
             if (s.currentTarget) s.currentTarget.classList.remove('stj-drag-over');
             removeDragGhost(s.ghostState);
 
-            // ★ 少しでも動いていたら、直後の click を抑止する
-            //   （mouseup の後にブラウザが独立して click を発火するため、
-            //     mouseup ハンドラの return だけでは click を防げない）
             if (s.isDragging || s.hasMoved) {
                 _suppressCellClickUntil = Date.now() + 300;
             }
@@ -911,7 +904,6 @@
                     else src.classList.add('stj-marked-for-delete');
                     return;
                 }
-                // ★ 少しでも動いていればクリック扱いしない
                 if (s.hasMoved) {
                     return;
                 }
@@ -989,8 +981,9 @@
         stjModalEl.style.display = 'block';
         stjModalEl.style.position = 'fixed';
         stjModalEl.style.top = '0px';
-        stjModalEl.style.left = '560px';
-        stjModalEl.style.width = 'calc(85vw - 280px)';
+        stjModalEl.style.left = 'auto';
+        stjModalEl.style.right = '0';
+        stjModalEl.style.width = 'calc(85vw - 550px)';
         stjModalEl.style.height = '100vh';
         stjModalEl.style.zIndex = '10001';
         stjModalEl.scrollTop = 0;
@@ -1304,7 +1297,6 @@
 
     // ============================================================
     // セルモーダル用: 動画サムネイルの IntersectionObserver
-    //   静止画サムネイル化のため no-op（互換維持のため残置）
     // ============================================================
     let _cellVideoIO = null;
     let _cellVideoIORoot = null;
@@ -1766,9 +1758,6 @@
         item.addEventListener('click', (e) => {
             if (e.target.closest('button')) return;
             if (isBulkDeleteMode || isDialogActive) return;
-            // ★ ドラッグ直後の click を抑止
-            //   mouseup の後にブラウザが独立して click を発火するため、
-            //   mouseup 側の return だけでは防げない
             if (Date.now() < _suppressCellClickUntil) {
                 e.stopPropagation();
                 e.preventDefault();
@@ -2518,7 +2507,6 @@
             item.addEventListener('click', (e) => {
                 if (e.target.closest('button')) return;
                 if (isBulkDeleteMode || isDialogActive) return;
-                // ★ ドラッグ直後の click を抑止
                 if (Date.now() < _suppressCellClickUntil) {
                     e.stopPropagation();
                     e.preventDefault();
