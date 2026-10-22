@@ -3585,4 +3585,496 @@ async function warmUpGallery() {
         }
 
         let galleryEl = null;
-        for (let round = 0; round < 3 && !galleryEl;
+        for (let round = 0; round < 3 && !galleryEl; round++) {
+            if (warmupState === 'aborted') { hideStyle.remove(); return; }
+            const appearStart = Date.now();
+            while (Date.now() - appearStart < 8000) {
+                if (warmupState === 'aborted') { hideStyle.remove(); return; }
+                galleryEl = document.getElementById('gallery');
+                if (galleryEl) break;
+                await wait(200);
+            }
+            if (galleryEl) break;
+            closeGalleryProgrammatically();
+            await wait(700);
+            clearGalleryOpenInFlight();
+            _galleryOpenCache = { value: false, timestamp: 0 };
+            lastGalleryStateForGic = null;
+            openGalleryFromGic();
+            await wait(1500);
+        }
+
+        if (!galleryEl) {
+            warmupState = 'idle';
+            hideStyle.remove();
+            closeGalleryProgrammatically();
+            return;
+        }
+
+        const contentStart = Date.now();
+        while (Date.now() - contentStart < 15000) {
+            if (warmupState === 'aborted') { hideStyle.remove(); return; }
+            const ng2 = galleryEl.querySelector('.nGY2Gallery');
+            const thumbs = galleryEl.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1');
+            if (ng2 || thumbs.length > 0) break;
+            await wait(200);
+        }
+
+        await preloadGalleryImages();
+        if (warmupState === 'aborted') { hideStyle.remove(); return; }
+
+        await wait(GALLERY_WARMUP_HOLD_MS);
+        if (warmupState === 'aborted') { hideStyle.remove(); return; }
+
+        closeGalleryProgrammatically();
+        setTimeout(() => {
+            hideStyle.remove();
+            hideGalleryUploadMessage();
+        }, 500);
+        warmupState = 'done';
+    } catch (e) {
+        warmupState = 'idle';
+        try { hideStyle.remove(); } catch (_) { /* ignore */ }
+    }
+}
+
+const STATUS_MESSAGE_ID = 'gic-status-message';
+const STATUS_MESSAGE_STYLE_ID = 'gic-status-message-style';
+let _statusMessageHideTimer = null;
+
+function ensureStatusMessageStyle() {
+    if (document.getElementById(STATUS_MESSAGE_STYLE_ID)) return;
+    const style = document.createElement('style');
+    style.id = STATUS_MESSAGE_STYLE_ID;
+    style.textContent = `
+        #${STATUS_MESSAGE_ID} {
+            position: fixed; padding: 8px 16px;
+            background-color: rgba(20, 20, 20, 0.92); color: #ffffff;
+            font-size: 13px; font-weight: bold; font-family: sans-serif;
+            border: 1px solid #666; border-radius: 6px; z-index: 15001;
+            pointer-events: none; opacity: 0; transition: opacity 0.3s ease;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.7);
+            text-align: center; white-space: nowrap;
+            left: -9999px; top: -9999px;
+        }
+        #${STATUS_MESSAGE_ID}.gic-visible { opacity: 1; }
+    `;
+    document.head.appendChild(style);
+}
+
+function getStatusMessageEl() {
+    ensureStatusMessageStyle();
+    let el = document.getElementById(STATUS_MESSAGE_ID);
+    if (!el) {
+        el = document.createElement('div');
+        el.id = STATUS_MESSAGE_ID;
+        document.body.appendChild(el);
+    }
+    return el;
+}
+
+function positionStatusMessage() {
+    const el = document.getElementById(STATUS_MESSAGE_ID);
+    if (!el) return;
+    if (!el.classList.contains('gic-visible')) return;
+    const btn = document.getElementById(GALLERY_BUTTON_ID);
+    if (!btn) return;
+    const bRect = btn.getBoundingClientRect();
+    if (bRect.width === 0 || bRect.height === 0) return;
+    const margin = 8;
+    const elW = el.offsetWidth || 200;
+    const elH = el.offsetHeight || 36;
+    let left = bRect.left - elW - margin;
+    let top = bRect.top + (bRect.height - elH) / 2;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    if (left < margin) left = margin;
+    if (left + elW > vw - margin) left = vw - margin - elW;
+    if (top < margin) top = margin;
+    if (top + elH > vh - margin) top = vh - margin - elH;
+    el.style.setProperty('position', 'fixed', 'important');
+    el.style.setProperty('left', Math.round(left) + 'px', 'important');
+    el.style.setProperty('top', Math.round(top) + 'px', 'important');
+    el.style.setProperty('right', 'auto', 'important');
+    el.style.setProperty('bottom', 'auto', 'important');
+    el.style.setProperty('transform', 'none', 'important');
+}
+
+function showStatusMessage(text, autoHideMs = 0) {
+    if (_statusMessageHideTimer) { clearTimeout(_statusMessageHideTimer); _statusMessageHideTimer = null; }
+    const el = getStatusMessageEl();
+    el.textContent = text;
+    void el.offsetWidth;
+    el.classList.add('gic-visible');
+    positionStatusMessage();
+    requestAnimationFrame(positionStatusMessage);
+    if (autoHideMs > 0) {
+        _statusMessageHideTimer = setTimeout(() => {
+            el.classList.remove('gic-visible');
+            _statusMessageHideTimer = null;
+        }, autoHideMs);
+    }
+}
+
+function hideStatusMessage() {
+    if (_statusMessageHideTimer) { clearTimeout(_statusMessageHideTimer); _statusMessageHideTimer = null; }
+    const el = document.getElementById(STATUS_MESSAGE_ID);
+    if (el) el.classList.remove('gic-visible');
+}
+
+let _galleryPreloadState = 'idle';
+let _galleryPreparedFor = null;
+let _galleryPrepareRetries = 0;
+
+function setGalleryButtonLoading(loading) {
+    const btn = document.getElementById(GALLERY_BUTTON_ID);
+    if (!btn) return;
+    if (loading) {
+        btn.classList.add('gic-gallery-loading');
+        btn.disabled = true;
+        btn.title = 'ギャラリーを読み込み中です…';
+    } else {
+        btn.classList.remove('gic-gallery-loading');
+        btn.disabled = false;
+        btn.title = 'SillyTavern公式ギャラリーを開く';
+    }
+}
+
+async function prepareGalleryForCharacter() {
+    if (_galleryPreloadState === 'loading') return;
+    if (_galleryPreloadState !== 'ready') {
+        setGalleryButtonLoading(true);
+        showStatusMessage('ギャラリーを読み込み中です…', 0);
+    }
+
+    let charName = getCurrentCharacterName();
+    _galleryPrepareRetries = 0;
+    while (!charName && _galleryPrepareRetries < GALLERY_PREPARE_MAX_RETRIES) {
+        _galleryPrepareRetries++;
+        await wait(GALLERY_PREPARE_RETRY_INTERVAL_MS);
+        charName = getCurrentCharacterName();
+    }
+
+    if (!charName) {
+        hideStatusMessage();
+        _galleryPreloadState = 'idle';
+        setGalleryButtonLoading(true);
+        return;
+    }
+
+    if (_galleryPreparedFor === charName && _galleryPreloadState === 'ready') {
+        setGalleryButtonLoading(false);
+        hideStatusMessage();
+        return;
+    }
+
+    _galleryPreloadState = 'loading';
+    try {
+        while (warmupState === 'running') await wait(100);
+        warmupState = 'idle';
+        await warmUpGallery();
+        clearGalleryOpenInFlight();
+        _galleryPreparedFor = charName;
+        _galleryPreloadState = 'ready';
+        showStatusMessage('読み込み完了', 1500);
+        setGalleryButtonLoading(false);
+    } catch (e) {
+        _galleryPreloadState = 'idle';
+        showStatusMessage('読み込みに失敗しました', 2000);
+        setGalleryButtonLoading(false);
+    }
+}
+
+function createReleaseButton() {
+    const existing = document.getElementById(BUTTON_ID);
+    if (existing) existing.remove();
+
+    const btn = document.createElement('button');
+    btn.id = BUTTON_ID;
+    btn.type = 'button';
+    btn.title = '事前設定モード（キーワードマッチ）と背景生成モード（生成画像）を切り替える';
+    btn.textContent = isOverrideLocal ? LABEL_OVERRIDE : LABEL_NORMAL;
+
+    Object.assign(btn.style, {
+        position: 'fixed', left: '0', bottom: '49px', zIndex: '15000',
+        padding: '6px 12px', fontSize: '12px', color: '#ffffff',
+        backgroundColor: '#444', border: '1px solid #666',
+        borderLeft: 'none', borderTopRightRadius: '6px', borderBottomRightRadius: '6px',
+        cursor: 'pointer', opacity: '0.12',
+        transition: 'opacity 0.15s ease, background-color 0.15s ease',
+        userSelect: 'none', outline: 'none', whiteSpace: 'nowrap',
+        pointerEvents: 'auto', touchAction: 'manipulation',
+    });
+
+    btn.addEventListener('mouseenter', () => { btn.style.opacity = '1'; btn.style.backgroundColor = '#666'; });
+    btn.addEventListener('mouseleave', () => { btn.style.opacity = '0.12'; btn.style.backgroundColor = '#444'; });
+
+    let flashTimer = null;
+    const flashBlue = () => {
+        if (flashTimer) clearTimeout(flashTimer);
+        btn.style.backgroundColor = '#0a84ff';
+        btn.style.opacity = '1';
+        flashTimer = setTimeout(() => {
+            const hovering = btn.matches(':hover');
+            btn.style.backgroundColor = hovering ? '#666' : '#444';
+            btn.style.opacity = hovering ? '1' : '0.12';
+            flashTimer = null;
+        }, 250);
+    };
+
+    let lastActionTime = 0;
+    const triggerAction = (source) => {
+        const now = Date.now();
+        if (now - lastActionTime < 200) return;
+        lastActionTime = now;
+        flashBlue();
+        Promise.resolve(handleButtonAction()).catch(e => console.error('[GIC] handleButtonAction エラー:', e));
+    };
+
+    btn.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); triggerAction('pointerdown'); }, true);
+    btn.addEventListener('click', (e) => { e.stopPropagation(); e.preventDefault(); triggerAction('click'); }, true);
+
+    document.body.appendChild(btn);
+    setButtonLabel(isOverrideLocal ? LABEL_OVERRIDE : LABEL_NORMAL);
+    syncButtonVisibilityForTextStyling();
+    requestAnimationFrame(positionGalleryButton);
+}
+
+function createGalleryButton() {
+    const existing = document.getElementById(GALLERY_BUTTON_ID);
+    if (existing) existing.remove();
+
+    const btn = document.createElement('button');
+    btn.id = GALLERY_BUTTON_ID;
+    btn.type = 'button';
+    btn.title = 'SillyTavern公式ギャラリーを開く';
+    btn.textContent = '🎨';
+
+    Object.assign(btn.style, {
+        position: 'fixed', left: '-9999px', top: '-9999px', zIndex: '15000',
+        width: '50px', height: '50px', padding: '0', margin: '0',
+        boxSizing: 'border-box', fontSize: '26px', lineHeight: '1',
+        color: '#ffffff', backgroundColor: '#444',
+        border: '1px solid #666', borderRadius: '4px',
+        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        opacity: '0.12', transition: 'opacity 0.15s ease, background-color 0.15s ease',
+        userSelect: 'none', outline: 'none', whiteSpace: 'nowrap',
+        pointerEvents: 'auto', touchAction: 'manipulation',
+    });
+
+    btn.classList.add('gic-gallery-loading');
+    btn.disabled = true;
+
+    btn.addEventListener('mouseenter', () => { btn.style.opacity = '1'; btn.style.backgroundColor = '#666'; });
+    btn.addEventListener('mouseleave', () => { btn.style.opacity = '0.12'; btn.style.backgroundColor = '#444'; });
+
+    let flashTimer = null;
+    const flashBlue = () => {
+        if (flashTimer) clearTimeout(flashTimer);
+        btn.style.backgroundColor = '#0a84ff';
+        btn.style.opacity = '1';
+        flashTimer = setTimeout(() => {
+            const hovering = btn.matches(':hover');
+            btn.style.backgroundColor = hovering ? '#666' : '#444';
+            btn.style.opacity = hovering ? '1' : '0.12';
+            flashTimer = null;
+        }, 250);
+    };
+
+    let lastActionTime = 0;
+    const triggerAction = () => {
+        if (btn.classList.contains('gic-gallery-loading') || btn.disabled) return;
+        const now = Date.now();
+        if (now - lastActionTime < 200) return;
+        lastActionTime = now;
+        if (warmupState === 'running') {
+            warmupState = 'aborted';
+            clearGalleryOpenInFlight();
+            const hs = document.getElementById('gic-gallery-warmup-hide');
+            if (hs) hs.remove();
+        }
+        if (!isGalleryOpen() && warmupState !== 'running') clearGalleryOpenInFlight();
+        flashBlue();
+        openGalleryFromGic();
+    };
+
+    btn.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); triggerAction(); }, true);
+    btn.addEventListener('click', (e) => { e.stopPropagation(); e.preventDefault(); triggerAction(); }, true);
+
+    document.body.appendChild(btn);
+    requestAnimationFrame(positionGalleryButton);
+    syncGalleryButtonVisibility();
+}
+
+function setupListeners() {
+    const safeOn = (type, handler) => { if (type && eventSource?.on) eventSource.on(type, handler); };
+    safeOn(event_types.MESSAGE_RECEIVED, scanForGeneratedImages);
+    safeOn(event_types.CHARACTER_MESSAGE_RENDERED, scanForGeneratedImages);
+    safeOn(event_types.USER_MESSAGE_RENDERED, scanForGeneratedImages);
+    if (event_types.MESSAGE_UPDATED) safeOn(event_types.MESSAGE_UPDATED, scanForGeneratedImages);
+    if (event_types.MESSAGE_SWIPED) safeOn(event_types.MESSAGE_SWIPED, scanForGeneratedImages);
+
+    if (event_types.CHAT_CHANGED) {
+        safeOn(event_types.CHAT_CHANGED, () => {
+            scanForGeneratedImages();
+            _galleryPreparedFor = null;
+            _galleryPreloadState = 'idle';
+            setTimeout(() => prepareGalleryForCharacter().catch(() => {}), 500);
+        });
+    }
+    if (event_types.CHARACTER_SELECTED) {
+        safeOn(event_types.CHARACTER_SELECTED, () => {
+            _galleryPreparedFor = null;
+            _galleryPreloadState = 'idle';
+            setTimeout(() => prepareGalleryForCharacter().catch(() => {}), 300);
+        });
+    }
+}
+
+window.GicDumpGallery = function () {
+    const gallery = document.getElementById('gallery');
+    if (!gallery) { console.log('[GicDumpGallery] #gallery が見つかりません'); return; }
+    const lines = [];
+    const walk = (el, depth) => {
+        if (depth > 6) return;
+        const cls = (el.className || '').toString().split(/\s+/).filter(Boolean).slice(0, 3).join('.');
+        const attrs = [];
+        if (el.id) attrs.push(`#${el.id}`);
+        if (el.hasAttribute('data-ngsrc')) attrs.push('[data-ngsrc]');
+        if (el.hasAttribute('data-src')) attrs.push('[data-src]');
+        const rect = el.getBoundingClientRect();
+        const size = `${Math.round(rect.width)}x${Math.round(rect.height)}`;
+        lines.push(`${'  '.repeat(depth)}${el.tagName.toLowerCase()}${cls ? '.' + cls : ''}${attrs.join('')} ${size}`);
+        if (depth < 6) Array.from(el.children).slice(0, 10).forEach(c => walk(c, depth + 1));
+    };
+    walk(gallery, 0);
+    console.log('[GicDumpGallery] ギャラリーDOM構造:\n' + lines.join('\n'));
+};
+
+function exposeGicApi() {
+    window.GicApi = {
+        openGallery: () => openGalleryFromGic(),
+        closeGallery: () => closeGalleryProgrammatically(),
+        isOpen: () => isGalleryOpen(),
+
+        ensureThumbnailForVideo,
+        generateVideoThumbnailBlob,
+        videoFileToThumbName,
+        isThumbFileName,
+        getUploadHeaders,
+        getCharName: getCurrentCharacterName,
+
+        clearThumbCache: clearAllThumbCache,
+        getThumbCacheStats: getThumbCacheStats,
+
+        debugThumbState: async (charName) => {
+            charName = charName || getCurrentCharacterName();
+            if (!charName) return { error: 'no charName' };
+            const stats = await getThumbCacheStats();
+            const charKeys = stats.keys.filter(k => k.startsWith(charName + ':'));
+            return {
+                charName,
+                indexedDBCount: charKeys.length,
+                indexedDBKeys: charKeys,
+                urlCacheSize: _thumbUrlCache.size,
+            };
+        },
+    };
+    console.log('[GIC] ✅ window.GicApi を公開しました');
+}
+
+function initializeGIC() {
+    console.log('[GIC] 初期化開始');
+    loadPersistedState();
+    installBulkDeleteDocumentHandlers();
+    installGalleryCloseInterceptor();
+    setupGalleryDedupeObserver();
+    setupGalleryDragToJson();
+
+    createReleaseButton();
+    createGalleryButton();
+    setupListeners();
+    setupTextStylingObserver();
+    setupGalleryObserverForGic();
+    exposeGicApi();
+
+    validatePersistedState().catch(e => console.warn('[GIC] 永続化状態の検証に失敗:', e));
+    ensureSdSourceConsistency().catch(e => console.warn('[GIC] SDソース整合性チェックに失敗:', e));
+
+    setInterval(() => {
+        scanForGeneratedImages();
+        syncButtonVisibilityForTextStyling();
+        syncGalleryButtonVisibility();
+        markGeneratedMessagesInDom();
+        positionGalleryButton();
+        positionStatusMessage();
+        applyGalleryLayout();
+        hideGalleryUploadMessage();
+        const pager = document.querySelector('.gic-pagination-pager');
+        if (pager) positionPager(pager);
+    }, 1500);
+
+    setInterval(() => {
+        if (window.__gicDragInProgress) return;
+        if (Date.now() < (window.__gicNoLayoutUntil || 0)) return;
+        const g = document.getElementById('gallery');
+        if (!g) return;
+        const cs = getComputedStyle(g);
+        if (cs.position !== 'fixed' || cs.left !== '0px') {
+            g.style.setProperty('position', 'fixed', 'important');
+            g.style.setProperty('left', '0', 'important');
+            g.style.setProperty('top', '50%', 'important');
+            g.style.setProperty('transform', 'translateY(-50%)', 'important');
+        }
+    }, 100);
+
+    scanForGeneratedImages();
+    syncButtonVisibilityForTextStyling();
+    syncGalleryButtonVisibility();
+    applyGalleryLayout();
+    try { setupGalleryVideoThumbs(); } catch (e) { /* ignore */ }
+}
+
+function bootstrapGIC() {
+    let started = false;
+    const startOnce = () => {
+        if (started) return;
+        started = true;
+        try {
+            if (document.body) initializeGIC();
+            else setTimeout(() => {
+                if (document.body) initializeGIC();
+                else document.addEventListener('DOMContentLoaded', initializeGIC);
+            }, 100);
+        } catch (e) {
+            console.error('[GIC] 初期化中に例外:', e);
+        }
+    };
+
+    if (eventSource && event_types && event_types.APP_READY) {
+        eventSource.on(event_types.APP_READY, startOnce);
+        setTimeout(startOnce, 5000);
+    } else {
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', startOnce);
+        else startOnce();
+    }
+}
+
+bootstrapGIC();
+
+export async function activate() {
+    console.log('[GIC] activate() が呼ばれました');
+    loadPersistedState();
+    installBulkDeleteDocumentHandlers();
+    installGalleryCloseInterceptor();
+    setupGalleryDedupeObserver();
+    setupGalleryDragToJson();
+    createReleaseButton();
+    createGalleryButton();
+    setupGalleryObserverForGic();
+    applyGalleryLayout();
+    exposeGicApi();
+    ensureSdSourceConsistency().catch(() => {});
+    validatePersistedState().catch(() => {});
+    console.log('[GIC] ✅ Generate Image Controller: アクティベート完了');
+}
