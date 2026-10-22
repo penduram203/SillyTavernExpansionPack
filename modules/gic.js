@@ -40,6 +40,7 @@ const GALLERY_WINDOW_CLOSE_SCALE = 2.5;
 const GALLERY_WINDOW_HEIGHT_DELTA = 600;
 const GALLERY_WINDOW_MAX_VIEWPORT_MARGIN = 20;
 const GALLERY_PAGINATION_HEIGHT = 40;
+const GALLERY_WINDOW_WIDTH_EXTRA = 350;
 const PAGINATION_PAGE_SIZE = 10;
 const PAGINATION_MAX_VISIBLE = 10;
 const PAGINATION_OFFSET_LEFT = 15;
@@ -2223,20 +2224,21 @@ function applyGalleryWindowLayout() {
             el.style.setProperty('min-height', targetH + 'px', 'important');
             el.style.setProperty('max-height', targetH + 'px', 'important');
 
+            /* 変更後 */
             if (!galleryBaseWidthCache.has(el)) {
                 el.style.removeProperty('width');
                 el.style.removeProperty('max-width');
                 const w = el.getBoundingClientRect().width;
                 if (w > 0) {
                     galleryBaseWidthCache.set(el, w);
-                    console.log(`[GIC] ギャラリー幅: ST本来=${Math.round(w)}px → 適用=${Math.round(w) + 80}px`);
+                    console.log(`[GIC] ギャラリー幅: ST本来=${Math.round(w)}px → 適用=${Math.round(w) + GALLERY_WINDOW_WIDTH_EXTRA}px`);
                 }
             }
 
             if (galleryBaseWidthCache.has(el)) {
                 const baseW = galleryBaseWidthCache.get(el);
                 const maxW = Math.max(100, vw - GALLERY_WINDOW_MAX_VIEWPORT_MARGIN);
-                const targetW = Math.min(maxW, Math.round(baseW + 80));
+                const targetW = Math.min(maxW, Math.round(baseW + GALLERY_WINDOW_WIDTH_EXTRA));
                 el.style.setProperty('width', targetW + 'px', 'important');
                 el.style.setProperty('max-width', targetW + 'px', 'important');
             }
