@@ -42,6 +42,39 @@
     let modalOriginalKeyword = '';
     let modalOriginalImages = [];
 
+    // ===== ★ 動画サムネイル用 🎬 バッジのCSS注入 =====
+    (function injectStjVideoBadgeStyle() {
+        if (document.getElementById('stj-video-badge-style')) return;
+        const style = document.createElement('style');
+        style.id = 'stj-video-badge-style';
+        style.textContent = `
+            .stj-video-badge {
+                position: absolute !important;
+                top: 50% !important;
+                left: 50% !important;
+                transform: translate(-50%, -50%) !important;
+                font-size: 24px !important;
+                line-height: 1 !important;
+                pointer-events: none !important;
+                z-index: 10 !important;
+                opacity: 0.95 !important;
+                user-select: none !important;
+                -webkit-user-select: none !important;
+                filter:
+                    drop-shadow(1px 0 0 #ffffff)
+                    drop-shadow(-1px 0 0 #ffffff)
+                    drop-shadow(0 1px 0 #ffffff)
+                    drop-shadow(0 -1px 0 #ffffff)
+                    drop-shadow(1px 1px 0 #ffffff)
+                    drop-shadow(-1px -1px 0 #ffffff)
+                    drop-shadow(1px -1px 0 #ffffff)
+                    drop-shadow(-1px 1px 0 #ffffff)
+                    drop-shadow(0 2px 3px rgba(0, 0, 0, 0.9)) !important;
+            }
+        `;
+        document.head.appendChild(style);
+    })();
+
     // ===== セルデータヘルパー =====
     function getCellImages(cell) {
         try {
@@ -92,6 +125,32 @@
     function isVideoUrl(url) {
         if (!url || typeof url !== 'string') return false;
         return !!url.match(/\.(mp4|webm)(\?|#|$)/i);
+    }
+
+    // ============================================================
+    // ★ 動画サムネイル用 🎬 バッジの付与 / 除去（冪等）
+    // ============================================================
+    function attachVideoBadge(parentEl, isVideo) {
+        if (!parentEl) return;
+        const existing = parentEl.querySelectorAll(':scope > .stj-video-badge');
+
+        if (isVideo) {
+            if (existing.length === 1) return;
+            existing.forEach(el => el.remove());
+
+            // 親に positioning context が無ければ relative を付与
+            const cs = window.getComputedStyle(parentEl);
+            if (cs.position === 'static') {
+                parentEl.style.setProperty('position', 'relative', 'important');
+            }
+
+            const badge = document.createElement('div');
+            badge.className = 'stj-video-badge';
+            badge.textContent = '🎬';
+            parentEl.appendChild(badge);
+        } else if (existing.length > 0) {
+            existing.forEach(el => el.remove());
+        }
     }
 
     function getSTContext() {
@@ -1133,7 +1192,6 @@
         if (!currentCellModal || !cell) return;
 
         // ★ _thum.png → 元の動画名に変換（表示用）
-        //   セルに保存される名前は _thum.png か動画名のどちらの可能性もある
         const rawImages = getCellImages(cell);
         const images = rawImages.map(f => {
             if (typeof f === 'string' && /_thum\.png$/i.test(f)) {
@@ -1180,6 +1238,8 @@
                     }
                     el.remove();
                 });
+                // ★ バッジも除去
+                attachVideoBadge(slot, false);
                 try { io.unobserve(slot); } catch (e) { /* ignore */ }
                 slot.removeAttribute('data-file-name');
                 delete slot.dataset.fileName;
@@ -1197,6 +1257,8 @@
                 const existingSrc = existing.getAttribute('data-src') || existing.getAttribute('src');
                 const existingIsVideo = existing.tagName === 'VIDEO';
                 if (existingIsVideo === isVideo && existingSrc === fullPath) {
+                    // ★ 既存メディアが正しくても、バッジの状態を同期
+                    attachVideoBadge(slot, isVideo);
                     continue;
                 }
                 if (existingIsVideo) {
@@ -1227,6 +1289,7 @@
                         'pointer-events:auto;cursor:zoom-in;background:#000;';
                     img.addEventListener('click', openZoom);
                     slot.insertBefore(img, slot.firstChild);
+                    attachVideoBadge(slot, true);
                     continue;
                 }
 
@@ -1259,6 +1322,7 @@
                 v.src = fullPath;
                 slot.insertBefore(v, slot.firstChild);
                 io.observe(slot);
+                attachVideoBadge(slot, true);
             } else {
                 const img = document.createElement('img');
                 img.src = fullPath;
@@ -1269,6 +1333,7 @@
                     'pointer-events:auto;cursor:zoom-in;';
                 img.addEventListener('click', openZoom);
                 slot.insertBefore(img, slot.firstChild);
+                attachVideoBadge(slot, false);
             }
         }
     }
@@ -1741,7 +1806,8 @@
             placeholder.dataset.originalText = (placeholder.textContent || 'プレビュー').trim() || 'プレビュー';
         }
 
-        const removeMedia = () => previewEl.querySelectorAll(':scope > img, :scope > video').forEach(el => {
+        // ★ バッジも含めて削除
+        const removeMedia = () => previewEl.querySelectorAll(':scope > img, :scope > video, :scope > .stj-video-badge').forEach(el => {
             if (el.tagName === 'VIDEO') {
                 try { el.pause(); } catch (e) { /* ignore */ }
             }
@@ -1767,6 +1833,7 @@
 
         if (!charName || imageNames.length === 0) {
             removeMedia(); removeLoading();
+            attachVideoBadge(previewEl, false);
             placeholderShowNormal();
             delete previewEl.dataset.currentIndex;
             delete previewEl.dataset.currentPath;
@@ -1781,6 +1848,7 @@
         const fileName = extractFileNameFromPath(imageNames[currentIndex]);
         if (!fileName) {
             removeMedia(); removeLoading();
+            attachVideoBadge(previewEl, false);
             placeholderShowError();
             previewEl.dataset.currentPath = '__missing__';
             return;
@@ -1790,12 +1858,15 @@
 
         if (fullPath === null) {
             removeMedia(); removeLoading();
+            attachVideoBadge(previewEl, false);
             placeholderShowError();
             previewEl.dataset.currentPath = '__missing__';
             return;
         }
 
         if (previewEl.dataset.currentPath === fullPath) {
+            // 既に表示済みならバッジの状態だけ同期
+            attachVideoBadge(previewEl, isVideoUrl(fullPath));
             placeholderHide();
             return;
         }
@@ -1829,6 +1900,7 @@
                     img.style.objectFit = 'contain'; img.style.display = 'block';
                     img.style.backgroundColor = 'transparent';
                     previewEl.appendChild(img);
+                    attachVideoBadge(previewEl, true);
                     previewEl.dataset.currentPath = fullPath;
                     removeLoading(); placeholderHide();
                     return;
@@ -1866,6 +1938,7 @@
             if (_previewLoadGen.get(previewEl) !== myGen) { removeLoading(); return; }
             if (video.readyState === 0) {
                 removeLoading();
+                attachVideoBadge(previewEl, false);
                 placeholderShowError();
                 previewEl.dataset.currentPath = '__missing__';
                 return;
@@ -1874,6 +1947,7 @@
             video.style.objectFit = 'contain'; video.style.display = 'block';
             video.style.backgroundColor = 'transparent';
             previewEl.appendChild(video);
+            attachVideoBadge(previewEl, true);
             previewEl.dataset.currentPath = fullPath;
             removeLoading(); placeholderHide();
         } else {
@@ -1895,6 +1969,7 @@
             if (_previewLoadGen.get(previewEl) !== myGen) { removeLoading(); return; }
             if (!decodeOk) {
                 removeLoading();
+                attachVideoBadge(previewEl, false);
                 placeholderShowError();
                 previewEl.dataset.currentPath = '__missing__';
                 return;
@@ -1902,6 +1977,7 @@
             img.style.width = '100%'; img.style.height = '100%';
             img.style.objectFit = 'contain'; img.style.display = 'block';
             previewEl.appendChild(img);
+            attachVideoBadge(previewEl, false);
             previewEl.dataset.currentPath = fullPath;
             removeLoading(); placeholderHide();
         }
