@@ -1038,7 +1038,6 @@
                     <button type="button" class="stj-cell-modal-cancel">キャンセル</button>
                     <input type="text" class="stj-cell-modal-keyword" placeholder="キーワード">
                     <button type="button" class="stj-cell-modal-choices stj-choices-disabled" disabled title="">選択肢</button>
-                    <span class="stj-cell-modal-number"></span>
                 </div>
                 <div class="stj-cell-modal-grid"></div>
             </div>
@@ -1136,19 +1135,14 @@
 
         const isSpecial = cell.classList.contains('stj-special-item');
         const kwInput = currentCellModal.querySelector('.stj-cell-modal-keyword');
-        const numberEl = currentCellModal.querySelector('.stj-cell-modal-number');
         const choicesBtn = currentCellModal.querySelector('.stj-cell-modal-choices');
 
         if (isSpecial) {
             kwInput.style.display = 'none';
-            numberEl.style.display = 'none';
             if (choicesBtn) choicesBtn.style.display = 'none';
         } else {
             kwInput.style.display = '';
-            numberEl.style.display = '';
             kwInput.value = modalOriginalKeyword;
-            const allCells = Array.from(document.querySelectorAll('#stj_keywords_container .stj-keyword-item'));
-            numberEl.textContent = String(allCells.indexOf(cell) + 1);
             if (choicesBtn) {
                 choicesBtn.style.display = '';
                 updateChoicesButtonState(cell).catch(e => console.warn('[STJ Editor] choices state error:', e));
