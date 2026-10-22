@@ -74,6 +74,10 @@ let isApplyingLayout = false;
 
 const galleryBaseHeightCache = new WeakMap();
 
+// ★ ギャラリーの幅基準値キャッシュ（+80px 計算用）
+const galleryBaseWidthCache = new WeakMap();
+let _lastWindowWidthForGallery = 0;
+
 let _galleryOpenCache = { value: false, timestamp: 0 };
 const GALLERY_OPEN_CACHE_TTL = 100;
 
@@ -694,8 +698,6 @@ function getCurrentCharacterName() {
             opacity: 0.95 !important;
             user-select: none !important;
             -webkit-user-select: none !important;
-
-            /* ★ 白くて太い縁取り（8方向）+ 黒いドロップシャドウ */
             filter:
                 drop-shadow(1px 0 0 #ffffff)
                 drop-shadow(-1px 0 0 #ffffff)
@@ -1432,9 +1434,6 @@ async function ensureThumbnailForVideo(videoFileName, charName = getCurrentChara
 
 // ============================================================
 // ★ 動画サムネイルに 🎬 バッジを付与
-//    - _thum.png（インターセプタ注入）
-//    - .gic-gallery-thumb-img（GIC生成サムネイル）
-//    - video.gic-gallery-video（旧互換）
 // ============================================================
 function isVideoThumbnail(thumb) {
     if (!thumb) return false;
@@ -1451,12 +1450,9 @@ function syncVideoBadgeForThumb(thumb) {
     const badges = thumb.querySelectorAll('.gic-video-badge');
 
     if (isVid) {
-        // 既にバッジが1個だけなら何もしない（冪等）
         if (badges.length === 1) return;
-        // 重複・不正状態をクリーンアップ
         badges.forEach(el => el.remove());
 
-        // 親に positioning context がない場合は relative を付与
         const cs = window.getComputedStyle(thumb);
         if (cs.position === 'static') {
             thumb.style.setProperty('position', 'relative', 'important');
@@ -1467,7 +1463,6 @@ function syncVideoBadgeForThumb(thumb) {
         badge.textContent = '🎬';
         thumb.appendChild(badge);
     } else if (badges.length > 0) {
-        // 動画ではないサムネイル（ページ遷移で中身が変わった等）からバッジを除去
         badges.forEach(el => el.remove());
     }
 }
@@ -1491,12 +1486,8 @@ async function setupGalleryVideoThumbs() {
 
     _thumbProcessingActive = true;
     try {
-        // ★ 既存 _thum.png サムネイルに 🎬 バッジを付与（即時反映）
         try { scanAndSyncVideoBadges(); } catch (e) { /* ignore */ }
 
-        // 未処理の動画 thumb を収集
-        //   ※ インターセプタが /api/images/list を _thum.png に置換済みのため
-        //     通常ここには何も入らない（旧形式互換のため残置）
         const videos = [];
         gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1').forEach(thumb => {
             const title = (thumb.getAttribute('title') || '').trim();
@@ -1508,7 +1499,6 @@ async function setupGalleryVideoThumbs() {
 
         videos.forEach(v => { v.thumb.dataset.gicVideoReady = '1'; });
 
-        // 同時実行数制限つきで処理
         const queue = [...videos];
         const workers = [];
         for (let i = 0; i < THUMB_CONCURRENCY; i++) {
@@ -1531,7 +1521,6 @@ async function setupGalleryVideoThumbs() {
 }
 
 async function processGalleryVideoThumb(thumb, videoFileName, charName) {
-    // 既存の動画要素をすべて削除
     thumb.querySelectorAll('video').forEach(v => {
         try { v.pause(); } catch (e) { /* ignore */ }
         v.remove();
@@ -1558,7 +1547,6 @@ async function processGalleryVideoThumb(thumb, videoFileName, charName) {
         return;
     }
 
-    // フォールバック: 静止画動画
     const videoUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(videoFileName);
     const video = document.createElement('video');
     video.className = 'gic-gallery-video';
@@ -1919,7 +1907,6 @@ function setupGalleryDragToJson() {
                 let previewTitle = title;
                 let isVid = isVideoFile(title);
 
-                // ★ _thum.png を元の動画名にマッピング
                 if (!isVid && title.match(/_thum\.png$/i)) {
                     const m = title.match(/^(.+)_(mp4|webm)_thum\.png$/i);
                     if (m) {
@@ -2094,6 +2081,20 @@ function hideGalleryUploadMessage() {
 }
 
 function applyGalleryWindowLayout() {
+    const vw = window.innerWidth;
+
+    // ★ ウィンドウ幅が変わったら幅キャッシュを破棄（次のポーリングで再計測）
+    if (vw !== _lastWindowWidthForGallery) {
+        _lastWindowWidthForGallery = vw;
+        for (const sel of GALLERY_WINDOW_SELECTORS) {
+            document.querySelectorAll(sel).forEach(el => {
+                if (galleryBaseWidthCache.has(el)) {
+                    galleryBaseWidthCache.delete(el);
+                }
+            });
+        }
+    }
+
     for (const sel of GALLERY_WINDOW_SELECTORS) {
         const elements = document.querySelectorAll(sel);
         for (const el of elements) {
@@ -2112,6 +2113,7 @@ function applyGalleryWindowLayout() {
             el.style.setProperty('transform', 'translateY(-50%)', 'important');
             el.style.setProperty('margin', '0', 'important');
 
+            // ===== 高さ（既存） =====
             if (!galleryBaseHeightCache.has(el)) {
                 const h = el.getBoundingClientRect().height;
                 if (h > 0) {
@@ -2136,6 +2138,26 @@ function applyGalleryWindowLayout() {
             el.style.setProperty('height', targetH + 'px', 'important');
             el.style.setProperty('min-height', targetH + 'px', 'important');
             el.style.setProperty('max-height', targetH + 'px', 'important');
+
+            // ===== ★ 幅 +80px =====
+            if (!galleryBaseWidthCache.has(el)) {
+                // 初回計測: width の上書きを外して ST 本来の幅を取得
+                el.style.removeProperty('width');
+                el.style.removeProperty('max-width');
+                const w = el.getBoundingClientRect().width;
+                if (w > 0) {
+                    galleryBaseWidthCache.set(el, w);
+                    console.log(`[GIC] ギャラリー幅: ST本来=${Math.round(w)}px → 適用=${Math.round(w) + 80}px`);
+                }
+            }
+
+            if (galleryBaseWidthCache.has(el)) {
+                const baseW = galleryBaseWidthCache.get(el);
+                const maxW = Math.max(100, vw - GALLERY_WINDOW_MAX_VIEWPORT_MARGIN);
+                const targetW = Math.min(maxW, Math.round(baseW + 80));
+                el.style.setProperty('width', targetW + 'px', 'important');
+                el.style.setProperty('max-width', targetW + 'px', 'important');
+            }
         }
     }
 }
@@ -2148,6 +2170,14 @@ function resetGalleryHeightCache() {
                 galleryBaseHeightCache.delete(el);
                 console.log('[GIC] ギャラリー高さキャッシュをリセット');
             }
+            // ★ 幅キャッシュもクリア
+            if (galleryBaseWidthCache.has(el)) {
+                galleryBaseWidthCache.delete(el);
+            }
+            // ★ width の上書きも除去（次回開いた時に ST 本来の幅で再計測させる）
+            el.style.removeProperty('width');
+            el.style.removeProperty('max-width');
+
             if (el.dataset.gicHeightLogged) delete el.dataset.gicHeightLogged;
         }
     }
@@ -3178,8 +3208,6 @@ function applyGalleryLayout() {
 
 // ============================================================
 // ★ STJEditor 再オープンを確実に行う
-//    ギャラリーの再オープンと STJEditor.open() のタイミングを
-//    リトライループで吸収する。ギャラリーが開くまで最大5秒待つ。
 // ============================================================
 function scheduleSTJEditorReopen() {
     if (_stjReopenScheduled) return;
@@ -3360,6 +3388,7 @@ function hideGalleryAttachmentsImmediately(reason = '') {
         const elements = document.querySelectorAll(sel);
         for (const el of elements) {
             if (galleryBaseHeightCache.has(el)) galleryBaseHeightCache.delete(el);
+            if (galleryBaseWidthCache.has(el)) galleryBaseWidthCache.delete(el);
         }
     }
 
@@ -3372,10 +3401,6 @@ function hideGalleryAttachmentsImmediately(reason = '') {
         try { window.STJEditor.close({ fromGallery: true, force: true }); } catch (e) { /* ignore */ }
     }
 
-    // ★ 状態キャッシュを無効化:
-    //   次の syncGalleryButtonVisibility で閉→開の遷移を確実に検出させる。
-    //   これがないと、ギャラリーが高速に再オープンした場合に遷移が
-    //   collapse して STJEditor の再オープンがスケジュールされない。
     lastGalleryStateForGic = null;
     _galleryOpenCache = { value: false, timestamp: 0 };
 }
@@ -3870,7 +3895,6 @@ function exposeGicApi() {
         closeGallery: () => closeGalleryProgrammatically(),
         isOpen: () => isGalleryOpen(),
 
-        // ★ サムネイルキャッシュ関連（stj_editor 等から利用）
         ensureThumbnailForVideo,
         generateVideoThumbnailBlob,
         videoFileToThumbName,
@@ -3878,11 +3902,9 @@ function exposeGicApi() {
         getUploadHeaders,
         getCharName: getCurrentCharacterName,
 
-        // ★ IndexedDB キャッシュ管理
         clearThumbCache: clearAllThumbCache,
         getThumbCacheStats: getThumbCacheStats,
 
-        // ★ デバッグ用
         debugThumbState: async (charName) => {
             charName = charName || getCurrentCharacterName();
             if (!charName) return { error: 'no charName' };
