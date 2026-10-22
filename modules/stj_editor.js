@@ -990,7 +990,7 @@
         stjModalEl.style.position = 'fixed';
         stjModalEl.style.top = '0px';
         stjModalEl.style.left = '480px';
-        stjModalEl.style.width = 'calc(85vw - 200px)';
+        stjModalEl.style.width = 'calc(85vw - 280px)';
         stjModalEl.style.height = '100vh';
         stjModalEl.style.zIndex = '10001';
         stjModalEl.scrollTop = 0;
