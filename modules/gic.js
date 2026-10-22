@@ -712,28 +712,21 @@ function getCurrentCharacterName() {
         #gallery .nGY2GThumbnail,
         #gallery .nGY2GThumbnail_l1,
         #gallery .nGY2Item {
+            background-color: #000 !important;
             box-sizing: border-box !important;
             overflow: hidden !important;
+            opacity: 1 !important;
         }
 
-        /* 黒背景は疑似要素で（.nGY2TnImg の background-image と干渉しない） */
+        /* 本体の background-color: #000 で代替するため ::before は無効化 */
         #gallery .nGY2GThumbnail::before,
         #gallery .nGY2GThumbnail_l1::before,
         #gallery .nGY2Item::before {
-            content: '' !important;
-            position: absolute !important;
-            top: 0 !important;
-            left: 0 !important;
-            width: 100% !important;
-            height: 100% !important;
-            background-color: #000 !important;
-            z-index: 0 !important;
-            pointer-events: none !important;
+            display: none !important;
         }
 
-        /* 背景画像レイヤー: 明示的に位置指定 + z-index 前面 */
-        #gallery .nGY2TnImg,
-        #gallery .nGY2TnImgBack {
+        /* 前景画像レイヤー: z-index 1（上） */
+        #gallery .nGY2TnImg {
             position: absolute !important;
             top: 0 !important;
             left: 0 !important;
@@ -744,7 +737,29 @@ function getCurrentCharacterName() {
             background-size: contain !important;
             background-position: center center !important;
             background-repeat: no-repeat !important;
+            background-color: transparent !important;
             z-index: 1 !important;
+            opacity: 1 !important;
+            visibility: visible !important;
+            transform: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            box-sizing: border-box !important;
+        }
+
+        /* 背景レイヤー: z-index 0（前景の下）、非表示化 */
+        #gallery .nGY2TnImgBack {
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+            max-width: 100% !important;
+            max-height: 100% !important;
+            background-color: transparent !important;
+            z-index: 0 !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
             transform: none !important;
             margin: 0 !important;
             padding: 0 !important;
@@ -765,10 +780,13 @@ function getCurrentCharacterName() {
             object-fit: contain !important;
             display: block !important;
             z-index: 2 !important;
+            opacity: 1 !important;
+            visibility: visible !important;
             pointer-events: none !important;
             transform: none !important;
             margin: 0 !important;
             padding: 0 !important;
+            background-color: transparent !important;
         }
     `;
     document.head.appendChild(style);
@@ -3199,8 +3217,7 @@ function setupBulkDelete() {
 // ============================================================
 // ★ ギャラリーサムネイルを 3列 × 4行 の 180×180 グリッドに強制
 //    - MAX_ROWS = 4 で 4行目以降は display:none
-//    - 黒背景は CSS の ::before 疑似要素が担当するため
-//      inline で background-color は設定しない
+//    - サムネイル本体の background-color: #000 で黒背景を保証
 // ============================================================
 function enforceGalleryGridLayout() {
     const gallery = document.getElementById('gallery');
@@ -3263,7 +3280,9 @@ function enforceGalleryGridLayout() {
         thumb.style.setProperty('transform', 'none', 'important');
         thumb.style.setProperty('overflow', 'hidden', 'important');
         thumb.style.setProperty('box-sizing', 'border-box', 'important');
-        thumb.style.setProperty('background-color', 'transparent', 'important');
+        thumb.style.setProperty('background-color', '#000', 'important');
+        thumb.style.setProperty('opacity', '1', 'important');
+        thumb.style.setProperty('visibility', 'visible', 'important');
     });
 
     // 絶対配置の子を持つ親は高さを明示する（4行上限）
@@ -4057,14 +4076,58 @@ function exposeGicApi() {
         // ★ デバッグ用: グリッド強制を手動実行
         forceGridLayout: () => enforceGalleryGridLayout(),
     };
+
+    // ★ デバッグ用: ページ切替後の黒化現象を診断
+    window.GicDebugPageBlack = function() {
+        const gallery = document.getElementById('gallery');
+        if (!gallery) { console.log('[GicDebug] no gallery'); return; }
+        const thumbs = gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1');
+        console.log(`[GicDebug] thumbs=${thumbs.length}`);
+        thumbs.forEach((thumb, i) => {
+            if (i > 4) return;  // 最初の5個だけ
+            const rect = thumb.getBoundingClientRect();
+            const vis = rect.width > 0 && rect.height > 0;
+            const thumbStyle = window.getComputedStyle(thumb);
+            const nGY2TnImg = thumb.querySelector('.nGY2TnImg');
+            const nGY2TnImgBack = thumb.querySelector('.nGY2TnImgBack');
+            const imgEl = thumb.querySelector('img');
+            console.log(`[GicDebug] thumb[${i}] visible=${vis}`, {
+                thumb: {
+                    size: `${Math.round(rect.width)}x${Math.round(rect.height)}`,
+                    bg: thumbStyle.backgroundColor,
+                    opacity: thumbStyle.opacity,
+                    display: thumbStyle.display,
+                },
+                nGY2TnImg: nGY2TnImg ? {
+                    bgImage: window.getComputedStyle(nGY2TnImg).backgroundImage.slice(0, 80),
+                    opacity: window.getComputedStyle(nGY2TnImg).opacity,
+                    display: window.getComputedStyle(nGY2TnImg).display,
+                    zIndex: window.getComputedStyle(nGY2TnImg).zIndex,
+                } : null,
+                nGY2TnImgBack: nGY2TnImgBack ? {
+                    bgColor: window.getComputedStyle(nGY2TnImgBack).backgroundColor,
+                    bgImage: window.getComputedStyle(nGY2TnImgBack).backgroundImage.slice(0, 80),
+                    opacity: window.getComputedStyle(nGY2TnImgBack).opacity,
+                    display: window.getComputedStyle(nGY2TnImgBack).display,
+                    zIndex: window.getComputedStyle(nGY2TnImgBack).zIndex,
+                } : null,
+                img: imgEl ? {
+                    src: imgEl.src.slice(0, 80),
+                    complete: imgEl.complete,
+                    naturalWidth: imgEl.naturalWidth,
+                    opacity: window.getComputedStyle(imgEl).opacity,
+                    display: window.getComputedStyle(imgEl).display,
+                    zIndex: window.getComputedStyle(imgEl).zIndex,
+                } : null,
+            });
+        });
+    };
+
     console.log('[GIC] ✅ window.GicApi を公開しました');
 }
 
 // ============================================================
 // ★ nanogallery2 の galleryMaxRows を 4 に強制
-//    ST本体は galleryMaxRows = floor((innerHeight*0.9 - 75)/150) で
-//    通常5行(15個/ページ)を計算する。これを4行(12個/ページ)に固定し、
-//    分頁ドットの数も 12個/ページ に整合させる。
 // ============================================================
 (function patchNanogallery2For4Rows() {
     if (window.__gicNG2Patched) return;
