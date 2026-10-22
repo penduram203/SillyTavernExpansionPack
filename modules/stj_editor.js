@@ -103,6 +103,74 @@
         if (display) display.textContent = kw || '';
     }
 
+    // ============================================================
+    // ★ キーワード重複チェック（完全一致）
+    //   「ラーメン食べる」 vs 「ラーメン買った」 → 重複しない
+    //   「赤+青+緑」 vs 「赤+青」 → 重複しない
+    //   文字列全体が完全一致した場合のみ重複とみなす
+    // ============================================================
+    function findDuplicateKeyword(currentCell, keyword) {
+        if (!currentCell || !keyword || typeof keyword !== 'string') return null;
+        const target = keyword.trim();
+        if (!target) return null;
+
+        const cells = document.querySelectorAll('#stj_keywords_container .stj-keyword-item');
+        for (const cell of cells) {
+            if (cell === currentCell) continue;
+            if (getCellKeyword(cell).trim() === target) {
+                return cell;
+            }
+        }
+        return null;
+    }
+
+    function showKeywordDuplicateWarning(keyword) {
+        const message = `既に同じキーワードが設定されています: 「${keyword}」`;
+
+        // toastr が使えるなら優先
+        try {
+            if (typeof window.toastr !== 'undefined' && typeof window.toastr.warning === 'function') {
+                window.toastr.warning(message, 'キーワード重複', {
+                    timeOut: 3000,
+                    positionClass: 'toast-top-center',
+                });
+                return;
+            }
+        } catch (e) { /* fallthrough */ }
+
+        // フォールバック: カスタム警告オーバーレイ
+        const existing = document.getElementById('stj_kw_dup_alert');
+        if (existing) existing.remove();
+
+        const alertDiv = document.createElement('div');
+        alertDiv.id = 'stj_kw_dup_alert';
+        alertDiv.textContent = message;
+        Object.assign(alertDiv.style, {
+            position: 'fixed',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            padding: '16px 28px',
+            background: 'rgba(220, 38, 38, 0.95)',
+            color: '#fff',
+            fontSize: '16px',
+            fontWeight: 'bold',
+            borderRadius: '8px',
+            boxShadow: '0 8px 30px rgba(0,0,0,0.6)',
+            zIndex: '25000',
+            pointerEvents: 'none',
+            textAlign: 'center',
+            maxWidth: '90vw',
+            border: '2px solid #fff',
+        });
+        document.body.appendChild(alertDiv);
+        setTimeout(() => {
+            alertDiv.style.transition = 'opacity 0.3s ease';
+            alertDiv.style.opacity = '0';
+            setTimeout(() => alertDiv.remove(), 300);
+        }, 2500);
+    }
+
     function addImageToCell(cell, fileName) {
         if (!cell || !fileName) return false;
         const images = getCellImages(cell);
@@ -138,7 +206,6 @@
             if (existing.length === 1) return;
             existing.forEach(el => el.remove());
 
-            // 親に positioning context が無ければ relative を付与
             const cs = window.getComputedStyle(parentEl);
             if (cs.position === 'static') {
                 parentEl.style.setProperty('position', 'relative', 'important');
@@ -1004,6 +1071,31 @@
                     applyCellModal();
                 }
             });
+
+            // ★ リアルタイム重複チェック（視覚的ヒント）
+            kwInput.addEventListener('input', () => {
+                if (!currentModalCell) return;
+                if (currentModalCell.classList.contains('stj-special-item')) return;
+
+                const newKw = kwInput.value.trim();
+                if (!newKw) {
+                    kwInput.style.borderColor = '';
+                    kwInput.style.boxShadow = '';
+                    kwInput.title = '';
+                    return;
+                }
+
+                const dup = findDuplicateKeyword(currentModalCell, newKw);
+                if (dup) {
+                    kwInput.style.borderColor = '#e53e3e';
+                    kwInput.style.boxShadow = '0 0 0 2px rgba(229, 62, 62, 0.4)';
+                    kwInput.title = '既に同じキーワードが設定されています';
+                } else {
+                    kwInput.style.borderColor = '';
+                    kwInput.style.boxShadow = '';
+                    kwInput.title = '';
+                }
+            });
         }
 
         modal.querySelector('.stj-cell-modal-grid').addEventListener('click', (e) => {
@@ -1050,6 +1142,22 @@
             if (choicesBtn) {
                 choicesBtn.style.display = '';
                 updateChoicesButtonState(cell).catch(e => console.warn('[STJ Editor] choices state error:', e));
+            }
+        }
+
+        // ★ 開いた時点で重複があるかチェック（既存データの警告表示）
+        kwInput.style.borderColor = '';
+        kwInput.style.boxShadow = '';
+        kwInput.title = '';
+        {
+            const curKw = kwInput.value.trim();
+            if (curKw) {
+                const dup = findDuplicateKeyword(cell, curKw);
+                if (dup) {
+                    kwInput.style.borderColor = '#e53e3e';
+                    kwInput.style.boxShadow = '0 0 0 2px rgba(229, 62, 62, 0.4)';
+                    kwInput.title = '既に同じキーワードが設定されています';
+                }
             }
         }
 
@@ -1116,6 +1224,27 @@
         if (!currentCellModal || !currentModalCell) return;
 
         const cell = currentModalCell;
+
+        // ★ キーワード重複チェック（完全一致、別セル参照）
+        //   重複していれば警告を表示し、登録を無効化
+        if (!cell.classList.contains('stj-special-item')) {
+            const kwInput = currentCellModal.querySelector('.stj-cell-modal-keyword');
+            const newKw = kwInput ? kwInput.value.trim() : '';
+            if (newKw) {
+                const dup = findDuplicateKeyword(cell, newKw);
+                if (dup) {
+                    showKeywordDuplicateWarning(newKw);
+                    if (kwInput) {
+                        kwInput.style.borderColor = '#e53e3e';
+                        kwInput.style.boxShadow = '0 0 0 2px rgba(229, 62, 62, 0.4)';
+                        kwInput.title = '既に同じキーワードが設定されています';
+                        try { kwInput.focus(); } catch (e) { /* ignore */ }
+                    }
+                    return;  // ★ 登録を無効化（doApplyCellModal を呼ばない）
+                }
+            }
+        }
+
         const currentImages = getCellImages(cell);
         const currentSet = new Set(currentImages);
         const removedFiles = modalOriginalImages.filter(f => !currentSet.has(f));
@@ -1228,8 +1357,8 @@
 
         for (let i = 0; i < slots.length; i++) {
             const slot = slots[i];
-            const fileName = images[i];         // 変換後の名前（表示・動画判定用）
-            const rawFileName = rawImages[i];   // 元の名前（削除操作用）
+            const fileName = images[i];
+            const rawFileName = rawImages[i];
 
             if (!fileName) {
                 slot.querySelectorAll(':scope > img, :scope > video').forEach(el => {
@@ -1238,7 +1367,6 @@
                     }
                     el.remove();
                 });
-                // ★ バッジも除去
                 attachVideoBadge(slot, false);
                 try { io.unobserve(slot); } catch (e) { /* ignore */ }
                 slot.removeAttribute('data-file-name');
@@ -1249,7 +1377,6 @@
             const fullPath = resolveModalMediaPath(fileName, charName);
             const isVideo = isVideoUrl(fileName);
 
-            // ★ 削除操作用には data-image-list に格納されている元の名前を保持
             slot.dataset.fileName = rawFileName || fileName;
 
             const existing = slot.querySelector(':scope > img, :scope > video');
@@ -1257,7 +1384,6 @@
                 const existingSrc = existing.getAttribute('data-src') || existing.getAttribute('src');
                 const existingIsVideo = existing.tagName === 'VIDEO';
                 if (existingIsVideo === isVideo && existingSrc === fullPath) {
-                    // ★ 既存メディアが正しくても、バッジの状態を同期
                     attachVideoBadge(slot, isVideo);
                     continue;
                 }
@@ -1275,7 +1401,6 @@
             };
 
             if (isVideo) {
-                // ★ サムネイル画像が存在すれば <img> で表示
                 const thumbUrl = await thumbPromises.get(i);
                 if (thumbUrl) {
                     const img = document.createElement('img');
@@ -1293,7 +1418,6 @@
                     continue;
                 }
 
-                // フォールバック: 静止画動画（第一フレーム）
                 const v = document.createElement('video');
                 v.className = 'gic-cell-video';
                 v.dataset.src = fullPath;
@@ -1447,7 +1571,6 @@
             return;
         }
 
-        // ★ _thum.png → 元の動画名に変換（セルには動画名で保存）
         let fileName = rawName;
         const m = rawName.match(/^(.+)_(mp4|webm)_thum\.png$/i);
         if (m) {
@@ -1806,7 +1929,6 @@
             placeholder.dataset.originalText = (placeholder.textContent || 'プレビュー').trim() || 'プレビュー';
         }
 
-        // ★ バッジも含めて削除
         const removeMedia = () => previewEl.querySelectorAll(':scope > img, :scope > video, :scope > .stj-video-badge').forEach(el => {
             if (el.tagName === 'VIDEO') {
                 try { el.pause(); } catch (e) { /* ignore */ }
@@ -1865,7 +1987,6 @@
         }
 
         if (previewEl.dataset.currentPath === fullPath) {
-            // 既に表示済みならバッジの状態だけ同期
             attachVideoBadge(previewEl, isVideoUrl(fullPath));
             placeholderHide();
             return;
@@ -1987,7 +2108,6 @@
         const imageMap = {};
         const toPaths = (names) => names.map(name => {
             const cleaned = extractFileNameFromPath(name);
-            // ★ _thum.png → 元の動画名に変換（エクスポート用）
             const m = cleaned.match(/^(.+)_(mp4|webm)_thum\.png$/i);
             if (m) {
                 return `user/images/${charName}/${m[1]}.${m[2].toLowerCase()}`;
@@ -2071,6 +2191,23 @@
         const nameEl = document.getElementById('stj_char_name_display');
         const charName = nameEl ? nameEl.textContent : '';
         if (!charName) { alert('キャラクター名が設定されていません'); return; }
+
+        // ★ セーブ時に重複チェック（保険）
+        const kwMap = new Map();
+        const duplicates = [];
+        document.querySelectorAll('#stj_keywords_container .stj-keyword-item').forEach(item => {
+            const kw = getCellKeyword(item).trim();
+            if (!kw) return;
+            if (kwMap.has(kw)) {
+                duplicates.push(kw);
+            } else {
+                kwMap.set(kw, item);
+            }
+        });
+        if (duplicates.length > 0) {
+            showKeywordDuplicateWarning(duplicates[0]);
+            return;
+        }
 
         const defaultCell = document.querySelector('.stj-special-item:nth-child(1)');
         const thumbnailCell = document.querySelector('.stj-special-item:nth-child(2)');
