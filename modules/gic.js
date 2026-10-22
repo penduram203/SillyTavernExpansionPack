@@ -491,9 +491,9 @@ function getCurrentCharacterName() {
 
         .gic-pagination-pager .gic-pagination-page,
         .gic-pagination-pager .gic-pagination-nav {
-            width: 39px !important;
-            min-width: 39px !important;
-            max-width: 39px !important;
+            width: 40px !important;
+            min-width: 40px !important;
+            max-width: 40px !important;
             height: 45px !important;
             min-height: 45px !important;
             max-height: 45px !important;
