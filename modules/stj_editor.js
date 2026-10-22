@@ -989,7 +989,7 @@
         stjModalEl.style.display = 'block';
         stjModalEl.style.position = 'fixed';
         stjModalEl.style.top = '0px';
-        stjModalEl.style.left = '480px';
+        stjModalEl.style.left = '560px';
         stjModalEl.style.width = 'calc(85vw - 280px)';
         stjModalEl.style.height = '100vh';
         stjModalEl.style.zIndex = '10001';
