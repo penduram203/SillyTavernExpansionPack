@@ -8,7 +8,7 @@
   top: 0;
   left: 480px;
   right: auto;
-  width: calc(85vw - 200px);
+  width: calc(85vw - 280px);
   height: 100vh;
   background-color: #2d3748;
   border: 1px solid #4a5568;
@@ -48,7 +48,7 @@
   position: fixed;
   left: 480px;
   bottom: 0;
-  width: calc(85vw - 200px);
+  width: calc(85vw - 280px);
   z-index: 100;
 
   display: flex;
