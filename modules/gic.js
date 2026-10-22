@@ -691,12 +691,21 @@ function getCurrentCharacterName() {
             line-height: 1 !important;
             pointer-events: none !important;
             z-index: 10 !important;
-            text-shadow:
-                0 0 8px rgba(0, 0, 0, 0.9),
-                0 2px 4px rgba(0, 0, 0, 0.9) !important;
             opacity: 0.95 !important;
             user-select: none !important;
             -webkit-user-select: none !important;
+
+            /* ★ 白くて太い縁取り（8方向）+ 黒いドロップシャドウ */
+            filter:
+                drop-shadow(2px 0 0 #ffffff)
+                drop-shadow(-2px 0 0 #ffffff)
+                drop-shadow(0 2px 0 #ffffff)
+                drop-shadow(0 -2px 0 #ffffff)
+                drop-shadow(2px 2px 0 #ffffff)
+                drop-shadow(-2px -2px 0 #ffffff)
+                drop-shadow(2px -2px 0 #ffffff)
+                drop-shadow(-2px 2px 0 #ffffff)
+                drop-shadow(0 2px 3px rgba(0, 0, 0, 0.9)) !important;
         }
     `;
     document.head.appendChild(style);
