@@ -547,22 +547,6 @@
   pointer-events: none;
 }
 
-.stj-cell-modal-number {
-  position: absolute;
-  right: 12px;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 28px;
-  font-weight: 900;
-  line-height: 1;
-  color: #ffffff;
-  text-shadow:
-    2px 0 0 #000, -2px 0 0 #000, 0 2px 0 #000, 0 -2px 0 #000,
-    2px 2px 0 #000, -2px 2px 0 #000, 2px -2px 0 #000, -2px -2px 0 #000;
-  pointer-events: none;
-  user-select: none;
-}
-
 /* ★ 3×3グリッド */
 .stj-cell-modal-grid {
   flex: 1;
@@ -919,5 +903,4 @@ body.stj-zoom-active #gic-bulk-toast {
   .stj-button-group > div { justify-content: center; }
   .stj-cell-modal-header { flex-wrap: wrap; height: auto; max-height: none; min-height: 60px; padding: 4px 8px; }
   .stj-cell-modal-keyword { width: 100%; }
-  .stj-cell-modal-number { position: static; transform: none; font-size: 22px; margin-left: auto; }
 }
