@@ -718,14 +718,12 @@ function getCurrentCharacterName() {
             opacity: 1 !important;
         }
 
-        /* 本体の background-color: #000 で代替するため ::before は無効化 */
         #gallery .nGY2GThumbnail::before,
         #gallery .nGY2GThumbnail_l1::before,
         #gallery .nGY2Item::before {
             display: none !important;
         }
 
-        /* 前景画像レイヤー: z-index 1（上） */
         #gallery .nGY2TnImg {
             position: absolute !important;
             top: 0 !important;
@@ -747,7 +745,6 @@ function getCurrentCharacterName() {
             box-sizing: border-box !important;
         }
 
-        /* 背景レイヤー: z-index 0（前景の下）、非表示化 */
         #gallery .nGY2TnImgBack {
             position: absolute !important;
             top: 0 !important;
@@ -766,7 +763,6 @@ function getCurrentCharacterName() {
             box-sizing: border-box !important;
         }
 
-        /* サムネイル内の <img>（GIC の gic-gallery-thumb-img 含む） */
         #gallery .nGY2GThumbnail > img,
         #gallery .nGY2GThumbnail_l1 > img,
         #gallery .gic-gallery-thumb-img {
@@ -3216,15 +3212,36 @@ function setupBulkDelete() {
 
 // ============================================================
 // ★ ギャラリーサムネイルを 3列 × 4行 の 180×180 グリッドに強制
-//    - MAX_ROWS = 4 で 4行目以降は display:none
-//    - サムネイル本体の background-color: #000 で黒背景を保証
+//    - nanogallery2 が現在のページとして表示しているアイテムのみを対象
+//    - 非表示ページのアイテム（display:none）には触れない
+//    - これによりページ切替時に正しく現在ページのサムネイルが表示される
 // ============================================================
 function enforceGalleryGridLayout() {
     const gallery = document.getElementById('gallery');
     if (!gallery) return;
 
-    const thumbs = gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item');
-    if (thumbs.length === 0) return;
+    const allThumbs = Array.from(gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item'));
+    if (allThumbs.length === 0) return;
+
+    // ★ Step 1: 自分で display:none にしたもののみ復元（nanogallery2のdisplay:noneには触らない）
+    allThumbs.forEach(thumb => {
+        if (thumb.dataset.gicForcedHidden === '1') {
+            thumb.style.removeProperty('display');
+            delete thumb.dataset.gicForcedHidden;
+        }
+    });
+
+    // ★ Step 2: nanogallery2 が現在のページとして表示しているアイテムのみ抽出
+    //    - 非表示ページのアイテムは nanogallery2 が display:none か visibility:hidden で隠す
+    const visibleThumbs = allThumbs.filter(thumb => {
+        const cs = window.getComputedStyle(thumb);
+        if (cs.display === 'none') return false;
+        if (cs.visibility === 'hidden') return false;
+        if (thumb.offsetWidth === 0 && thumb.offsetHeight === 0) return false;
+        return true;
+    });
+
+    if (visibleThumbs.length === 0) return;
 
     const THUMB = 180;
     const COLS = 3;
@@ -3232,7 +3249,7 @@ function enforceGalleryGridLayout() {
     const PARENT_W = THUMB * COLS; // 540px
 
     // サムネイルの実際の親（.nGY2GallerySub 等）
-    const parent = thumbs[0].parentElement;
+    const parent = visibleThumbs[0].parentElement;
     const galleryEl = gallery.querySelector('.nGY2Gallery');
     const subEl = gallery.querySelector('.nGY2GallerySub');
 
@@ -3249,18 +3266,18 @@ function enforceGalleryGridLayout() {
         el.style.setProperty('overflow', 'hidden', 'important');
     });
 
-    // 各サムネイルを絶対配置でグリッド状に並べる
+    // ★ Step 3: 現在のページのアイテムのみを 3×4 グリッドに配置
     let maxRow = 0;
-    thumbs.forEach((thumb, i) => {
+    visibleThumbs.forEach((thumb, i) => {
         const row = Math.floor(i / COLS);
         const col = i % COLS;
 
         // ★ 4行を超える行は非表示（safety net）
         if (row >= MAX_ROWS) {
             thumb.style.setProperty('display', 'none', 'important');
+            thumb.dataset.gicForcedHidden = '1';
             return;
         }
-        thumb.style.removeProperty('display');
 
         if (row > maxRow) maxRow = row;
 
@@ -4084,7 +4101,7 @@ function exposeGicApi() {
         const thumbs = gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1');
         console.log(`[GicDebug] thumbs=${thumbs.length}`);
         thumbs.forEach((thumb, i) => {
-            if (i > 4) return;  // 最初の5個だけ
+            if (i > 4) return;
             const rect = thumb.getBoundingClientRect();
             const vis = rect.width > 0 && rect.height > 0;
             const thumbStyle = window.getComputedStyle(thumb);
@@ -4165,11 +4182,9 @@ function initializeGIC() {
         );
         if (!isPager) return;
 
-        // 即座に1回
         try { enforceGalleryGridLayout(); } catch (_) {}
         try { scanAndSyncVideoBadges(); } catch (_) {}
 
-        // 段階的にリトライ（画像ロード完了を待つ）
         [80, 200, 400, 700, 1200].forEach(delay => {
             setTimeout(() => {
                 try { enforceGalleryGridLayout(); } catch (_) {}
