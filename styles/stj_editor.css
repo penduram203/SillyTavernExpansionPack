@@ -6,9 +6,9 @@
   display: none;
   position: fixed;
   top: 0;
-  left: 560px;
-  right: auto;
-  width: calc(85vw - 280px);
+  left: auto;
+  right: 0;
+  width: calc(85vw - 550px);
   height: 100vh;
   background-color: #2d3748;
   border: 1px solid #4a5568;
@@ -46,9 +46,10 @@
 /* ===== ボタングループ（画面下部に固定） ===== */
 .stj-button-group {
   position: fixed;
-  left: 560px;
+  left: auto;
+  right: 0;
   bottom: 0;
-  width: calc(85vw - 280px);
+  width: calc(85vw - 550px);
   z-index: 100;
 
   display: flex;
@@ -262,14 +263,14 @@
   user-select: none;
 }
 
-/* ===== キーワードグリッド（5列） ===== */
+/* ===== キーワードグリッド（4列） ===== */
 .stj-grid-container {
   display: grid;
-  grid-template-columns: repeat(5, 260px);
+  grid-template-columns: repeat(4, 260px);
   column-gap: 0;
   row-gap: 8px;
   width: max-content;
-  min-width: 1300px;
+  min-width: 1040px;
   margin: 0 auto;
 }
 
@@ -903,9 +904,6 @@ body.stj-zoom-active #gic-bulk-toast {
 }
 
 /* ===== レスポンシブ ===== */
-@media (max-width: 1380px) {
-  .stj-grid-container { grid-template-columns: repeat(4, 260px); min-width: 1040px; }
-}
 @media (max-width: 1120px) {
   .stj-grid-container { grid-template-columns: repeat(3, 260px); min-width: 780px; }
   .stj-top-section { flex-direction: column; }
