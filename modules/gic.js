@@ -687,7 +687,7 @@ function getCurrentCharacterName() {
             top: 50% !important;
             left: 50% !important;
             transform: translate(-50%, -50%) !important;
-            font-size: 36px !important;
+            font-size: 24px !important;
             line-height: 1 !important;
             pointer-events: none !important;
             z-index: 10 !important;
