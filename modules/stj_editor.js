@@ -25,7 +25,8 @@
 
     let pointerDragState = null;
     let pointerDragHandlerInstalled = false;
-    const DRAG_THRESHOLD_PX = 5;
+    const DRAG_THRESHOLD_PX = 5;   // ゴースト生成の閾値
+    const CLICK_THRESHOLD_PX = 2;  // 「クリック扱いしない」閾値
 
     const AUTOSCROLL_EDGE_PX = 200;
     const AUTOSCROLL_MAX_SPEED = 35;
@@ -105,9 +106,6 @@
 
     // ============================================================
     // ★ キーワード重複チェック（完全一致）
-    //   「ラーメン食べる」 vs 「ラーメン買った」 → 重複しない
-    //   「赤+青+緑」 vs 「赤+青」 → 重複しない
-    //   文字列全体が完全一致した場合のみ重複とみなす
     // ============================================================
     function findDuplicateKeyword(currentCell, keyword) {
         if (!currentCell || !keyword || typeof keyword !== 'string') return null;
@@ -127,7 +125,6 @@
     function showKeywordDuplicateWarning(keyword) {
         const message = `既に同じキーワードが設定されています: 「${keyword}」`;
 
-        // toastr が使えるなら優先
         try {
             if (typeof window.toastr !== 'undefined' && typeof window.toastr.warning === 'function') {
                 window.toastr.warning(message, 'キーワード重複', {
@@ -138,7 +135,6 @@
             }
         } catch (e) { /* fallthrough */ }
 
-        // フォールバック: カスタム警告オーバーレイ
         const existing = document.getElementById('stj_kw_dup_alert');
         if (existing) existing.remove();
 
@@ -860,6 +856,13 @@
             s.lastY = e.clientY;
             const dx = e.clientX - s.startX;
             const dy = e.clientY - s.startY;
+
+            // ★ 微小移動を検出（クリック判定用）
+            //    2px 以上動いたら「クリック扱いしない」フラグを立てる
+            if (!s.hasMoved && (dx * dx + dy * dy) > (CLICK_THRESHOLD_PX * CLICK_THRESHOLD_PX)) {
+                s.hasMoved = true;
+            }
+
             if (!s.isDragging && (dx * dx + dy * dy) > (DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX)) {
                 if (s.isBulkDelete) return;
                 s.isDragging = true;
@@ -895,6 +898,10 @@
                 if (s.isBulkDelete || isBulkDeleteMode) {
                     if (src.classList.contains('stj-marked-for-delete')) src.classList.remove('stj-marked-for-delete');
                     else src.classList.add('stj-marked-for-delete');
+                    return;
+                }
+                // ★ 少しでも動いていればクリック扱いしない
+                if (s.hasMoved) {
                     return;
                 }
                 openCellModal(src);
@@ -1072,7 +1079,6 @@
                 }
             });
 
-            // ★ リアルタイム重複チェック（視覚的ヒント）
             kwInput.addEventListener('input', () => {
                 if (!currentModalCell) return;
                 if (currentModalCell.classList.contains('stj-special-item')) return;
@@ -1145,7 +1151,6 @@
             }
         }
 
-        // ★ 開いた時点で重複があるかチェック（既存データの警告表示）
         kwInput.style.borderColor = '';
         kwInput.style.boxShadow = '';
         kwInput.title = '';
@@ -1225,8 +1230,6 @@
 
         const cell = currentModalCell;
 
-        // ★ キーワード重複チェック（完全一致、別セル参照）
-        //   重複していれば警告を表示し、登録を無効化
         if (!cell.classList.contains('stj-special-item')) {
             const kwInput = currentCellModal.querySelector('.stj-cell-modal-keyword');
             const newKw = kwInput ? kwInput.value.trim() : '';
@@ -1240,7 +1243,7 @@
                         kwInput.title = '既に同じキーワードが設定されています';
                         try { kwInput.focus(); } catch (e) { /* ignore */ }
                     }
-                    return;  // ★ 登録を無効化（doApplyCellModal を呼ばない）
+                    return;
                 }
             }
         }
@@ -1320,7 +1323,6 @@
     async function renderCellModalGrid(cell) {
         if (!currentCellModal || !cell) return;
 
-        // ★ _thum.png → 元の動画名に変換（表示用）
         const rawImages = getCellImages(cell);
         const images = rawImages.map(f => {
             if (typeof f === 'string' && /_thum\.png$/i.test(f)) {
@@ -1347,7 +1349,6 @@
         const charName = document.getElementById('stj_char_name_display')?.textContent || '';
         const io = ensureCellVideoIO(grid);
 
-        // キャッシュ問い合わせを並列化
         const thumbPromises = new Map();
         for (let i = 0; i < images.length; i++) {
             const fileName = images[i];
@@ -1462,6 +1463,7 @@
         }
     }
 
+    // ★ ❌ボタンなし: Escape / 外側クリックで閉じる
     function showMediaZoom(src, isVideo) {
         const existing = document.getElementById('stj_media_zoom');
         if (existing) existing.remove();
@@ -1469,13 +1471,6 @@
         const overlay = document.createElement('div');
         overlay.id = 'stj_media_zoom';
         overlay.className = 'stj-media-zoom';
-
-        const closeBtn = document.createElement('button');
-        closeBtn.type = 'button';
-        closeBtn.className = 'stj-media-zoom-close';
-        closeBtn.textContent = '×';
-        closeBtn.title = '閉じる (Esc / 外側クリック)';
-        overlay.appendChild(closeBtn);
 
         let mediaEl;
         if (isVideo) {
@@ -1513,25 +1508,14 @@
         };
 
         overlay.addEventListener('click', (e) => {
-            if (e.target === closeBtn || closeBtn.contains(e.target)) {
-                e.stopPropagation();
-                e.preventDefault();
-                close();
-                return;
-            }
             if (e.target === mediaEl) {
-                if (isVideo) return;
+                if (isVideo) return;  // 動画本体クリックは再生コントロール用に無視
                 e.stopPropagation();
                 e.preventDefault();
                 close();
                 return;
             }
-            e.stopPropagation();
-            e.preventDefault();
-            close();
-        });
-
-        closeBtn.addEventListener('click', (e) => {
+            // 外側クリック
             e.stopPropagation();
             e.preventDefault();
             close();
@@ -1738,6 +1722,7 @@
                         startX: e.clientX, startY: e.clientY,
                         lastX: e.clientX, lastY: e.clientY,
                         isDragging: false, isBulkDelete: true,
+                        hasMoved: false,
                         currentTarget: null, ghostState: null, scrollContainer: null
                     };
                     return;
@@ -1750,6 +1735,7 @@
                     startX: e.clientX, startY: e.clientY,
                     lastX: e.clientX, lastY: e.clientY,
                     isDragging: false, isBulkDelete: false,
+                    hasMoved: false,
                     currentTarget: null, ghostState: null, scrollContainer: null
                 };
             });
@@ -2192,7 +2178,6 @@
         const charName = nameEl ? nameEl.textContent : '';
         if (!charName) { alert('キャラクター名が設定されていません'); return; }
 
-        // ★ セーブ時に重複チェック（保険）
         const kwMap = new Map();
         const duplicates = [];
         document.querySelectorAll('#stj_keywords_container .stj-keyword-item').forEach(item => {
