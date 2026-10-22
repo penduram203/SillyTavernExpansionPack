@@ -706,97 +706,36 @@ function getCurrentCharacterName() {
         }
 
         /* ============================================================
-           ★ ギャラリーサムネイル: 3列 × 180×180 正方形
-           ★ nanogallery2 の絶対配置・transform を打ち消して
-              flex-wrap で確実に折り返す
+           ★ ギャラリーサムネイル: 180×180 正方形・contain・黒背景
+           （位置・サイズは JS の enforceGalleryGridLayout() が担当）
            ============================================================ */
-        #gallery .nGY2Gallery {
-            display: flex !important;
-            flex-wrap: wrap !important;
-            flex-direction: row !important;
-            justify-content: flex-start !important;
-            align-items: flex-start !important;
-            gap: 0 !important;
-            width: 540px !important;
-            min-width: 540px !important;
-            max-width: 540px !important;
-            height: auto !important;
-            max-height: none !important;
-            min-height: 0 !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            position: relative !important;
-            overflow: visible !important;
-            text-align: left !important;
-            transform: none !important;
-        }
-
-        /* 各サムネイル: flex item として固定幅 180px */
         #gallery .nGY2GThumbnail,
         #gallery .nGY2GThumbnail_l1,
         #gallery .nGY2Item {
-            flex: 0 0 180px !important;
-            width: 180px !important;
-            min-width: 180px !important;
-            max-width: 180px !important;
-            height: 180px !important;
-            min-height: 180px !important;
-            max-height: 180px !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            position: relative !important;
-            left: 0 !important;
-            top: 0 !important;
-            transform: none !important;
             background-color: #000 !important;
             box-sizing: border-box !important;
             overflow: hidden !important;
-            display: block !important;
-            float: none !important;
-            vertical-align: top !important;
         }
 
-        /* 背景画像レイヤー: 親いっぱいに広げ、contain + center */
         #gallery .nGY2TnImg,
         #gallery .nGY2TnImgBack {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            right: auto !important;
-            bottom: auto !important;
             width: 100% !important;
             height: 100% !important;
-            max-width: 100% !important;
-            max-height: 100% !important;
             background-size: contain !important;
             background-position: center center !important;
             background-repeat: no-repeat !important;
             background-color: #000 !important;
-            transform: none !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            box-sizing: border-box !important;
         }
 
-        /* サムネイル内の <img>（GIC の gic-gallery-thumb-img 含む） */
         #gallery .nGY2GThumbnail > img,
         #gallery .nGY2GThumbnail_l1 > img,
         #gallery .gic-gallery-thumb-img {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
             width: 100% !important;
             height: 100% !important;
-            max-width: 100% !important;
-            max-height: 100% !important;
             object-fit: contain !important;
             background-color: #000 !important;
             display: block !important;
-            z-index: 5 !important;
             pointer-events: none !important;
-            transform: none !important;
-            margin: 0 !important;
-            padding: 0 !important;
         }
     `;
     document.head.appendChild(style);
@@ -3224,6 +3163,76 @@ function setupBulkDelete() {
     }
 }
 
+// ============================================================
+// ★ ギャラリーサムネイルを 3列 × N行 の 180×180 グリッドに強制
+//    CSS では nanogallery2 の内部構造（.nGY2GallerySub 等）に
+//    対応しきれないため、JS で inline style を直接上書きする
+// ============================================================
+function enforceGalleryGridLayout() {
+    const gallery = document.getElementById('gallery');
+    if (!gallery) return;
+
+    const thumbs = gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item');
+    if (thumbs.length === 0) return;
+
+    const THUMB = 180;
+    const COLS = 3;
+    const PARENT_W = THUMB * COLS; // 540px
+
+    // サムネイルの実際の親（.nGY2GallerySub 等）
+    const parent = thumbs[0].parentElement;
+    const galleryEl = gallery.querySelector('.nGY2Gallery');
+    const subEl = gallery.querySelector('.nGY2GallerySub');
+
+    // 3つの候補すべてに「ブロック・相対配置・幅540px」を強制
+    [galleryEl, subEl, parent].filter(Boolean).forEach(el => {
+        el.style.setProperty('width', PARENT_W + 'px', 'important');
+        el.style.setProperty('min-width', PARENT_W + 'px', 'important');
+        el.style.setProperty('max-width', PARENT_W + 'px', 'important');
+        el.style.setProperty('position', 'relative', 'important');
+        el.style.setProperty('display', 'block', 'important');
+        el.style.setProperty('transform', 'none', 'important');
+        el.style.setProperty('margin', '0', 'important');
+        el.style.setProperty('padding', '0', 'important');
+        el.style.setProperty('overflow', 'visible', 'important');
+    });
+
+    // 各サムネイルを絶対配置でグリッド状に並べる
+    let maxRow = 0;
+    thumbs.forEach((thumb, i) => {
+        const row = Math.floor(i / COLS);
+        const col = i % COLS;
+        if (row > maxRow) maxRow = row;
+
+        thumb.style.setProperty('position', 'absolute', 'important');
+        thumb.style.setProperty('left', (col * THUMB) + 'px', 'important');
+        thumb.style.setProperty('top', (row * THUMB) + 'px', 'important');
+        thumb.style.setProperty('right', 'auto', 'important');
+        thumb.style.setProperty('bottom', 'auto', 'important');
+        thumb.style.setProperty('width', THUMB + 'px', 'important');
+        thumb.style.setProperty('height', THUMB + 'px', 'important');
+        thumb.style.setProperty('min-width', THUMB + 'px', 'important');
+        thumb.style.setProperty('min-height', THUMB + 'px', 'important');
+        thumb.style.setProperty('max-width', THUMB + 'px', 'important');
+        thumb.style.setProperty('max-height', THUMB + 'px', 'important');
+        thumb.style.setProperty('margin', '0', 'important');
+        thumb.style.setProperty('padding', '0', 'important');
+        thumb.style.setProperty('transform', 'none', 'important');
+        thumb.style.setProperty('background-color', '#000', 'important');
+        thumb.style.setProperty('overflow', 'hidden', 'important');
+        thumb.style.setProperty('box-sizing', 'border-box', 'important');
+    });
+
+    // 絶対配置の子を持つ親は高さを明示する
+    const totalRows = maxRow + 1;
+    const totalH = totalRows * THUMB;
+    [galleryEl, subEl, parent].filter(Boolean).forEach(el => {
+        el.style.setProperty('height', totalH + 'px', 'important');
+        el.style.setProperty('min-height', totalH + 'px', 'important');
+        el.style.setProperty('max-height', 'none', 'important');
+    });
+}
+
 function applyGalleryLayout() {
     if (isApplyingLayout) return;
 
@@ -3265,6 +3274,9 @@ function applyGalleryLayout() {
         dedupeGalleryElements();
         applyGalleryWindowLayout();
         styleGalleryWindowCloseButton();
+
+        // ★ 追加: 180×180 グリッドを強制
+        try { enforceGalleryGridLayout(); } catch (e) { /* ignore */ }
 
         document.querySelectorAll('.nGY2paginationRectangle, .nGY2paginationRectangleCurrentPage').forEach(el => {
             el.style.setProperty('height', GALLERY_PAGINATION_HEIGHT + 'px', 'important');
@@ -3998,6 +4010,9 @@ function exposeGicApi() {
                 urlCacheSize: _thumbUrlCache.size,
             };
         },
+
+        // ★ デバッグ用: グリッド強制を手動実行
+        forceGridLayout: () => enforceGalleryGridLayout(),
     };
     console.log('[GIC] ✅ window.GicApi を公開しました');
 }
