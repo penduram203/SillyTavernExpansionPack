@@ -2169,6 +2169,7 @@ function hideGalleryUploadMessage() {
 
 function applyGalleryWindowLayout() {
     const vw = window.innerWidth;
+    const vh = window.innerHeight;   /* ★ 追加 */
 
     if (vw !== _lastWindowWidthForGallery) {
         _lastWindowWidthForGallery = vw;
@@ -2191,54 +2192,42 @@ function applyGalleryWindowLayout() {
                 }
             });
 
+            /* ★ 変更: 上下いっぱいに固定 */
             el.style.setProperty('position', 'fixed', 'important');
-            el.style.setProperty('top', '50%', 'important');
+            el.style.setProperty('top', '0', 'important');
+            el.style.setProperty('bottom', '0', 'important');
             el.style.setProperty('left', '0', 'important');
             el.style.setProperty('right', 'auto', 'important');
-            el.style.setProperty('bottom', 'auto', 'important');
-            el.style.setProperty('transform', 'translateY(-50%)', 'important');
+            el.style.setProperty('transform', 'none', 'important');
             el.style.setProperty('margin', '0', 'important');
 
-            if (!galleryBaseHeightCache.has(el)) {
-                const h = el.getBoundingClientRect().height;
-                if (h > 0) {
-                    galleryBaseHeightCache.set(el, h);
-                } else {
-                    continue;
-                }
-            }
-
-            const base = galleryBaseHeightCache.get(el);
-            const desired = Math.round(base + GALLERY_WINDOW_HEIGHT_DELTA);
-
-            const vh = window.innerHeight;
-            const maxAllowed = Math.max(100, vh - GALLERY_WINDOW_MAX_VIEWPORT_MARGIN * 2);
-            const targetH = Math.min(desired, maxAllowed);
+            /* ★ 変更: 高さ = viewport ぴったり（旧: base+600 / clamp） */
+            el.style.setProperty('height', vh + 'px', 'important');
+            el.style.setProperty('min-height', vh + 'px', 'important');
+            el.style.setProperty('max-height', vh + 'px', 'important');
 
             if (el.dataset.gicHeightLogged !== 'true') {
                 el.dataset.gicHeightLogged = 'true';
-                console.log(`[GIC] ギャラリー高さ: ST本来=${Math.round(base)}px, 希望=${desired}px, 適用=${targetH}px (上限=${maxAllowed}px)`);
+                console.log(`[GIC] ギャラリー高さ: viewport=${vh}px（上下いっぱい）`);
             }
 
-            el.style.setProperty('height', targetH + 'px', 'important');
-            el.style.setProperty('min-height', targetH + 'px', 'important');
-            el.style.setProperty('max-height', targetH + 'px', 'important');
-
-            /* 変更後 */
+            /* 幅計算（ご自身の修正済みロジックをそのまま維持） */
             if (!galleryBaseWidthCache.has(el)) {
                 el.style.removeProperty('width');
                 el.style.removeProperty('max-width');
                 const w = el.getBoundingClientRect().width;
                 if (w > 0) {
                     galleryBaseWidthCache.set(el, w);
-                    console.log(`[GIC] ギャラリー幅: ST本来=${Math.round(w)}px → 適用=${Math.round(w) + GALLERY_WINDOW_WIDTH_EXTRA}px`);
+                    // ※ ここはご自身の +350 等のロジックを維持してください
+                    console.log(`[GIC] ギャラリー幅: ST本来=${Math.round(w)}px`);
                 }
             }
 
             if (galleryBaseWidthCache.has(el)) {
                 const baseW = galleryBaseWidthCache.get(el);
                 const maxW = Math.max(100, vw - GALLERY_WINDOW_MAX_VIEWPORT_MARGIN);
-                const targetW = Math.min(maxW, Math.round(baseW + GALLERY_WINDOW_WIDTH_EXTRA));
+                // ※ ここもご自身の拡張幅（+270 等）を維持してください
+                const targetW = Math.min(maxW, Math.round(baseW + 80));
                 el.style.setProperty('width', targetW + 'px', 'important');
                 el.style.setProperty('max-width', targetW + 'px', 'important');
             }
@@ -3236,7 +3225,7 @@ function enforceGalleryGridLayout() {
     const allThumbs = Array.from(gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item'));
     if (allThumbs.length === 0) return;
 
-    // ★ Step 1: 自分で display:none にしたもののみ復元
+    // Step 1: 自分で display:none にしたものを復元
     allThumbs.forEach(thumb => {
         if (thumb.dataset.gicForcedHidden === '1') {
             thumb.style.removeProperty('display');
@@ -3244,8 +3233,7 @@ function enforceGalleryGridLayout() {
         }
     });
 
-    // ★ Step 2: nanogallery2 が現在のページとして表示しているアイテムのみ抽出
-    //    display:none で判定（visibility は親の hidden に影響されるため使わない）
+    // Step 2: 現在のページとして表示されているアイテムのみ抽出
     const visibleThumbs = allThumbs.filter(thumb => {
         if (thumb.style.display === 'none') return false;
         const cs = window.getComputedStyle(thumb);
@@ -3256,21 +3244,44 @@ function enforceGalleryGridLayout() {
 
     if (visibleThumbs.length === 0) return;
 
-    const THUMB = 180;
-    const COLS = 3;
+    /* ★ 4列 × 4行 + 中央配置 */
+    const THUMB   = 195;
+    const COLS    = 4;
     const MAX_ROWS = 4;
-    const PARENT_W = THUMB * COLS; // 540px
+    const H_GAP   = 4;
+    const V_GAP   = 4;
+
+    const totalRows = Math.min(Math.ceil(visibleThumbs.length / COLS), MAX_ROWS);
+    const gridW = COLS * THUMB + (COLS - 1) * H_GAP;
+    const gridH = totalRows * THUMB + Math.max(0, totalRows - 1) * V_GAP;
+
+    // #gallery の実寸（applyGalleryWindowLayout 後は vw × vh）
+    const galleryRect = gallery.getBoundingClientRect();
+    const containerW = Math.max(gridW, Math.round(galleryRect.width) || gridW);
+    const containerH = Math.max(gridH, Math.round(galleryRect.height) || gridH);
+
+    // 中央寄せオフセット
+    const offsetX = Math.max(0, Math.floor((containerW - gridW) / 2));
+    const offsetY = Math.max(0, Math.floor((containerH - gridH) / 2));
 
     // サムネイルの実際の親（.nGY2GallerySub 等）
-    const parent = visibleThumbs[0].parentElement;
-    const galleryEl = gallery.querySelector('.nGY2Gallery');
-    const subEl = gallery.querySelector('.nGY2GallerySub');
+    const parent     = visibleThumbs[0].parentElement;
+    const galleryEl  = gallery.querySelector('.nGY2Gallery');
+    const subEl      = gallery.querySelector('.nGY2GallerySub');
 
+    /* ★ コンテナを #gallery 全高まで拡張 */
     [galleryEl, subEl, parent].filter(Boolean).forEach(el => {
-        el.style.setProperty('width', PARENT_W + 'px', 'important');
-        el.style.setProperty('min-width', PARENT_W + 'px', 'important');
-        el.style.setProperty('max-width', PARENT_W + 'px', 'important');
-        el.style.setProperty('position', 'relative', 'important');
+        el.style.setProperty('position', 'absolute', 'important');
+        el.style.setProperty('top', '0', 'important');
+        el.style.setProperty('left', '0', 'important');
+        el.style.setProperty('right', 'auto', 'important');
+        el.style.setProperty('bottom', 'auto', 'important');
+        el.style.setProperty('width', containerW + 'px', 'important');
+        el.style.setProperty('min-width', containerW + 'px', 'important');
+        el.style.setProperty('max-width', containerW + 'px', 'important');
+        el.style.setProperty('height', containerH + 'px', 'important');
+        el.style.setProperty('min-height', containerH + 'px', 'important');
+        el.style.setProperty('max-height', containerH + 'px', 'important');
         el.style.setProperty('display', 'block', 'important');
         el.style.setProperty('transform', 'none', 'important');
         el.style.setProperty('margin', '0', 'important');
@@ -3278,8 +3289,7 @@ function enforceGalleryGridLayout() {
         el.style.setProperty('overflow', 'hidden', 'important');
     });
 
-    // ★ Step 3: 現在のページのアイテムのみを 3×4 グリッドに配置
-    let maxRow = 0;
+    /* ★ 現在のページのアイテムを 4×4 で中央配置 */
     visibleThumbs.forEach((thumb, i) => {
         const row = Math.floor(i / COLS);
         const col = i % COLS;
@@ -3290,11 +3300,12 @@ function enforceGalleryGridLayout() {
             return;
         }
 
-        if (row > maxRow) maxRow = row;
+        const left = offsetX + col * (THUMB + H_GAP);
+        const top  = offsetY + row * (THUMB + V_GAP);
 
         thumb.style.setProperty('position', 'absolute', 'important');
-        thumb.style.setProperty('left', (col * THUMB) + 'px', 'important');
-        thumb.style.setProperty('top', (row * THUMB) + 'px', 'important');
+        thumb.style.setProperty('left', left + 'px', 'important');
+        thumb.style.setProperty('top', top + 'px', 'important');
         thumb.style.setProperty('right', 'auto', 'important');
         thumb.style.setProperty('bottom', 'auto', 'important');
         thumb.style.setProperty('width', THUMB + 'px', 'important');
@@ -3311,14 +3322,6 @@ function enforceGalleryGridLayout() {
         thumb.style.setProperty('background-color', '#000', 'important');
         thumb.style.setProperty('opacity', '1', 'important');
         thumb.style.setProperty('visibility', 'visible', 'important');
-    });
-
-    const totalRows = Math.min(maxRow + 1, MAX_ROWS);
-    const totalH = totalRows * THUMB;
-    [galleryEl, subEl, parent].filter(Boolean).forEach(el => {
-        el.style.setProperty('height', totalH + 'px', 'important');
-        el.style.setProperty('min-height', totalH + 'px', 'important');
-        el.style.setProperty('max-height', totalH + 'px', 'important');
     });
 }
 
@@ -4267,7 +4270,7 @@ function exposeGicApi() {
     if (window.__gicDragGalleryWidthForcer) return;
     window.__gicDragGalleryWidthForcer = true;
 
-    const PARENT_W = 540;
+    const PARENT_W = 760;   /* ★ 変更: 540 → 760（4列分） */
 
     const forceWidth = (dg) => {
         if (!dg) return;
@@ -4296,7 +4299,7 @@ function exposeGicApi() {
     });
     observer.observe(document.body, { childList: true, subtree: true });
 
-    console.log('[GIC] ✅ #dragGallery 幅事前固定オブザーバを設置しました');
+    console.log('[GIC] ✅ #dragGallery 幅事前固定オブザーバを設置しました (4列対応: 760px)');
 })();
 
 function initializeGIC() {
