@@ -678,6 +678,26 @@ function getCurrentCharacterName() {
         body.gic-dragging #gallery * {
             pointer-events: none !important;
         }
+
+        /* ============================================================
+           ★ 動画サムネイル用 🎬 バッジ
+           ============================================================ */
+        .gic-video-badge {
+            position: absolute !important;
+            top: 50% !important;
+            left: 50% !important;
+            transform: translate(-50%, -50%) !important;
+            font-size: 36px !important;
+            line-height: 1 !important;
+            pointer-events: none !important;
+            z-index: 10 !important;
+            text-shadow:
+                0 0 8px rgba(0, 0, 0, 0.9),
+                0 2px 4px rgba(0, 0, 0, 0.9) !important;
+            opacity: 0.95 !important;
+            user-select: none !important;
+            -webkit-user-select: none !important;
+        }
     `;
     document.head.appendChild(style);
     console.log('[GIC] 🖼️ ギャラリー配置CSSを注入しました');
@@ -1402,6 +1422,55 @@ async function ensureThumbnailForVideo(videoFileName, charName = getCurrentChara
 }
 
 // ============================================================
+// ★ 動画サムネイルに 🎬 バッジを付与
+//    - _thum.png（インターセプタ注入）
+//    - .gic-gallery-thumb-img（GIC生成サムネイル）
+//    - video.gic-gallery-video（旧互換）
+// ============================================================
+function isVideoThumbnail(thumb) {
+    if (!thumb) return false;
+    const title = (thumb.getAttribute('title') || '').trim();
+    if (/_thum\.png$/i.test(title)) return true;
+    if (thumb.querySelector('.gic-gallery-thumb-img')) return true;
+    if (thumb.querySelector('video.gic-gallery-video')) return true;
+    return false;
+}
+
+function syncVideoBadgeForThumb(thumb) {
+    if (!thumb) return;
+    const isVid = isVideoThumbnail(thumb);
+    const badges = thumb.querySelectorAll('.gic-video-badge');
+
+    if (isVid) {
+        // 既にバッジが1個だけなら何もしない（冪等）
+        if (badges.length === 1) return;
+        // 重複・不正状態をクリーンアップ
+        badges.forEach(el => el.remove());
+
+        // 親に positioning context がない場合は relative を付与
+        const cs = window.getComputedStyle(thumb);
+        if (cs.position === 'static') {
+            thumb.style.setProperty('position', 'relative', 'important');
+        }
+
+        const badge = document.createElement('div');
+        badge.className = 'gic-video-badge';
+        badge.textContent = '🎬';
+        thumb.appendChild(badge);
+    } else if (badges.length > 0) {
+        // 動画ではないサムネイル（ページ遷移で中身が変わった等）からバッジを除去
+        badges.forEach(el => el.remove());
+    }
+}
+
+function scanAndSyncVideoBadges() {
+    const gallery = document.getElementById('gallery');
+    if (!gallery) return;
+    const selector = '.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item';
+    gallery.querySelectorAll(selector).forEach(syncVideoBadgeForThumb);
+}
+
+// ============================================================
 // ★ ギャラリー動画サムネイル: キャッシュ画像を表示（動画はロードしない）
 // ============================================================
 async function setupGalleryVideoThumbs() {
@@ -1413,6 +1482,9 @@ async function setupGalleryVideoThumbs() {
 
     _thumbProcessingActive = true;
     try {
+        // ★ 既存 _thum.png サムネイルに 🎬 バッジを付与（即時反映）
+        try { scanAndSyncVideoBadges(); } catch (e) { /* ignore */ }
+
         // 未処理の動画 thumb を収集
         //   ※ インターセプタが /api/images/list を _thum.png に置換済みのため
         //     通常ここには何も入らない（旧形式互換のため残置）
@@ -3079,6 +3151,9 @@ function applyGalleryLayout() {
         });
 
         applyPageNumbers();
+
+        // ★ 動画サムネイルに 🎬 バッジを同期（追加・除去の両方を処理）
+        try { scanAndSyncVideoBadges(); } catch (e) { /* ignore */ }
 
         const pager = document.querySelector('.gic-pagination-pager');
         if (pager) positionPager(pager);
