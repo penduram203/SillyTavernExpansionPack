@@ -1066,7 +1066,13 @@ function positionGalleryButton() {
 }
 
 function isGalleryOpen() {
-    const now = performance.now();
+    const primary = document.getElementById('gallery');
+
+    // ★ ページ切替中は強制的に「開いている」とみなす
+    //    （syncGalleryButtonVisibility が閉→開の遷移を誤検出するのを防ぐ）
+    if (primary && primary.classList.contains('gic-page-switching')) {
+        return true;
+    }
     if (now - _galleryOpenCache.timestamp < GALLERY_OPEN_CACHE_TTL) {
         return _galleryOpenCache.value;
     }
@@ -3313,11 +3319,8 @@ function enforceGalleryGridLayout() {
 }
 
 // ============================================================
-// ★ ページ切替を「隠してから揃えてから見せる」方式で処理
-//    - クリック直後にギャラリーを visibility: hidden で隠す
-//    - 表示アイテム数が「12個 or 総数」で安定するまで待つ
-//    - enforceGalleryGridLayout を実行
-//    - 2フレーム待ってから visibility を復元
+// ★ ページ切替を「内側コンテナを隠して揃えてから見せる」方式で処理
+//    #gallery 自体の visibility は触らない（isGalleryOpen を狂わせない）
 // ============================================================
 async function handlePageSwitchAsync() {
     if (_pageSwitchInProgress) return;
@@ -3329,23 +3332,28 @@ async function handlePageSwitchAsync() {
         return;
     }
 
-    // 元の visibility を保存して隠す
-    _pageSwitchOrigVisibility = gallery.style.getPropertyValue('visibility') || '';
-    gallery.style.setProperty('visibility', 'hidden', 'important');
+    // ★ #gallery を「スイッチ中」マーク（isGalleryOpen が true を返すようにする）
+    gallery.classList.add('gic-page-switching');
+
+    // ★ サムネイルコンテナだけを隠す（#gallery は触らない）
+    const thumbContainer = gallery.querySelector('.nGY2GallerySub')
+                        || gallery.querySelector('.nGY2Gallery');
+    let origVisibility = '';
+    if (thumbContainer) {
+        origVisibility = thumbContainer.style.getPropertyValue('visibility') || '';
+        thumbContainer.style.setProperty('visibility', 'hidden', 'important');
+    }
 
     try {
-        const MAX_ITEMS = 12;
         const startTime = Date.now();
         const MAX_WAIT = 2000;
         let lastSig = '';
         let stableFrames = 0;
 
         while (Date.now() - startTime < MAX_WAIT) {
-            // 1フレーム待つ（レイアウト確定を促す）
             await new Promise(r => requestAnimationFrame(r));
 
             const allThumbs = Array.from(gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item'));
-
             const visibleThumbs = allThumbs.filter(thumb => {
                 if (thumb.style.display === 'none') return false;
                 const cs = window.getComputedStyle(thumb);
@@ -3354,35 +3362,33 @@ async function handlePageSwitchAsync() {
                 return true;
             });
 
-            const expected = Math.min(allThumbs.length, MAX_ITEMS);
-
+            const expected = Math.min(allThumbs.length, 12);
             const sig = visibleThumbs.length + ':' + visibleThumbs
-                .map(t => (t.getAttribute('title') || '').slice(0, 24))
+                .map(t => (t.getAttribute('title') || '').slice(0, 40))
                 .join('|');
 
             if (visibleThumbs.length >= expected && sig === lastSig) {
                 stableFrames++;
-                if (stableFrames >= 2) break;
+                if (stableFrames >= 3) break;
             } else {
                 stableFrames = 0;
             }
             lastSig = sig;
         }
 
-        // レイアウトを強制
         try { enforceGalleryGridLayout(); } catch (_) {}
         try { scanAndSyncVideoBadges(); } catch (_) {}
 
-        // 2フレーム待ってから表示
         await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-
     } finally {
-        // visibility を復元
-        if (_pageSwitchOrigVisibility) {
-            gallery.style.setProperty('visibility', _pageSwitchOrigVisibility, 'important');
-        } else {
-            gallery.style.removeProperty('visibility');
+        if (thumbContainer) {
+            if (origVisibility) {
+                thumbContainer.style.setProperty('visibility', origVisibility, 'important');
+            } else {
+                thumbContainer.style.removeProperty('visibility');
+            }
         }
+        gallery.classList.remove('gic-page-switching');
         _pageSwitchInProgress = false;
     }
 }
@@ -4234,11 +4240,14 @@ function exposeGicApi() {
                     console.log('[GIC] 🎯 galleryMaxRows:', options.galleryMaxRows, '→ 4');
                     options.galleryMaxRows = 4;
                 }
+                // ★ thumbnailWidth を 180px 固定（3列を確実にする）
+                options.thumbnailWidth = '180px';
+                options.thumbnailHeight = 180;
             }
         } catch (e) { /* ignore */ }
         return orig.apply(this, arguments);
     };
-    console.log('[GIC] ✅ nanogallery2 patch installed (galleryMaxRows ≤ 4)');
+    console.log('[GIC] ✅ nanogallery2 patch installed (galleryMaxRows ≤ 4, thumbnailWidth = 180px)');
 })();
 
 function initializeGIC() {
@@ -4348,3 +4357,46 @@ export async function activate() {
     validatePersistedState().catch(() => {});
     console.log('[GIC] ✅ Generate Image Controller: アクティベート完了');
 }
+// ============================================================
+// ★ #dragGallery 幅を 540px に事前固定
+//    ST の showCharGallery は makeMovable() → delay(100) → initGallery()
+//    の順で走る。MutationObserver は delay(100) より先に発火するので
+//    nanogallery2 init 時点で 3列計算に必要な幅が確定する。
+// ============================================================
+(function installDragGalleryWidthForcer() {
+    if (window.__gicDragGalleryWidthForcer) return;
+    window.__gicDragGalleryWidthForcer = true;
+
+    const PARENT_W = 540;
+
+    const forceWidth = (dg) => {
+        if (!dg) return;
+        dg.style.setProperty('width', PARENT_W + 'px', 'important');
+        dg.style.setProperty('min-width', PARENT_W + 'px', 'important');
+        dg.style.setProperty('max-width', PARENT_W + 'px', 'important');
+        dg.style.setProperty('box-sizing', 'border-box', 'important');
+    };
+
+    // 既に存在する場合に即時適用
+    forceWidth(document.getElementById('dragGallery'));
+
+    // 新規追加を監視
+    const observer = new MutationObserver((mutations) => {
+        for (const m of mutations) {
+            for (const node of m.addedNodes) {
+                if (node.nodeType !== 1) continue;
+                if (node.id === 'dragGallery') {
+                    forceWidth(node);
+                    continue;
+                }
+                if (node.querySelector) {
+                    const dg = node.querySelector('#dragGallery');
+                    if (dg) forceWidth(dg);
+                }
+            }
+        }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    console.log('[GIC] ✅ #dragGallery 幅事前固定オブザーバを設置しました');
+})();
