@@ -987,7 +987,7 @@
         stjModalEl.style.minWidth = '500px';
         stjModalEl.style.height = '100vh';
         stjModalEl.style.zIndex = '10001';
-        stjModalEl.style.scrollTop = 0;
+        stjModalEl.scrollTop = 0;
         document.body.classList.add('stj-editor-open');
         modalOpenedTimestamp = Date.now();
 
@@ -1025,7 +1025,7 @@
         }
     }
 
-     // ============================================================
+    // ============================================================
     // セルポップアップモーダル
     // ============================================================
     function createCellModal() {
@@ -1318,12 +1318,6 @@
         return '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(fileName);
     }
 
-    // ============================================================
-    // ★ セルモーダルグリッド
-    //    - 通常画像: ギャラリーと同じサムネイル (_img_thum.png) を表示
-    //    - 動画: サムネイル or <video> プレビュー
-    //    - クリック → showMediaZoom(fullPath) で原寸表示
-    // ============================================================
     async function renderCellModalGrid(cell) {
         if (!currentCellModal || !cell) return;
 
@@ -1353,22 +1347,11 @@
         const charName = document.getElementById('stj_char_name_display')?.textContent || '';
         const io = ensureCellVideoIO(grid);
 
-        // ★ 動画・画像の両方でサムネイルを事前取得（並列）
         const thumbPromises = new Map();
         for (let i = 0; i < images.length; i++) {
             const fileName = images[i];
-            if (!fileName) continue;
-
-            if (isVideoUrl(fileName)) {
-                thumbPromises.set(i, ensureThumbForEditor(fileName, charName));
-            } else if (/\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(fileName)) {
-                if (window.GicApi?.ensureImageThumbnail) {
-                    thumbPromises.set(
-                        i,
-                        window.GicApi.ensureImageThumbnail(fileName, charName).catch(() => null)
-                    );
-                }
-            }
+            if (!fileName || !isVideoUrl(fileName)) continue;
+            thumbPromises.set(i, ensureThumbForEditor(fileName, charName));
         }
 
         for (let i = 0; i < slots.length; i++) {
@@ -1395,13 +1378,6 @@
 
             slot.dataset.fileName = rawFileName || fileName;
 
-            // 拡大ビューは元画像/元動画を表示する
-            const openZoom = (e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                showMediaZoom(fullPath, isVideo);
-            };
-
             const existing = slot.querySelector(':scope > img, :scope > video');
             if (existing) {
                 const existingSrc = existing.getAttribute('data-src') || existing.getAttribute('src');
@@ -1416,6 +1392,12 @@
                 }
                 existing.remove();
             }
+
+            const openZoom = (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                showMediaZoom(fullPath, isVideo);
+            };
 
             if (isVideo) {
                 const thumbUrl = await thumbPromises.get(i);
@@ -1465,14 +1447,9 @@
                 io.observe(slot);
                 attachVideoBadge(slot, true);
             } else {
-                // ── 画像: サムネイルを表示（クリックで原寸） ──
-                const thumbUrl = await thumbPromises.get(i);
-                const displaySrc = thumbUrl || fullPath;
-
                 const img = document.createElement('img');
-                img.src = displaySrc;
+                img.src = fullPath;
                 img.dataset.src = fullPath;
-                img.dataset.originalSrc = fullPath;
                 img.alt = fileName;
                 img.style.cssText =
                     'width:100%;height:100%;object-fit:contain;display:block;' +
@@ -1484,7 +1461,7 @@
         }
     }
 
-    // Escape / 外側クリックで閉じる
+    // ★ ❌ボタンなし: Escape / 外側クリックで閉じる
     function showMediaZoom(src, isVideo) {
         const existing = document.getElementById('stj_media_zoom');
         if (existing) existing.remove();
@@ -1921,9 +1898,6 @@
 
     const _previewLoadGen = new WeakMap();
 
-    // ============================================================
-    // ★ セルプレビュー（通常画像はサムネイル表示、原寸は拡大ビューで）
-    // ============================================================
     async function updateImagePreview(previewId, charName, rawValue, targetIndex = 0) {
         const previewEl = document.getElementById(previewId);
         if (!previewEl) return;
@@ -2000,7 +1974,6 @@
             return;
         }
 
-        // 既レンダリング判定は元画像パスで
         if (previewEl.dataset.currentPath === fullPath) {
             attachVideoBadge(previewEl, isVideoUrl(fullPath));
             placeholderHide();
@@ -2022,7 +1995,6 @@
         previewEl.appendChild(loadingEl);
 
         if (isVideoUrl(fullPath)) {
-            // ── 動画: 従来どおり（サムネ or video） ──
             const thumbUrl = await ensureThumbForEditor(fileName, charName);
             if (_previewLoadGen.get(previewEl) !== myGen) { removeLoading(); return; }
             if (thumbUrl) {
@@ -2088,18 +2060,8 @@
             previewEl.dataset.currentPath = fullPath;
             removeLoading(); placeholderHide();
         } else {
-            // ── 画像: サムネイルを表示（原寸は拡大ビューで） ──
-            let displaySrc = fullPath;
-            try {
-                if (window.GicApi?.ensureImageThumbnail) {
-                    const thumbUrl = await window.GicApi.ensureImageThumbnail(fileName, charName);
-                    if (thumbUrl) displaySrc = thumbUrl;
-                }
-            } catch (e) { /* ignore */ }
-            if (_previewLoadGen.get(previewEl) !== myGen) { removeLoading(); return; }
-
             const img = new Image();
-            img.src = displaySrc;
+            img.src = fullPath;
             img.alt = fileName;
             let decodeOk = false;
             try {
