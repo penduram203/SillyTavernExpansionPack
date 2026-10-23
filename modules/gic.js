@@ -56,6 +56,11 @@ console.log('[GIC] モジュールロード開始');
                     if (thumbName && set.has(thumbName)) {
                         filtered.push(thumbName);
                         replaced++;
+                        // ★ プレビューでの逆引き用に「サムネ → 元画像」を記録
+                        try {
+                            if (!window.__gicListReverseMap) window.__gicListReverseMap = new Map();
+                            window.__gicListReverseMap.set(thumbName, f);
+                        } catch (e) { /* ignore */ }
                         continue;
                     }
                 }
@@ -164,10 +169,17 @@ function resolveOriginalFileName(fileName) {
     if (!fileName || typeof fileName !== 'string') return null;
 
     if (fileName.endsWith(IMG_THUMB_SUFFIX)) {
-        /* 逆引きマップにあるものだけ返す（404を生む .png フォールバックを廃止） */
+        /* ① マニフェスト由来の逆引きマップ */
         if (_imgThumbReverseMap.has(fileName)) {
             return _imgThumbReverseMap.get(fileName);
         }
+        /* ② リスト取得時に記録した逆引きマップ
+              （初回ロード・localStorage 未保有時でも元画像を解決できる） */
+        try {
+            if (window.__gicListReverseMap?.has(fileName)) {
+                return window.__gicListReverseMap.get(fileName);
+            }
+        } catch (e) { /* ignore */ }
         return null;
     }
     if (fileName.endsWith('_thum.png')) return null;  // video thumb
