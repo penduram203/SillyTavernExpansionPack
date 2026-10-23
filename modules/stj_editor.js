@@ -194,13 +194,54 @@
     }
 
     // ============================================================
-    // ★ 動画サムネイル用 🎬 バッジの付与 / 除去（冪等）
+    // ★ サムネイル名 → 元ファイル名 変換
+    //   - xxx_img_thum.png → xxx.(元拡張子)
+    //   - xxx_mp4_thum.png / xxx_webm_thum.png → xxx.mp4 / xxx.webm
+    //   - それ以外はそのまま返す
     // ============================================================
-    function attachVideoBadge(parentEl, isVideo) {
+    function resolveThumbToOriginal(fileName) {
+        if (!fileName || typeof fileName !== 'string') return fileName;
+
+        /* 動画サムネ */
+        const vm = fileName.match(/^(.+)_(mp4|webm)_thum\.png$/i);
+        if (vm) return `${vm[1]}.${vm[2].toLowerCase()}`;
+
+        /* 画像サムネ */
+        if (fileName.endsWith('_img_thum.png')) {
+            if (window.GicApi?.resolveOriginalFileName) {
+                const orig = window.GicApi.resolveOriginalFileName(fileName);
+                if (orig) return orig;
+            }
+            // フォールバック: .png と仮定
+            return fileName.slice(0, -'_img_thum.png'.length) + '.png';
+        }
+
+        return fileName;
+    }
+
+    // ============================================================
+    // ★ 動画 / アニメ GIF / APNG 用 🎬 バッジ（async）
+    //   isVideo=true は無条件で表示。
+    //   isVideo=false でも fileName が .gif/.png ならアニメ判定。
+    //   fileName は「元ファイル名」を渡すこと（サムネ名不可）。
+    // ============================================================
+    async function attachVideoBadge(parentEl, isVideo, fileName, charName) {
         if (!parentEl) return;
+
+        let shouldShow = !!isVideo;
+
+        // GIF / PNG はアニメ判定
+        if (!shouldShow && fileName && charName && /\.(gif|png)$/i.test(fileName)) {
+            try {
+                if (window.GicApi?.isAnimatedImage) {
+                    shouldShow = await window.GicApi.isAnimatedImage(fileName, charName);
+                }
+            } catch (e) { /* ignore */ }
+        }
+
         const existing = parentEl.querySelectorAll(':scope > .stj-video-badge');
 
-        if (isVideo) {
+        if (shouldShow) {
             if (existing.length === 1) return;
             existing.forEach(el => el.remove());
 
@@ -1322,13 +1363,8 @@
         if (!currentCellModal || !cell) return;
 
         const rawImages = getCellImages(cell);
-        const images = rawImages.map(f => {
-            if (typeof f === 'string' && /_thum\.png$/i.test(f)) {
-                const m = f.match(/^(.+)_(mp4|webm)_thum\.png$/i);
-                if (m) return `${m[1]}.${m[2].toLowerCase()}`;
-            }
-            return f;
-        });
+        // ★ サムネ名は元ファイル名に変換（videos も images も）
+        const images = rawImages.map(f => resolveThumbToOriginal(f));
 
         const grid = currentCellModal.querySelector('.stj-cell-modal-grid');
         if (!grid) return;
@@ -1347,6 +1383,7 @@
         const charName = document.getElementById('stj_char_name_display')?.textContent || '';
         const io = ensureCellVideoIO(grid);
 
+        // 動画サムネの並列生成
         const thumbPromises = new Map();
         for (let i = 0; i < images.length; i++) {
             const fileName = images[i];
@@ -1356,8 +1393,8 @@
 
         for (let i = 0; i < slots.length; i++) {
             const slot = slots[i];
-            const fileName = images[i];
-            const rawFileName = rawImages[i];
+            const fileName = images[i];           // 元ファイル名（GIF/動画/通常画像）
+            const rawFileName = rawImages[i];     // セルに保存されている元の名前
 
             if (!fileName) {
                 slot.querySelectorAll(':scope > img, :scope > video').forEach(el => {
@@ -1366,7 +1403,7 @@
                     }
                     el.remove();
                 });
-                attachVideoBadge(slot, false);
+                attachVideoBadge(slot, false).catch(() => {});
                 try { io.unobserve(slot); } catch (e) { /* ignore */ }
                 slot.removeAttribute('data-file-name');
                 delete slot.dataset.fileName;
@@ -1383,7 +1420,7 @@
                 const existingSrc = existing.getAttribute('data-src') || existing.getAttribute('src');
                 const existingIsVideo = existing.tagName === 'VIDEO';
                 if (existingIsVideo === isVideo && existingSrc === fullPath) {
-                    attachVideoBadge(slot, isVideo);
+                    attachVideoBadge(slot, isVideo, fileName, charName).catch(() => {});
                     continue;
                 }
                 if (existingIsVideo) {
@@ -1396,6 +1433,7 @@
             const openZoom = (e) => {
                 e.stopPropagation();
                 e.preventDefault();
+                // ★ ズームは「元ファイル」を開く
                 showMediaZoom(fullPath, isVideo);
             };
 
@@ -1413,7 +1451,7 @@
                         'pointer-events:auto;cursor:zoom-in;background:#000;';
                     img.addEventListener('click', openZoom);
                     slot.insertBefore(img, slot.firstChild);
-                    attachVideoBadge(slot, true);
+                    attachVideoBadge(slot, true, fileName, charName).catch(() => {});
                     continue;
                 }
 
@@ -1445,8 +1483,10 @@
                 v.src = fullPath;
                 slot.insertBefore(v, slot.firstChild);
                 io.observe(slot);
-                attachVideoBadge(slot, true);
+                attachVideoBadge(slot, true, fileName, charName).catch(() => {});
             } else {
+                // 画像（GIF/APNG/通常 PNG/JPEG 等）
+                //   サムネ名がセルに保存されていた場合も、fullPath は「元画像」を指す
                 const img = document.createElement('img');
                 img.src = fullPath;
                 img.dataset.src = fullPath;
@@ -1456,12 +1496,14 @@
                     'pointer-events:auto;cursor:zoom-in;';
                 img.addEventListener('click', openZoom);
                 slot.insertBefore(img, slot.firstChild);
-                attachVideoBadge(slot, false);
+
+                // ★ 元ファイル名でバッジ判定
+                attachVideoBadge(slot, false, fileName, charName).catch(() => {});
             }
         }
     }
 
-    // ★ ❌ボタンなし: Escape / 外側クリックで閉じる
+    // ★ Escape / 外側クリックで閉じる
     function showMediaZoom(src, isVideo) {
         const existing = document.getElementById('stj_media_zoom');
         if (existing) existing.remove();
@@ -1552,11 +1594,8 @@
             return;
         }
 
-        let fileName = rawName;
-        const m = rawName.match(/^(.+)_(mp4|webm)_thum\.png$/i);
-        if (m) {
-            fileName = `${m[1]}.${m[2].toLowerCase()}`;
-        }
+        // ★ サムネ名 → 元ファイル名に変換（GIF もアニメ表示できるように）
+        const fileName = resolveThumbToOriginal(rawName);
 
         if (!/\.(png|jpe?g|gif|webp|avif|bmp|mp4|webm)$/i.test(fileName)) {
             console.log(`[STJ Editor] 拡張子なしのためスキップ: ${fileName}`);
@@ -1943,7 +1982,7 @@
 
         if (!charName || imageNames.length === 0) {
             removeMedia(); removeLoading();
-            attachVideoBadge(previewEl, false);
+            attachVideoBadge(previewEl, false).catch(() => {});
             placeholderShowNormal();
             delete previewEl.dataset.currentIndex;
             delete previewEl.dataset.currentPath;
@@ -1958,24 +1997,28 @@
         const fileName = extractFileNameFromPath(imageNames[currentIndex]);
         if (!fileName) {
             removeMedia(); removeLoading();
-            attachVideoBadge(previewEl, false);
+            attachVideoBadge(previewEl, false).catch(() => {});
             placeholderShowError();
             previewEl.dataset.currentPath = '__missing__';
             return;
         }
+
+        // ★ 元ファイル名を求める（サムネ名→元画像名）
+        const origFileName = resolveThumbToOriginal(fileName);
+
         const fullPath = await detectImageExtension(charName, fileName);
         if (_previewLoadGen.get(previewEl) !== myGen) return;
 
         if (fullPath === null) {
             removeMedia(); removeLoading();
-            attachVideoBadge(previewEl, false);
+            attachVideoBadge(previewEl, false).catch(() => {});
             placeholderShowError();
             previewEl.dataset.currentPath = '__missing__';
             return;
         }
 
         if (previewEl.dataset.currentPath === fullPath) {
-            attachVideoBadge(previewEl, isVideoUrl(fullPath));
+            attachVideoBadge(previewEl, isVideoUrl(fullPath), origFileName, charName).catch(() => {});
             placeholderHide();
             return;
         }
@@ -2009,7 +2052,7 @@
                     img.style.objectFit = 'contain'; img.style.display = 'block';
                     img.style.backgroundColor = 'transparent';
                     previewEl.appendChild(img);
-                    attachVideoBadge(previewEl, true);
+                    attachVideoBadge(previewEl, true, origFileName, charName).catch(() => {});
                     previewEl.dataset.currentPath = fullPath;
                     removeLoading(); placeholderHide();
                     return;
@@ -2047,7 +2090,7 @@
             if (_previewLoadGen.get(previewEl) !== myGen) { removeLoading(); return; }
             if (video.readyState === 0) {
                 removeLoading();
-                attachVideoBadge(previewEl, false);
+                attachVideoBadge(previewEl, false).catch(() => {});
                 placeholderShowError();
                 previewEl.dataset.currentPath = '__missing__';
                 return;
@@ -2056,7 +2099,7 @@
             video.style.objectFit = 'contain'; video.style.display = 'block';
             video.style.backgroundColor = 'transparent';
             previewEl.appendChild(video);
-            attachVideoBadge(previewEl, true);
+            attachVideoBadge(previewEl, true, origFileName, charName).catch(() => {});
             previewEl.dataset.currentPath = fullPath;
             removeLoading(); placeholderHide();
         } else {
@@ -2078,7 +2121,7 @@
             if (_previewLoadGen.get(previewEl) !== myGen) { removeLoading(); return; }
             if (!decodeOk) {
                 removeLoading();
-                attachVideoBadge(previewEl, false);
+                attachVideoBadge(previewEl, false).catch(() => {});
                 placeholderShowError();
                 previewEl.dataset.currentPath = '__missing__';
                 return;
@@ -2086,7 +2129,8 @@
             img.style.width = '100%'; img.style.height = '100%';
             img.style.objectFit = 'contain'; img.style.display = 'block';
             previewEl.appendChild(img);
-            attachVideoBadge(previewEl, false);
+            // ★ 元ファイル名でバッジ判定（アニメ GIF/APNG も対象）
+            attachVideoBadge(previewEl, false, origFileName, charName).catch(() => {});
             previewEl.dataset.currentPath = fullPath;
             removeLoading(); placeholderHide();
         }
