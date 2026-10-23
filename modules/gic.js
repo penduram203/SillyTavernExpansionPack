@@ -56,9 +56,11 @@ console.log('[GIC] モジュールロード開始');
                     if (thumbName && set.has(thumbName)) {
                         filtered.push(thumbName);
                         replaced++;
-                        // ★ プレビューでの逆引き用に「サムネ → 元画像」を記録
+                        /* ★ 逆引き用マップ: サムネ → 元画像（拡大ビュー・削除処理で使用） */
                         try {
-                            if (!window.__gicListReverseMap) window.__gicListReverseMap = new Map();
+                            if (!window.__gicListReverseMap) {
+                                window.__gicListReverseMap = new Map();
+                            }
                             window.__gicListReverseMap.set(thumbName, f);
                         } catch (e) { /* ignore */ }
                         continue;
@@ -164,6 +166,7 @@ const _failedThumbs = new Set();
 //    - image_img_thum.png で逆引きマップに登録済み → 対応する元画像名
 //    - 未登録の _img_thum.png → null（背景画像をそのまま使う）
 //    - video_mp4_thum.png → null
+//    - ★ window.__gicListReverseMap（/api/images/list 由来）も参照
 // ============================================================
 function resolveOriginalFileName(fileName) {
     if (!fileName || typeof fileName !== 'string') return null;
@@ -3507,7 +3510,8 @@ function fitPreviewToViewport(panel) {
         const charName = getCurrentCharacterName();
         panel.querySelectorAll('img').forEach(img => {
             // ★ getAttribute を優先（プロパティの絶対URL解決を回避）
-            let src = img.getAttribute('src') || img.src || '';
+            const srcAttr = img.getAttribute('src') || '';
+            const src = srcAttr || img.src || '';
             if (!src) return;
             if (src.startsWith('blob:') || src.startsWith('data:')) return;
 
@@ -3525,7 +3529,6 @@ function fitPreviewToViewport(panel) {
 
             const origFile = resolveOriginalFileName(thumbFileName);
             if (!origFile) {
-                // 逆引き失敗の診断ログ（必要になったら有効化）
                 console.debug(
                     `[GIC] 🔍 プレビュー: 逆引き失敗 thumb="${thumbFileName}" ` +
                     `(mapSize=${_imgThumbReverseMap.size})`
@@ -3534,11 +3537,10 @@ function fitPreviewToViewport(panel) {
             }
             if (!charName) return;
 
-            let origSrc = null;
-
             /* ① メモリキャッシュの元画像 blob を優先 */
             const cacheKey = `${charName}:${origFile}`;
             const cachedBlobUrl = _imgBlobUrlCache.get(cacheKey);
+            let origSrc;
             if (cachedBlobUrl) {
                 origSrc = cachedBlobUrl;
             } else {
@@ -3546,8 +3548,7 @@ function fitPreviewToViewport(panel) {
                 origSrc = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(origFile);
             }
 
-            // ★ 比較は「blob か相対URLか」で分ける
-            //   （img.src は絶対URLを返すため、相対URLと直接比較すると常に不一致になる）
+            // ★ 比較: blob は絶対URL、相対URLは getAttribute 同士で比較
             const currentAttr = img.getAttribute('src') || '';
             const isBlobOrig = origSrc.startsWith('blob:');
             const needsSwap = isBlobOrig
@@ -4104,6 +4105,45 @@ function placeBulkDeleteButton(controls) {
     }
 }
 
+// ============================================================
+// ★ サムネイルパス → 元ファイルパス 変換
+//   ギャラリーの削除操作でサムネ(_img_thum.png / _thum.png)だけが
+//   削除されて元ファイルが残る問題を防ぐ
+// ============================================================
+function convertThumbPathToOriginal(rawPath) {
+    if (!rawPath || typeof rawPath !== 'string') return rawPath;
+
+    const cleaned = rawPath.replace(/^\/+/, '');
+    const lastSlash = cleaned.lastIndexOf('/');
+    const folder = lastSlash >= 0 ? cleaned.slice(0, lastSlash) : '';
+    const fileName = lastSlash >= 0 ? cleaned.slice(lastSlash + 1) : cleaned;
+
+    if (!fileName) return rawPath;
+
+    let originalName = null;
+
+    /* 画像サムネ: xxx_img_thum.png → xxx.(元拡張子) */
+    if (fileName.endsWith(IMG_THUMB_SUFFIX)) {
+        if (_imgThumbReverseMap.has(fileName)) {
+            originalName = _imgThumbReverseMap.get(fileName);
+        } else if (window.__gicListReverseMap?.has(fileName)) {
+            originalName = window.__gicListReverseMap.get(fileName);
+        } else {
+            // 最終フォールバック: .png と仮定
+            originalName = fileName.slice(0, -IMG_THUMB_SUFFIX.length) + '.png';
+        }
+    }
+    /* 動画サムネ: xxx_mp4_thum.png / xxx_webm_thum.png → xxx.mp4 / xxx.webm */
+    else if (/_thum\.png$/i.test(fileName)) {
+        const m = fileName.match(/^(.+)_(mp4|webm)_thum\.png$/i);
+        if (m) originalName = `${m[1]}.${m[2].toLowerCase()}`;
+    }
+
+    if (!originalName || originalName === fileName) return rawPath;
+    return folder ? `${folder}/${originalName}` : originalName;
+}
+
+
 async function tryDeleteImage(rawPath) {
     if (!rawPath || typeof rawPath !== 'string') return { ok: false };
     const cleaned = rawPath.replace(/^\/+/, '');
@@ -4154,8 +4194,31 @@ async function executeBulkDelete() {
 
     let successCount = 0, failCount = 0;
     for (const path of paths) {
-        const result = await tryDeleteImage(path);
-        if (result.ok) successCount++; else failCount++;
+        // ★ サムネイルパスなら元ファイルパスに変換して優先削除
+        const originalPath = convertThumbPathToOriginal(path);
+        let ok = false;
+
+        if (originalPath !== path) {
+            // サムネイルパス → 元ファイルを削除（成功必須）
+            const origResult = await tryDeleteImage(originalPath);
+            if (origResult.ok) {
+                ok = true;
+                console.log(`[GIC-Bulk] ✅ 元ファイル削除: ${origResult.usedPath}`);
+                // サムネイル自体も削除（ベストエフォート／失敗しても無視）
+                tryDeleteImage(path).catch(() => {});
+            } else {
+                console.warn(`[GIC-Bulk] ⚠️ 元ファイル削除に失敗: ${originalPath}`);
+            }
+        } else {
+            // 非サムネイルパス（元ファイル名そのまま） → 直接削除
+            const result = await tryDeleteImage(path);
+            if (result.ok) {
+                ok = true;
+                console.log(`[GIC-Bulk] ✅ 削除: ${result.usedPath}`);
+            }
+        }
+
+        if (ok) successCount++; else failCount++;
     }
     console.log(`[GIC-Bulk] 完了: 成功 ${successCount} / 失敗 ${failCount}`);
 
