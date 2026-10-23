@@ -4530,7 +4530,7 @@ function enforceGalleryGridLayout() {
     const MAX_ROWS      = 4;
     const H_GAP         = 0;
     const V_GAP         = 0;
-    const RIGHT_EXTRA   = 20;
+    const RIGHT_EXTRA   = 0;
     const TOP_PADDING   = 6;
     const PAGER_RESERVE = 70;
     const THUMB_MAX     = 180;
