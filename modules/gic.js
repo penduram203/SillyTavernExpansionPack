@@ -3506,15 +3506,32 @@ function fitPreviewToViewport(panel) {
     try {
         const charName = getCurrentCharacterName();
         panel.querySelectorAll('img').forEach(img => {
-            const src = img.src || '';
-            if (src.startsWith('blob:')) return;  // 既に blob → 何もしない
-            if (!src.endsWith(IMG_THUMB_SUFFIX)) return;
+            // ★ getAttribute を優先（プロパティの絶対URL解決を回避）
+            let src = img.getAttribute('src') || img.src || '';
+            if (!src) return;
+            if (src.startsWith('blob:') || src.startsWith('data:')) return;
 
-            const thumbFileName = src.split('/').pop();
+            // クエリ・フラグメントを除去
+            const cleanSrc = src.split('?')[0].split('#')[0];
+            const lastSegRaw = cleanSrc.split('/').pop() || '';
+
+            // ★ パーセントエンコードをデコード（日本語ファイル名対応）
+            let thumbFileName = lastSegRaw;
+            try {
+                thumbFileName = decodeURIComponent(lastSegRaw);
+            } catch (e) { /* ignore */ }
+
+            if (!thumbFileName.endsWith(IMG_THUMB_SUFFIX)) return;
+
             const origFile = resolveOriginalFileName(thumbFileName);
-
-            /* 逆引きマップに無い場合は変換しない */
-            if (!origFile) return;
+            if (!origFile) {
+                // 逆引き失敗の診断ログ（必要になったら有効化）
+                console.debug(
+                    `[GIC] 🔍 プレビュー: 逆引き失敗 thumb="${thumbFileName}" ` +
+                    `(mapSize=${_imgThumbReverseMap.size})`
+                );
+                return;
+            }
             if (!charName) return;
 
             let origSrc = null;
@@ -3524,18 +3541,31 @@ function fitPreviewToViewport(panel) {
             const cachedBlobUrl = _imgBlobUrlCache.get(cacheKey);
             if (cachedBlobUrl) {
                 origSrc = cachedBlobUrl;
-                console.log(`[GIC] 🔍 プレビュー: キャッシュ済み元画像を使用: ${origFile}`);
             } else {
-                /* ② 未キャッシュ → 元画像 URL（バックグラウンド取得） */
+                /* ② 未キャッシュ → 元画像 URL */
                 origSrc = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(origFile);
             }
 
-            if (img.src !== origSrc) {
+            // ★ 比較は「blob か相対URLか」で分ける
+            //   （img.src は絶対URLを返すため、相対URLと直接比較すると常に不一致になる）
+            const currentAttr = img.getAttribute('src') || '';
+            const isBlobOrig = origSrc.startsWith('blob:');
+            const needsSwap = isBlobOrig
+                ? img.src !== origSrc
+                : currentAttr !== origSrc;
+
+            if (needsSwap) {
+                console.log(
+                    `[GIC] 🔍 プレビュー差し替え: ${thumbFileName} → ${origFile}` +
+                    (cachedBlobUrl ? ' (cache)' : '')
+                );
                 img.src = origSrc;
                 img.dataset.gicFitBound = '';
             }
         });
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+        console.warn('[GIC] fitPreviewToViewport img差し替えエラー:', e);
+    }
 
     if (window.__gicPendingPreview) {
         fitVideoPreview(panel, window.__gicPendingPreview);
