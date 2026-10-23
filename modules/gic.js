@@ -1590,6 +1590,7 @@ async function clearAllImageCache() {
             try { URL.revokeObjectURL(url); } catch (e) { /* ignore */ }
         });
         _imgBlobUrlCache.clear();
+        window.__gicCacheWarmedFor = null;
         console.log('[GIC] 🧹 画像 blob キャッシュを全消去しました');
         return true;
     } catch (e) {
@@ -1971,6 +1972,111 @@ async function preloadGalleryImagesInBackground() {
     } finally {
         _imgPreloading = false;
     }
+}
+
+// ============================================================
+// ★ IndexedDB から全 blob を読み込み、メモリキャッシュに展開
+//    再起動直後のサムネ描画を瞬時化する
+// ============================================================
+async function warmupImageMemoryCacheForChar(charName) {
+    if (!charName) return;
+    if (window.__gicCacheWarmedFor === charName) return;
+    window.__gicCacheWarmedFor = charName;
+
+    try {
+        const db = await openImgDB();
+        const keys = await new Promise((resolve, reject) => {
+            const tx = db.transaction(IMG_DB_STORE, 'readonly');
+            const req = tx.objectStore(IMG_DB_STORE).getAllKeys();
+            req.onsuccess = () => resolve(req.result || []);
+            req.onerror = () => reject(req.error);
+        });
+
+        const prefix = `${charName}:`;
+        const matchingKeys = keys.filter(k => k.startsWith(prefix));
+        if (matchingKeys.length === 0) return;
+
+        let loaded = 0;
+        for (const key of matchingKeys) {
+            if (_imgBlobUrlCache.has(key)) continue;
+            try {
+                const blob = await new Promise((resolve, reject) => {
+                    const tx = db.transaction(IMG_DB_STORE, 'readonly');
+                    const req = tx.objectStore(IMG_DB_STORE).get(key);
+                    req.onsuccess = () => resolve(req.result);
+                    req.onerror = () => reject(req.error);
+                });
+                if (blob) {
+                    _imgBlobUrlCache.set(key, URL.createObjectURL(blob));
+                    loaded++;
+                }
+            } catch (e) { /* skip */ }
+        }
+
+        console.log(`[GIC] 🔥 メモリキャッシュウォームアップ完了: ${charName} (${loaded}/${matchingKeys.length}件)`);
+    } catch (e) {
+        console.warn('[GIC] メモリキャッシュウォームアップ失敗:', e);
+    }
+}
+
+// ============================================================
+// ★ MutationObserver でサムネ追加を即検知し、キャッシュがあれば即座に swap
+// ============================================================
+function setupImmediateThumbCacheInterceptor() {
+    if (window.__gicImmediateThumbCacheInstalled) return;
+    window.__gicImmediateThumbCacheInstalled = true;
+
+    const processing = new WeakSet();
+
+    async function processThumb(thumb) {
+        if (!thumb || processing.has(thumb)) return;
+        if (thumb.dataset.gicImageReady === '1') return;
+        processing.add(thumb);
+
+        const title = (thumb.getAttribute('title') || '').trim();
+        if (!title) return;
+        if (!/\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(title)) return;
+        if (/_thum\.png$/i.test(title)) return;
+
+        const charName = getCurrentCharacterName();
+        if (!charName) return;
+
+        const cacheKey = `${charName}:${title}`;
+
+        /* ① メモリキャッシュ */
+        let blobUrl = _imgBlobUrlCache.get(cacheKey);
+
+        /* ② IndexedDB */
+        if (!blobUrl) {
+            try {
+                const blob = await getImgFromDB(cacheKey);
+                if (blob) {
+                    blobUrl = URL.createObjectURL(blob);
+                    _imgBlobUrlCache.set(cacheKey, blobUrl);
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        if (!blobUrl) return;
+
+        thumb.querySelectorAll('.nGY2TnImg, .nGY2TnImgBack').forEach(el => {
+            el.style.setProperty('opacity', '0', 'important');
+        });
+        thumb.querySelectorAll('.nGY2TnImg2, .nGY2GThumbnailImg').forEach(el => {
+            el.style.setProperty('opacity', '0', 'important');
+        });
+        applyCachedImageToThumb(thumb, blobUrl);
+        thumb.dataset.gicImageReady = '1';
+    }
+
+    const observer = new MutationObserver(() => {
+        const gallery = document.getElementById('gallery');
+        if (!gallery) return;
+        gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1').forEach(processThumb);
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    console.log('[GIC] ⚡ 即時サムネキャッシュ適用インターセプタを設置しました');
 }
 
 // ============================================================
@@ -2580,6 +2686,8 @@ function resetGalleryHeightCache() {
     removeBulkOverlays();
     const bulkBtn = document.getElementById('gic-bulk-delete-button');
     if (bulkBtn) bulkBtn.remove();
+    const floatingBtn = document.getElementById('gic-floating-bulk-exit');
+    if (floatingBtn) floatingBtn.remove();
 
     const folderInput = document.querySelector('.gallery-folder-input.gic-bulk-shortened-input');
     if (folderInput) folderInput.classList.remove('gic-bulk-shortened-input');
@@ -2595,6 +2703,7 @@ function positionPager(pager) {
     const gr = galleryEl.getBoundingClientRect();
     if (gr.width === 0 || gr.height === 0) return;
 
+    /* ★ ギャラリー右端から何 px 内側に置くか（右寄せ） */
     const rightInset = (window.innerWidth - gr.right) + PAGINATION_OFFSET_LEFT;
     const bottom     = (window.innerHeight - gr.bottom) + PAGINATION_OFFSET_UP;
 
@@ -3005,6 +3114,7 @@ function fitVideoPreview(panel, pending) {
     panel.style.setProperty('top', topPx + 'px', 'important');
     panel.style.setProperty('right', 'auto', 'important');
     panel.style.setProperty('bottom', 'auto', 'important');
+    /* ★ translateY(0) でパネルを fixed 子孫の containing block 化 */
     panel.style.setProperty('transform', 'translateY(0)', 'important');
     panel.style.setProperty('transform-origin', 'left top', 'important');
     panel.style.setProperty('margin', '0', 'important');
@@ -3221,6 +3331,7 @@ function updateBulkDeleteButton() {
     const btn = document.getElementById('gic-bulk-delete-button');
     const floatingBtn = document.getElementById('gic-floating-bulk-exit');
 
+    /* ★ 元ボタンと浮動ボタンで同じテキストを共有 */
     const text = _bulkDeleteMode
         ? (_bulkDeleteSelected.size > 0 ? `選択終了 (${_bulkDeleteSelected.size})` : '選択終了')
         : '一括選択';
@@ -3266,6 +3377,10 @@ function createBulkDeleteButton() {
     return btn;
 }
 
+// ============================================================
+// ★ 一括選択モード: 前面の「選択終了」ボタン（白枠付き）
+//    元の一括選択ボタンと同じ位置に表示する
+// ============================================================
 function ensureFloatingBulkButton() {
     let btn = document.getElementById('gic-floating-bulk-exit');
     if (btn) return btn;
@@ -3291,6 +3406,8 @@ function positionFloatingBulkButton() {
     const original = document.getElementById('gic-bulk-delete-button');
     if (!btn || !original) return;
 
+    /* ★ 元の一括選択ボタンの位置を取得
+          visibility:hidden はレイアウト保持なので rect は正確 */
     const rect = original.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return;
 
@@ -3583,6 +3700,9 @@ function setupBulkDelete() {
 
 // ============================================================
 // ★ ギャラリーヘッダー再構成
+//    .dragTitle 内の "Image Gallery" テキストを削除し、
+//    フォルダ入力・一括選択・✓・🗑・♻ を左端に集約する。
+//    空になった旧コンテナも除去する。
 // ============================================================
 function restructureGalleryHeader() {
     const gallery = document.getElementById('gallery');
@@ -3640,7 +3760,11 @@ function restructureGalleryHeader() {
 }
 
 // ============================================================
-// ★ ギャラリーサムネイルを 4列 × 4行 のグリッドに強制
+// ★ ギャラリーサムネイルを 4列 × 4行 の グリッドに強制
+//    - 200×200px 固定・隙間ゼロ
+//    - 画面上端寄せ（下方向へ拡張）
+//    - 右側余白を10px広げる
+//    - サムネ内部要素も200pxに強制（黒余白排除）
 // ============================================================
 function enforceGalleryGridLayout() {
     const gallery = document.getElementById('gallery');
@@ -3683,15 +3807,16 @@ function enforceGalleryGridLayout() {
     /* ★ レイアウト定数 */
     const COLS          = 4;
     const MAX_ROWS      = 4;
-    const H_GAP         = 0;      /* ★ 隙間なし */
-    const V_GAP         = 0;      /* ★ 隙間なし */
+    const H_GAP         = 0;      /* 隙間なし */
+    const V_GAP         = 0;      /* 隙間なし */
     const RIGHT_EXTRA   = 10;
     const TOP_PADDING   = 6;
     const PAGER_RESERVE = 70;
-    const THUMB_MAX     = 200;    /* ★ 200px */
+    const THUMB_MAX     = 200;    /* 200px 固定 */
     const THUMB_MIN     = 120;
 
-    /* ★ headerH: 上半分の既知ヘッダー要素のみを測定 */
+    /* ★ headerH: 上半分の既知ヘッダー要素のみを測定
+          （per-thumb の🗑ボタンや下部要素を除外） */
     const galleryRect0 = gallery.getBoundingClientRect();
     const halfH = galleryRect0.height / 2;
     let headerBottom = 0;
@@ -3840,6 +3965,7 @@ function enforceGalleryGridLayout() {
 
 // ============================================================
 // ★ ページ切替: 内側コンテナを隠して揃えてから見せる方式
+//    キャッシュ済み画像は即時適用
 // ============================================================
 async function handlePageSwitchAsync() {
     if (_pageSwitchInProgress) return;
@@ -3853,6 +3979,7 @@ async function handlePageSwitchAsync() {
         t.style.removeProperty('visibility');
     });
 
+    /* ★ クラス付与で CSS が全サムネを hidden にする */
     gallery.classList.add('gic-page-switching');
 
     const thumbContainer = gallery.querySelector('.nGY2GallerySub')
@@ -3899,7 +4026,7 @@ async function handlePageSwitchAsync() {
         try { enforceGalleryGridLayout(); } catch (_) {}
         try { scanAndSyncVideoBadges(); } catch (_) {}
 
-        /* ★ キャッシュ済みの画像を即時適用 */
+        /* ★ キャッシュ済み画像を即時適用 */
         try {
             const charName = getCurrentCharacterName();
             if (charName) {
@@ -3927,6 +4054,7 @@ async function handlePageSwitchAsync() {
                 thumbContainer.style.removeProperty('visibility');
             }
         }
+        /* ★ クラス除去 = この瞬間に全サムネが正しい位置で一斉に表示される */
         gallery.classList.remove('gic-page-switching');
         _pageSwitchInProgress = false;
     }
@@ -4069,11 +4197,17 @@ function syncGalleryButtonVisibility() {
     if (galleryOpen) {
         applyGalleryLayout();
 
+        /* ★ メモリキャッシュを先にウォームアップ（再起動直後の読み込み遅延対策） */
+        const charName = getCurrentCharacterName();
+        if (charName) {
+            warmupImageMemoryCacheForChar(charName).catch(() => {});
+        }
+
         setTimeout(() => {
             if (!isGalleryOpen()) return;
             setupGalleryVideoThumbs().catch(e => console.warn('[GIC] video thumbs setup error:', e));
             preloadGalleryImagesInBackground().catch(e => console.warn('[GIC] preload error:', e));
-        }, 500);
+        }, 100);   /* ★ 500 → 100 に短縮 */
 
         if (warmupState !== 'running') {
             scheduleSTJEditorReopen();
@@ -4178,6 +4312,8 @@ function hideGalleryAttachmentsImmediately(reason = '') {
         _bulkDeleteMode = false;
         _bulkDeleteSelected.clear();
     }
+    const floatingBtn = document.getElementById('gic-floating-bulk-exit');
+    if (floatingBtn) floatingBtn.remove();
 
     for (const sel of GALLERY_WINDOW_SELECTORS) {
         const elements = document.querySelectorAll(sel);
@@ -4652,14 +4788,27 @@ function setupListeners() {
             scanForGeneratedImages();
             _galleryPreparedFor = null;
             _galleryPreloadState = 'idle';
-            setTimeout(() => prepareGalleryForCharacter().catch(() => {}), 500);
+            setTimeout(() => {
+                const charName = getCurrentCharacterName();
+                if (charName) {
+                    /* ★ メモリキャッシュを事前展開（ギャラリーを開く前に完了させる） */
+                    warmupImageMemoryCacheForChar(charName).catch(() => {});
+                }
+                prepareGalleryForCharacter().catch(() => {});
+            }, 500);
         });
     }
     if (event_types.CHARACTER_SELECTED) {
         safeOn(event_types.CHARACTER_SELECTED, () => {
             _galleryPreparedFor = null;
             _galleryPreloadState = 'idle';
-            setTimeout(() => prepareGalleryForCharacter().catch(() => {}), 300);
+            setTimeout(() => {
+                const charName = getCurrentCharacterName();
+                if (charName) {
+                    warmupImageMemoryCacheForChar(charName).catch(() => {});
+                }
+                prepareGalleryForCharacter().catch(() => {});
+            }, 300);
         });
     }
 }
@@ -4720,6 +4869,11 @@ function exposeGicApi() {
                 indexedDBCount: count,
                 memoryBlobUrlCount: _imgBlobUrlCache.size,
             };
+        },
+        warmupCache: () => {
+            const charName = getCurrentCharacterName();
+            if (charName) return warmupImageMemoryCacheForChar(charName);
+            return Promise.resolve();
         },
 
         debugThumbState: async (charName) => {
@@ -4787,8 +4941,7 @@ function exposeGicApi() {
 }
 
 // ============================================================
-// ★ nanogallery2 の galleryMaxRows を 4 に強制し、
-//    thumbnailWidth を 180px 固定（4列を確実にする）
+// ★ nanogallery2 の galleryMaxRows を 4 に強制
 // ============================================================
 (function patchNanogallery2For4Rows() {
     if (window.__gicNG2Patched) return;
@@ -4858,6 +5011,13 @@ function initializeGIC() {
     loadPersistedState();
     installBulkDeleteDocumentHandlers();
     installGalleryCloseInterceptor();
+    setupImmediateThumbCacheInterceptor();   /* ★ 即時インターセプタ登録 */
+
+    /* ★ 起動直後にもウォームアップを試行（再起動直後の読み込み遅延対策） */
+    const charName = getCurrentCharacterName();
+    if (charName) {
+        warmupImageMemoryCacheForChar(charName).catch(() => {});
+    }
 
     document.addEventListener('click', (e) => {
         if (!e.target) return;
@@ -4948,6 +5108,7 @@ export async function activate() {
     loadPersistedState();
     installBulkDeleteDocumentHandlers();
     installGalleryCloseInterceptor();
+    setupImmediateThumbCacheInterceptor();
     setupGalleryDedupeObserver();
     setupGalleryDragToJson();
     createReleaseButton();
