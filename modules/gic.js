@@ -10,6 +10,7 @@ console.log('[GIC] モジュールロード開始');
 // ============================================================
 // ★ /api/images/list で「元画像 → サムネイル」置換
 //    - _img_thum.png 自体はリストから除外（2倍表示防止）
+//    - 動画サムネイル (_thum.png) は置換対象外（二重サムネ防止）
 //    - 元画像 image.png を image_img_thum.png に置換（存在時のみ）
 //    - これにより nanogallery2 は最初からサムネイル URL を設定する
 //    - ブラウザは元画像 (1280x720) を一切 fetch しない
@@ -42,6 +43,12 @@ console.log('[GIC] モジュールロード開始');
 
                 /* _img_thum.png 自体は除外（2倍表示防止） */
                 if (f.endsWith('_img_thum.png')) { removed++; continue; }
+
+                /* ★ 動画サムネイル (_thum.png) は置換対象外 */
+                if (f.endsWith('_thum.png')) {
+                    filtered.push(f);
+                    continue;
+                }
 
                 /* 元画像 → サムネイル置換（サムネが存在する時のみ） */
                 if (/\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(f)) {
@@ -1005,6 +1012,25 @@ function getCurrentCharacterName() {
     } catch (e) { /* ignore */ }
 })();
 
+// ============================================================
+// ★ マニフェストから不正キー（動画サムネ・二重サムネ）を除去
+// ============================================================
+(function cleanupManifestInvalidKeys() {
+    let removedCount = 0;
+    for (const key of [..._imgThumbKnown]) {
+        const parts = key.split(':');
+        const fileName = parts.slice(1).join(':');
+        if (fileName.endsWith('_thum.png') || fileName.endsWith('_img_thum.png')) {
+            _imgThumbKnown.delete(key);
+            removedCount++;
+        }
+    }
+    if (removedCount > 0) {
+        saveImgThumbManifest();
+        console.log(`[GIC] 🧹 マニフェストから不正キー ${removedCount}件を削除`);
+    }
+})();
+
 function saveImgThumbManifest() {
     try {
         localStorage.setItem(IMG_THUMB_MANIFEST_KEY, JSON.stringify([..._imgThumbKnown]));
@@ -1013,6 +1039,8 @@ function saveImgThumbManifest() {
 
 function imageFileToThumbName(fileName) {
     if (!fileName || typeof fileName !== 'string') return null;
+    /* ★ 動画サムネイル・画像サムネイル自体は対象外 */
+    if (fileName.endsWith('_thum.png') || fileName.endsWith('_img_thum.png')) return null;
     const m = fileName.match(/^(.+)\.(png|jpe?g|webp|gif|avif|bmp)$/i);
     if (!m) return null;
     return `${m[1]}${IMG_THUMB_SUFFIX}`;
@@ -1853,7 +1881,6 @@ async function ensureThumbnailForVideo(videoFileName, charName = getCurrentChara
 async function generateImageThumbnailBlob(imageUrl, size = IMG_THUMB_SIZE) {
     return new Promise((resolve) => {
         const img = new Image();
-        /* ★ crossOrigin は不要（同一オリジン）なので削除 */
         img.onload = () => {
             try {
                 const vw = img.naturalWidth;
@@ -1892,6 +1919,11 @@ async function generateImageThumbnailBlob(imageUrl, size = IMG_THUMB_SIZE) {
 async function ensureImageThumbnail(imageFileName, charName) {
     if (!imageFileName || !charName) return null;
 
+    /* ★ 動画サムネイル・画像サムネイル自体は処理対象外 */
+    if (imageFileName.endsWith('_thum.png') || imageFileName.endsWith('_img_thum.png')) {
+        return null;
+    }
+
     const manifestKey = `${charName}:${imageFileName}`;
     const cacheKey = `${charName}:${imageFileName}:imgthumb`;
 
@@ -1923,7 +1955,6 @@ async function ensureImageThumbnail(imageFileName, charName) {
             _imgThumbKnown.add(manifestKey);
             saveImgThumbManifest();
         }
-        /* ★ IndexedDB にあるがディスクに無い場合は書き出す */
         const thumbName = imageFileToThumbName(imageFileName);
         if (thumbName) {
             const diskUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(thumbName);
@@ -1942,7 +1973,6 @@ async function ensureImageThumbnail(imageFileName, charName) {
 
     await putImgInDB(cacheKey, blob);
 
-    /* ★ ディスク保存（/api/images/list 置換に必須） */
     const thumbName = imageFileToThumbName(imageFileName);
     if (thumbName) {
         const ok = await uploadThumbnailBlob(charName, blob, thumbName);
@@ -2076,6 +2106,7 @@ async function setupGalleryVideoThumbs() {
             if (!title) return;
 
             if (title.endsWith('_img_thum.png')) return;
+            if (title.endsWith('_thum.png')) return;
 
             if (isVideoFile(title)) {
                 if (thumb.dataset.gicVideoReady === '1') return;
@@ -2165,7 +2196,6 @@ async function processGalleryVideoThumb(thumb, videoFileName, charName) {
 
 // ============================================================
 // ★ 全画像のバックグラウンド先読み（元画像 + サムネイル両方）
-//    ★ 引数順序修正: ensureImageThumbnail(f, charName)
 // ============================================================
 async function preloadGalleryImagesInBackground() {
     if (_imgPreloading) return;
@@ -2215,7 +2245,7 @@ async function preloadGalleryImagesInBackground() {
             await Promise.all(chunk.map(async f => {
                 /* 元画像の blob キャッシュ（プレビュー用） */
                 await fetchAndCacheImage(charName, f);
-                /* ★ 200×200 サムネイル生成（引数順序修正: f, charName） */
+                /* 200×200 サムネイル生成（引数順序: f, charName） */
                 await ensureImageThumbnail(f, charName);
             }));
             await wait(IMG_PRELOAD_DELAY_MS);
@@ -2388,6 +2418,7 @@ function setupImmediateThumbCacheInterceptor() {
 
 // ============================================================
 // ★ 既存 IndexedDB サムネイルを一括でディスクに書き出す（一回限りの移行）
+//    ★ 不正キー（動画サムネ・二重サムネ）はスキップ
 // ============================================================
 async function migrateCacheToDisk() {
     const charName = getCurrentCharacterName();
@@ -2416,9 +2447,15 @@ async function migrateCacheToDisk() {
         console.log(`[GIC] 🔄 対象サムネイル: ${thumbKeys.length} 件`);
 
         for (const key of thumbKeys) {
-            /* key = "charName:imageFileName:imgthumb" → imageFileName を抽出 */
             const mid = key.slice(prefix.length, -(':imgthumb'.length));
             const imageFileName = mid;
+
+            /* ★ 動画サムネイル (_thum.png) や _img_thum.png は除外 */
+            if (imageFileName.endsWith('_thum.png') || imageFileName.endsWith('_img_thum.png')) {
+                console.debug(`[GIC] ⏭ 不正キーをスキップ: ${imageFileName}`);
+                skipped++;
+                continue;
+            }
 
             const thumbName = imageFileToThumbName(imageFileName);
             if (!thumbName) { skipped++; continue; }
@@ -2458,6 +2495,62 @@ async function migrateCacheToDisk() {
     } catch (e) {
         console.warn('[GIC] 移行エラー:', e);
         return { migrated, failed, skipped, error: e.message };
+    }
+}
+
+// ============================================================
+// ★ 不正な二重サムネイル (*_thum_img_thum.png) を一括削除
+// ============================================================
+async function cleanupInvalidImgThumbs() {
+    const charName = getCurrentCharacterName();
+    if (!charName) return { removed: 0 };
+
+    let removed = 0;
+
+    try {
+        const origFetch = window.__gicOriginalFetch || window.fetch;
+        const resp = await origFetch.call(window, '/api/images/list', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify({ folder: charName })
+        });
+        if (!resp.ok) return { removed: 0 };
+
+        const files = await resp.json();
+        if (!Array.isArray(files)) return { removed: 0 };
+
+        const invalid = files.filter(f =>
+            typeof f === 'string' && f.match(/_thum_img_thum\.png$/i)
+        );
+        if (invalid.length === 0) return { removed: 0 };
+
+        console.log(`[GIC] 🧹 不正な二重サムネイル ${invalid.length}件を削除します`);
+
+        for (const f of invalid) {
+            try {
+                const delResp = await origFetch.call(window, '/api/images/delete', {
+                    method: 'POST',
+                    headers: getRequestHeaders(),
+                    body: JSON.stringify({ path: `/user/images/${charName}/${f}` })
+                });
+                if (delResp.ok) {
+                    removed++;
+                    const imageFileName = f.slice(0, -'_img_thum.png'.length) + '.png';
+                    const cacheKey = `${charName}:${imageFileName}:imgthumb`;
+                    try {
+                        const db = await openImgDB();
+                        const tx = db.transaction(IMG_DB_STORE, 'readwrite');
+                        tx.objectStore(IMG_DB_STORE).delete(cacheKey);
+                    } catch (e) { /* ignore */ }
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        console.log(`[GIC] ✅ 不正サムネイル削除完了: ${removed}件`);
+        return { removed };
+    } catch (e) {
+        console.warn('[GIC] 不正サムネイル削除エラー:', e);
+        return { removed };
     }
 }
 
@@ -3133,7 +3226,6 @@ function positionPager(pager) {
     const gr = galleryEl.getBoundingClientRect();
     if (gr.width === 0 || gr.height === 0) return;
 
-    /* ★ ギャラリー右端から何 px 内側に置くか（右寄せ） */
     const rightInset = (window.innerWidth - gr.right) + PAGINATION_OFFSET_LEFT;
     const bottom     = (window.innerHeight - gr.bottom) + PAGINATION_OFFSET_UP;
 
@@ -3340,8 +3432,7 @@ function applyPageNumbers() {
 function fitPreviewToViewport(panel) {
     if (!panel) return;
 
-    /* ★ パネル内の img が _img_thum.png を指していたら元画像名に変換
-          （拡大ビューではオリジナル画像を表示する） */
+    /* ★ パネル内の img が _img_thum.png を指していたら元画像名に変換 */
     try {
         panel.querySelectorAll('img').forEach(img => {
             const src = img.src || '';
@@ -5280,6 +5371,7 @@ function exposeGicApi() {
         imageFileToThumbName,
         isImageThumbName,
         cleanupExistingImgThumbs,
+        cleanupInvalidImgThumbs,
         migrateCacheToDisk,
 
         clearThumbCache: clearAllThumbCache,
@@ -5519,11 +5611,16 @@ function initializeGIC() {
     applyGalleryLayout();
     try { setupGalleryVideoThumbs(); } catch (e) { /* ignore */ }
 
-    /* ★ 起動 2秒後に、IndexedDB の既存サムネイルをディスクに一括書き出し
-          （過去バージョンで生成された 207件等を一度だけ移行）
-          移行が完了したら、この setTimeout は削除して構いません */
-    setTimeout(() => {
-        migrateCacheToDisk().catch(e => console.warn('[GIC] 移行失敗:', e));
+    /* ★ 起動 2秒後に:
+         1. 不正な二重サムネイル (*_thum_img_thum.png) を削除
+         2. IndexedDB の正しいサムネイルをディスクに書き出し */
+    setTimeout(async () => {
+        try {
+            await cleanupInvalidImgThumbs();
+            await migrateCacheToDisk();
+        } catch (e) {
+            console.warn('[GIC] 起動時クリーンアップでエラー:', e);
+        }
     }, 2000);
 }
 
