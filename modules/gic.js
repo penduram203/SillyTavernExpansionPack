@@ -3713,7 +3713,7 @@ function enforceGalleryGridLayout() {
     const RIGHT_EXTRA   = 10;
     const TOP_PADDING   = 6;
     const PAGER_RESERVE = 70;
-    const THUMB_MAX     = 190;
+    const THUMB_MAX     = 192;
     const THUMB_MIN     = 120;
 
     /* ★ headerH: 上半分の既知ヘッダー要素のみを測定
@@ -3740,8 +3740,8 @@ function enforceGalleryGridLayout() {
     const containerH = Math.max(100, Math.round(galleryRect0.height) || 922);
 
     /* ★ サムネサイズを画面高から動的決定 */
-    const availH      = containerH - headerH - PAGER_RESERVE;
-    const maxThumbByH = Math.floor((availH - (MAX_ROWS - 1) * V_GAP) / MAX_ROWS);
+    const availH      = containerH - headerH - PAGER_RESERVE;  // コンテナ最小高さ用
+    const maxThumbByH = Math.floor((containerH - headerH - (MAX_ROWS - 1) * V_GAP) / MAX_ROWS);
     const THUMB       = Math.min(THUMB_MAX, Math.max(THUMB_MIN, maxThumbByH));
 
     const totalRows = Math.min(Math.ceil(visibleThumbs.length / COLS), MAX_ROWS);
