@@ -72,6 +72,14 @@ const IMG_DB_VERSION = 1;
 const IMG_PRELOAD_CHUNK = 3;
 const IMG_PRELOAD_DELAY_MS = 50;
 
+// === Image Thumbnail Cache (画像用 200x200 サムネイル) ===
+const IMG_THUMB_SUFFIX = '_img_thum.png';
+const IMG_THUMB_SIZE = 200;
+const IMG_THUMB_MANIFEST_KEY = 'gic_image_thumb_manifest';
+
+// 既知の画像サムネイル（メモリマニフェスト）
+const _imgThumbKnown = new Set();
+
 // ===== 状態 =====
 let lastGeneratedImageUrl = null;
 let isOverrideLocal = false;
@@ -924,6 +932,42 @@ function getCurrentCharacterName() {
     console.log('[GIC] 🖼️ ギャラリー配置CSSを注入しました');
 })();
 
+// ============================================================
+// ★ 画像サムネイルマニフェストを localStorage から復元
+// ============================================================
+(function loadImgThumbManifest() {
+    try {
+        const raw = localStorage.getItem(IMG_THUMB_MANIFEST_KEY);
+        if (!raw) return;
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) arr.forEach(k => _imgThumbKnown.add(k));
+        console.log(`[GIC] 画像サムネイルマニフェスト復元: ${_imgThumbKnown.size} 件`);
+    } catch (e) { /* ignore */ }
+})();
+
+function saveImgThumbManifest() {
+    try {
+        localStorage.setItem(IMG_THUMB_MANIFEST_KEY, JSON.stringify([..._imgThumbKnown]));
+    } catch (e) { /* ignore */ }
+}
+
+function imageFileToThumbName(fileName) {
+    if (!fileName || typeof fileName !== 'string') return null;
+    const m = fileName.match(/^(.+)\.(png|jpe?g|webp|gif|avif|bmp)$/i);
+    if (!m) return null;
+    return `${m[1]}${IMG_THUMB_SUFFIX}`;
+}
+
+function isImageThumbName(name) {
+    return typeof name === 'string' && name.endsWith(IMG_THUMB_SUFFIX);
+}
+
+function imgThumbNameToOriginal(thumbName) {
+    if (!thumbName || typeof thumbName !== 'string') return null;
+    if (!thumbName.endsWith(IMG_THUMB_SUFFIX)) return null;
+    return thumbName.slice(0, -IMG_THUMB_SUFFIX.length) + '.png';
+}
+
 // ===== ユーティリティ =====
 
 function isGeneratedImageMessage(message) {
@@ -1590,6 +1634,8 @@ async function clearAllImageCache() {
             try { URL.revokeObjectURL(url); } catch (e) { /* ignore */ }
         });
         _imgBlobUrlCache.clear();
+        _imgThumbKnown.clear();
+        localStorage.removeItem(IMG_THUMB_MANIFEST_KEY);
         window.__gicCacheWarmedFor = null;
         console.log('[GIC] 🧹 画像 blob キャッシュを全消去しました');
         return true;
@@ -1741,6 +1787,88 @@ async function ensureThumbnailForVideo(videoFileName, charName = getCurrentChara
 }
 
 // ============================================================
+// ★ 画像サムネイル（200x200）の生成・キャッシュ・永続化
+// ============================================================
+async function generateImageThumbnailBlob(imageUrl, size = IMG_THUMB_SIZE) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+            try {
+                const vw = img.naturalWidth;
+                const vh = img.naturalHeight;
+                if (!vw || !vh) return resolve(null);
+
+                const scale = Math.min(size / vw, size / vh);
+                const w = Math.max(1, Math.round(vw * scale));
+                const h = Math.max(1, Math.round(vh * scale));
+
+                const canvas = document.createElement('canvas');
+                canvas.width = size;
+                canvas.height = size;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return resolve(null);
+
+                ctx.fillStyle = '#000';
+                ctx.fillRect(0, 0, size, size);
+
+                const offsetX = (size - w) / 2;
+                const offsetY = (size - h) / 2;
+                ctx.drawImage(img, offsetX, offsetY, w, h);
+
+                canvas.toBlob((blob) => {
+                    resolve(blob);
+                }, 'image/png', 0.85);
+            } catch (e) {
+                resolve(null);
+            }
+        };
+        img.onerror = () => resolve(null);
+        img.src = imageUrl;
+    });
+}
+
+async function ensureImageThumbnail(imageFileName, charName) {
+    if (!imageFileName || !charName) return null;
+
+    const manifestKey = `${charName}:${imageFileName}`;
+    const cacheKey = `${charName}:${imageFileName}:imgthumb`;
+
+    if (_imgBlobUrlCache.has(cacheKey)) {
+        return _imgBlobUrlCache.get(cacheKey);
+    }
+
+    const cachedBlob = await getImgFromDB(cacheKey);
+    if (cachedBlob) {
+        const url = URL.createObjectURL(cachedBlob);
+        _imgBlobUrlCache.set(cacheKey, url);
+        if (!_imgThumbKnown.has(manifestKey)) {
+            _imgThumbKnown.add(manifestKey);
+            saveImgThumbManifest();
+        }
+        return url;
+    }
+
+    const imageUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(imageFileName);
+    const blob = await generateImageThumbnailBlob(imageUrl, IMG_THUMB_SIZE);
+    if (!blob) return null;
+
+    await putImgInDB(cacheKey, blob);
+
+    const thumbName = imageFileToThumbName(imageFileName);
+    if (thumbName) {
+        await uploadThumbnailBlob(charName, blob, thumbName);
+    }
+
+    _imgThumbKnown.add(manifestKey);
+    saveImgThumbManifest();
+
+    const url = URL.createObjectURL(blob);
+    _imgBlobUrlCache.set(cacheKey, url);
+    return url;
+}
+
+// ============================================================
 // ★ 動画サムネイルに 🎬 バッジを付与
 // ============================================================
 function isVideoThumbnail(thumb) {
@@ -1783,7 +1911,7 @@ function scanAndSyncVideoBadges() {
 }
 
 // ============================================================
-// ★ ギャラリーサムネ: 通常画像・動画の両方を blob キャッシュ経由で表示
+// ★ サムネイル画像を thumb に適用（汎用）
 // ============================================================
 function applyCachedImageToThumb(thumb, blobUrl) {
     if (!thumb || !blobUrl) return;
@@ -1803,17 +1931,40 @@ function applyCachedImageToThumb(thumb, blobUrl) {
     thumb.appendChild(img);
 }
 
+// ============================================================
+// ★ サムネの background-image を「即座にブロック → blob 適用」
+// ============================================================
+function applyThumbnailBlobImmediately(thumb, blobUrl) {
+    if (!thumb || !blobUrl) return;
+
+    thumb.querySelectorAll('.nGY2TnImg, .nGY2TnImgBack, .nGY2TnImg2, .nGY2GThumbnailImg').forEach(el => {
+        el.style.setProperty('background-image', 'none', 'important');
+        el.style.setProperty('opacity', '0', 'important');
+    });
+
+    thumb.querySelectorAll('.gic-gallery-image-cached').forEach(el => el.remove());
+
+    const img = document.createElement('img');
+    img.className = 'gic-gallery-image-cached';
+    img.src = blobUrl;
+    img.style.cssText =
+        'position:absolute;top:0;left:0;width:100%;height:100%;' +
+        'object-fit:contain;pointer-events:none;z-index:2;background:transparent;';
+    thumb.appendChild(img);
+}
+
 async function processGalleryImageThumb(thumb, fileName, charName) {
     if (!thumb || !fileName || !charName) return;
 
-    const blobUrl = await fetchAndCacheImage(charName, fileName);
-    if (!blobUrl) {
+    /* サムネイル（200x200）を取得して適用 */
+    const thumbUrl = await ensureImageThumbnail(fileName, charName);
+    if (!thumbUrl) {
         thumb.querySelectorAll('.nGY2TnImg, .nGY2TnImgBack').forEach(el => {
             el.style.removeProperty('opacity');
         });
         return;
     }
-    applyCachedImageToThumb(thumb, blobUrl);
+    applyThumbnailBlobImmediately(thumb, thumbUrl);
 }
 
 async function setupGalleryVideoThumbs() {
@@ -1920,7 +2071,7 @@ async function processGalleryVideoThumb(thumb, videoFileName, charName) {
 }
 
 // ============================================================
-// ★ 全画像のバックグラウンド先読み
+// ★ 全画像のバックグラウンド先読み（元画像 + サムネイル両方）
 // ============================================================
 async function preloadGalleryImagesInBackground() {
     if (_imgPreloading) return;
@@ -1945,30 +2096,38 @@ async function preloadGalleryImagesInBackground() {
         const images = files.filter(f =>
             typeof f === 'string' &&
             /\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(f) &&
-            !/_thum\.png$/i.test(f)
+            !/_thum\.png$/i.test(f) &&
+            !/_img_thum\.png$/i.test(f)
         );
         if (images.length === 0) return;
 
         let alreadyCached = 0;
         for (const f of images) {
-            if (_imgBlobUrlCache.has(`${charName}:${f}`)) alreadyCached++;
+            if (_imgThumbKnown.has(`${charName}:${f}`) && _imgBlobUrlCache.has(`${charName}:${f}:imgthumb`)) {
+                alreadyCached++;
+            }
         }
         const remaining = images.length - alreadyCached;
         if (remaining === 0) {
-            console.log(`[GIC] ✅ 全 ${images.length} 枚の画像はキャッシュ済みです`);
+            console.log(`[GIC] ✅ 全 ${images.length} 枚の画像サムネイルはキャッシュ済みです`);
             return;
         }
 
-        console.log(`[GIC] 📥 ${remaining} 枚の画像をバックグラウンド先読み開始（全${images.length}枚中）`);
+        console.log(`[GIC] 📥 ${remaining} 枚の画像サムネイルをバックグラウンド先読み開始（全${images.length}枚中）`);
 
         for (let i = 0; i < images.length; i += IMG_PRELOAD_CHUNK) {
             if (!isGalleryOpen()) break;
             const chunk = images.slice(i, i + IMG_PRELOAD_CHUNK);
-            await Promise.all(chunk.map(f => fetchAndCacheImage(charName, f)));
+            await Promise.all(chunk.map(async f => {
+                /* 元画像の blob キャッシュ（プレビュー用） */
+                await fetchAndCacheImage(charName, f);
+                /* ★ 200×200 サムネイル生成（ギャラリー表示用） */
+                await ensureImageThumbnail(charName, f);
+            }));
             await wait(IMG_PRELOAD_DELAY_MS);
         }
 
-        console.log('[GIC] ✅ 画像先読み完了');
+        console.log('[GIC] ✅ 画像サムネイル先読み完了');
     } finally {
         _imgPreloading = false;
     }
@@ -1976,7 +2135,6 @@ async function preloadGalleryImagesInBackground() {
 
 // ============================================================
 // ★ IndexedDB から全 blob を読み込み、メモリキャッシュに展開
-//    再起動直後のサムネ描画を瞬時化する
 // ============================================================
 async function warmupImageMemoryCacheForChar(charName) {
     if (!charName) return;
@@ -1997,6 +2155,7 @@ async function warmupImageMemoryCacheForChar(charName) {
         if (matchingKeys.length === 0) return;
 
         let loaded = 0;
+        let thumbLoaded = 0;
         for (const key of matchingKeys) {
             if (_imgBlobUrlCache.has(key)) continue;
             try {
@@ -2008,12 +2167,13 @@ async function warmupImageMemoryCacheForChar(charName) {
                 });
                 if (blob) {
                     _imgBlobUrlCache.set(key, URL.createObjectURL(blob));
-                    loaded++;
+                    if (key.endsWith(':imgthumb')) thumbLoaded++;
+                    else loaded++;
                 }
             } catch (e) { /* skip */ }
         }
 
-        console.log(`[GIC] 🔥 メモリキャッシュウォームアップ完了: ${charName} (${loaded}/${matchingKeys.length}件)`);
+        console.log(`[GIC] 🔥 メモリキャッシュウォームアップ: ${charName} (元画像 ${loaded}件, サムネ ${thumbLoaded}件)`);
     } catch (e) {
         console.warn('[GIC] メモリキャッシュウォームアップ失敗:', e);
     }
@@ -2021,6 +2181,7 @@ async function warmupImageMemoryCacheForChar(charName) {
 
 // ============================================================
 // ★ MutationObserver でサムネ追加を即検知し、キャッシュがあれば即座に swap
+//    未キャッシュでも fetch をブロックしてサムネ生成を待つ
 // ============================================================
 function setupImmediateThumbCacheInterceptor() {
     if (window.__gicImmediateThumbCacheInstalled) return;
@@ -2031,52 +2192,87 @@ function setupImmediateThumbCacheInterceptor() {
     async function processThumb(thumb) {
         if (!thumb || processing.has(thumb)) return;
         if (thumb.dataset.gicImageReady === '1') return;
-        processing.add(thumb);
 
         const title = (thumb.getAttribute('title') || '').trim();
         if (!title) return;
         if (!/\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(title)) return;
-        if (/_thum\.png$/i.test(title)) return;
+        if (/_thum\.png$/i.test(title) || /_img_thum\.png$/i.test(title)) return;
 
         const charName = getCurrentCharacterName();
         if (!charName) return;
 
-        const cacheKey = `${charName}:${title}`;
+        processing.add(thumb);
 
-        /* ① メモリキャッシュ */
-        let blobUrl = _imgBlobUrlCache.get(cacheKey);
-
-        /* ② IndexedDB */
-        if (!blobUrl) {
-            try {
-                const blob = await getImgFromDB(cacheKey);
-                if (blob) {
-                    blobUrl = URL.createObjectURL(blob);
-                    _imgBlobUrlCache.set(cacheKey, blobUrl);
-                }
-            } catch (e) { /* ignore */ }
+        const thumbUrl = await ensureImageThumbnail(title, charName);
+        if (!thumbUrl) {
+            processing.delete(thumb);
+            return;
         }
 
-        if (!blobUrl) return;
-
-        thumb.querySelectorAll('.nGY2TnImg, .nGY2TnImgBack').forEach(el => {
-            el.style.setProperty('opacity', '0', 'important');
-        });
-        thumb.querySelectorAll('.nGY2TnImg2, .nGY2GThumbnailImg').forEach(el => {
-            el.style.setProperty('opacity', '0', 'important');
-        });
-        applyCachedImageToThumb(thumb, blobUrl);
+        applyThumbnailBlobImmediately(thumb, thumbUrl);
         thumb.dataset.gicImageReady = '1';
     }
 
-    const observer = new MutationObserver(() => {
+    /* childList（サムネ要素追加） */
+    const childObserver = new MutationObserver(() => {
         const gallery = document.getElementById('gallery');
         if (!gallery) return;
         gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1').forEach(processThumb);
     });
-    observer.observe(document.body, { childList: true, subtree: true });
+    childObserver.observe(document.body, { childList: true, subtree: true });
 
-    console.log('[GIC] ⚡ 即時サムネキャッシュ適用インターセプタを設置しました');
+    /* attributeFilter（background-image 設定を即捕捉して fetch を抑止） */
+    const styleObserver = new MutationObserver((mutations) => {
+        for (const m of mutations) {
+            if (m.type !== 'attributes' || m.attributeName !== 'style') continue;
+            const el = m.target;
+            if (!el.classList) continue;
+            if (!el.classList.contains('nGY2TnImg') && !el.classList.contains('nGY2TnImgBack')) continue;
+
+            const bg = el.style.backgroundImage;
+            if (!bg || !bg.includes('/user/images/')) continue;
+            if (bg.includes('_thum.png') || bg.includes('_img_thum.png')) continue;
+            if (bg.includes('blob:')) continue;
+
+            const thumb = el.closest('.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item');
+            if (!thumb) continue;
+
+            const title = (thumb.getAttribute('title') || '').trim();
+            if (!title) continue;
+
+            const charName = getCurrentCharacterName();
+            if (!charName) continue;
+
+            const cacheKey = `${charName}:${title}:imgthumb`;
+            const cachedUrl = _imgBlobUrlCache.get(cacheKey);
+
+            if (cachedUrl) {
+                el.style.setProperty('background-image', 'none', 'important');
+                el.style.setProperty('opacity', '0', 'important');
+                applyThumbnailBlobImmediately(thumb, cachedUrl);
+                thumb.dataset.gicImageReady = '1';
+            } else {
+                el.style.setProperty('background-image', 'none', 'important');
+                el.style.setProperty('opacity', '0', 'important');
+                ensureImageThumbnail(title, charName).then(url => {
+                    if (url) {
+                        applyThumbnailBlobImmediately(thumb, url);
+                        thumb.dataset.gicImageReady = '1';
+                    }
+                }).catch(() => {
+                    el.style.removeProperty('background-image');
+                    el.style.removeProperty('opacity');
+                });
+            }
+        }
+    });
+    styleObserver.observe(document.body, {
+        attributes: true,
+        attributeFilter: ['style'],
+        subtree: true
+    });
+
+    console.log('[GIC] ⚡ 画像サムネイル即時適用インターセプタを設置しました');
 }
 
 // ============================================================
@@ -2129,7 +2325,7 @@ function setupGalleryDragToJson() {
     function createGhost(thumb, x, y) {
         const w = thumb.offsetWidth || 100;
         const h = thumb.offsetHeight || 100;
-        const imgEl = thumb.querySelector('.gic-gallery-thumb-img') || thumb.querySelector('img');
+        const imgEl = thumb.querySelector('.gic-gallery-thumb-img') || thumb.querySelector('.gic-gallery-image-cached') || thumb.querySelector('img');
         const videoEl = thumb.querySelector('video.gic-gallery-video');
 
         const ghost = document.createElement('div');
@@ -2293,7 +2489,7 @@ function setupGalleryDragToJson() {
         if (isSimulatingClick) return;
         isSimulatingClick = true;
         try {
-            const img = thumb.querySelector('.gic-gallery-thumb-img') || thumb.querySelector('img');
+            const img = thumb.querySelector('.gic-gallery-thumb-img') || thumb.querySelector('.gic-gallery-image-cached') || thumb.querySelector('img');
             const target = img || thumb;
             const opts = {
                 bubbles: true,
@@ -2423,6 +2619,11 @@ function setupGalleryDragToJson() {
                         previewTitle = `${m[1]}.${m[2].toLowerCase()}`;
                         isVid = true;
                     }
+                }
+
+                /* ★ 画像サムネイル → 元画像名に変換 */
+                if (!isVid && title.endsWith(IMG_THUMB_SUFFIX)) {
+                    previewTitle = title.slice(0, -IMG_THUMB_SUFFIX.length) + '.png';
                 }
 
                 const charName = getCurrentCharacterName();
@@ -4026,7 +4227,7 @@ async function handlePageSwitchAsync() {
         try { enforceGalleryGridLayout(); } catch (_) {}
         try { scanAndSyncVideoBadges(); } catch (_) {}
 
-        /* ★ キャッシュ済み画像を即時適用 */
+        /* ★ キャッシュ済みサムネイル画像を即時適用 */
         try {
             const charName = getCurrentCharacterName();
             if (charName) {
@@ -4034,11 +4235,11 @@ async function handlePageSwitchAsync() {
                     const title = (thumb.getAttribute('title') || '').trim();
                     if (!title || isVideoFile(title)) return;
                     if (!/\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(title)) return;
-                    const cacheKey = `${charName}:${title}`;
+                    const cacheKey = `${charName}:${title}:imgthumb`;
                     const cachedUrl = _imgBlobUrlCache.get(cacheKey);
                     if (cachedUrl) {
                         thumb.dataset.gicImageReady = '1';
-                        applyCachedImageToThumb(thumb, cachedUrl);
+                        applyThumbnailBlobImmediately(thumb, cachedUrl);
                     }
                 });
             }
@@ -4868,6 +5069,7 @@ function exposeGicApi() {
                 charName,
                 indexedDBCount: count,
                 memoryBlobUrlCount: _imgBlobUrlCache.size,
+                manifestCount: _imgThumbKnown.size,
             };
         },
         warmupCache: () => {
