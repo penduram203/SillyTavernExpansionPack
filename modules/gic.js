@@ -150,6 +150,22 @@ const IMG_THUMB_MANIFEST_KEY = 'gic_image_thumb_manifest';
 // 既知の画像サムネイル（メモリマニフェスト）
 const _imgThumbKnown = new Set();
 
+// ============================================================
+// ★ サムネ/元画像/動画サムネを判別して
+//    キャッシュキー用の「元ファイル名」を返すヘルパー
+//    - image_img_thum.png → image.png に変換
+//    - video_mp4_thum.png → null（動画サムネ）
+//    - image.png         → image.png（そのまま）
+// ============================================================
+function resolveOriginalFileName(fileName) {
+    if (!fileName || typeof fileName !== 'string') return null;
+    if (fileName.endsWith(IMG_THUMB_SUFFIX)) {
+        return fileName.slice(0, -IMG_THUMB_SUFFIX.length) + '.png';
+    }
+    if (fileName.endsWith('_thum.png')) return null;  // video thumb
+    return fileName;
+}
+
 // ===== 状態 =====
 let lastGeneratedImageUrl = null;
 let isOverrideLocal = false;
@@ -835,6 +851,8 @@ function getCurrentCharacterName() {
             overflow: hidden !important;
         }
 
+        /* ★ nGY2TnImg: background-image は削除しない（_img_thum.png を直接表示するため）
+             初期状態では opacity: 0 にし、applyThumbnailBlobImmediately で blob を被せる */
         #gallery .nGY2TnImg {
             position: absolute !important;
             top: 0 !important;
@@ -848,6 +866,7 @@ function getCurrentCharacterName() {
             background-repeat: no-repeat !important;
             background-color: transparent !important;
             z-index: 1 !important;
+            opacity: 0 !important;
             visibility: visible !important;
             transform: none !important;
             margin: 0 !important;
@@ -1037,7 +1056,6 @@ function saveImgThumbManifest() {
 
 function imageFileToThumbName(fileName) {
     if (!fileName || typeof fileName !== 'string') return null;
-    /* ★ 動画サムネイル・画像サムネイル自体は対象外 */
     if (fileName.endsWith('_thum.png') || fileName.endsWith('_img_thum.png')) return null;
     const m = fileName.match(/^(.+)\.(png|jpe?g|webp|gif|avif|bmp)$/i);
     if (!m) return null;
@@ -2068,7 +2086,9 @@ function applyThumbnailBlobImmediately(thumb, blobUrl) {
 
 async function processGalleryImageThumb(thumb, fileName, charName) {
     if (!thumb || !fileName || !charName) return;
+    /* ★ _thum.png / _img_thum.png は処理対象外 */
     if (fileName.endsWith('_thum.png') || fileName.endsWith('_img_thum.png')) return;
+
     const thumbUrl = await ensureImageThumbnail(fileName, charName);
 
     if (!thumbUrl) {
@@ -2103,16 +2123,18 @@ async function setupGalleryVideoThumbs() {
             const title = (thumb.getAttribute('title') || '').trim();
             if (!title) return;
 
-            if (title.endsWith('_img_thum.png')) return;
-            if (title.endsWith('_thum.png')) return;
+            if (title.endsWith('_thum_img_thum.png')) return;
 
             if (isVideoFile(title)) {
                 if (thumb.dataset.gicVideoReady === '1') return;
                 thumb.dataset.gicVideoReady = '1';
                 tasks.push({ type: 'video', thumb, title });
             } else if (/\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(title)) {
+                /* _img_thum.png も image タスクとして処理（blob を被せる） */
                 if (thumb.dataset.gicImageReady === '1') return;
-                tasks.push({ type: 'image', thumb, title });
+                const orig = resolveOriginalFileName(title);
+                if (!orig) return;
+                tasks.push({ type: 'image', thumb, title: orig });
             }
         });
         if (tasks.length === 0) return;
@@ -2193,7 +2215,8 @@ async function processGalleryVideoThumb(thumb, videoFileName, charName) {
 }
 
 // ============================================================
-// ★ 全画像のバックグラウンド先読み（元画像 + サムネイル両方）
+// ★ 全画像のバックグラウンド先読み
+//    ★ インターセプタを迂回して元のファイルリストを取得する
 // ============================================================
 async function preloadGalleryImagesInBackground() {
     if (_imgPreloading) return;
@@ -2205,7 +2228,9 @@ async function preloadGalleryImagesInBackground() {
 
         let files = [];
         try {
-            const resp = await fetch('/api/images/list', {
+            /* ★ インターセプタを迂回して元のリストを取得 */
+            const origFetch = window.__gicOriginalFetch || window.fetch;
+            const resp = await origFetch.call(window, '/api/images/list', {
                 method: 'POST',
                 headers: getRequestHeaders(),
                 body: JSON.stringify({ folder: charName })
@@ -2243,7 +2268,7 @@ async function preloadGalleryImagesInBackground() {
             await Promise.all(chunk.map(async f => {
                 /* 元画像の blob キャッシュ（プレビュー用） */
                 await fetchAndCacheImage(charName, f);
-                /* 200×200 サムネイル生成（引数順序: f, charName） */
+                /* 200×200 サムネイル生成 */
                 await ensureImageThumbnail(f, charName);
             }));
             await wait(IMG_PRELOAD_DELAY_MS);
@@ -2303,6 +2328,7 @@ async function warmupImageMemoryCacheForChar(charName) {
 
 // ============================================================
 // ★ MutationObserver でサムネ追加を即検知し、キャッシュがあれば即座に swap
+//    ★ _img_thum.png も処理対象（resolveOriginalFileName で正規化）
 // ============================================================
 function setupImmediateThumbCacheInterceptor() {
     if (window.__gicImmediateThumbCacheInstalled) return;
@@ -2321,8 +2347,13 @@ function setupImmediateThumbCacheInterceptor() {
 
         const title = (thumb.getAttribute('title') || '').trim();
         if (!title) return;
-        if (!/\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(title)) return;
-        if (/_thum\.png$/i.test(title) || /_img_thum\.png$/i.test(title)) return;
+        if (isVideoFile(title)) return;
+        /* ★ 不正な二重サムネのみ除外、通常の _img_thum.png は処理する */
+        if (title.endsWith('_thum_img_thum.png')) return;
+
+        const orig = resolveOriginalFileName(title);
+        if (!orig) return;
+        if (!/\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(orig)) return;
 
         const charName = getCurrentCharacterName();
         if (!charName) return;
@@ -2330,11 +2361,11 @@ function setupImmediateThumbCacheInterceptor() {
         processing.add(thumb);
 
         try {
-            const thumbUrl = await ensureImageThumbnail(title, charName);
+            const thumbUrl = await ensureImageThumbnail(orig, charName);
             if (thumbUrl) {
                 applyThumbnailBlobImmediately(thumb, thumbUrl);
             } else {
-                const origUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(title);
+                const origUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(orig);
                 thumb.querySelectorAll('.nGY2TnImg, .nGY2TnImgBack').forEach(el => {
                     el.style.setProperty('background-image', `url("${origUrl}")`, 'important');
                     el.style.setProperty('opacity', '1', 'important');
@@ -2365,7 +2396,7 @@ function setupImmediateThumbCacheInterceptor() {
             const bg = el.style.backgroundImage;
             if (!bg) continue;
             if (!bg.includes('user/images/')) continue;
-            if (bg.includes('_thum.png') || bg.includes('_img_thum.png')) continue;
+            if (bg.includes('_thum_img_thum.png')) continue;
             if (bg.includes('blob:')) continue;
 
             const thumb = el.closest('.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item');
@@ -2373,11 +2404,15 @@ function setupImmediateThumbCacheInterceptor() {
 
             const title = (thumb.getAttribute('title') || '').trim();
             if (!title) continue;
+            if (isVideoFile(title)) continue;
+
+            const orig = resolveOriginalFileName(title);
+            if (!orig) continue;
 
             const charName = getCurrentCharacterName();
             if (!charName) continue;
 
-            const cacheKey = `${charName}:${title}:imgthumb`;
+            const cacheKey = `${charName}:${orig}:imgthumb`;
             const cachedUrl = _imgBlobUrlCache.get(cacheKey);
 
             if (cachedUrl) {
@@ -2388,12 +2423,12 @@ function setupImmediateThumbCacheInterceptor() {
             } else {
                 el.style.setProperty('background-image', 'none', 'important');
                 el.style.setProperty('opacity', '0', 'important');
-                ensureImageThumbnail(title, charName).then(url => {
+                ensureImageThumbnail(orig, charName).then(url => {
                     if (url) {
                         applyThumbnailBlobImmediately(thumb, url);
                         thumb.dataset.gicImageReady = '1';
                     } else {
-                        const origUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(title);
+                        const origUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(orig);
                         el.style.setProperty('background-image', `url("${origUrl}")`, 'important');
                         el.style.setProperty('opacity', '1', 'important');
                         thumb.dataset.gicImageReady = '1';
@@ -2416,7 +2451,6 @@ function setupImmediateThumbCacheInterceptor() {
 
 // ============================================================
 // ★ 既存 IndexedDB サムネイルを一括でディスクに書き出す（一回限りの移行）
-//    ★ 不正キー（動画サムネ・二重サムネ）はスキップ
 // ============================================================
 async function migrateCacheToDisk() {
     const charName = getCurrentCharacterName();
@@ -2448,7 +2482,6 @@ async function migrateCacheToDisk() {
             const mid = key.slice(prefix.length, -(':imgthumb'.length));
             const imageFileName = mid;
 
-            /* ★ 動画サムネイル (_thum.png) や _img_thum.png は除外 */
             if (imageFileName.endsWith('_thum.png') || imageFileName.endsWith('_img_thum.png')) {
                 console.debug(`[GIC] ⏭ 不正キーをスキップ: ${imageFileName}`);
                 skipped++;
@@ -2460,7 +2493,6 @@ async function migrateCacheToDisk() {
 
             const diskUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(thumbName);
 
-            /* 既にディスクに存在すればスキップ */
             if (await checkFileExists(diskUrl, false)) { skipped++; continue; }
 
             try {
@@ -3430,7 +3462,6 @@ function applyPageNumbers() {
 function fitPreviewToViewport(panel) {
     if (!panel) return;
 
-    /* ★ パネル内の img が _img_thum.png を指していたら元画像名に変換 */
     try {
         panel.querySelectorAll('img').forEach(img => {
             const src = img.src || '';
@@ -4282,6 +4313,14 @@ function restructureGalleryHeader() {
     });
 }
 
+// ============================================================
+// ★ ギャラリーサムネイルを 4列 × 4行 の グリッドに強制
+//    - 200×200px 固定・隙間ゼロ
+//    - 画面上端寄せ（下方向へ拡張）
+//    - 右側余白を10px広げる
+//    - 不正な二重サムネ(_thum_img_thum.png)のみ非表示
+//    - resolveOriginalFileName でサムネ再適用
+// ============================================================
 function enforceGalleryGridLayout() {
     const gallery = document.getElementById('gallery');
     if (!gallery) return;
@@ -4312,7 +4351,7 @@ function enforceGalleryGridLayout() {
     const visibleThumbs = allThumbs.filter(thumb => {
         const title = (thumb.getAttribute('title') || '').trim();
 
-        /* ★ 不正な二重サムネイル (*_thum_img_thum.png) のみ非表示 */
+        /* ★ 不正な二重サムネのみ非表示 */
         if (title.endsWith('_thum_img_thum.png')) {
             thumb.style.setProperty('display', 'none', 'important');
             return false;
@@ -4446,20 +4485,23 @@ function enforceGalleryGridLayout() {
         thumb.style.setProperty('opacity', '1', 'important');
     });
 
-    /* ★ サムネ再適用保証 */
+    /* ★ サムネ再適用保証: _img_thum.png も処理対象 */
     try {
         const charName = getCurrentCharacterName();
         if (charName) {
             visibleThumbs.forEach(thumb => {
                 const title = (thumb.getAttribute('title') || '').trim();
                 if (!title || isVideoFile(title)) return;
-                if (title.endsWith('_img_thum.png')) return;
-                if (!/\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(title)) return;
+                if (title.endsWith('_thum_img_thum.png')) return;
+
+                const orig = resolveOriginalFileName(title);
+                if (!orig) return;
+                if (!/\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(orig)) return;
 
                 const hasCached = thumb.querySelector('.gic-gallery-image-cached');
                 if (hasCached && hasCached.src && hasCached.src.startsWith('blob:')) return;
 
-                const cacheKey = `${charName}:${title}:imgthumb`;
+                const cacheKey = `${charName}:${orig}:imgthumb`;
                 const cachedUrl = _imgBlobUrlCache.get(cacheKey);
                 if (cachedUrl) {
                     applyThumbnailBlobImmediately(thumb, cachedUrl);
@@ -4493,6 +4535,11 @@ function enforceGalleryGridLayout() {
     }
 }
 
+// ============================================================
+// ★ ページ切替: 内側コンテナを隠して揃えてから見せる方式
+//    ★ ページ切替時に全サムネに blob を適用（_img_thum.png も含む）
+//    ★ 未キャッシュのサムネは生成して適用
+// ============================================================
 async function handlePageSwitchAsync() {
     if (_pageSwitchInProgress) return;
     _pageSwitchInProgress = true;
@@ -4528,7 +4575,7 @@ async function handlePageSwitchAsync() {
             ));
             const visibleThumbs = allThumbs.filter(thumb => {
                 const title = (thumb.getAttribute('title') || '').trim();
-                if (title.endsWith('_img_thum.png')) return false;
+                if (title.endsWith('_thum_img_thum.png')) return false;
 
                 const cs = window.getComputedStyle(thumb);
                 if (cs.display === 'none') return false;
@@ -4552,21 +4599,41 @@ async function handlePageSwitchAsync() {
         try { enforceGalleryGridLayout(); } catch (_) {}
         try { scanAndSyncVideoBadges(); } catch (_) {}
 
+        /* ★ ページ切替時に全サムネに blob を適用（未キャッシュは生成） */
         try {
             const charName = getCurrentCharacterName();
             if (charName) {
+                const promises = [];
                 gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1').forEach(thumb => {
                     const title = (thumb.getAttribute('title') || '').trim();
-                    if (!title || isVideoFile(title)) return;
-                    if (title.endsWith('_img_thum.png')) return;
-                    if (!/\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(title)) return;
-                    const cacheKey = `${charName}:${title}:imgthumb`;
+                    if (!title) return;
+                    if (isVideoFile(title)) return;
+                    if (title.endsWith('_thum_img_thum.png')) return;
+
+                    const orig = resolveOriginalFileName(title);
+                    if (!orig) return;
+                    if (!/\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(orig)) return;
+
+                    const cacheKey = `${charName}:${orig}:imgthumb`;
                     const cachedUrl = _imgBlobUrlCache.get(cacheKey);
+
                     if (cachedUrl) {
                         thumb.dataset.gicImageReady = '1';
                         applyThumbnailBlobImmediately(thumb, cachedUrl);
+                    } else {
+                        /* 未キャッシュ → 生成を試みる */
+                        promises.push(
+                            ensureImageThumbnail(orig, charName).then(url => {
+                                if (url) {
+                                    applyThumbnailBlobImmediately(thumb, url);
+                                    thumb.dataset.gicImageReady = '1';
+                                }
+                            }).catch(() => {})
+                        );
                     }
                 });
+                /* 生成完了を最大5秒待つ */
+                await Promise.race([Promise.all(promises), wait(5000)]);
             }
         } catch (_) { /* ignore */ }
 
@@ -5372,6 +5439,7 @@ function exposeGicApi() {
         cleanupExistingImgThumbs,
         cleanupInvalidImgThumbs,
         migrateCacheToDisk,
+        resolveOriginalFileName,
 
         clearThumbCache: clearAllThumbCache,
         getThumbCacheStats: getThumbCacheStats,
@@ -5610,9 +5678,6 @@ function initializeGIC() {
     applyGalleryLayout();
     try { setupGalleryVideoThumbs(); } catch (e) { /* ignore */ }
 
-    /* ★ 起動 2秒後に:
-         1. 不正な二重サムネイル (*_thum_img_thum.png) を削除
-         2. IndexedDB の正しいサムネイルをディスクに書き出し */
     setTimeout(async () => {
         try {
             await cleanupInvalidImgThumbs();
