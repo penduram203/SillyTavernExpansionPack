@@ -2059,7 +2059,84 @@ function isVideoThumbnail(thumb) {
     return false;
 }
 
-function syncVideoBadgeForThumb(thumb) {
+// ============================================================
+// ★ アニメ GIF / APNG 判定
+//   通常 GIF/PNG は除外し、アニメーションするものだけ true を返す
+// ============================================================
+const _animatedMediaCache = new Map();
+
+function hasGifAnimation(bytes) {
+    // NETSCAPE2.0 / ANIMEXTS1.0 拡張ブロックの有無で判定
+    const n = Math.min(bytes.length, 4096);
+    let str = '';
+    for (let i = 0; i < n; i++) str += String.fromCharCode(bytes[i]);
+    return str.includes('NETSCAPE2.0') || str.includes('ANIMEXTS1.0');
+}
+
+function hasApngChunk(bytes) {
+    if (bytes.length < 8) return false;
+    const sig = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+    for (let i = 0; i < 8; i++) if (bytes[i] !== sig[i]) return false;
+
+    // チャンク走査: IHDR → (acTL?) → IDAT
+    let offset = 8;
+    while (offset + 12 <= bytes.length) {
+        const len = (bytes[offset] << 24) | (bytes[offset + 1] << 16) |
+                    (bytes[offset + 2] << 8) | bytes[offset + 3];
+        const type = String.fromCharCode(
+            bytes[offset + 4], bytes[offset + 5], bytes[offset + 6], bytes[offset + 7]
+        );
+        if (type === 'acTL') return true;   // アニメ制御チャンク
+        if (type === 'IDAT') return false;  // acTL は IDAT より前
+        offset += 12 + len;
+    }
+    return false;
+}
+
+async function isAnimatedImage(fileName, charName) {
+    if (!fileName || !charName) return false;
+    if (!/\.(gif|png)$/i.test(fileName)) return false;
+
+    const cacheKey = `${charName}:${fileName}`;
+    if (_animatedMediaCache.has(cacheKey)) return _animatedMediaCache.get(cacheKey);
+
+    const promise = (async () => {
+        let bytes = null;
+
+        // ① IndexedDB の元画像 blob を優先
+        try {
+            const blob = await getImgFromDB(cacheKey);
+            if (blob) bytes = new Uint8Array(await blob.arrayBuffer());
+        } catch (e) { /* ignore */ }
+
+        // ② メモリキャッシュ（blob URL）経由
+        if (!bytes && _imgBlobUrlCache.has(cacheKey)) {
+            try {
+                const resp = await fetch(_imgBlobUrlCache.get(cacheKey));
+                if (resp.ok) bytes = new Uint8Array(await resp.arrayBuffer());
+            } catch (e) { /* ignore */ }
+        }
+
+        // ③ サーバから直接取得
+        if (!bytes) {
+            try {
+                const url = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(fileName);
+                const resp = await fetch(url);
+                if (resp.ok) bytes = new Uint8Array(await resp.arrayBuffer());
+            } catch (e) { /* ignore */ }
+        }
+
+        if (!bytes) return false;
+        if (/\.png$/i.test(fileName)) return hasApngChunk(bytes);
+        if (/\.gif$/i.test(fileName)) return hasGifAnimation(bytes);
+        return false;
+    })();
+
+    _animatedMediaCache.set(cacheKey, promise);
+    return promise;
+}
+
+async function syncVideoBadgeForThumb(thumb) {
     if (!thumb) return;
 
     const title = (thumb.getAttribute('title') || '').trim();
@@ -2068,11 +2145,34 @@ function syncVideoBadgeForThumb(thumb) {
         return;
     }
 
-    const isVid = isVideoThumbnail(thumb);
-    const badges = thumb.querySelectorAll('.gic-video-badge');
+    let shouldShow = false;
 
-    if (isVid) {
-        if (badges.length === 1) return;
+    // ── 動画判定（同期） ──
+    if (isVideoFile(title) ||
+        /_thum\.png$/i.test(title) ||
+        thumb.querySelector('.gic-gallery-thumb-img') ||
+        thumb.querySelector('video.gic-gallery-video')) {
+        shouldShow = true;
+    }
+    // ── アニメ GIF / APNG 判定（非同期） ──
+    else {
+        const charName = getCurrentCharacterName();
+        if (charName) {
+            const orig = resolveOriginalFileName(title) || title;
+            if (/\.(gif|png)$/i.test(orig)) {
+                try {
+                    shouldShow = await isAnimatedImage(orig, charName);
+                } catch (e) {
+                    shouldShow = false;
+                }
+            }
+        }
+    }
+
+    // ── バッジ反映 ──
+    const badges = thumb.querySelectorAll('.gic-video-badge');
+    if (shouldShow) {
+        if (badges.length === 1) return;   // 既に付与済み
         badges.forEach(el => el.remove());
 
         const cs = window.getComputedStyle(thumb);
@@ -2093,7 +2193,9 @@ function scanAndSyncVideoBadges() {
     const gallery = document.getElementById('gallery');
     if (!gallery) return;
     const selector = '.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item';
-    gallery.querySelectorAll(selector).forEach(syncVideoBadgeForThumb);
+    gallery.querySelectorAll(selector).forEach(thumb => {
+        syncVideoBadgeForThumb(thumb).catch(() => {});
+    });
 }
 
 // ============================================================
@@ -2336,8 +2438,10 @@ async function warmupImageMemoryCacheForChar(charName) {
 
         let loaded = 0;
         let thumbLoaded = 0;
-        for (const key of matchingKeys) {
-            if (_imgBlobUrlCache.has(key)) continue;
+
+        // ★ 並列読み込み（逐次だと 300件超で 6〜7秒かかり、初回クリック遅延の原因になる）
+        await Promise.all(matchingKeys.map(async (key) => {
+            if (_imgBlobUrlCache.has(key)) return;
             try {
                 const blob = await new Promise((resolve, reject) => {
                     const tx = db.transaction(IMG_DB_STORE, 'readonly');
@@ -2351,7 +2455,7 @@ async function warmupImageMemoryCacheForChar(charName) {
                     else loaded++;
                 }
             } catch (e) { /* skip */ }
-        }
+        }));
 
         console.log(`[GIC] 🔥 メモリキャッシュウォームアップ: ${charName} (元画像 ${loaded}件, サムネ ${thumbLoaded}件)`);
     } catch (e) {
@@ -2495,6 +2599,44 @@ function setupImmediateThumbCacheInterceptor() {
     });
 
     console.log('[GIC] ⚡ 画像サムネイル即時適用インターセプタを設置しました');
+}
+
+// ============================================================
+// ★ サムネ hover 時の元画像プリロード
+//   クリックより先に hover で元画像を取得しておくことで、
+//   初回クリック時も即座に拡大ビューを表示できる
+// ============================================================
+let _lastHoverThumb = null;
+
+function setupHoverPreload() {
+    if (window.__gicHoverPreloadInstalled) return;
+    window.__gicHoverPreloadInstalled = true;
+
+    document.addEventListener('mouseover', (e) => {
+        const thumb = e.target?.closest?.('.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item');
+        if (thumb === _lastHoverThumb) return;
+        _lastHoverThumb = thumb;
+        if (!thumb) return;
+
+        const title = (thumb.getAttribute('title') || '').trim();
+        if (!title) return;
+        if (isVideoFile(title)) return;
+
+        const orig = resolveOriginalFileName(title);
+        if (!orig) return;
+        if (!/\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(orig)) return;
+
+        const charName = getCurrentCharacterName();
+        if (!charName) return;
+
+        // 既にメモリキャッシュ済みならスキップ
+        if (_imgBlobUrlCache.has(`${charName}:${orig}`)) return;
+
+        // バックグラウンドで元画像取得（失敗しても無視）
+        fetchAndCacheImage(charName, orig).catch(() => {});
+    }, { passive: true });
+
+    console.log('[GIC] 🖱️ サムネ hover 時の元画像先読みを開始しました');
 }
 
 // ============================================================
@@ -5778,6 +5920,7 @@ function initializeGIC() {
     installBulkDeleteDocumentHandlers();
     installGalleryCloseInterceptor();
     setupImmediateThumbCacheInterceptor();
+    setupHoverPreload();
 
     const charName = getCurrentCharacterName();
     if (charName) {
