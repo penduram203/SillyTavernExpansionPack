@@ -834,16 +834,17 @@ function getCurrentCharacterName() {
         /* ============================================================
            ★ 一括選択モード: 前面に表示する「一括選択」ボタン（白枠付き）
            ============================================================ */
+        /* 前回追加したCSSのうち、#gic-floating-bulk-exit 本体を以下に置き換え */
         #gic-floating-bulk-exit {
             display: none;
             position: fixed;
             align-items: center;
             justify-content: center;
-            height: 28px;
-            padding: 0 14px;
-            font-size: 13px;
+            height: 28px;               /* JSで上書きされますが既定値 */
+            padding: 0 8px;             /* ★ 元ボタン(0 8px)に合わせる */
+            font-size: 12px;            /* ★ 元ボタン(12px)に合わせる */
             font-weight: bold;
-            font-family: sans-serif;
+            font-family: inherit;
             color: #ffffff;
             background-color: #d9534f;
             border: 2px solid #ffffff;
@@ -2984,14 +2985,20 @@ function toggleBulkSelection(itemEl, evt) {
 
 function updateBulkDeleteButton() {
     const btn = document.getElementById('gic-bulk-delete-button');
-    if (!btn) return;
-    btn.classList.remove('gic-bulk-delete-disabled');
-    btn.disabled = false;
-    if (_bulkDeleteMode) {
-        const n = _bulkDeleteSelected.size;
-        btn.textContent = n > 0 ? `選択終了 (${n})` : '選択終了';
-    } else {
-        btn.textContent = '一括選択';
+    const floatingBtn = document.getElementById('gic-floating-bulk-exit');
+
+    /* ★ 元ボタンと浮動ボタンで同じテキストを共有 */
+    const text = _bulkDeleteMode
+        ? (_bulkDeleteSelected.size > 0 ? `選択終了 (${_bulkDeleteSelected.size})` : '選択終了')
+        : '一括選択';
+
+    if (btn) {
+        btn.classList.remove('gic-bulk-delete-disabled');
+        btn.disabled = false;
+        btn.textContent = text;
+    }
+    if (floatingBtn) {
+        floatingBtn.textContent = text;
     }
 }
 
@@ -3037,7 +3044,7 @@ function ensureFloatingBulkButton() {
     btn = document.createElement('button');
     btn.id = 'gic-floating-bulk-exit';
     btn.type = 'button';
-    btn.textContent = '一括選択';
+    btn.textContent = '選択終了';
     btn.title = '一括選択モードを終了';
     btn.addEventListener('click', (e) => {
         e.preventDefault();
@@ -3052,16 +3059,21 @@ function ensureFloatingBulkButton() {
 function positionFloatingBulkButton() {
     if (!_bulkDeleteMode) return;
     const btn = document.getElementById('gic-floating-bulk-exit');
-    const gallery = document.getElementById('gallery');
-    if (!btn || !gallery) return;
-    const gr = gallery.getBoundingClientRect();
-    if (gr.width === 0 || gr.height === 0) return;
+    const original = document.getElementById('gic-bulk-delete-button');
+    if (!btn || !original) return;
+
+    /* ★ 元の一括選択ボタンの位置を取得
+          visibility:hidden はレイアウト保持なので rect は正確 */
+    const rect = original.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
 
     btn.style.setProperty('position', 'fixed', 'important');
-    btn.style.setProperty('top', Math.round(gr.top + 4) + 'px', 'important');
-    btn.style.setProperty('right', Math.round(window.innerWidth - gr.right + 8) + 'px', 'important');
-    btn.style.setProperty('left', 'auto', 'important');
+    btn.style.setProperty('top', Math.round(rect.top) + 'px', 'important');
+    btn.style.setProperty('left', Math.round(rect.left) + 'px', 'important');
+    btn.style.setProperty('right', 'auto', 'important');
     btn.style.setProperty('bottom', 'auto', 'important');
+    btn.style.setProperty('min-width', Math.round(rect.width) + 'px', 'important');
+    btn.style.setProperty('height', Math.round(rect.height) + 'px', 'important');
     btn.style.setProperty('z-index', '2147483647', 'important');
 }
 
