@@ -65,6 +65,17 @@ const THUMB_DB_NAME = 'gic_thumbnails';
 const THUMB_DB_STORE = 'thumbs';
 const THUMB_DB_VERSION = 1;
 
+// === Image Blob Cache (通常画像用) ===
+const IMG_DB_NAME = 'gic_image_cache';
+const IMG_DB_STORE = 'images';
+const IMG_DB_VERSION = 1;
+const IMG_PRELOAD_CHUNK = 3;
+const IMG_PRELOAD_DELAY_MS = 50;
+
+let _imgDbPromise = null;
+const _imgBlobUrlCache = new Map();
+let _imgPreloading = false;
+
 // ===== 状態 =====
 let lastGeneratedImageUrl = null;
 let isOverrideLocal = false;
@@ -1487,6 +1498,111 @@ async function getThumbCacheStats() {
     } catch (e) { return { count: 0, keys: [] }; }
 }
 
+// ============================================================
+// ★ 通常画像用 IndexedDB blob キャッシュ
+// ============================================================
+function openImgDB() {
+    if (_imgDbPromise) return _imgDbPromise;
+    _imgDbPromise = new Promise((resolve, reject) => {
+        try {
+            const req = indexedDB.open(IMG_DB_NAME, IMG_DB_VERSION);
+            req.onupgradeneeded = () => {
+                const db = req.result;
+                if (!db.objectStoreNames.contains(IMG_DB_STORE)) {
+                    db.createObjectStore(IMG_DB_STORE);
+                }
+            };
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => { _imgDbPromise = null; reject(req.error); };
+        } catch (e) {
+            _imgDbPromise = null;
+            reject(e);
+        }
+    });
+    return _imgDbPromise;
+}
+
+async function getImgFromDB(key) {
+    try {
+        const db = await openImgDB();
+        return await new Promise((resolve, reject) => {
+            const tx = db.transaction(IMG_DB_STORE, 'readonly');
+            const req = tx.objectStore(IMG_DB_STORE).get(key);
+            req.onsuccess = () => resolve(req.result || null);
+            req.onerror = () => reject(req.error);
+        });
+    } catch (e) { return null; }
+}
+
+async function putImgInDB(key, blob) {
+    try {
+        const db = await openImgDB();
+        return await new Promise((resolve, reject) => {
+            const tx = db.transaction(IMG_DB_STORE, 'readwrite');
+            tx.objectStore(IMG_DB_STORE).put(blob, key);
+            tx.oncomplete = () => resolve(true);
+            tx.onerror = () => reject(tx.error);
+        });
+    } catch (e) { return false; }
+}
+
+async function clearAllImageCache() {
+    try {
+        const db = await openImgDB();
+        await new Promise((resolve, reject) => {
+            const tx = db.transaction(IMG_DB_STORE, 'readwrite');
+            tx.objectStore(IMG_DB_STORE).clear();
+            tx.oncomplete = () => resolve(true);
+            tx.onerror = () => reject(tx.error);
+        });
+        _imgBlobUrlCache.forEach(url => {
+            try { URL.revokeObjectURL(url); } catch (e) { /* ignore */ }
+        });
+        _imgBlobUrlCache.clear();
+        console.log('[GIC] 🧹 画像 blob キャッシュを全消去しました');
+        return true;
+    } catch (e) {
+        console.warn('[GIC] 画像キャッシュ消去に失敗:', e);
+        return false;
+    }
+}
+
+// ============================================================
+// ★ 画像 blob を取得して IndexedDB にキャッシュ
+//   戻り値: blob URL（失敗時は null）
+// ============================================================
+async function fetchAndCacheImage(charName, fileName) {
+    if (!charName || !fileName) return null;
+    const cacheKey = `${charName}:${fileName}`;
+
+    // メモリキャッシュ
+    if (_imgBlobUrlCache.has(cacheKey)) {
+        return _imgBlobUrlCache.get(cacheKey);
+    }
+
+    // IndexedDB キャッシュ
+    const cachedBlob = await getImgFromDB(cacheKey);
+    if (cachedBlob) {
+        const url = URL.createObjectURL(cachedBlob);
+        _imgBlobUrlCache.set(cacheKey, url);
+        return url;
+    }
+
+    // サーバーから取得してキャッシュ
+    const url = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(fileName);
+    try {
+        const resp = await fetch(url);
+        if (!resp.ok) return null;
+        const blob = await resp.blob();
+        await putImgInDB(cacheKey, blob);
+        const blobUrl = URL.createObjectURL(blob);
+        _imgBlobUrlCache.set(cacheKey, blobUrl);
+        return blobUrl;
+    } catch (e) {
+        return null;
+    }
+}
+
 function getUploadHeaders() {
     try {
         const headers = { ...getRequestHeaders() };
@@ -1661,18 +1777,24 @@ async function setupGalleryVideoThumbs() {
     try {
         try { scanAndSyncVideoBadges(); } catch (e) { /* ignore */ }
 
-        const videos = [];
+        const tasks = [];
         gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1').forEach(thumb => {
             const title = (thumb.getAttribute('title') || '').trim();
-            if (!title || !isVideoFile(title)) return;
-            if (thumb.dataset.gicVideoReady === '1') return;
-            videos.push({ thumb, title });
+            if (!title) return;
+
+            if (isVideoFile(title)) {
+                if (thumb.dataset.gicVideoReady === '1') return;
+                thumb.dataset.gicVideoReady = '1';
+                tasks.push({ type: 'video', thumb, title });
+            } else if (/\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(title)) {
+                if (thumb.dataset.gicImageReady === '1') return;
+                thumb.dataset.gicImageReady = '1';
+                tasks.push({ type: 'image', thumb, title });
+            }
         });
-        if (videos.length === 0) return;
+        if (tasks.length === 0) return;
 
-        videos.forEach(v => { v.thumb.dataset.gicVideoReady = '1'; });
-
-        const queue = [...videos];
+        const queue = [...tasks];
         const workers = [];
         for (let i = 0; i < THUMB_CONCURRENCY; i++) {
             workers.push((async () => {
@@ -1680,7 +1802,11 @@ async function setupGalleryVideoThumbs() {
                     const item = queue.shift();
                     if (!item) break;
                     try {
-                        await processGalleryVideoThumb(item.thumb, item.title, charName);
+                        if (item.type === 'video') {
+                            await processGalleryVideoThumb(item.thumb, item.title, charName);
+                        } else {
+                            await processGalleryImageThumb(item.thumb, item.title, charName);
+                        }
                     } catch (e) {
                         console.warn('[GIC] gallery thumb error:', e);
                     }
@@ -1690,6 +1816,66 @@ async function setupGalleryVideoThumbs() {
         await Promise.all(workers);
     } finally {
         _thumbProcessingActive = false;
+    }
+}
+
+// ============================================================
+// ★ ギャラリー全画像をバックグラウンド先読み
+//    ギャラリーを開いた直後に走り、IndexedDB を温める。
+//    以降のページ切替は瞬時に表示される。
+// ============================================================
+async function preloadGalleryImagesInBackground() {
+    if (_imgPreloading) return;
+    _imgPreloading = true;
+
+    try {
+        const charName = getCurrentCharacterName();
+        if (!charName) return;
+
+        // 画像リストを取得
+        let files = [];
+        try {
+            const resp = await fetch('/api/images/list', {
+                method: 'POST',
+                headers: getRequestHeaders(),
+                body: JSON.stringify({ folder: charName })
+            });
+            if (resp.ok) files = await resp.json();
+        } catch (e) { return; }
+
+        if (!Array.isArray(files)) return;
+
+        const images = files.filter(f =>
+            typeof f === 'string' &&
+            /\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(f) &&
+            !/_thum\.png$/i.test(f)
+        );
+        if (images.length === 0) return;
+
+        // 既にキャッシュ済みの数を確認
+        let alreadyCached = 0;
+        for (const f of images) {
+            if (_imgBlobUrlCache.has(`${charName}:${f}`)) alreadyCached++;
+        }
+        const remaining = images.length - alreadyCached;
+        if (remaining === 0) {
+            console.log(`[GIC] ✅ 全 ${images.length} 枚の画像はキャッシュ済みです`);
+            return;
+        }
+
+        console.log(`[GIC] 📥 ${remaining} 枚の画像をバックグラウンド先読み開始（全${images.length}枚中）`);
+
+        // チャンクごとに先読み
+        for (let i = 0; i < images.length; i += IMG_PRELOAD_CHUNK) {
+            if (!isGalleryOpen()) break;
+            const chunk = images.slice(i, i + IMG_PRELOAD_CHUNK);
+            await Promise.all(chunk.map(f => fetchAndCacheImage(charName, f)));
+            await wait(IMG_PRELOAD_DELAY_MS);
+        }
+
+        console.log('[GIC] ✅ 画像先読み完了');
+    } finally {
+        _imgPreloading = false;
     }
 }
 
@@ -1742,6 +1928,46 @@ async function processGalleryVideoThumb(thumb, videoFileName, charName) {
     }, { once: true });
     thumb.appendChild(video);
 }
+
+// ============================================================
+// ★ 通常画像サムネを blob キャッシュ画像に置き換え
+//    キャッシュ済みなら瞬時に表示、未キャッシュならフェッチして差し替え
+// ============================================================
+function applyCachedImageToThumb(thumb, blobUrl) {
+    if (!thumb || !blobUrl) return;
+
+    // 既存の背景画像を隠す
+    thumb.querySelectorAll('.nGY2TnImg, .nGY2TnImgBack').forEach(el => {
+        el.style.setProperty('opacity', '0', 'important');
+    });
+
+    // 既存オーバーレイを削除
+    thumb.querySelectorAll('.gic-gallery-image-cached, .gic-gallery-thumb-img, .gic-gallery-video').forEach(el => el.remove());
+
+    // blob URL の <img> を追加
+    const img = document.createElement('img');
+    img.className = 'gic-gallery-image-cached';
+    img.src = blobUrl;
+    img.style.cssText =
+        'position:absolute;top:0;left:0;width:100%;height:100%;' +
+        'object-fit:contain;pointer-events:none;z-index:2;background:transparent;';
+    thumb.appendChild(img);
+}
+
+async function processGalleryImageThumb(thumb, fileName, charName) {
+    if (!thumb || !fileName || !charName) return;
+
+    const blobUrl = await fetchAndCacheImage(charName, fileName);
+    if (!blobUrl) {
+        // フェッチ失敗時は背景画像を復元（ブラウザに任せる）
+        thumb.querySelectorAll('.nGY2TnImg, .nGY2TnImgBack').forEach(el => {
+            el.style.removeProperty('opacity');
+        });
+        return;
+    }
+    applyCachedImageToThumb(thumb, blobUrl);
+}
+
 // ============================================================
 // ★ ギャラリーサムネイルの個別ドラッグ
 // ============================================================
@@ -3683,6 +3909,24 @@ async function handlePageSwitchAsync() {
         try { enforceGalleryGridLayout(); } catch (_) {}
         try { scanAndSyncVideoBadges(); } catch (_) {}
 
+        /* ★ キャッシュ済みの通常画像を即時適用（未キャッシュは背景画像に任せる） */
+        try {
+            const charName = getCurrentCharacterName();
+            if (charName) {
+                gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1').forEach(thumb => {
+                    const title = (thumb.getAttribute('title') || '').trim();
+                    if (!title || isVideoFile(title)) return;
+                    if (!/\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(title)) return;
+                    const cacheKey = `${charName}:${title}`;
+                    const cachedUrl = _imgBlobUrlCache.get(cacheKey);
+                    if (cachedUrl) {
+                        thumb.dataset.gicImageReady = '1';
+                        applyCachedImageToThumb(thumb, cachedUrl);
+                    }
+                });
+            }
+        } catch (_) { /* ignore */ }
+        
         /* ★ 2重 rAF で確実にペイント完了を待つ */
         await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     } finally {
@@ -3839,6 +4083,7 @@ function syncGalleryButtonVisibility() {
         setTimeout(() => {
             if (!isGalleryOpen()) return;
             setupGalleryVideoThumbs().catch(e => console.warn('[GIC] video thumbs setup error:', e));
+            preloadGalleryImagesInBackground().catch(e => console.warn('[GIC] preload error:', e));
         }, 500);
 
         if (warmupState !== 'running') {
@@ -4464,6 +4709,28 @@ function exposeGicApi() {
         getCharName: getCurrentCharacterName,
 
         clearThumbCache: clearAllThumbCache,
+        clearImageCache: clearAllImageCache,
+        preloadImages: () => preloadGalleryImagesInBackground(),
+        getImageCacheStats: async () => {
+            const charName = getCurrentCharacterName();
+            if (!charName) return { error: 'no charName' };
+            let count = 0;
+            try {
+                const db = await openImgDB();
+                count = await new Promise((resolve, reject) => {
+                    const tx = db.transaction(IMG_DB_STORE, 'readonly');
+                    const req = tx.objectStore(IMG_DB_STORE).count();
+                    req.onsuccess = () => resolve(req.result || 0);
+                    req.onerror = () => reject(req.error);
+                });
+            } catch (e) { /* ignore */ }
+            return {
+                charName,
+                indexedDBCount: count,
+                memoryBlobUrlCount: _imgBlobUrlCache.size,
+            };
+        },
+        
         getThumbCacheStats: getThumbCacheStats,
 
         debugThumbState: async (charName) => {
