@@ -807,6 +807,8 @@ function getCurrentCharacterName() {
             overflow: hidden !important;
         }
 
+        /* ★ 背景画像レイヤー: background-image を none で固定し、
+              nanogallery2 がオリジナル URL をセットしても fetch させない */
         #gallery .nGY2TnImg {
             position: absolute !important;
             top: 0 !important;
@@ -815,12 +817,12 @@ function getCurrentCharacterName() {
             height: 100% !important;
             max-width: 100% !important;
             max-height: 100% !important;
+            background-image: none !important;
             background-size: contain !important;
             background-position: center center !important;
             background-repeat: no-repeat !important;
             background-color: transparent !important;
             z-index: 1 !important;
-            opacity: 1 !important;
             visibility: visible !important;
             transform: none !important;
             margin: 0 !important;
@@ -837,6 +839,7 @@ function getCurrentCharacterName() {
             height: 100% !important;
             max-width: 100% !important;
             max-height: 100% !important;
+            background-image: none !important;
             background-color: transparent !important;
             z-index: 0 !important;
             opacity: 0 !important;
@@ -1961,27 +1964,6 @@ function scanAndSyncVideoBadges() {
 }
 
 // ============================================================
-// ★ サムネイル画像を thumb に適用（汎用）
-// ============================================================
-function applyCachedImageToThumb(thumb, blobUrl) {
-    if (!thumb || !blobUrl) return;
-
-    thumb.querySelectorAll('.nGY2TnImg, .nGY2TnImgBack').forEach(el => {
-        el.style.setProperty('opacity', '0', 'important');
-    });
-
-    thumb.querySelectorAll('.gic-gallery-image-cached, .gic-gallery-thumb-img, .gic-gallery-video').forEach(el => el.remove());
-
-    const img = document.createElement('img');
-    img.className = 'gic-gallery-image-cached';
-    img.src = blobUrl;
-    img.style.cssText =
-        'position:absolute;top:0;left:0;width:100%;height:100%;' +
-        'object-fit:contain;pointer-events:none;z-index:2;background:transparent;';
-    thumb.appendChild(img);
-}
-
-// ============================================================
 // ★ サムネの background-image を「即座にブロック → blob 適用」
 // ============================================================
 function applyThumbnailBlobImmediately(thumb, blobUrl) {
@@ -2006,15 +1988,23 @@ function applyThumbnailBlobImmediately(thumb, blobUrl) {
 async function processGalleryImageThumb(thumb, fileName, charName) {
     if (!thumb || !fileName || !charName) return;
 
-    /* サムネイル（200x200）を取得して適用 */
     const thumbUrl = await ensureImageThumbnail(fileName, charName);
+
     if (!thumbUrl) {
-        thumb.querySelectorAll('.nGY2TnImg, .nGY2TnImgBack').forEach(el => {
-            el.style.removeProperty('opacity');
-        });
+        /* ★ 生成失敗時: 元画像をフォールバックとして表示（CSS !important を打ち消す） */
+        try {
+            const origUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(fileName);
+            thumb.querySelectorAll('.nGY2TnImg, .nGY2TnImgBack').forEach(el => {
+                el.style.setProperty('background-image', `url("${origUrl}")`, 'important');
+                el.style.setProperty('opacity', '1', 'important');
+            });
+        } catch (e) { /* ignore */ }
+        thumb.dataset.gicImageReady = '1';
         return;
     }
+
     applyThumbnailBlobImmediately(thumb, thumbUrl);
+    thumb.dataset.gicImageReady = '1';
 }
 
 async function setupGalleryVideoThumbs() {
@@ -2042,7 +2032,7 @@ async function setupGalleryVideoThumbs() {
                 tasks.push({ type: 'video', thumb, title });
             } else if (/\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(title)) {
                 if (thumb.dataset.gicImageReady === '1') return;
-                thumb.dataset.gicImageReady = '1';
+                /* ★ フラグは処理後に立てる（setupImmediateThumbCacheInterceptor と競合させない） */
                 tasks.push({ type: 'image', thumb, title });
             }
         });
@@ -2255,14 +2245,22 @@ function setupImmediateThumbCacheInterceptor() {
 
         processing.add(thumb);
 
-        const thumbUrl = await ensureImageThumbnail(title, charName);
-        if (!thumbUrl) {
-            processing.delete(thumb);
-            return;
+        try {
+            const thumbUrl = await ensureImageThumbnail(title, charName);
+            if (thumbUrl) {
+                applyThumbnailBlobImmediately(thumb, thumbUrl);
+            } else {
+                /* ★ 生成失敗時: 元画像をフォールバック */
+                const origUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(title);
+                thumb.querySelectorAll('.nGY2TnImg, .nGY2TnImgBack').forEach(el => {
+                    el.style.setProperty('background-image', `url("${origUrl}")`, 'important');
+                    el.style.setProperty('opacity', '1', 'important');
+                });
+            }
+            thumb.dataset.gicImageReady = '1';
+        } catch (e) {
+            console.warn('[GIC] processThumb error:', e);
         }
-
-        applyThumbnailBlobImmediately(thumb, thumbUrl);
-        thumb.dataset.gicImageReady = '1';
     }
 
     /* childList（サムネ要素追加） */
@@ -2309,6 +2307,12 @@ function setupImmediateThumbCacheInterceptor() {
                 ensureImageThumbnail(title, charName).then(url => {
                     if (url) {
                         applyThumbnailBlobImmediately(thumb, url);
+                        thumb.dataset.gicImageReady = '1';
+                    } else {
+                        /* ★ 生成失敗時: 元画像をフォールバック */
+                        const origUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(title);
+                        el.style.setProperty('background-image', `url("${origUrl}")`, 'important');
+                        el.style.setProperty('opacity', '1', 'important');
                         thumb.dataset.gicImageReady = '1';
                     }
                 }).catch(() => {
