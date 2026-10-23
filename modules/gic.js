@@ -2825,13 +2825,12 @@ function fitVideoPreview(panel, pending) {
     if (closeBtn) {
         closeBtn.style.setProperty('display', 'inline-block', 'important');
 
-        /* ★ 実測した高さで正確に垂直センター配置（topPx 計算はもう不要） */
-        const btnH = closeBtn.offsetHeight || 30;
+        /* ★ 画像側 (fitPreviewToViewport の applySize) と完全に同じ指定 */
         closeBtn.style.setProperty('position', 'fixed', 'important');
         closeBtn.style.setProperty('left', '0', 'important');
-        closeBtn.style.setProperty('top', `calc(50% - ${Math.round(btnH / 2)}px)`, 'important');
-        closeBtn.style.setProperty('transform', `scale(${GALLERY_PREVIEW_CLOSE_SCALE})`, 'important');
-        closeBtn.style.setProperty('transform-origin', 'center center', 'important');
+        closeBtn.style.setProperty('top', '50%', 'important');
+        closeBtn.style.setProperty('transform', `translateY(-50%) scale(${GALLERY_PREVIEW_CLOSE_SCALE})`, 'important');
+        closeBtn.style.setProperty('transform-origin', 'left center', 'important');
         closeBtn.style.setProperty('margin', '0', 'important');
         closeBtn.style.setProperty('z-index', '15001', 'important');
     }
