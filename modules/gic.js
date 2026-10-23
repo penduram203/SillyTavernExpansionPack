@@ -2779,7 +2779,7 @@ function fitVideoPreview(panel, pending) {
     panel.style.setProperty('top', topPx + 'px', 'important');
     panel.style.setProperty('right', 'auto', 'important');
     panel.style.setProperty('bottom', 'auto', 'important');
-    panel.style.setProperty('transform', 'none', 'important');
+    panel.style.setProperty('transform', 'translateY(0)', 'important');
     panel.style.setProperty('transform-origin', 'left top', 'important');
     panel.style.setProperty('margin', '0', 'important');
     panel.style.setProperty('padding', '0', 'important');
