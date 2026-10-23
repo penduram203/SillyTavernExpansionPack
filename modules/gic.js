@@ -3249,6 +3249,77 @@ function setupBulkDelete() {
 }
 
 // ============================================================
+// ★ ギャラリーヘッダー再構成
+//    .dragTitle 内の "Image Gallery" テキストを削除し、
+//    フォルダ入力・一括選択・✓・🗑・♻ を左端に集約する。
+//    空になった旧コンテナも除去する。
+// ============================================================
+function restructureGalleryHeader() {
+    const gallery = document.getElementById('gallery');
+    if (!gallery) return;
+
+    const dragTitle = gallery.querySelector('.dragTitle');
+    if (!dragTitle) return;
+
+    /* ① "Image Gallery" の span を削除（直下の span のみ対象） */
+    dragTitle.querySelectorAll(':scope > span').forEach(span => {
+        const txt = (span.textContent || '').trim();
+        if (/^image\s*gallery$/i.test(txt)) {
+            span.remove();
+        }
+    });
+
+    /* ② 移植対象の 5 要素を取得
+          （存在しないものはフィルタで除外） */
+    const folderInput = gallery.querySelector('.gallery-folder-input');
+    const bulkBtn     = document.getElementById('gic-bulk-delete-button');
+    const checkBtn    = gallery.querySelector('.right_menu_button[title="Change gallery folder"]');
+    const trashBtn    = gallery.querySelector('.right_menu_button[title="Delete mode"]');
+    const recycleBtn  = gallery.querySelector('.right_menu_button[title="Restore gallery folder"]');
+
+    const elements = [folderInput, bulkBtn, checkBtn, trashBtn, recycleBtn].filter(Boolean);
+    if (elements.length === 0) return;
+
+    /* ③ 既に先頭 N 個が elements と一致していればスキップ（毎tickの負荷軽減） */
+    let alreadyInPlace = elements.length <= dragTitle.children.length;
+    if (alreadyInPlace) {
+        for (let i = 0; i < elements.length; i++) {
+            if (dragTitle.children[i] !== elements[i]) {
+                alreadyInPlace = false;
+                break;
+            }
+        }
+    }
+
+    if (!alreadyInPlace) {
+        /* 「管理対象外の最初の子要素」をアンカーとして取得
+           （＝既存の右側ボタン群の先頭） */
+        const managed = new Set(elements);
+        const anchor  = Array.from(dragTitle.children).find(c => !managed.has(c)) || null;
+
+        /* フラグメントに順番通り詰め替え → アンカーの直前へ一括挿入 */
+        const frag = document.createDocumentFragment();
+        elements.forEach(el => frag.appendChild(el));
+        dragTitle.insertBefore(frag, anchor);
+    }
+
+    /* ④ 空になった旧コンテナを削除
+          （data-gic-bulk-row-observed 付きの flex-container.alignItemsCenter） */
+    gallery.querySelectorAll('.flex-container.alignItemsCenter').forEach(c => {
+        if (c.children.length === 0 && !c.textContent.trim()) {
+            c.remove();
+        }
+    });
+
+    /* ⑤ z-index / pointer-events を保証（クリック不能問題の再発防止） */
+    elements.forEach(el => {
+        el.style.setProperty('position', 'relative', 'important');
+        el.style.setProperty('z-index', '200', 'important');
+        el.style.setProperty('pointer-events', 'auto', 'important');
+    });
+}
+
+// ============================================================
 // ★ ギャラリーサムネイルを 3列 × 4行 の 180×180 グリッドに強制
 //    - nanogallery2 が現在のページとして表示しているアイテムのみを対象
 //    - 非表示ページのアイテムには触れない
@@ -3573,6 +3644,7 @@ function applyGalleryLayout() {
         if (pager) positionPager(pager);
 
         try { setupBulkDelete(); } catch (e) { /* ignore */ }
+        restructureGalleryHeader();
         hideGalleryUploadMessage();
 
         currentPreviewEl = null;
