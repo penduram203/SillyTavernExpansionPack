@@ -1777,6 +1777,7 @@ async function clearAllImageCache() {
         _imgThumbKnown.clear();
         _imgThumbReverseMap.clear();
         _failedThumbs.clear();
+        _staticFrameCache.clear();
         localStorage.removeItem(IMG_THUMB_MANIFEST_KEY);
         window.__gicCacheWarmedFor = null;
         console.log('[GIC] 🧹 画像 blob キャッシュを全消去しました');
@@ -2149,6 +2150,89 @@ function hasApngChunk(bytes) {
     return false;
 }
 
+// ============================================================
+// ★ GIF / APNG の静止フレーム URL を取得（最初のフレームのみ）
+//   JSON編集画面のサムネプレビューでアニメーションさせないため
+//   - IndexedDB → メモリキャッシュ → サーバ の順で元画像を取得
+//   - canvas に最初のフレームを描画して PNG 化
+//   - 結果は Promise で永続キャッシュ
+// ============================================================
+const _staticFrameCache = new Map();
+
+async function getStaticFrameUrl(fileName, charName) {
+    if (!fileName || !charName) return null;
+    if (!/\.(gif|png)$/i.test(fileName)) return null;
+
+    const key = `${charName}:${fileName}`;
+    if (_staticFrameCache.has(key)) return _staticFrameCache.get(key);
+
+    const promise = (async () => {
+        let blob = null;
+
+        // ① IndexedDB の元画像 blob
+        try {
+            blob = await getImgFromDB(key);
+        } catch (e) { /* ignore */ }
+
+        // ② メモリキャッシュ（blob URL）経由
+        if (!blob) {
+            const cachedUrl = _imgBlobUrlCache.get(key);
+            if (cachedUrl) {
+                try {
+                    const resp = await fetch(cachedUrl);
+                    if (resp.ok) blob = await resp.blob();
+                } catch (e) { /* ignore */ }
+            }
+        }
+
+        // ③ サーバから直接取得
+        if (!blob) {
+            try {
+                const url = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(fileName);
+                const resp = await fetch(url);
+                if (resp.ok) blob = await resp.blob();
+            } catch (e) { /* ignore */ }
+        }
+
+        if (!blob) return null;
+
+        // 最初のフレームを canvas に描画して PNG 化
+        const srcUrl = URL.createObjectURL(blob);
+        try {
+            const img = new Image();
+            await new Promise((resolve, reject) => {
+                img.onload = resolve;
+                img.onerror = reject;
+                img.src = srcUrl;
+            });
+
+            const w = img.naturalWidth;
+            const h = img.naturalHeight;
+            if (!w || !h) return null;
+
+            const canvas = document.createElement('canvas');
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return null;
+            ctx.drawImage(img, 0, 0, w, h);
+
+            const stillBlob = await new Promise(resolve =>
+                canvas.toBlob(resolve, 'image/png', 0.92)
+            );
+            if (!stillBlob) return null;
+            return URL.createObjectURL(stillBlob);
+        } catch (e) {
+            return null;
+        } finally {
+            URL.revokeObjectURL(srcUrl);
+        }
+    })();
+
+    _staticFrameCache.set(key, promise);
+    return promise;
+}
+    
 async function isAnimatedImage(fileName, charName) {
     if (!fileName || !charName) return false;
     if (!/\.(gif|png)$/i.test(fileName)) return false;
@@ -5805,6 +5889,7 @@ function exposeGicApi() {
         migrateCacheToDisk,
         resolveOriginalFileName,
         isAnimatedImage,
+        getStaticFrameUrl,
 
         clearThumbCache: clearAllThumbCache,
         getThumbCacheStats: getThumbCacheStats,
