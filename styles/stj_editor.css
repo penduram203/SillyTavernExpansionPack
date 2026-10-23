@@ -8,7 +8,8 @@
   top: 0;
   left: auto;
   right: 0;
-  width: calc(85vw - 540px);
+  width: calc(85vw - 280px);
+  min-width: 500px;
   height: 100vh;
   background-color: #2d3748;
   border: 1px solid #4a5568;
@@ -49,7 +50,8 @@
   left: auto;
   right: 0;
   bottom: 0;
-  width: calc(85vw - 540px);
+  width: calc(85vw - 280px);
+  min-width: 500px;
   z-index: 100;
 
   display: flex;
@@ -266,11 +268,11 @@
 /* ===== キーワードグリッド（4列） ===== */
 .stj-grid-container {
   display: grid;
-  grid-template-columns: repeat(4, 260px);
+  grid-template-columns: repeat(5, 260px);
   column-gap: 0;
   row-gap: 8px;
   width: max-content;
-  min-width: 1040px;
+  min-width: 1300px;
   margin: 0 auto;
 }
 
