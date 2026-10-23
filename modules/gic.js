@@ -851,7 +851,8 @@ function getCurrentCharacterName() {
             box-sizing: border-box !important;
         }
 
-        /* ★ 内側の生 img 要素も親いっぱいに */
+        /* ★ 内側の生 img 要素も親いっぱいに
+              ★ display:none で完全非表示（オリジナル画像の露出を防ぐ） */
         #gallery .nGY2GThumbnailImg,
         #gallery .nGY2TnImg2 {
             position: absolute !important;
@@ -866,6 +867,9 @@ function getCurrentCharacterName() {
             margin: 0 !important;
             border: 0 !important;
             box-sizing: border-box !important;
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
         }
 
         #gallery .nGY2GThumbnail > img,
@@ -885,6 +889,26 @@ function getCurrentCharacterName() {
             visibility: visible !important;
             pointer-events: none !important;
             transform: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background-color: transparent !important;
+        }
+
+        /* ★ サムネイル用のキャッシュ済み blob 画像 */
+        #gallery .gic-gallery-image-cached {
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+            max-width: 100% !important;
+            max-height: 100% !important;
+            object-fit: contain !important;
+            display: block !important;
+            z-index: 2 !important;
+            opacity: 1 !important;
+            visibility: visible !important;
+            pointer-events: none !important;
             margin: 0 !important;
             padding: 0 !important;
             background-color: transparent !important;
@@ -1965,6 +1989,7 @@ function scanAndSyncVideoBadges() {
 
 // ============================================================
 // ★ サムネの background-image を「即座にブロック → blob 適用」
+//    ★ IMG 要素は display:none で完全非表示
 // ============================================================
 function applyThumbnailBlobImmediately(thumb, blobUrl) {
     if (!thumb || !blobUrl) return;
@@ -1972,6 +1997,11 @@ function applyThumbnailBlobImmediately(thumb, blobUrl) {
     thumb.querySelectorAll('.nGY2TnImg, .nGY2TnImgBack, .nGY2TnImg2, .nGY2GThumbnailImg').forEach(el => {
         el.style.setProperty('background-image', 'none', 'important');
         el.style.setProperty('opacity', '0', 'important');
+        /* ★ 生 img 要素は display:none で完全に消す */
+        if (el.tagName === 'IMG') {
+            el.style.setProperty('display', 'none', 'important');
+            el.style.setProperty('visibility', 'hidden', 'important');
+        }
     });
 
     thumb.querySelectorAll('.gic-gallery-image-cached').forEach(el => el.remove());
@@ -2032,7 +2062,6 @@ async function setupGalleryVideoThumbs() {
                 tasks.push({ type: 'video', thumb, title });
             } else if (/\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(title)) {
                 if (thumb.dataset.gicImageReady === '1') return;
-                /* ★ フラグは処理後に立てる（setupImmediateThumbCacheInterceptor と競合させない） */
                 tasks.push({ type: 'image', thumb, title });
             }
         });
@@ -2233,7 +2262,13 @@ function setupImmediateThumbCacheInterceptor() {
 
     async function processThumb(thumb) {
         if (!thumb || processing.has(thumb)) return;
-        if (thumb.dataset.gicImageReady === '1') return;
+
+        /* ★ gicImageReady フラグより、実 DOM の .gic-gallery-image-cached を優先確認 */
+        const existing = thumb.querySelector('.gic-gallery-image-cached');
+        if (existing && existing.src && existing.src.startsWith('blob:')) {
+            thumb.dataset.gicImageReady = '1';
+            return;
+        }
 
         const title = (thumb.getAttribute('title') || '').trim();
         if (!title) return;
@@ -2260,6 +2295,8 @@ function setupImmediateThumbCacheInterceptor() {
             thumb.dataset.gicImageReady = '1';
         } catch (e) {
             console.warn('[GIC] processThumb error:', e);
+        } finally {
+            processing.delete(thumb);
         }
     }
 
@@ -2271,7 +2308,8 @@ function setupImmediateThumbCacheInterceptor() {
     });
     childObserver.observe(document.body, { childList: true, subtree: true });
 
-    /* attributeFilter（background-image 設定を即捕捉して fetch を抑止） */
+    /* attributeFilter（background-image 設定を即捕捉して fetch を抑止）
+       ★ 先頭スラッシュの有無両対応（相対パス・絶対パス両方マッチ） */
     const styleObserver = new MutationObserver((mutations) => {
         for (const m of mutations) {
             if (m.type !== 'attributes' || m.attributeName !== 'style') continue;
@@ -2280,7 +2318,9 @@ function setupImmediateThumbCacheInterceptor() {
             if (!el.classList.contains('nGY2TnImg') && !el.classList.contains('nGY2TnImgBack')) continue;
 
             const bg = el.style.backgroundImage;
-            if (!bg || !bg.includes('/user/images/')) continue;
+            if (!bg) continue;
+            /* ★ 先頭スラッシュの有無両対応 */
+            if (!bg.includes('user/images/')) continue;
             if (bg.includes('_thum.png') || bg.includes('_img_thum.png')) continue;
             if (bg.includes('blob:')) continue;
 
@@ -4067,6 +4107,7 @@ function restructureGalleryHeader() {
 //    - 右側余白を10px広げる
 //    - サムネ内部要素も200pxに強制（黒余白排除）
 //    - _img_thum.png の thumb は完全非表示
+//    - サムネ再適用保証（キャッシュから復元）
 // ============================================================
 function enforceGalleryGridLayout() {
     const gallery = document.getElementById('gallery');
@@ -4244,6 +4285,32 @@ function enforceGalleryGridLayout() {
         thumb.style.setProperty('opacity', '1', 'important');
         /* visibility は設定しない（CSS .gic-page-switching に任せる） */
     });
+
+    /* ★ サムネ再適用保証:
+          nanogallery2 の再描画で .gic-gallery-image-cached が消えることがあるため、
+          毎サイクル存在チェック → なければキャッシュから再適用 */
+    try {
+        const charName = getCurrentCharacterName();
+        if (charName) {
+            visibleThumbs.forEach(thumb => {
+                const title = (thumb.getAttribute('title') || '').trim();
+                if (!title || isVideoFile(title)) return;
+                if (title.endsWith('_img_thum.png')) return;
+                if (!/\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(title)) return;
+
+                const hasCached = thumb.querySelector('.gic-gallery-image-cached');
+                if (hasCached && hasCached.src && hasCached.src.startsWith('blob:')) return;
+
+                /* キャッシュ済みなら即座に再適用、なければスキップ（インターセプタに任せる） */
+                const cacheKey = `${charName}:${title}:imgthumb`;
+                const cachedUrl = _imgBlobUrlCache.get(cacheKey);
+                if (cachedUrl) {
+                    applyThumbnailBlobImmediately(thumb, cachedUrl);
+                    thumb.dataset.gicImageReady = '1';
+                }
+            });
+        }
+    } catch (e) { /* ignore */ }
 
     /* ★ サムネ内部要素のサイズを実寸で強制（黒余白排除） */
     visibleThumbs.forEach(thumb => {
@@ -5222,7 +5289,8 @@ function exposeGicApi() {
             const thumbStyle = window.getComputedStyle(thumb);
             const nGY2TnImg = thumb.querySelector('.nGY2TnImg');
             const nGY2TnImgBack = thumb.querySelector('.nGY2TnImgBack');
-            const imgEl = thumb.querySelector('img');
+            const nGY2TnImg2 = thumb.querySelector('.nGY2TnImg2');
+            const imgEl = thumb.querySelector('.gic-gallery-image-cached') || thumb.querySelector('img');
             console.log(`[GicDebug] thumb[${i}] visible=${vis}`, {
                 thumb: {
                     size: `${Math.round(rect.width)}x${Math.round(rect.height)}`,
@@ -5242,6 +5310,12 @@ function exposeGicApi() {
                     opacity: window.getComputedStyle(nGY2TnImgBack).opacity,
                     display: window.getComputedStyle(nGY2TnImgBack).display,
                     zIndex: window.getComputedStyle(nGY2TnImgBack).zIndex,
+                } : null,
+                nGY2TnImg2: nGY2TnImg2 ? {
+                    src: nGY2TnImg2.src?.slice(0, 80),
+                    display: window.getComputedStyle(nGY2TnImg2).display,
+                    visibility: window.getComputedStyle(nGY2TnImg2).visibility,
+                    opacity: window.getComputedStyle(nGY2TnImg2).opacity,
                 } : null,
                 img: imgEl ? {
                     src: imgEl.src.slice(0, 80),
