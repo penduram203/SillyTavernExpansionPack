@@ -8,8 +8,11 @@ import { getContext } from '../../../../extensions.js';
 console.log('[GIC] モジュールロード開始');
 
 // ============================================================
-// ★ /api/images/list から _img_thum.png を除外
-//    既存の _img_thum.png がギャラリーに表示されるのを防ぐ
+// ★ /api/images/list で「元画像 → サムネイル」置換
+//    - _img_thum.png 自体はリストから除外（2倍表示防止）
+//    - 元画像 image.png を image_img_thum.png に置換（存在時のみ）
+//    - これにより nanogallery2 は最初からサムネイル URL を設定する
+//    - ブラウザは元画像 (1280x720) を一切 fetch しない
 // ============================================================
 (function installImgThumbListFilter() {
     if (window.__gicImgThumbListFilterInstalled) return;
@@ -29,12 +32,32 @@ console.log('[GIC] モジュールロード開始');
             const data = await resp.clone().json();
             if (!Array.isArray(data)) return resp;
 
-            const filtered = data.filter(f =>
-                typeof f === 'string' && !f.endsWith('_img_thum.png')
-            );
-            if (filtered.length === data.length) return resp;
+            const set = new Set(data.filter(f => typeof f === 'string'));
 
-            console.debug(`[GIC] 🚫 /api/images/list: _img_thum.png ${data.length - filtered.length}件を除外`);
+            let replaced = 0;
+            let removed = 0;
+            const filtered = [];
+            for (const f of data) {
+                if (typeof f !== 'string') { filtered.push(f); continue; }
+
+                /* _img_thum.png 自体は除外（2倍表示防止） */
+                if (f.endsWith('_img_thum.png')) { removed++; continue; }
+
+                /* 元画像 → サムネイル置換（サムネが存在する時のみ） */
+                if (/\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(f)) {
+                    const thumbName = imageFileToThumbName(f);
+                    if (thumbName && set.has(thumbName)) {
+                        filtered.push(thumbName);
+                        replaced++;
+                        continue;
+                    }
+                }
+                filtered.push(f);
+            }
+
+            if (replaced === 0 && removed === 0) return resp;
+
+            console.debug(`[GIC] 🚫 /api/images/list: 元画像→サムネ置換 ${replaced}件, _img_thum除外 ${removed}件`);
             return new Response(JSON.stringify(filtered), {
                 status: resp.status,
                 statusText: resp.statusText,
@@ -44,7 +67,7 @@ console.log('[GIC] モジュールロード開始');
             return resp;
         }
     };
-    console.log('[GIC] 🚫 /api/images/list から _img_thum.png を除外するフィルタを設置');
+    console.log('[GIC] 🚫 /api/images/list で元画像→サムネイル置換を有効化');
 })();
 
 // ===== 定数 =====
@@ -1855,7 +1878,7 @@ async function ensureThumbnailForVideo(videoFileName, charName = getCurrentChara
 
 // ============================================================
 // ★ 画像サムネイル（200x200）の生成・キャッシュ
-//    ★ ディスク保存は行わない（IndexedDB のみ）
+//    ★ /api/images/list 置換に必要なため、ディスク保存も行う
 // ============================================================
 async function generateImageThumbnailBlob(imageUrl, size = IMG_THUMB_SIZE) {
     return new Promise((resolve) => {
@@ -1914,6 +1937,16 @@ async function ensureImageThumbnail(imageFileName, charName) {
             _imgThumbKnown.add(manifestKey);
             saveImgThumbManifest();
         }
+        /* ★ IndexedDB にあるがディスクに無い場合は書き出す */
+        const thumbName = imageFileToThumbName(imageFileName);
+        if (thumbName) {
+            const diskUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(thumbName);
+            if (!(await checkFileExists(diskUrl))) {
+                console.log(`[GIC] 💾 IndexedDB → ディスク書き出し: ${thumbName}`);
+                await uploadThumbnailBlob(charName, cachedBlob, thumbName);
+                _thumbExistCache.delete(diskUrl);
+            }
+        }
         return url;
     }
 
@@ -1923,7 +1956,15 @@ async function ensureImageThumbnail(imageFileName, charName) {
 
     await putImgInDB(cacheKey, blob);
 
-    /* ★ ディスク保存は行わない（IndexedDB のみにキャッシュ） */
+    /* ★ ディスク保存を復活（/api/images/list 置換に必要） */
+    const thumbName = imageFileToThumbName(imageFileName);
+    if (thumbName) {
+        const ok = await uploadThumbnailBlob(charName, blob, thumbName);
+        if (ok) {
+            const diskUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(thumbName);
+            _thumbExistCache.delete(diskUrl);
+        }
+    }
 
     _imgThumbKnown.add(manifestKey);
     saveImgThumbManifest();
@@ -2193,7 +2234,7 @@ async function preloadGalleryImagesInBackground() {
             await Promise.all(chunk.map(async f => {
                 /* 元画像の blob キャッシュ（プレビュー用） */
                 await fetchAndCacheImage(charName, f);
-                /* ★ 200×200 サムネイル生成（ギャラリー表示用） */
+                /* ★ 200×200 サムネイル生成（ギャラリー表示用・ディスク保存） */
                 await ensureImageThumbnail(charName, f);
             }));
             await wait(IMG_PRELOAD_DELAY_MS);
@@ -2374,6 +2415,7 @@ function setupImmediateThumbCacheInterceptor() {
 // ============================================================
 // ★ 既存の _img_thum.png をディスクから自動削除
 //    過去バージョンがディスク保存した残骸を一掃する
+//    ※ 現在は保存する方針のため呼び出さないが、互換維持のため残す
 // ============================================================
 async function cleanupExistingImgThumbs() {
     const charName = getCurrentCharacterName();
@@ -3245,8 +3287,27 @@ function applyPageNumbers() {
     positionPager(pager);
 }
 
+// ============================================================
+// ★ 画像プレビュー: サムネイル(_img_thum.png) → 元画像(.png) 変換
+// ============================================================
 function fitPreviewToViewport(panel) {
     if (!panel) return;
+
+    /* ★ パネル内の img が _img_thum.png を指していたら元画像名に変換
+          （拡大ビューではオリジナル画像を表示する） */
+    try {
+        panel.querySelectorAll('img').forEach(img => {
+            const src = img.src || '';
+            if (src.endsWith(IMG_THUMB_SUFFIX)) {
+                const origSrc = src.slice(0, -IMG_THUMB_SUFFIX.length) + '.png';
+                if (img.src !== origSrc) {
+                    img.src = origSrc;
+                    img.dataset.gicFitBound = '';
+                    console.log(`[GIC] 🔍 プレビュー画像を元画像に変換: ${origSrc}`);
+                }
+            }
+        });
+    } catch (e) { /* ignore */ }
 
     if (window.__gicPendingPreview) {
         fitVideoPreview(panel, window.__gicPendingPreview);
@@ -4041,9 +4102,6 @@ function setupBulkDelete() {
 
 // ============================================================
 // ★ ギャラリーヘッダー再構成
-//    .dragTitle 内の "Image Gallery" テキストを削除し、
-//    フォルダ入力・一括選択・✓・🗑・♻ を左端に集約する。
-//    空になった旧コンテナも除去する。
 // ============================================================
 function restructureGalleryHeader() {
     const gallery = document.getElementById('gallery');
@@ -4102,12 +4160,6 @@ function restructureGalleryHeader() {
 
 // ============================================================
 // ★ ギャラリーサムネイルを 4列 × 4行 の グリッドに強制
-//    - 200×200px 固定・隙間ゼロ
-//    - 画面上端寄せ（下方向へ拡張）
-//    - 右側余白を10px広げる
-//    - サムネ内部要素も200pxに強制（黒余白排除）
-//    - _img_thum.png の thumb は完全非表示
-//    - サムネ再適用保証（キャッシュから復元）
 // ============================================================
 function enforceGalleryGridLayout() {
     const gallery = document.getElementById('gallery');
@@ -4340,7 +4392,6 @@ function enforceGalleryGridLayout() {
 
 // ============================================================
 // ★ ページ切替: 内側コンテナを隠して揃えてから見せる方式
-//    キャッシュ済み画像は即時適用
 // ============================================================
 async function handlePageSwitchAsync() {
     if (_pageSwitchInProgress) return;
@@ -5467,10 +5518,8 @@ function initializeGIC() {
     applyGalleryLayout();
     try { setupGalleryVideoThumbs(); } catch (e) { /* ignore */ }
 
-    /* ★ 既存の _img_thum.png を自動削除（過去バージョンの残骸を一掃） */
-    setTimeout(() => {
-        cleanupExistingImgThumbs().catch(() => {});
-    }, 3000);
+    /* ※ _img_thum.png 自動削除は廃止（保存方針に戻したため）
+         cleanupExistingImgThumbs() は呼び出さない */
 }
 
 function bootstrapGIC() {
