@@ -2163,6 +2163,14 @@ async function getStaticFrameUrl(fileName, charName) {
     if (!fileName || !charName) return null;
     if (!/\.(gif|png)$/i.test(fileName)) return null;
 
+    // ★ アニメーションしない GIF/PNG はスキップ（canvas 描画は高コスト）
+    try {
+        const animated = await isAnimatedImage(fileName, charName);
+        if (!animated) return null;
+    } catch (e) {
+        return null;
+    }
+
     const key = `${charName}:${fileName}`;
     if (_staticFrameCache.has(key)) return _staticFrameCache.get(key);
 
@@ -2241,32 +2249,38 @@ async function isAnimatedImage(fileName, charName) {
     if (_animatedMediaCache.has(cacheKey)) return _animatedMediaCache.get(cacheKey);
 
     const promise = (async () => {
-        let bytes = null;
+        let blob = null;
 
         // ① IndexedDB の元画像 blob を優先
         try {
-            const blob = await getImgFromDB(cacheKey);
-            if (blob) bytes = new Uint8Array(await blob.arrayBuffer());
+            blob = await getImgFromDB(cacheKey);
         } catch (e) { /* ignore */ }
 
         // ② メモリキャッシュ（blob URL）経由
-        if (!bytes && _imgBlobUrlCache.has(cacheKey)) {
+        if (!blob && _imgBlobUrlCache.has(cacheKey)) {
             try {
                 const resp = await fetch(_imgBlobUrlCache.get(cacheKey));
-                if (resp.ok) bytes = new Uint8Array(await resp.arrayBuffer());
+                if (resp.ok) blob = await resp.blob();
             } catch (e) { /* ignore */ }
         }
 
-        // ③ サーバから直接取得
-        if (!bytes) {
+        // ③ サーバから直接取得（Range リクエストで先頭64KBのみ）
+        if (!blob) {
             try {
                 const url = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(fileName);
-                const resp = await fetch(url);
-                if (resp.ok) bytes = new Uint8Array(await resp.arrayBuffer());
+                const resp = await fetch(url, { headers: { 'Range': 'bytes=0-65535' } });
+                if (resp.ok || resp.status === 206) {
+                    blob = await resp.blob();
+                }
             } catch (e) { /* ignore */ }
         }
 
-        if (!bytes) return false;
+        if (!blob) return false;
+
+        // ★ 先頭64KBのみ読む（全体読み込みで183ファイル×500KBだと10秒近くかかる）
+        const slice = blob.slice(0, 65536);
+        const bytes = new Uint8Array(await slice.arrayBuffer());
+
         if (/\.png$/i.test(fileName)) return hasApngChunk(bytes);
         if (/\.gif$/i.test(fileName)) return hasGifAnimation(bytes);
         return false;
