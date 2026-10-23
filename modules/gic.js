@@ -740,6 +740,24 @@ function getCurrentCharacterName() {
             display: none !important;
         }
 
+        /* ★ サムネ内側コンテナを親いっぱいに */
+        #gallery .nGY2GThumbnailSub {
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+            min-width: 100% !important;
+            min-height: 100% !important;
+            max-width: 100% !important;
+            max-height: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            box-sizing: border-box !important;
+            overflow: hidden !important;
+        }
+
+        /* ★ 背景画像レイヤー: cover で親を完全に埋める */
         #gallery .nGY2TnImg {
             position: absolute !important;
             top: 0 !important;
@@ -748,7 +766,7 @@ function getCurrentCharacterName() {
             height: 100% !important;
             max-width: 100% !important;
             max-height: 100% !important;
-            background-size: contain !important;
+            background-size: cover !important;          /* ★ contain → cover */
             background-position: center center !important;
             background-repeat: no-repeat !important;
             background-color: transparent !important;
@@ -756,6 +774,22 @@ function getCurrentCharacterName() {
             opacity: 1 !important;
             visibility: visible !important;
             transform: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            box-sizing: border-box !important;
+        }
+
+        /* ★ 内側の生 img（nGY2TnImg2）も親いっぱいに */
+        #gallery .nGY2GThumbnailImg,
+        #gallery .nGY2TnImg2 {
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+            max-width: 100% !important;
+            max-height: 100% !important;
+            object-fit: cover !important;
             margin: 0 !important;
             padding: 0 !important;
             box-sizing: border-box !important;
@@ -789,7 +823,7 @@ function getCurrentCharacterName() {
             height: 100% !important;
             max-width: 100% !important;
             max-height: 100% !important;
-            object-fit: contain !important;
+            object-fit: cover !important;
             display: block !important;
             z-index: 2 !important;
             opacity: 1 !important;
@@ -1901,7 +1935,7 @@ async function processGalleryVideoThumb(thumb, videoFileName, charName) {
         img.src = thumbUrl;
         img.style.cssText =
             'position:absolute;top:0;left:0;width:100%;height:100%;' +
-            'object-fit:contain;pointer-events:none;z-index:2;background:transparent;';
+            'object-fit:cover;pointer-events:none;z-index:2;background:transparent;';
         thumb.appendChild(img);
         return;
     }
@@ -1918,7 +1952,7 @@ async function processGalleryVideoThumb(thumb, videoFileName, charName) {
     video.setAttribute('playsinline', '');
     video.style.cssText =
         'position:absolute;top:0;left:0;width:100%;height:100%;' +
-        'object-fit:contain;pointer-events:none;z-index:2;background:transparent;';
+        'object-fit:cover;pointer-events:none;z-index:2;background:transparent;';
     video.addEventListener('loadeddata', () => {
         try {
             if (Number.isFinite(video.duration) && video.duration > 0.1) {
@@ -1950,7 +1984,7 @@ function applyCachedImageToThumb(thumb, blobUrl) {
     img.src = blobUrl;
     img.style.cssText =
         'position:absolute;top:0;left:0;width:100%;height:100%;' +
-        'object-fit:contain;pointer-events:none;z-index:2;background:transparent;';
+        'object-fit:cover;pointer-events:none;z-index:2;background:transparent;';
     thumb.appendChild(img);
 }
 
