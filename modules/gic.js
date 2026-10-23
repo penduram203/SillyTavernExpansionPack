@@ -117,7 +117,7 @@ const GALLERY_WINDOW_CLOSE_SCALE = 2.5;
 const GALLERY_WINDOW_HEIGHT_DELTA = 600;
 const GALLERY_WINDOW_MAX_VIEWPORT_MARGIN = 20;
 const GALLERY_PAGINATION_HEIGHT = 40;
-const GALLERY_WINDOW_WIDTH_EXTRA = 350;
+const GALLERY_WINDOW_WIDTH_EXTRA = 150;
 const PAGINATION_PAGE_SIZE = 10;
 const PAGINATION_MAX_VISIBLE = 10;
 const PAGINATION_OFFSET_LEFT = 15;
@@ -4526,14 +4526,14 @@ function enforceGalleryGridLayout() {
     });
     if (visibleThumbs.length === 0) return;
 
-    const COLS          = 4;
+    const COLS          = 3;
     const MAX_ROWS      = 4;
     const H_GAP         = 0;
     const V_GAP         = 0;
     const RIGHT_EXTRA   = 10;
     const TOP_PADDING   = 6;
     const PAGER_RESERVE = 70;
-    const THUMB_MAX     = 200;
+    const THUMB_MAX     = 180;
     const THUMB_MIN     = 120;
 
     const galleryRect0 = gallery.getBoundingClientRect();
@@ -5740,7 +5740,7 @@ function exposeGicApi() {
     if (window.__gicDragGalleryWidthForcer) return;
     window.__gicDragGalleryWidthForcer = true;
 
-    const PARENT_W = 760;
+    const PARENT_W = 560;
 
     const forceWidth = (dg) => {
         if (!dg) return;
@@ -5769,7 +5769,7 @@ function exposeGicApi() {
     });
     observer.observe(document.body, { childList: true, subtree: true });
 
-    console.log('[GIC] ✅ #dragGallery 幅事前固定オブザーバを設置しました (4列対応: 760px)');
+    console.log('[GIC] ✅ #dragGallery 幅事前固定オブザーバを設置しました (3列対応: 560px)');
 })();
 
 function initializeGIC() {
