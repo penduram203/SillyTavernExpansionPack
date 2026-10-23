@@ -72,10 +72,6 @@ const IMG_DB_VERSION = 1;
 const IMG_PRELOAD_CHUNK = 3;
 const IMG_PRELOAD_DELAY_MS = 50;
 
-let _imgDbPromise = null;
-const _imgBlobUrlCache = new Map();
-let _imgPreloading = false;
-
 // ===== 状態 =====
 let lastGeneratedImageUrl = null;
 let isOverrideLocal = false;
@@ -86,7 +82,6 @@ let isApplyingLayout = false;
 
 const galleryBaseHeightCache = new WeakMap();
 
-// ★ ギャラリーの幅基準値キャッシュ（+80px 計算用）
 const galleryBaseWidthCache = new WeakMap();
 let _lastWindowWidthForGallery = 0;
 
@@ -139,13 +134,18 @@ const _thumbUrlCache = new Map();
 let _thumbProcessingActive = false;
 let _thumbDbPromise = null;
 
-// ★ ギャラリーの開閉状態追跡（syncGalleryButtonVisibility 用）
+// ★ 画像 blob キャッシュ状態
+let _imgDbPromise = null;
+const _imgBlobUrlCache = new Map();
+let _imgPreloading = false;
+
+// ★ ギャラリーの開閉状態追跡
 let lastGalleryStateForGic = null;
 
 // ★ STJEditor 再オープンの状態
 let _stjReopenScheduled = false;
 
-// ★ ページ切替時のレイアウトロック（バラバラな並びをユーザーに見せない）
+// ★ ページ切替時のレイアウトロック
 let _pageSwitchInProgress = false;
 let _pageSwitchOrigVisibility = '';
 
@@ -382,9 +382,9 @@ function getCurrentCharacterName() {
         ${closeSel} {
             position: fixed !important;
             left: 0 !important;
-            top: calc(50% - 15px) !important;  /* ★ デフォルト半高15px（JSで実測補正） */
+            top: 50% !important;
             transform: scale(${GALLERY_PREVIEW_CLOSE_SCALE}) !important;
-            transform-origin: center center !important;  /* ★ 中心基準 */
+            transform-origin: left center !important;
             display: inline-block !important;
             opacity: 0 !important;
             pointer-events: none !important;
@@ -623,7 +623,7 @@ function getCurrentCharacterName() {
         }
 
         body.gic-bulk-delete-mode #gallery::before {
-            content: var(--gic-bulk-banner-text, '一括選択モード — 画像をクリックして選択');
+            content: var(--gic-bulk-banner-text, '一括選択モード — 画像クリックで選択');
             position: absolute;
             top: 0;
             left: 0;
@@ -722,7 +722,7 @@ function getCurrentCharacterName() {
         }
 
         /* ============================================================
-           ★ ギャラリーサムネイル: 180×180 正方形
+           ★ ギャラリーサムネイル: 正方形
            （位置は JS の enforceGalleryGridLayout() が担当）
            ============================================================ */
         #gallery .nGY2GThumbnail,
@@ -732,6 +732,9 @@ function getCurrentCharacterName() {
             box-sizing: border-box !important;
             overflow: hidden !important;
             opacity: 1 !important;
+            border: 0 !important;
+            padding: 0 !important;
+            margin: 0 !important;
         }
 
         #gallery .nGY2GThumbnail::before,
@@ -740,24 +743,22 @@ function getCurrentCharacterName() {
             display: none !important;
         }
 
-        /* ★ サムネ内側コンテナを親いっぱいに */
+        /* ★ サムネ内側コンテナを親いっぱいに（黒余白排除） */
         #gallery .nGY2GThumbnailSub {
             position: absolute !important;
             top: 0 !important;
             left: 0 !important;
             width: 100% !important;
             height: 100% !important;
-            min-width: 100% !important;
-            min-height: 100% !important;
             max-width: 100% !important;
             max-height: 100% !important;
-            margin: 0 !important;
             padding: 0 !important;
+            margin: 0 !important;
+            border: 0 !important;
             box-sizing: border-box !important;
             overflow: hidden !important;
         }
 
-        /* ★ 背景画像レイヤー: cover で親を完全に埋める */
         #gallery .nGY2TnImg {
             position: absolute !important;
             top: 0 !important;
@@ -766,7 +767,7 @@ function getCurrentCharacterName() {
             height: 100% !important;
             max-width: 100% !important;
             max-height: 100% !important;
-            background-size: cover !important;          /* ★ contain → cover */
+            background-size: contain !important;
             background-position: center center !important;
             background-repeat: no-repeat !important;
             background-color: transparent !important;
@@ -776,22 +777,7 @@ function getCurrentCharacterName() {
             transform: none !important;
             margin: 0 !important;
             padding: 0 !important;
-            box-sizing: border-box !important;
-        }
-
-        /* ★ 内側の生 img（nGY2TnImg2）も親いっぱいに */
-        #gallery .nGY2GThumbnailImg,
-        #gallery .nGY2TnImg2 {
-            position: absolute !important;
-            top: 0 !important;
-            left: 0 !important;
-            width: 100% !important;
-            height: 100% !important;
-            max-width: 100% !important;
-            max-height: 100% !important;
-            object-fit: cover !important;
-            margin: 0 !important;
-            padding: 0 !important;
+            border: 0 !important;
             box-sizing: border-box !important;
         }
 
@@ -810,6 +796,24 @@ function getCurrentCharacterName() {
             transform: none !important;
             margin: 0 !important;
             padding: 0 !important;
+            border: 0 !important;
+            box-sizing: border-box !important;
+        }
+
+        /* ★ 内側の生 img 要素も親いっぱいに */
+        #gallery .nGY2GThumbnailImg,
+        #gallery .nGY2TnImg2 {
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+            max-width: 100% !important;
+            max-height: 100% !important;
+            object-fit: contain !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            border: 0 !important;
             box-sizing: border-box !important;
         }
 
@@ -823,7 +827,7 @@ function getCurrentCharacterName() {
             height: 100% !important;
             max-width: 100% !important;
             max-height: 100% !important;
-            object-fit: cover !important;
+            object-fit: contain !important;
             display: block !important;
             z-index: 2 !important;
             opacity: 1 !important;
@@ -847,7 +851,6 @@ function getCurrentCharacterName() {
 
         /* ============================================================
            ★ ページ切替中: サムネを CSS レベルで完全非表示
-           （inline visibility:visible が無い前提で機能する）
            ============================================================ */
         #gallery.gic-page-switching .nGY2GThumbnail,
         #gallery.gic-page-switching .nGY2GThumbnail_l1,
@@ -867,9 +870,7 @@ function getCurrentCharacterName() {
             pointer-events: none !important;
         }
 
-        /* ★ 例外: 🗑アイコン（Delete mode）だけは表示・クリック可能に戻す
-           visibility は親の hidden を子で visible に上書きでき、
-           pointer-events も子で auto に戻せばクリックを受け付ける */
+        /* ★ 例外: 🗑アイコンだけは表示・クリック可能に戻す */
         body.gic-bulk-delete-mode #gallery .dragTitle > [title="Delete mode"],
         body.gic-bulk-delete-mode #gallery .dragTitle > .fa-trash,
         body.gic-bulk-delete-mode #gallery .dragTitle > [class*="fa-trash"] {
@@ -887,17 +888,16 @@ function getCurrentCharacterName() {
         }
 
         /* ============================================================
-           ★ 一括選択モード: 前面に表示する「一括選択」ボタン（白枠付き）
+           ★ 一括選択モード: 前面の「選択終了」ボタン（白枠付き）
            ============================================================ */
-        /* 前回追加したCSSのうち、#gic-floating-bulk-exit 本体を以下に置き換え */
         #gic-floating-bulk-exit {
             display: none;
             position: fixed;
             align-items: center;
             justify-content: center;
-            height: 28px;               /* JSで上書きされますが既定値 */
-            padding: 0 8px;             /* ★ 元ボタン(0 8px)に合わせる */
-            font-size: 12px;            /* ★ 元ボタン(12px)に合わせる */
+            height: 28px;
+            padding: 0 8px;
+            font-size: 12px;
             font-weight: bold;
             font-family: inherit;
             color: #ffffff;
@@ -919,7 +919,6 @@ function getCurrentCharacterName() {
         #gic-floating-bulk-exit:hover {
             background-color: #c9302c;
         }
-        
     `;
     document.head.appendChild(style);
     console.log('[GIC] 🖼️ ギャラリー配置CSSを注入しました');
@@ -1200,8 +1199,6 @@ function positionGalleryButton() {
 function isGalleryOpen() {
     const primary = document.getElementById('gallery');
 
-    // ★ ページ切替中は強制的に「開いている」とみなす
-    //    （syncGalleryButtonVisibility が閉→開の遷移を誤検出するのを防ぐ）
     if (primary && primary.classList.contains('gic-page-switching')) {
         return true;
     }
@@ -1438,7 +1435,7 @@ async function generateVideoThumbnailBlob(videoUrl, size = THUMB_SIZE) {
 }
 
 // ============================================================
-// ★ IndexedDB ベースのサムネイル永続キャッシュ
+// ★ IndexedDB ベースの動画サムネイル永続キャッシュ
 // ============================================================
 function openThumbDB() {
     if (_thumbDbPromise) return _thumbDbPromise;
@@ -1601,20 +1598,14 @@ async function clearAllImageCache() {
     }
 }
 
-// ============================================================
-// ★ 画像 blob を取得して IndexedDB にキャッシュ
-//   戻り値: blob URL（失敗時は null）
-// ============================================================
 async function fetchAndCacheImage(charName, fileName) {
     if (!charName || !fileName) return null;
     const cacheKey = `${charName}:${fileName}`;
 
-    // メモリキャッシュ
     if (_imgBlobUrlCache.has(cacheKey)) {
         return _imgBlobUrlCache.get(cacheKey);
     }
 
-    // IndexedDB キャッシュ
     const cachedBlob = await getImgFromDB(cacheKey);
     if (cachedBlob) {
         const url = URL.createObjectURL(cachedBlob);
@@ -1622,7 +1613,6 @@ async function fetchAndCacheImage(charName, fileName) {
         return url;
     }
 
-    // サーバーから取得してキャッシュ
     const url = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(fileName);
     try {
         const resp = await fetch(url);
@@ -1698,14 +1688,12 @@ async function ensureThumbnailForVideo(videoFileName, charName = getCurrentChara
         _thumbUrlCache.delete(cacheKey);
     }
 
-    // ① IndexedDB
     const cachedBlob = await getThumbFromDB(cacheKey);
     if (cachedBlob) {
         const url = URL.createObjectURL(cachedBlob);
         _thumbUrlCache.set(cacheKey, url);
         console.log(`[GIC] ⚡ thumbnail from IndexedDB: ${cacheKey}`);
 
-        // IndexedDB にあるがディスクに無い場合は書き出す
         const thumbName = videoFileToThumbName(videoFileName);
         if (thumbName) {
             const diskUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(thumbName);
@@ -1718,7 +1706,6 @@ async function ensureThumbnailForVideo(videoFileName, charName = getCurrentChara
         return url;
     }
 
-    // ② 旧形式 _thum.png（互換）
     const thumbName = videoFileToThumbName(videoFileName);
     if (thumbName) {
         const thumbUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(thumbName);
@@ -1728,7 +1715,6 @@ async function ensureThumbnailForVideo(videoFileName, charName = getCurrentChara
         }
     }
 
-    // ③ 生成
     const videoUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(videoFileName);
     console.log(`[GIC] 🎬 generating thumbnail: ${cacheKey}`);
     const blob = await generateVideoThumbnailBlob(videoUrl, THUMB_SIZE);
@@ -1737,11 +1723,9 @@ async function ensureThumbnailForVideo(videoFileName, charName = getCurrentChara
         return null;
     }
 
-    // ④ IndexedDB 保存
     const saved = await putThumbInDB(cacheKey, blob);
     if (!saved) console.warn(`[GIC] ⚠️ IndexedDB save failed: ${cacheKey}`);
 
-    // ⑤ ディスク保存
     if (thumbName) {
         const ok = await uploadThumbnailBlob(charName, blob, thumbName);
         if (ok) {
@@ -1798,8 +1782,39 @@ function scanAndSyncVideoBadges() {
 }
 
 // ============================================================
-// ★ ギャラリー動画サムネイル: キャッシュ画像を表示（動画はロードしない）
+// ★ ギャラリーサムネ: 通常画像・動画の両方を blob キャッシュ経由で表示
 // ============================================================
+function applyCachedImageToThumb(thumb, blobUrl) {
+    if (!thumb || !blobUrl) return;
+
+    thumb.querySelectorAll('.nGY2TnImg, .nGY2TnImgBack').forEach(el => {
+        el.style.setProperty('opacity', '0', 'important');
+    });
+
+    thumb.querySelectorAll('.gic-gallery-image-cached, .gic-gallery-thumb-img, .gic-gallery-video').forEach(el => el.remove());
+
+    const img = document.createElement('img');
+    img.className = 'gic-gallery-image-cached';
+    img.src = blobUrl;
+    img.style.cssText =
+        'position:absolute;top:0;left:0;width:100%;height:100%;' +
+        'object-fit:contain;pointer-events:none;z-index:2;background:transparent;';
+    thumb.appendChild(img);
+}
+
+async function processGalleryImageThumb(thumb, fileName, charName) {
+    if (!thumb || !fileName || !charName) return;
+
+    const blobUrl = await fetchAndCacheImage(charName, fileName);
+    if (!blobUrl) {
+        thumb.querySelectorAll('.nGY2TnImg, .nGY2TnImgBack').forEach(el => {
+            el.style.removeProperty('opacity');
+        });
+        return;
+    }
+    applyCachedImageToThumb(thumb, blobUrl);
+}
+
 async function setupGalleryVideoThumbs() {
     if (_thumbProcessingActive) return;
     const gallery = document.getElementById('gallery');
@@ -1853,66 +1868,6 @@ async function setupGalleryVideoThumbs() {
     }
 }
 
-// ============================================================
-// ★ ギャラリー全画像をバックグラウンド先読み
-//    ギャラリーを開いた直後に走り、IndexedDB を温める。
-//    以降のページ切替は瞬時に表示される。
-// ============================================================
-async function preloadGalleryImagesInBackground() {
-    if (_imgPreloading) return;
-    _imgPreloading = true;
-
-    try {
-        const charName = getCurrentCharacterName();
-        if (!charName) return;
-
-        // 画像リストを取得
-        let files = [];
-        try {
-            const resp = await fetch('/api/images/list', {
-                method: 'POST',
-                headers: getRequestHeaders(),
-                body: JSON.stringify({ folder: charName })
-            });
-            if (resp.ok) files = await resp.json();
-        } catch (e) { return; }
-
-        if (!Array.isArray(files)) return;
-
-        const images = files.filter(f =>
-            typeof f === 'string' &&
-            /\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(f) &&
-            !/_thum\.png$/i.test(f)
-        );
-        if (images.length === 0) return;
-
-        // 既にキャッシュ済みの数を確認
-        let alreadyCached = 0;
-        for (const f of images) {
-            if (_imgBlobUrlCache.has(`${charName}:${f}`)) alreadyCached++;
-        }
-        const remaining = images.length - alreadyCached;
-        if (remaining === 0) {
-            console.log(`[GIC] ✅ 全 ${images.length} 枚の画像はキャッシュ済みです`);
-            return;
-        }
-
-        console.log(`[GIC] 📥 ${remaining} 枚の画像をバックグラウンド先読み開始（全${images.length}枚中）`);
-
-        // チャンクごとに先読み
-        for (let i = 0; i < images.length; i += IMG_PRELOAD_CHUNK) {
-            if (!isGalleryOpen()) break;
-            const chunk = images.slice(i, i + IMG_PRELOAD_CHUNK);
-            await Promise.all(chunk.map(f => fetchAndCacheImage(charName, f)));
-            await wait(IMG_PRELOAD_DELAY_MS);
-        }
-
-        console.log('[GIC] ✅ 画像先読み完了');
-    } finally {
-        _imgPreloading = false;
-    }
-}
-
 async function processGalleryVideoThumb(thumb, videoFileName, charName) {
     thumb.querySelectorAll('video').forEach(v => {
         try { v.pause(); } catch (e) { /* ignore */ }
@@ -1935,7 +1890,7 @@ async function processGalleryVideoThumb(thumb, videoFileName, charName) {
         img.src = thumbUrl;
         img.style.cssText =
             'position:absolute;top:0;left:0;width:100%;height:100%;' +
-            'object-fit:cover;pointer-events:none;z-index:2;background:transparent;';
+            'object-fit:contain;pointer-events:none;z-index:2;background:transparent;';
         thumb.appendChild(img);
         return;
     }
@@ -1952,7 +1907,7 @@ async function processGalleryVideoThumb(thumb, videoFileName, charName) {
     video.setAttribute('playsinline', '');
     video.style.cssText =
         'position:absolute;top:0;left:0;width:100%;height:100%;' +
-        'object-fit:cover;pointer-events:none;z-index:2;background:transparent;';
+        'object-fit:contain;pointer-events:none;z-index:2;background:transparent;';
     video.addEventListener('loadeddata', () => {
         try {
             if (Number.isFinite(video.duration) && video.duration > 0.1) {
@@ -1964,42 +1919,58 @@ async function processGalleryVideoThumb(thumb, videoFileName, charName) {
 }
 
 // ============================================================
-// ★ 通常画像サムネを blob キャッシュ画像に置き換え
-//    キャッシュ済みなら瞬時に表示、未キャッシュならフェッチして差し替え
+// ★ 全画像のバックグラウンド先読み
 // ============================================================
-function applyCachedImageToThumb(thumb, blobUrl) {
-    if (!thumb || !blobUrl) return;
+async function preloadGalleryImagesInBackground() {
+    if (_imgPreloading) return;
+    _imgPreloading = true;
 
-    // 既存の背景画像を隠す
-    thumb.querySelectorAll('.nGY2TnImg, .nGY2TnImgBack').forEach(el => {
-        el.style.setProperty('opacity', '0', 'important');
-    });
+    try {
+        const charName = getCurrentCharacterName();
+        if (!charName) return;
 
-    // 既存オーバーレイを削除
-    thumb.querySelectorAll('.gic-gallery-image-cached, .gic-gallery-thumb-img, .gic-gallery-video').forEach(el => el.remove());
+        let files = [];
+        try {
+            const resp = await fetch('/api/images/list', {
+                method: 'POST',
+                headers: getRequestHeaders(),
+                body: JSON.stringify({ folder: charName })
+            });
+            if (resp.ok) files = await resp.json();
+        } catch (e) { return; }
 
-    // blob URL の <img> を追加
-    const img = document.createElement('img');
-    img.className = 'gic-gallery-image-cached';
-    img.src = blobUrl;
-    img.style.cssText =
-        'position:absolute;top:0;left:0;width:100%;height:100%;' +
-        'object-fit:cover;pointer-events:none;z-index:2;background:transparent;';
-    thumb.appendChild(img);
-}
+        if (!Array.isArray(files)) return;
 
-async function processGalleryImageThumb(thumb, fileName, charName) {
-    if (!thumb || !fileName || !charName) return;
+        const images = files.filter(f =>
+            typeof f === 'string' &&
+            /\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(f) &&
+            !/_thum\.png$/i.test(f)
+        );
+        if (images.length === 0) return;
 
-    const blobUrl = await fetchAndCacheImage(charName, fileName);
-    if (!blobUrl) {
-        // フェッチ失敗時は背景画像を復元（ブラウザに任せる）
-        thumb.querySelectorAll('.nGY2TnImg, .nGY2TnImgBack').forEach(el => {
-            el.style.removeProperty('opacity');
-        });
-        return;
+        let alreadyCached = 0;
+        for (const f of images) {
+            if (_imgBlobUrlCache.has(`${charName}:${f}`)) alreadyCached++;
+        }
+        const remaining = images.length - alreadyCached;
+        if (remaining === 0) {
+            console.log(`[GIC] ✅ 全 ${images.length} 枚の画像はキャッシュ済みです`);
+            return;
+        }
+
+        console.log(`[GIC] 📥 ${remaining} 枚の画像をバックグラウンド先読み開始（全${images.length}枚中）`);
+
+        for (let i = 0; i < images.length; i += IMG_PRELOAD_CHUNK) {
+            if (!isGalleryOpen()) break;
+            const chunk = images.slice(i, i + IMG_PRELOAD_CHUNK);
+            await Promise.all(chunk.map(f => fetchAndCacheImage(charName, f)));
+            await wait(IMG_PRELOAD_DELAY_MS);
+        }
+
+        console.log('[GIC] ✅ 画像先読み完了');
+    } finally {
+        _imgPreloading = false;
     }
-    applyCachedImageToThumb(thumb, blobUrl);
 }
 
 // ============================================================
@@ -2129,8 +2100,8 @@ function setupGalleryDragToJson() {
                 console.warn(`[GIC] gallery drift (Δx=${dx.toFixed(1)}, Δy=${dy.toFixed(1)}) → restore`);
                 g2.style.setProperty('position', 'fixed', 'important');
                 g2.style.setProperty('left', '0', 'important');
-                g2.style.setProperty('top', '50%', 'important');
-                g2.style.setProperty('transform', 'translateY(-50%)', 'important');
+                g2.style.setProperty('top', '0', 'important');
+                g2.style.setProperty('transform', 'none', 'important');
             }
             if (startScroll) {
                 const ng2 = g2.querySelector('.nGY2Gallery');
@@ -2161,8 +2132,8 @@ function setupGalleryDragToJson() {
                 console.warn(`[GIC] post-drag gallery shift: Δx=${cur.left.toFixed(1)} → restore`);
                 g.style.setProperty('position', 'fixed', 'important');
                 g.style.setProperty('left', '0', 'important');
-                g.style.setProperty('top', '50%', 'important');
-                g.style.setProperty('transform', 'translateY(-50%)', 'important');
+                g.style.setProperty('top', '0', 'important');
+                g.style.setProperty('transform', 'none', 'important');
             }
             if (origScroll) {
                 const n = g.querySelector('.nGY2Gallery');
@@ -2515,7 +2486,7 @@ function hideGalleryUploadMessage() {
 
 function applyGalleryWindowLayout() {
     const vw = window.innerWidth;
-    const vh = window.innerHeight;   /* ★ 追加 */
+    const vh = window.innerHeight;
 
     if (vw !== _lastWindowWidthForGallery) {
         _lastWindowWidthForGallery = vw;
@@ -2538,7 +2509,6 @@ function applyGalleryWindowLayout() {
                 }
             });
 
-            /* ★ 変更: 上下いっぱいに固定 */
             el.style.setProperty('position', 'fixed', 'important');
             el.style.setProperty('top', '0', 'important');
             el.style.setProperty('bottom', '0', 'important');
@@ -2547,7 +2517,6 @@ function applyGalleryWindowLayout() {
             el.style.setProperty('transform', 'none', 'important');
             el.style.setProperty('margin', '0', 'important');
 
-            /* ★ 変更: 高さ = viewport ぴったり（旧: base+600 / clamp） */
             el.style.setProperty('height', vh + 'px', 'important');
             el.style.setProperty('min-height', vh + 'px', 'important');
             el.style.setProperty('max-height', vh + 'px', 'important');
@@ -2557,14 +2526,12 @@ function applyGalleryWindowLayout() {
                 console.log(`[GIC] ギャラリー高さ: viewport=${vh}px（上下いっぱい）`);
             }
 
-            /* 幅計算（ご自身の修正済みロジックをそのまま維持） */
             if (!galleryBaseWidthCache.has(el)) {
                 el.style.removeProperty('width');
                 el.style.removeProperty('max-width');
                 const w = el.getBoundingClientRect().width;
                 if (w > 0) {
                     galleryBaseWidthCache.set(el, w);
-                    // ※ ここはご自身の +350 等のロジックを維持してください
                     console.log(`[GIC] ギャラリー幅: ST本来=${Math.round(w)}px`);
                 }
             }
@@ -2572,8 +2539,7 @@ function applyGalleryWindowLayout() {
             if (galleryBaseWidthCache.has(el)) {
                 const baseW = galleryBaseWidthCache.get(el);
                 const maxW = Math.max(100, vw - GALLERY_WINDOW_MAX_VIEWPORT_MARGIN);
-                // ※ ここもご自身の拡張幅（+270 等）を維持してください
-                const targetW = Math.min(maxW, Math.round(baseW + 350));
+                const targetW = Math.min(maxW, Math.round(baseW + GALLERY_WINDOW_WIDTH_EXTRA));
                 el.style.setProperty('width', targetW + 'px', 'important');
                 el.style.setProperty('max-width', targetW + 'px', 'important');
             }
@@ -2629,7 +2595,6 @@ function positionPager(pager) {
     const gr = galleryEl.getBoundingClientRect();
     if (gr.width === 0 || gr.height === 0) return;
 
-    /* ★ ギャラリー右端から何 px 内側に置くか */
     const rightInset = (window.innerWidth - gr.right) + PAGINATION_OFFSET_LEFT;
     const bottom     = (window.innerHeight - gr.bottom) + PAGINATION_OFFSET_UP;
 
@@ -2862,18 +2827,18 @@ function fitPreviewToViewport(panel) {
             child.style.removeProperty('display');
         });
     }
+
     if (closeBtn) {
-        /* ★ 実測した高さを使って正確に垂直センター配置 */
         const btnH = closeBtn.offsetHeight || 30;
         closeBtn.style.setProperty('position', 'fixed', 'important');
         closeBtn.style.setProperty('left', '0', 'important');
         closeBtn.style.setProperty('top', `calc(50% - ${Math.round(btnH / 2)}px)`, 'important');
         closeBtn.style.setProperty('transform', `scale(${GALLERY_PREVIEW_CLOSE_SCALE})`, 'important');
-        closeBtn.style.setProperty('transform-origin', 'center center', 'important');
+        closeBtn.style.setProperty('transform-origin', 'left center', 'important');
         closeBtn.style.setProperty('margin', '0', 'important');
         closeBtn.style.setProperty('z-index', '15001', 'important');
     }
-    
+
     img.style.setProperty('display', 'block', 'important');
 
     const applySize = () => {
@@ -2931,10 +2896,11 @@ function fitPreviewToViewport(panel) {
         img.style.setProperty('flex', '0 0 auto', 'important');
 
         if (closeBtn) {
+            const btnH = closeBtn.offsetHeight || 30;
             closeBtn.style.setProperty('position', 'fixed', 'important');
             closeBtn.style.setProperty('left', '0', 'important');
-            closeBtn.style.setProperty('top', '50%', 'important');
-            closeBtn.style.setProperty('transform', `translateY(-50%) scale(${GALLERY_PREVIEW_CLOSE_SCALE})`, 'important');
+            closeBtn.style.setProperty('top', `calc(50% - ${Math.round(btnH / 2)}px)`, 'important');
+            closeBtn.style.setProperty('transform', `scale(${GALLERY_PREVIEW_CLOSE_SCALE})`, 'important');
             closeBtn.style.setProperty('transform-origin', 'left center', 'important');
             closeBtn.style.setProperty('margin', '0', 'important');
             closeBtn.style.setProperty('z-index', '15001', 'important');
@@ -3081,15 +3047,15 @@ function fitVideoPreview(panel, pending) {
         });
     }
 
+    /* ★ 画像プレビュー (fitPreviewToViewport) と完全一致させる */
     const closeBtn = panel.querySelector('.dragClose');
     if (closeBtn) {
         closeBtn.style.setProperty('display', 'inline-block', 'important');
-
-        /* ★ 画像側 (fitPreviewToViewport の applySize) と完全に同じ指定 */
+        const btnH = closeBtn.offsetHeight || 30;
         closeBtn.style.setProperty('position', 'fixed', 'important');
         closeBtn.style.setProperty('left', '0', 'important');
-        closeBtn.style.setProperty('top', '50%', 'important');
-        closeBtn.style.setProperty('transform', `translateY(-50%) scale(${GALLERY_PREVIEW_CLOSE_SCALE})`, 'important');
+        closeBtn.style.setProperty('top', `calc(50% - ${Math.round(btnH / 2)}px)`, 'important');
+        closeBtn.style.setProperty('transform', `scale(${GALLERY_PREVIEW_CLOSE_SCALE})`, 'important');
         closeBtn.style.setProperty('transform-origin', 'left center', 'important');
         closeBtn.style.setProperty('margin', '0', 'important');
         closeBtn.style.setProperty('z-index', '15001', 'important');
@@ -3183,11 +3149,10 @@ function enterBulkDeleteMode() {
     _bulkDeleteSelected.clear();
     document.body.classList.add('gic-bulk-delete-mode');
     console.log('[GIC-Bulk] 一括選択モード開始');
-    showBulkDeleteToast('一括選択モード — 画像クリックで選択');  /* ★ 文言変更 */
+    showBulkDeleteToast('一括選択モード — 画像クリックで選択');
     updateBulkDeleteButton();
     updateBulkDeleteBanner();
 
-    /* ★ 浮動ボタンを生成・表示 */
     ensureFloatingBulkButton();
     requestAnimationFrame(() => positionFloatingBulkButton());
 }
@@ -3256,7 +3221,6 @@ function updateBulkDeleteButton() {
     const btn = document.getElementById('gic-bulk-delete-button');
     const floatingBtn = document.getElementById('gic-floating-bulk-exit');
 
-    /* ★ 元ボタンと浮動ボタンで同じテキストを共有 */
     const text = _bulkDeleteMode
         ? (_bulkDeleteSelected.size > 0 ? `選択終了 (${_bulkDeleteSelected.size})` : '選択終了')
         : '一括選択';
@@ -3278,7 +3242,7 @@ function updateBulkDeleteBanner() {
     const count = _bulkDeleteSelected.size;
     const text = count > 0
         ? `一括選択中 — ${count} 枚（🗑 で削除 / ドラッグでまとめて登録）`
-        : '一括選択モード — 画像クリックで選択';  /* ★ 文言変更 */
+        : '一括選択モード — 画像クリックで選択';
     gallery.style.setProperty('--gic-bulk-banner-text', `"${text}"`);
 }
 
@@ -3302,10 +3266,6 @@ function createBulkDeleteButton() {
     return btn;
 }
 
-// ============================================================
-// ★ 一括選択モード用: 前面の「一括選択」ボタン（白枠付き）
-//    赤い枠の上部右側に固定表示し、クリックでモード終了
-// ============================================================
 function ensureFloatingBulkButton() {
     let btn = document.getElementById('gic-floating-bulk-exit');
     if (btn) return btn;
@@ -3331,8 +3291,6 @@ function positionFloatingBulkButton() {
     const original = document.getElementById('gic-bulk-delete-button');
     if (!btn || !original) return;
 
-    /* ★ 元の一括選択ボタンの位置を取得
-          visibility:hidden はレイアウト保持なので rect は正確 */
     const rect = original.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return;
 
@@ -3625,9 +3583,6 @@ function setupBulkDelete() {
 
 // ============================================================
 // ★ ギャラリーヘッダー再構成
-//    .dragTitle 内の "Image Gallery" テキストを削除し、
-//    フォルダ入力・一括選択・✓・🗑・♻ を左端に集約する。
-//    空になった旧コンテナも除去する。
 // ============================================================
 function restructureGalleryHeader() {
     const gallery = document.getElementById('gallery');
@@ -3636,7 +3591,6 @@ function restructureGalleryHeader() {
     const dragTitle = gallery.querySelector('.dragTitle');
     if (!dragTitle) return;
 
-    /* ① "Image Gallery" の span を削除（直下の span のみ対象） */
     dragTitle.querySelectorAll(':scope > span').forEach(span => {
         const txt = (span.textContent || '').trim();
         if (/^image\s*gallery$/i.test(txt)) {
@@ -3644,8 +3598,6 @@ function restructureGalleryHeader() {
         }
     });
 
-    /* ② 移植対象の 5 要素を取得
-          （存在しないものはフィルタで除外） */
     const folderInput = gallery.querySelector('.gallery-folder-input');
     const bulkBtn     = document.getElementById('gic-bulk-delete-button');
     const checkBtn    = gallery.querySelector('.right_menu_button[title="Change gallery folder"]');
@@ -3655,7 +3607,6 @@ function restructureGalleryHeader() {
     const elements = [folderInput, bulkBtn, checkBtn, trashBtn, recycleBtn].filter(Boolean);
     if (elements.length === 0) return;
 
-    /* ③ 既に先頭 N 個が elements と一致していればスキップ（毎tickの負荷軽減） */
     let alreadyInPlace = elements.length <= dragTitle.children.length;
     if (alreadyInPlace) {
         for (let i = 0; i < elements.length; i++) {
@@ -3667,26 +3618,20 @@ function restructureGalleryHeader() {
     }
 
     if (!alreadyInPlace) {
-        /* 「管理対象外の最初の子要素」をアンカーとして取得
-           （＝既存の右側ボタン群の先頭） */
         const managed = new Set(elements);
         const anchor  = Array.from(dragTitle.children).find(c => !managed.has(c)) || null;
 
-        /* フラグメントに順番通り詰め替え → アンカーの直前へ一括挿入 */
         const frag = document.createDocumentFragment();
         elements.forEach(el => frag.appendChild(el));
         dragTitle.insertBefore(frag, anchor);
     }
 
-    /* ④ 空になった旧コンテナを削除
-          （data-gic-bulk-row-observed 付きの flex-container.alignItemsCenter） */
     gallery.querySelectorAll('.flex-container.alignItemsCenter').forEach(c => {
         if (c.children.length === 0 && !c.textContent.trim()) {
             c.remove();
         }
     });
 
-    /* ⑤ z-index / pointer-events を保証（クリック不能問題の再発防止） */
     elements.forEach(el => {
         el.style.setProperty('position', 'relative', 'important');
         el.style.setProperty('z-index', '200', 'important');
@@ -3695,17 +3640,13 @@ function restructureGalleryHeader() {
 }
 
 // ============================================================
-// ★ ギャラリーサムネイルを 3列 × 4行 の 180×180 グリッドに強制
-//    - nanogallery2 が現在のページとして表示しているアイテムのみを対象
-//    - 非表示ページのアイテムには触れない
-//    - ページ切替中は内側コンテナ (.nGY2GallerySub) が visibility:hidden に
-//      なるが、thumb.style.display / computed display で判定するため影響なし
+// ★ ギャラリーサムネイルを 4列 × 4行 のグリッドに強制
 // ============================================================
 function enforceGalleryGridLayout() {
     const gallery = document.getElementById('gallery');
     if (!gallery) return;
 
-    /* ★ ヘッダー系要素を最前面に固定（クリック可能に） - z-index は広めに適用 */
+    /* ★ ヘッダー系要素を最前面に固定（クリック可能に） */
     gallery.querySelectorAll(
         '.dragTitle, .panelControlBar, .nGY2GalleryTop, .nGY2GalleryHeader, ' +
         '.gallery-folder-input, .gallery-sort-select, .gic-bulk-delete-button, ' +
@@ -3742,16 +3683,15 @@ function enforceGalleryGridLayout() {
     /* ★ レイアウト定数 */
     const COLS          = 4;
     const MAX_ROWS      = 4;
-    const H_GAP         = 0;
-    const V_GAP         = 0;
+    const H_GAP         = 0;      /* ★ 隙間なし */
+    const V_GAP         = 0;      /* ★ 隙間なし */
     const RIGHT_EXTRA   = 10;
     const TOP_PADDING   = 6;
     const PAGER_RESERVE = 70;
-    const THUMB_MAX     = 200;
+    const THUMB_MAX     = 200;    /* ★ 200px */
     const THUMB_MIN     = 120;
 
-    /* ★ headerH: 上半分の既知ヘッダー要素のみを測定
-          （per-thumb の🗑ボタンや下部要素を除外） */
+    /* ★ headerH: 上半分の既知ヘッダー要素のみを測定 */
     const galleryRect0 = gallery.getBoundingClientRect();
     const halfH = galleryRect0.height / 2;
     let headerBottom = 0;
@@ -3763,7 +3703,6 @@ function enforceGalleryGridLayout() {
             const r = h.getBoundingClientRect();
             if (r.width > 0 && r.height > 0) {
                 const b = r.bottom - galleryRect0.top;
-                /* 上半分の要素のみ対象 */
                 if (b > 0 && b < halfH && b > headerBottom) headerBottom = b;
             }
         });
@@ -3773,8 +3712,8 @@ function enforceGalleryGridLayout() {
     const containerW = Math.max(100, Math.round(galleryRect0.width)  || 830);
     const containerH = Math.max(100, Math.round(galleryRect0.height) || 922);
 
-    /* ★ サムネサイズを画面高から動的決定 */
-    const availH      = containerH - headerH - PAGER_RESERVE;  // コンテナ最小高さ用
+    /* ★ サムネサイズ: PAGER_RESERVE を差し引かずに算出（下方向へ拡張） */
+    const availH      = containerH - headerH - PAGER_RESERVE;
     const maxThumbByH = Math.floor((containerH - headerH - (MAX_ROWS - 1) * V_GAP) / MAX_ROWS);
     const THUMB       = Math.min(THUMB_MAX, Math.max(THUMB_MIN, maxThumbByH));
 
@@ -3789,7 +3728,8 @@ function enforceGalleryGridLayout() {
     /* 垂直: 上端寄せ */
     const offsetY = TOP_PADDING;
 
-    const containerInnerH = Math.max(gridH, availH);
+    /* ★ offsetY 分も含めた高さを確保（下端切れ防止） */
+    const containerInnerH = Math.max(gridH + offsetY, availH);
 
     const parent    = visibleThumbs[0].parentElement;
     const galleryEl = gallery.querySelector('.nGY2Gallery');
@@ -3814,7 +3754,7 @@ function enforceGalleryGridLayout() {
         galleryEl.style.setProperty('box-sizing', 'border-box', 'important');
     }
 
-    /* ★ subEl / parent は relative + top:0（galleryEl 内で自然に積む） */
+    /* ★ subEl / parent は relative + top:0 */
     [subEl, parent].forEach(el => {
         if (!el || el === galleryEl) return;
         el.style.setProperty('position', 'relative', 'important');
@@ -3871,6 +3811,26 @@ function enforceGalleryGridLayout() {
         /* visibility は設定しない（CSS .gic-page-switching に任せる） */
     });
 
+    /* ★ サムネ内部要素のサイズを実寸で強制（黒余白排除）
+          nanogallery2 がインラインstyleで 196px 等を入れてくるのを上書き */
+    visibleThumbs.forEach(thumb => {
+        const innerSel = '.nGY2GThumbnailSub, .nGY2TnImg, .nGY2TnImgBack, .nGY2TnImg2, .nGY2GThumbnailImg';
+        thumb.querySelectorAll(innerSel).forEach(el => {
+            el.style.setProperty('width', THUMB + 'px', 'important');
+            el.style.setProperty('height', THUMB + 'px', 'important');
+            el.style.setProperty('min-width', THUMB + 'px', 'important');
+            el.style.setProperty('min-height', THUMB + 'px', 'important');
+            el.style.setProperty('max-width', THUMB + 'px', 'important');
+            el.style.setProperty('max-height', THUMB + 'px', 'important');
+            el.style.setProperty('top', '0', 'important');
+            el.style.setProperty('left', '0', 'important');
+            el.style.setProperty('padding', '0', 'important');
+            el.style.setProperty('margin', '0', 'important');
+            el.style.setProperty('border', '0', 'important');
+            el.style.setProperty('box-sizing', 'border-box', 'important');
+        });
+    });
+
     /* ★ 診断ログ（初回のみ） */
     if (gallery.dataset.gicLayoutLogged !== 'true') {
         gallery.dataset.gicLayoutLogged = 'true';
@@ -3879,10 +3839,7 @@ function enforceGalleryGridLayout() {
 }
 
 // ============================================================
-// ★ ページ切替を「内側コンテナを隠して揃えてから見せる」方式で処理
-//    #gallery 自体の visibility は触らない（isGalleryOpen を狂わせない）
-//    代わりに #gallery に gic-page-switching クラスを付与し、
-//    isGalleryOpen() がそのクラスを検出したら「開いている」とみなす。
+// ★ ページ切替: 内側コンテナを隠して揃えてから見せる方式
 // ============================================================
 async function handlePageSwitchAsync() {
     if (_pageSwitchInProgress) return;
@@ -3896,7 +3853,6 @@ async function handlePageSwitchAsync() {
         t.style.removeProperty('visibility');
     });
 
-    /* ★ クラス付与で CSS が全サムネを hidden にする */
     gallery.classList.add('gic-page-switching');
 
     const thumbContainer = gallery.querySelector('.nGY2GallerySub')
@@ -3939,11 +3895,11 @@ async function handlePageSwitchAsync() {
             lastSig = sig;
         }
 
-        /* ★ レイアウト適用（visibility は触らない） */
+        /* ★ レイアウト適用 */
         try { enforceGalleryGridLayout(); } catch (_) {}
         try { scanAndSyncVideoBadges(); } catch (_) {}
 
-        /* ★ キャッシュ済みの通常画像を即時適用（未キャッシュは背景画像に任せる） */
+        /* ★ キャッシュ済みの画像を即時適用 */
         try {
             const charName = getCurrentCharacterName();
             if (charName) {
@@ -3960,7 +3916,7 @@ async function handlePageSwitchAsync() {
                 });
             }
         } catch (_) { /* ignore */ }
-        
+
         /* ★ 2重 rAF で確実にペイント完了を待つ */
         await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     } finally {
@@ -3971,7 +3927,6 @@ async function handlePageSwitchAsync() {
                 thumbContainer.style.removeProperty('visibility');
             }
         }
-        /* ★ クラス除去 = この瞬間に全サムネが正しい位置で一斉に表示される */
         gallery.classList.remove('gic-page-switching');
         _pageSwitchInProgress = false;
     }
@@ -3979,7 +3934,7 @@ async function handlePageSwitchAsync() {
 
 function applyGalleryLayout() {
     if (isApplyingLayout) return;
-    if (_pageSwitchInProgress) return;  // ★ ページ切替待機中はスキップ
+    if (_pageSwitchInProgress) return;
 
     if (window.__gicDragInProgress) {
         if (!window.__gicDragStartTime) {
@@ -4140,7 +4095,7 @@ function setupGalleryObserverForGic() {
         syncGalleryButtonVisibility();
         applyGalleryLayout();
         hideGalleryUploadMessage();
-        if (_bulkDeleteMode) positionFloatingBulkButton();  /* ★ 追加 */
+        if (_bulkDeleteMode) positionFloatingBulkButton();
     }, 300);
 
     syncGalleryButtonVisibility();
@@ -4743,6 +4698,8 @@ function exposeGicApi() {
         getCharName: getCurrentCharacterName,
 
         clearThumbCache: clearAllThumbCache,
+        getThumbCacheStats: getThumbCacheStats,
+
         clearImageCache: clearAllImageCache,
         preloadImages: () => preloadGalleryImagesInBackground(),
         getImageCacheStats: async () => {
@@ -4764,8 +4721,6 @@ function exposeGicApi() {
                 memoryBlobUrlCount: _imgBlobUrlCache.size,
             };
         },
-        
-        getThumbCacheStats: getThumbCacheStats,
 
         debugThumbState: async (charName) => {
             charName = charName || getCurrentCharacterName();
@@ -4833,7 +4788,7 @@ function exposeGicApi() {
 
 // ============================================================
 // ★ nanogallery2 の galleryMaxRows を 4 に強制し、
-//    thumbnailWidth を 180px 固定（3列を確実にする）
+//    thumbnailWidth を 180px 固定（4列を確実にする）
 // ============================================================
 (function patchNanogallery2For4Rows() {
     if (window.__gicNG2Patched) return;
@@ -4850,7 +4805,6 @@ function exposeGicApi() {
                     console.log('[GIC] 🎯 galleryMaxRows:', options.galleryMaxRows, '→ 4');
                     options.galleryMaxRows = 4;
                 }
-                // ★ thumbnailWidth を 180px 固定（3列を確実にする）
                 options.thumbnailWidth = '180px';
                 options.thumbnailHeight = 180;
             }
@@ -4861,16 +4815,13 @@ function exposeGicApi() {
 })();
 
 // ============================================================
-// ★ #dragGallery 幅を 540px に事前固定
-//    ST の showCharGallery は makeMovable() → delay(100) → initGallery()
-//    の順で走る。MutationObserver は delay(100) より先に発火するので
-//    nanogallery2 init 時点で 3列計算に必要な幅が確定する。
+// ★ #dragGallery 幅を 760px に事前固定（4列分）
 // ============================================================
 (function installDragGalleryWidthForcer() {
     if (window.__gicDragGalleryWidthForcer) return;
     window.__gicDragGalleryWidthForcer = true;
 
-    const PARENT_W = 760;   /* ★ 変更: 540 → 760（4列分） */
+    const PARENT_W = 760;
 
     const forceWidth = (dg) => {
         if (!dg) return;
@@ -4908,7 +4859,6 @@ function initializeGIC() {
     installBulkDeleteDocumentHandlers();
     installGalleryCloseInterceptor();
 
-    // ★ ページ切替時は「内側コンテナを隠す→揃える→見せる」方式で処理
     document.addEventListener('click', (e) => {
         if (!e.target) return;
         const isPager = e.target.closest(
@@ -4950,11 +4900,12 @@ function initializeGIC() {
         const g = document.getElementById('gallery');
         if (!g) return;
         const cs = getComputedStyle(g);
-        if (cs.position !== 'fixed' || cs.left !== '0px') {
+        if (cs.position !== 'fixed' || cs.left !== '0px' || cs.top !== '0px') {
             g.style.setProperty('position', 'fixed', 'important');
             g.style.setProperty('left', '0', 'important');
-            g.style.setProperty('top', '50%', 'important');
-            g.style.setProperty('transform', 'translateY(-50%)', 'important');
+            g.style.setProperty('top', '0', 'important');
+            g.style.setProperty('bottom', '0', 'important');
+            g.style.setProperty('transform', 'none', 'important');
         }
     }, 100);
 
