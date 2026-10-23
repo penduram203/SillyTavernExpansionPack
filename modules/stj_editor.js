@@ -1486,10 +1486,20 @@
                 attachVideoBadge(slot, true, fileName, charName).catch(() => {});
             } else {
                 // 画像（GIF/APNG/通常 PNG/JPEG 等）
-                //   サムネ名がセルに保存されていた場合も、fullPath は「元画像」を指す
+                // ★ GIF/APNG は静止フレームで表示（アニメーションさせない）
+                let displaySrc = fullPath;
+                if (/\.(gif|png)$/i.test(fileName)) {
+                    try {
+                        if (window.GicApi?.getStaticFrameUrl) {
+                            const staticUrl = await window.GicApi.getStaticFrameUrl(fileName, charName);
+                            if (staticUrl) displaySrc = staticUrl;
+                        }
+                    } catch (e) { /* ignore */ }
+                }
+
                 const img = document.createElement('img');
-                img.src = fullPath;
-                img.dataset.src = fullPath;
+                img.src = displaySrc;
+                img.dataset.src = fullPath;   // ★ ズームは元ファイルを開く
                 img.alt = fileName;
                 img.style.cssText =
                     'width:100%;height:100%;object-fit:contain;display:block;' +
@@ -1497,7 +1507,7 @@
                 img.addEventListener('click', openZoom);
                 slot.insertBefore(img, slot.firstChild);
 
-                // ★ 元ファイル名でバッジ判定
+                // ★ 元ファイル名でバッジ判定（🎬 表示のみ、アニメはしない）
                 attachVideoBadge(slot, false, fileName, charName).catch(() => {});
             }
         }
@@ -2103,8 +2113,19 @@
             previewEl.dataset.currentPath = fullPath;
             removeLoading(); placeholderHide();
         } else {
+            // 画像（GIF/APNG は静止フレームで表示、アニメーションさせない）
+            let displaySrc = fullPath;
+            if (/\.(gif|png)$/i.test(origFileName)) {
+                try {
+                    if (window.GicApi?.getStaticFrameUrl) {
+                        const staticUrl = await window.GicApi.getStaticFrameUrl(origFileName, charName);
+                        if (staticUrl) displaySrc = staticUrl;
+                    }
+                } catch (e) { /* ignore */ }
+            }
+
             const img = new Image();
-            img.src = fullPath;
+            img.src = displaySrc;
             img.alt = fileName;
             let decodeOk = false;
             try {
@@ -2129,7 +2150,7 @@
             img.style.width = '100%'; img.style.height = '100%';
             img.style.objectFit = 'contain'; img.style.display = 'block';
             previewEl.appendChild(img);
-            // ★ 元ファイル名でバッジ判定（アニメ GIF/APNG も対象）
+            // ★ 元ファイル名でバッジ判定（🎬 表示のみ、アニメはしない）
             attachVideoBadge(previewEl, false, origFileName, charName).catch(() => {});
             previewEl.dataset.currentPath = fullPath;
             removeLoading(); placeholderHide();
