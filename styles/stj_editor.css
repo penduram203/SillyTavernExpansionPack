@@ -417,10 +417,23 @@
 
 /* ===== 一括削除候補 ===== */
 .stj-keyword-item.stj-marked-for-delete {
-  outline: 4px solid #ff2d2d;
-  outline-offset: -4px;
+  /* outline を廃止し、::after 疑似要素で前面に枠を描画 */
   box-shadow: 0 0 0 2px rgba(255, 45, 45, 0.4), 0 0 20px rgba(255, 45, 45, 0.7);
   border-radius: 8px;
+}
+
+.stj-keyword-item.stj-marked-for-delete::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border: 4px solid #ff2d2d;
+  border-radius: 8px;
+  pointer-events: none;
+  z-index: 30;
+  box-sizing: border-box;
 }
 
 #stj_export_modal.stj-drag-active #stj_test_section {
