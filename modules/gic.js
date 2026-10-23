@@ -265,6 +265,22 @@ let _stjReopenScheduled = false;
 // ★ ページ切替時のレイアウトロック
 let _pageSwitchInProgress = false;
 let _pageSwitchOrigVisibility = '';
+let _pageSwitchStartTime = 0;
+const PAGE_SWITCH_MAX_DURATION_MS = 5000;
+
+function forceResetPageSwitch(reason) {
+    if (reason) console.warn(`[GIC] forceResetPageSwitch: ${reason}`);
+    const gallery = document.getElementById('gallery');
+    if (gallery) gallery.classList.remove('gic-page-switching');
+    _pageSwitchInProgress = false;
+    _pageSwitchStartTime = 0;
+}
+
+function isPageSwitchStale() {
+    if (!_pageSwitchInProgress) return false;
+    if (!_pageSwitchStartTime) return true;
+    return Date.now() - _pageSwitchStartTime > PAGE_SWITCH_MAX_DURATION_MS;
+}
 
 // ===== ユーティリティ =====
 function wait(ms) {
@@ -3650,23 +3666,46 @@ function getGalleryTotalPages() {
 }
 
 function goToPageIndex(targetIdx, dots) {
-    const dot = dots[targetIdx];
+    // ★ dots 引数は使わず、クリック時点の DOM から最新の dots を取り直す
+    const container = document.querySelector('.nGY2GalleryBottom');
+    const liveDots = container
+        ? Array.from(container.querySelectorAll(
+            '.nGY2paginationRectangle, .nGY2paginationRectangleCurrentPage'
+          ))
+        : dots;
+
+    const dot = liveDots[targetIdx];
     if (!dot) {
         console.warn(`[GIC] ページ${targetIdx + 1} の dot が見つかりません`);
         return false;
     }
+
     try {
+        const rect = dot.getBoundingClientRect();
+        const x = rect.width > 0 ? Math.round(rect.left + rect.width / 2) : 0;
+        const y = rect.height > 0 ? Math.round(rect.top + rect.height / 2) : 0;
+        const base = {
+            bubbles: true,
+            cancelable: true,
+            view: window,
+            clientX: x,
+            clientY: y,
+            button: 0,
+            buttons: 0,
+        };
+
+        // mousedown → mouseup → click の完全シーケンス
+        // （nGY2 が mousedown/mouseup を拾う実装でも反応するよう保険をかける）
+        dot.dispatchEvent(new MouseEvent('mousedown', base));
+        dot.dispatchEvent(new MouseEvent('mouseup', base));
         dot.click();
-        console.log(`[GIC] dot.click() で ページ${targetIdx + 1} に移動`);
+
+        console.log(`[GIC] ページ${targetIdx + 1} に移動イベントを送信`);
         return true;
-    } catch (e) { /* ignore */ }
-    try {
-        const evt = new MouseEvent('click', { bubbles: true, cancelable: true, view: window });
-        dot.dispatchEvent(evt);
-        console.log(`[GIC] dispatchEvent で ページ${targetIdx + 1} に移動`);
-        return true;
-    } catch (e) { /* ignore */ }
-    return false;
+    } catch (e) {
+        console.warn('[GIC] goToPageIndex dispatch error:', e);
+        return false;
+    }
 }
 
 function applyPageNumbers() {
@@ -3758,6 +3797,8 @@ function applyPageNumbers() {
         prev.title = '前のページ群（表示範囲を戻す）';
         prev.addEventListener('click', (e) => {
             e.preventDefault(); e.stopPropagation();
+            // ★ スタックしていれば先に解除
+            if (isPageSwitchStale()) forceResetPageSwitch('before pager nav prev');
             _paginationWindowStart = Math.max(0, windowStart - pageSize);
             _paginationWindowManual = true;
             _lastPagerSignature = '';
@@ -3775,9 +3816,21 @@ function applyPageNumbers() {
         btn.title = `ページ ${i + 1}`;
         btn.addEventListener('click', (e) => {
             e.preventDefault(); e.stopPropagation();
+
+            // ★ スタックしていれば先に解除
+            if (isPageSwitchStale()) {
+                forceResetPageSwitch('before pager click');
+            }
+
             if (!isSmall) _paginationWindowStart = Math.floor(i / pageSize) * pageSize;
             _paginationWindowManual = false;
             _lastPagerSignature = '';
+
+            // ★ 明示的にページ切替を起動
+            //   （document capture 側のハンドラと二重に呼ばれるが、
+            //     _pageSwitchInProgress ガードにより実処理は一度だけ）
+            handlePageSwitchAsync().catch(err => console.warn('[GIC] page switch error:', err));
+
             goToPageIndex(i, dots);
             setTimeout(() => applyPageNumbers(), 200);
         });
@@ -3797,6 +3850,8 @@ function applyPageNumbers() {
         next.title = '次のページ群（表示範囲を進める）';
         next.addEventListener('click', (e) => {
             e.preventDefault(); e.stopPropagation();
+            // ★ スタックしていれば先に解除
+            if (isPageSwitchStale()) forceResetPageSwitch('before pager nav next');
             _paginationWindowStart = Math.min(Math.max(0, totalCount - pageSize), windowStart + pageSize);
             _paginationWindowManual = true;
             _lastPagerSignature = '';
@@ -4224,6 +4279,10 @@ function urlToServerPath(url) {
 
 function enterBulkDeleteMode() {
     if (_bulkDeleteMode) return;
+
+    // ★ 念のため page switch 状態をリセット
+    if (isPageSwitchStale()) forceResetPageSwitch('enter bulk mode');
+
     _bulkDeleteMode = true;
     _bulkDeleteSelected.clear();
     document.body.classList.add('gic-bulk-delete-mode');
@@ -4244,6 +4303,10 @@ function exitBulkDeleteMode() {
     document.querySelectorAll('.gic-bulk-selected').forEach(el => el.classList.remove('gic-bulk-selected'));
     showBulkDeleteToast('一括選択モードを終了しました');
     updateBulkDeleteButton();
+
+    // ★ page switch 状態もリセット
+    if (isPageSwitchStale()) forceResetPageSwitch('exit bulk mode');
+
     console.log('[GIC-Bulk] 一括選択モード終了');
 }
 
@@ -5014,11 +5077,21 @@ function enforceGalleryGridLayout() {
 //    ★ 未キャッシュは setupImmediateThumbCacheInterceptor が非同期処理
 // ============================================================
 async function handlePageSwitchAsync() {
+    // ★ スタックしていれば強制リセット
+    if (isPageSwitchStale()) {
+        forceResetPageSwitch('stale state detected');
+    }
+
     if (_pageSwitchInProgress) return;
     _pageSwitchInProgress = true;
+    _pageSwitchStartTime = Date.now();
 
     const gallery = document.getElementById('gallery');
-    if (!gallery) { _pageSwitchInProgress = false; return; }
+    if (!gallery) {
+        _pageSwitchInProgress = false;
+        _pageSwitchStartTime = 0;
+        return;
+    }
 
     gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item').forEach(t => {
         t.style.removeProperty('visibility');
@@ -5073,7 +5146,6 @@ async function handlePageSwitchAsync() {
         try { enforceGalleryGridLayout(); } catch (_) {}
         try { scanAndSyncVideoBadges(); } catch (_) {}
 
-        /* ★ キャッシュ済みのみ即適用（生成は一切待たない） */
         try {
             const charName = getCurrentCharacterName();
             if (charName) {
@@ -5098,7 +5170,6 @@ async function handlePageSwitchAsync() {
             }
         } catch (_) { /* ignore */ }
 
-        /* ★ 1重 rAF のみ */
         await new Promise(r => requestAnimationFrame(r));
     } finally {
         if (thumbContainer) {
@@ -5110,6 +5181,7 @@ async function handlePageSwitchAsync() {
         }
         gallery.classList.remove('gic-page-switching');
         _pageSwitchInProgress = false;
+        _pageSwitchStartTime = 0;
     }
 }
 
