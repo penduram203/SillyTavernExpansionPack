@@ -813,6 +813,57 @@ function getCurrentCharacterName() {
             transition: none !important;
             animation: none !important;
         }
+
+        /* ============================================================
+           ★ 一括選択モード: .dragTitle 内の全要素を非表示・クリック不能化
+           ============================================================ */
+        body.gic-bulk-delete-mode #gallery .dragTitle {
+            visibility: hidden !important;
+            pointer-events: none !important;
+        }
+
+        /* ============================================================
+           ★ 一括選択モード: バナーを左寄せ表示に変更
+           ============================================================ */
+        body.gic-bulk-delete-mode #gallery::before {
+            right: auto !important;
+            left: 0 !important;
+            text-align: left !important;
+        }
+
+        /* ============================================================
+           ★ 一括選択モード: 前面に表示する「一括選択」ボタン（白枠付き）
+           ============================================================ */
+        #gic-floating-bulk-exit {
+            display: none;
+            position: fixed;
+            align-items: center;
+            justify-content: center;
+            height: 28px;
+            padding: 0 14px;
+            font-size: 13px;
+            font-weight: bold;
+            font-family: sans-serif;
+            color: #ffffff;
+            background-color: #d9534f;
+            border: 2px solid #ffffff;
+            border-radius: 4px;
+            cursor: pointer;
+            user-select: none;
+            box-sizing: border-box;
+            white-space: nowrap;
+            pointer-events: auto;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+            z-index: 2147483647;
+            transition: background-color 0.15s ease;
+        }
+        body.gic-bulk-delete-mode #gic-floating-bulk-exit {
+            display: inline-flex;
+        }
+        #gic-floating-bulk-exit:hover {
+            background-color: #c9302c;
+        }
+        
     `;
     document.head.appendChild(style);
     console.log('[GIC] 🖼️ ギャラリー配置CSSを注入しました');
@@ -2862,9 +2913,13 @@ function enterBulkDeleteMode() {
     _bulkDeleteSelected.clear();
     document.body.classList.add('gic-bulk-delete-mode');
     console.log('[GIC-Bulk] 一括選択モード開始');
-    showBulkDeleteToast('一括選択モード — 画像をクリックして選択してください');
+    showBulkDeleteToast('一括選択モード — 画像クリックで選択');  /* ★ 文言変更 */
     updateBulkDeleteButton();
     updateBulkDeleteBanner();
+
+    /* ★ 浮動ボタンを生成・表示 */
+    ensureFloatingBulkButton();
+    requestAnimationFrame(() => positionFloatingBulkButton());
 }
 
 function exitBulkDeleteMode() {
@@ -2947,7 +3002,7 @@ function updateBulkDeleteBanner() {
     const count = _bulkDeleteSelected.size;
     const text = count > 0
         ? `一括選択中 — ${count} 枚（🗑 で削除 / ドラッグでまとめて登録）`
-        : '一括選択モード — 画像をクリックして選択';
+        : '一括選択モード — 画像クリックで選択';  /* ★ 文言変更 */
     gallery.style.setProperty('--gic-bulk-banner-text', `"${text}"`);
 }
 
@@ -2969,6 +3024,45 @@ function createBulkDeleteButton() {
         }
     });
     return btn;
+}
+
+// ============================================================
+// ★ 一括選択モード用: 前面の「一括選択」ボタン（白枠付き）
+//    赤い枠の上部右側に固定表示し、クリックでモード終了
+// ============================================================
+function ensureFloatingBulkButton() {
+    let btn = document.getElementById('gic-floating-bulk-exit');
+    if (btn) return btn;
+
+    btn = document.createElement('button');
+    btn.id = 'gic-floating-bulk-exit';
+    btn.type = 'button';
+    btn.textContent = '一括選択';
+    btn.title = '一括選択モードを終了';
+    btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        if (_bulkDeleteMode) exitBulkDeleteMode();
+    });
+    document.body.appendChild(btn);
+    return btn;
+}
+
+function positionFloatingBulkButton() {
+    if (!_bulkDeleteMode) return;
+    const btn = document.getElementById('gic-floating-bulk-exit');
+    const gallery = document.getElementById('gallery');
+    if (!btn || !gallery) return;
+    const gr = gallery.getBoundingClientRect();
+    if (gr.width === 0 || gr.height === 0) return;
+
+    btn.style.setProperty('position', 'fixed', 'important');
+    btn.style.setProperty('top', Math.round(gr.top + 4) + 'px', 'important');
+    btn.style.setProperty('right', Math.round(window.innerWidth - gr.right + 8) + 'px', 'important');
+    btn.style.setProperty('left', 'auto', 'important');
+    btn.style.setProperty('bottom', 'auto', 'important');
+    btn.style.setProperty('z-index', '2147483647', 'important');
 }
 
 function placeBulkDeleteButton(controls) {
@@ -3746,6 +3840,7 @@ function setupGalleryObserverForGic() {
         syncGalleryButtonVisibility();
         applyGalleryLayout();
         hideGalleryUploadMessage();
+        if (_bulkDeleteMode) positionFloatingBulkButton();  /* ★ 追加 */
     }, 300);
 
     syncGalleryButtonVisibility();
