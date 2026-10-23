@@ -843,7 +843,6 @@ function getCurrentCharacterName() {
             height: 100% !important;
             max-width: 100% !important;
             max-height: 100% !important;
-            background-image: none !important;
             background-size: contain !important;
             background-position: center center !important;
             background-repeat: no-repeat !important;
@@ -865,7 +864,6 @@ function getCurrentCharacterName() {
             height: 100% !important;
             max-width: 100% !important;
             max-height: 100% !important;
-            background-image: none !important;
             background-color: transparent !important;
             z-index: 0 !important;
             opacity: 0 !important;
@@ -2070,7 +2068,7 @@ function applyThumbnailBlobImmediately(thumb, blobUrl) {
 
 async function processGalleryImageThumb(thumb, fileName, charName) {
     if (!thumb || !fileName || !charName) return;
-
+    if (fileName.endsWith('_thum.png') || fileName.endsWith('_img_thum.png')) return;
     const thumbUrl = await ensureImageThumbnail(fileName, charName);
 
     if (!thumbUrl) {
@@ -4314,7 +4312,8 @@ function enforceGalleryGridLayout() {
     const visibleThumbs = allThumbs.filter(thumb => {
         const title = (thumb.getAttribute('title') || '').trim();
 
-        if (title.endsWith('_img_thum.png')) {
+        /* ★ 不正な二重サムネイル (*_thum_img_thum.png) のみ非表示 */
+        if (title.endsWith('_thum_img_thum.png')) {
             thumb.style.setProperty('display', 'none', 'important');
             return false;
         }
