@@ -822,6 +822,16 @@ function getCurrentCharacterName() {
             pointer-events: none !important;
         }
 
+        /* ★ 例外: 🗑アイコン（Delete mode）だけは表示・クリック可能に戻す
+           visibility は親の hidden を子で visible に上書きでき、
+           pointer-events も子で auto に戻せばクリックを受け付ける */
+        body.gic-bulk-delete-mode #gallery .dragTitle > [title="Delete mode"],
+        body.gic-bulk-delete-mode #gallery .dragTitle > .fa-trash,
+        body.gic-bulk-delete-mode #gallery .dragTitle > [class*="fa-trash"] {
+            visibility: visible !important;
+            pointer-events: auto !important;
+        }
+
         /* ============================================================
            ★ 一括選択モード: バナーを左寄せ表示に変更
            ============================================================ */
