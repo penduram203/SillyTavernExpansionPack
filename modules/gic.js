@@ -5804,6 +5804,7 @@ function exposeGicApi() {
         cleanupInvalidImgThumbs,
         migrateCacheToDisk,
         resolveOriginalFileName,
+        isAnimatedImage,
 
         clearThumbCache: clearAllThumbCache,
         getThumbCacheStats: getThumbCacheStats,
