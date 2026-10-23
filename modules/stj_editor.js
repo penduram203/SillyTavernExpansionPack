@@ -45,6 +45,9 @@
     let modalOriginalKeyword = '';
     let modalOriginalImages = [];
 
+    // ===== セルモーダル レンダートークン =====
+    let _currentGridRenderToken = 0;
+
     // ===== ★ 動画サムネイル用 🎬 バッジのCSS注入 =====
     (function injectStjVideoBadgeStyle() {
         if (document.getElementById('stj-video-badge-style')) return;
@@ -195,24 +198,18 @@
 
     // ============================================================
     // ★ サムネイル名 → 元ファイル名 変換
-    //   - xxx_img_thum.png → xxx.(元拡張子)
-    //   - xxx_mp4_thum.png / xxx_webm_thum.png → xxx.mp4 / xxx.webm
-    //   - それ以外はそのまま返す
     // ============================================================
     function resolveThumbToOriginal(fileName) {
         if (!fileName || typeof fileName !== 'string') return fileName;
 
-        /* 動画サムネ */
         const vm = fileName.match(/^(.+)_(mp4|webm)_thum\.png$/i);
         if (vm) return `${vm[1]}.${vm[2].toLowerCase()}`;
 
-        /* 画像サムネ */
         if (fileName.endsWith('_img_thum.png')) {
             if (window.GicApi?.resolveOriginalFileName) {
                 const orig = window.GicApi.resolveOriginalFileName(fileName);
                 if (orig) return orig;
             }
-            // フォールバック: .png と仮定
             return fileName.slice(0, -'_img_thum.png'.length) + '.png';
         }
 
@@ -221,16 +218,12 @@
 
     // ============================================================
     // ★ 動画 / アニメ GIF / APNG 用 🎬 バッジ（async）
-    //   isVideo=true は無条件で表示。
-    //   isVideo=false でも fileName が .gif/.png ならアニメ判定。
-    //   fileName は「元ファイル名」を渡すこと（サムネ名不可）。
     // ============================================================
     async function attachVideoBadge(parentEl, isVideo, fileName, charName) {
         if (!parentEl) return;
 
         let shouldShow = !!isVideo;
 
-        // GIF / PNG はアニメ判定
         if (!shouldShow && fileName && charName && /\.(gif|png)$/i.test(fileName)) {
             try {
                 if (window.GicApi?.isAnimatedImage) {
@@ -1169,6 +1162,14 @@
     function openCellModal(cell) {
         if (!cell) return;
         if (isBulkDeleteMode || isDialogActive) return;
+
+        // ★ 二重起動防止（mouseup と click の両方が openCellModal を呼ぶため）
+        if (currentModalCell === cell &&
+            currentCellModal &&
+            currentCellModal.classList.contains('visible')) {
+            return;
+        }
+
         if (!currentCellModal) currentCellModal = createCellModal();
 
         currentModalCell = cell;
@@ -1362,8 +1363,9 @@
     async function renderCellModalGrid(cell) {
         if (!currentCellModal || !cell) return;
 
+        const myToken = ++_currentGridRenderToken;
+
         const rawImages = getCellImages(cell);
-        // ★ サムネ名は元ファイル名に変換（videos も images も）
         const images = rawImages.map(f => resolveThumbToOriginal(f));
 
         const grid = currentCellModal.querySelector('.stj-cell-modal-grid');
@@ -1383,7 +1385,6 @@
         const charName = document.getElementById('stj_char_name_display')?.textContent || '';
         const io = ensureCellVideoIO(grid);
 
-        // 動画サムネの並列生成
         const thumbPromises = new Map();
         for (let i = 0; i < images.length; i++) {
             const fileName = images[i];
@@ -1392,9 +1393,11 @@
         }
 
         for (let i = 0; i < slots.length; i++) {
+            if (myToken !== _currentGridRenderToken) return;
+
             const slot = slots[i];
-            const fileName = images[i];           // 元ファイル名（GIF/動画/通常画像）
-            const rawFileName = rawImages[i];     // セルに保存されている元の名前
+            const fileName = images[i];
+            const rawFileName = rawImages[i];
 
             if (!fileName) {
                 slot.querySelectorAll(':scope > img, :scope > video').forEach(el => {
@@ -1433,12 +1436,12 @@
             const openZoom = (e) => {
                 e.stopPropagation();
                 e.preventDefault();
-                // ★ ズームは「元ファイル」を開く
                 showMediaZoom(fullPath, isVideo);
             };
 
             if (isVideo) {
                 const thumbUrl = await thumbPromises.get(i);
+                if (myToken !== _currentGridRenderToken) return;
                 if (thumbUrl) {
                     const img = document.createElement('img');
                     img.src = thumbUrl;
@@ -1463,8 +1466,6 @@
                 v.setAttribute('playsinline', '');
                 v.setAttribute('webkit-playsinline', '');
                 v.setAttribute('preload', 'auto');
-                v.setAttribute('disablepictureinpicture', '');
-                v.setAttribute('disableremoteplayback', '');
                 v.muted = true;
                 v.loop = true;
                 v.playsInline = true;
@@ -1485,13 +1486,12 @@
                 io.observe(slot);
                 attachVideoBadge(slot, true, fileName, charName).catch(() => {});
             } else {
-                // 画像（GIF/APNG/通常 PNG/JPEG 等）
-                // ★ GIF/APNG は静止フレームで表示（アニメーションさせない）
                 let displaySrc = fullPath;
                 if (/\.(gif|png)$/i.test(fileName)) {
                     try {
                         if (window.GicApi?.getStaticFrameUrl) {
                             const staticUrl = await window.GicApi.getStaticFrameUrl(fileName, charName);
+                            if (myToken !== _currentGridRenderToken) return;
                             if (staticUrl) displaySrc = staticUrl;
                         }
                     } catch (e) { /* ignore */ }
@@ -1499,7 +1499,7 @@
 
                 const img = document.createElement('img');
                 img.src = displaySrc;
-                img.dataset.src = fullPath;   // ★ ズームは元ファイルを開く
+                img.dataset.src = fullPath;
                 img.alt = fileName;
                 img.style.cssText =
                     'width:100%;height:100%;object-fit:contain;display:block;' +
@@ -1507,7 +1507,6 @@
                 img.addEventListener('click', openZoom);
                 slot.insertBefore(img, slot.firstChild);
 
-                // ★ 元ファイル名でバッジ判定（🎬 表示のみ、アニメはしない）
                 attachVideoBadge(slot, false, fileName, charName).catch(() => {});
             }
         }
@@ -1604,7 +1603,6 @@
             return;
         }
 
-        // ★ サムネ名 → 元ファイル名に変換（GIF もアニメ表示できるように）
         const fileName = resolveThumbToOriginal(rawName);
 
         if (!/\.(png|jpe?g|gif|webp|avif|bmp|mp4|webm)$/i.test(fileName)) {
@@ -2013,7 +2011,6 @@
             return;
         }
 
-        // ★ 元ファイル名を求める（サムネ名→元画像名）
         const origFileName = resolveThumbToOriginal(fileName);
 
         const fullPath = await detectImageExtension(charName, fileName);
@@ -2113,12 +2110,12 @@
             previewEl.dataset.currentPath = fullPath;
             removeLoading(); placeholderHide();
         } else {
-            // 画像（GIF/APNG は静止フレームで表示、アニメーションさせない）
             let displaySrc = fullPath;
             if (/\.(gif|png)$/i.test(origFileName)) {
                 try {
                     if (window.GicApi?.getStaticFrameUrl) {
                         const staticUrl = await window.GicApi.getStaticFrameUrl(origFileName, charName);
+                        if (_previewLoadGen.get(previewEl) !== myGen) { removeLoading(); return; }
                         if (staticUrl) displaySrc = staticUrl;
                     }
                 } catch (e) { /* ignore */ }
@@ -2150,7 +2147,6 @@
             img.style.width = '100%'; img.style.height = '100%';
             img.style.objectFit = 'contain'; img.style.display = 'block';
             previewEl.appendChild(img);
-            // ★ 元ファイル名でバッジ判定（🎬 表示のみ、アニメはしない）
             attachVideoBadge(previewEl, false, origFileName, charName).catch(() => {});
             previewEl.dataset.currentPath = fullPath;
             removeLoading(); placeholderHide();
