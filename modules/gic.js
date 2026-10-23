@@ -3708,12 +3708,12 @@ function enforceGalleryGridLayout() {
     /* ★ レイアウト定数 */
     const COLS          = 4;
     const MAX_ROWS      = 4;
-    const H_GAP         = 4;
-    const V_GAP         = 4;
+    const H_GAP         = 0;
+    const V_GAP         = 0;
     const RIGHT_EXTRA   = 10;
     const TOP_PADDING   = 6;
     const PAGER_RESERVE = 70;
-    const THUMB_MAX     = 192;
+    const THUMB_MAX     = 200;
     const THUMB_MIN     = 120;
 
     /* ★ headerH: 上半分の既知ヘッダー要素のみを測定
