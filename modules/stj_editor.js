@@ -983,7 +983,8 @@
         stjModalEl.style.top = '0px';
         stjModalEl.style.left = 'auto';
         stjModalEl.style.right = '0';
-        stjModalEl.style.width = 'calc(85vw - 540px)';
+        stjModalEl.style.width = 'calc(85vw - 280px)';
+        stjModalEl.style.minWidth = '500px';
         stjModalEl.style.height = '100vh';
         stjModalEl.style.zIndex = '10001';
         stjModalEl.scrollTop = 0;
