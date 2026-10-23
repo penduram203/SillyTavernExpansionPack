@@ -2065,8 +2065,64 @@ function isVideoThumbnail(thumb) {
 // ============================================================
 const _animatedMediaCache = new Map();
 
+// ============================================================
+// ★ GIF フレーム数カウント（Image Descriptor 0x2C を数える）
+//    >= 2 で アニメーション扱い
+// ============================================================
+function countGifFrames(bytes) {
+    if (bytes.length < 13) return 0;
+    const hdr = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5]);
+    if (hdr !== 'GIF87a' && hdr !== 'GIF89a') return 0;
+
+    let pos = 6 + 7;
+    const packed = bytes[10];
+    if (packed & 0x80) {
+        const size = 2 << (packed & 0x07);
+        pos += 3 * size;
+    }
+
+    let frames = 0;
+    while (pos < bytes.length) {
+        const b = bytes[pos];
+
+        if (b === 0x3B) break;                  // Trailer
+
+        if (b === 0x21) {                       // Extension
+            pos += 2;
+            while (pos < bytes.length) {        // サブブロックをスキップ
+                const len = bytes[pos];
+                if (len === 0) { pos++; break; }
+                pos += 1 + len;
+            }
+        } else if (b === 0x2C) {                // Image Descriptor
+            frames++;
+            if (frames >= 2) return frames;     // 早期終了
+            pos++;
+            if (pos + 9 > bytes.length) break;
+            const localPacked = bytes[pos + 8];
+            pos += 9;
+            if (localPacked & 0x80) {           // Local Color Table
+                const size = 2 << (localPacked & 0x07);
+                pos += 3 * size;
+            }
+            pos++;                              // LZW min code size
+            while (pos < bytes.length) {        // LZW サブブロック
+                const len = bytes[pos];
+                if (len === 0) { pos++; break; }
+                pos += 1 + len;
+            }
+        } else {
+            break;
+        }
+    }
+    return frames;
+}
+
 function hasGifAnimation(bytes) {
-    // NETSCAPE2.0 / ANIMEXTS1.0 拡張ブロックの有無で判定
+    // ① フレーム数で判定（最も確実）
+    if (countGifFrames(bytes) >= 2) return true;
+
+    // ② フォールバック: ループ拡張ブロックの有無
     const n = Math.min(bytes.length, 4096);
     let str = '';
     for (let i = 0; i < n; i++) str += String.fromCharCode(bytes[i]);
@@ -2136,56 +2192,59 @@ async function isAnimatedImage(fileName, charName) {
     return promise;
 }
 
-async function syncVideoBadgeForThumb(thumb) {
+function applyVideoBadge(thumb, show) {
     if (!thumb) return;
-
-    const title = (thumb.getAttribute('title') || '').trim();
-    if (title.endsWith('_img_thum.png')) {
-        thumb.querySelectorAll('.gic-video-badge').forEach(el => el.remove());
-        return;
-    }
-
-    let shouldShow = false;
-
-    // ── 動画判定（同期） ──
-    if (isVideoFile(title) ||
-        /_thum\.png$/i.test(title) ||
-        thumb.querySelector('.gic-gallery-thumb-img') ||
-        thumb.querySelector('video.gic-gallery-video')) {
-        shouldShow = true;
-    }
-    // ── アニメ GIF / APNG 判定（非同期） ──
-    else {
-        const charName = getCurrentCharacterName();
-        if (charName) {
-            const orig = resolveOriginalFileName(title) || title;
-            if (/\.(gif|png)$/i.test(orig)) {
-                try {
-                    shouldShow = await isAnimatedImage(orig, charName);
-                } catch (e) {
-                    shouldShow = false;
-                }
-            }
-        }
-    }
-
-    // ── バッジ反映 ──
     const badges = thumb.querySelectorAll('.gic-video-badge');
-    if (shouldShow) {
-        if (badges.length === 1) return;   // 既に付与済み
+    if (show) {
+        if (badges.length === 1) return;
         badges.forEach(el => el.remove());
-
         const cs = window.getComputedStyle(thumb);
         if (cs.position === 'static') {
             thumb.style.setProperty('position', 'relative', 'important');
         }
-
         const badge = document.createElement('div');
         badge.className = 'gic-video-badge';
         badge.textContent = '🎬';
         thumb.appendChild(badge);
     } else if (badges.length > 0) {
         badges.forEach(el => el.remove());
+    }
+}
+
+async function syncVideoBadgeForThumb(thumb) {
+    if (!thumb) return;
+    const title = (thumb.getAttribute('title') || '').trim();
+    if (!title) return;
+
+    // ── 動画・動画サムネは無条件で 🎬 ──
+    //   ※ _img_thum.png は画像サムネなので除外
+    const isVid =
+        isVideoFile(title) ||
+        (/_thum\.png$/i.test(title) && !title.endsWith('_img_thum.png')) ||
+        !!thumb.querySelector('.gic-gallery-thumb-img') ||
+        !!thumb.querySelector('video.gic-gallery-video');
+
+    if (isVid) {
+        applyVideoBadge(thumb, true);
+        return;
+    }
+
+    // ── 画像系: 元ファイルを解決してアニメ判定 ──
+    const charName = getCurrentCharacterName();
+    if (!charName) { applyVideoBadge(thumb, false); return; }
+
+    const orig = resolveOriginalFileName(title) || title;
+    if (!/\.(gif|png)$/i.test(orig)) {
+        // アニメーションの可能性が低い拡張子はスキップ
+        applyVideoBadge(thumb, false);
+        return;
+    }
+
+    try {
+        const animated = await isAnimatedImage(orig, charName);
+        applyVideoBadge(thumb, animated);
+    } catch (e) {
+        applyVideoBadge(thumb, false);
     }
 }
 
@@ -2385,31 +2444,42 @@ async function preloadGalleryImagesInBackground() {
         );
         if (images.length === 0) return;
 
-        let alreadyCached = 0;
+        // ★ 元画像とサムネの両方をチェック（片方でも欠けていれば preload 対象）
+        let needWork = 0;
         for (const f of images) {
-            if (_imgThumbKnown.has(`${charName}:${f}`) && _imgBlobUrlCache.has(`${charName}:${f}:imgthumb`)) {
-                alreadyCached++;
+            const origKey = `${charName}:${f}`;
+            const thumbKey = `${charName}:${f}:imgthumb`;
+            if (!_imgBlobUrlCache.has(origKey) || !_imgBlobUrlCache.has(thumbKey)) {
+                needWork++;
             }
         }
-        const remaining = images.length - alreadyCached;
-        if (remaining === 0) {
-            console.log(`[GIC] ✅ 全 ${images.length} 枚の画像サムネイルはキャッシュ済みです`);
+
+        if (needWork === 0) {
+            console.log(`[GIC] ✅ 全 ${images.length} 枚の画像（元＋サムネ）はキャッシュ済みです`);
             return;
         }
 
-        console.log(`[GIC] 📥 ${remaining} 枚の画像サムネイルをバックグラウンド先読み開始（全${images.length}枚中）`);
+        console.log(`[GIC] 📥 ${needWork} 枚の画像（元/サムネ）をバックグラウンド先読み開始（全${images.length}枚中）`);
 
         for (let i = 0; i < images.length; i += IMG_PRELOAD_CHUNK) {
-            if (!isGalleryOpen()) break;
+            // ★ ギャラリーが閉じても継続。キャラクターが変わったら中断。
+            if (getCurrentCharacterName() !== charName) break;
+
             const chunk = images.slice(i, i + IMG_PRELOAD_CHUNK);
             await Promise.all(chunk.map(async f => {
-                await fetchAndCacheImage(charName, f);
-                await ensureImageThumbnail(f, charName);
+                const origKey = `${charName}:${f}`;
+                const thumbKey = `${charName}:${f}:imgthumb`;
+                if (!_imgBlobUrlCache.has(origKey)) {
+                    await fetchAndCacheImage(charName, f);
+                }
+                if (!_imgBlobUrlCache.has(thumbKey)) {
+                    await ensureImageThumbnail(f, charName);
+                }
             }));
             await wait(IMG_PRELOAD_DELAY_MS);
         }
 
-        console.log('[GIC] ✅ 画像サムネイル先読み完了');
+        console.log('[GIC] ✅ 画像先読み完了');
     } finally {
         _imgPreloading = false;
     }
