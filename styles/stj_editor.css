@@ -620,8 +620,10 @@
 /* ===== ❌（右下）登録解除ボタン ===== */
 .stj-cell-modal-slot-remove {
   position: absolute;
-  bottom: 4px;
-  right: 4px;
+  top: 4px;
+  left: 4px;
+  bottom: auto;
+  right: auto;
   width: 32px;
   height: 32px;
   padding: 0;
@@ -632,14 +634,11 @@
   cursor: pointer;
   font-size: 20px;
   font-weight: bold;
-  display: none;
+  display: flex;
   align-items: center;
   justify-content: center;
   z-index: 10;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
-}
-.stj-cell-modal-slot:hover .stj-cell-modal-slot-remove {
-  display: flex;
 }
 .stj-cell-modal-slot-remove:hover {
   background: #c53030;
