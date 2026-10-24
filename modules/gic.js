@@ -224,6 +224,51 @@ console.log('[GIC] モジュールロード開始');
 })();
 
 // ============================================================
+// ★ 生成プロンプト保管庫
+//   「キャラ名:ファイル名」をキーにプロンプトを localStorage に保存。
+//   ファイル名は元画像 (リネーム前/後) の両方で登録する。
+// ============================================================
+const PROMPT_STORE_KEY = 'gic_prompt_store_v1';
+let _promptStore = null;
+
+function loadPromptStore() {
+    if (_promptStore !== null) return _promptStore;
+    try {
+        const raw = localStorage.getItem(PROMPT_STORE_KEY);
+        _promptStore = raw ? JSON.parse(raw) : {};
+        if (typeof _promptStore !== 'object' || _promptStore === null) {
+            _promptStore = {};
+        }
+    } catch (e) {
+        _promptStore = {};
+    }
+    return _promptStore;
+}
+
+function savePromptStore() {
+    if (!_promptStore) return;
+    try {
+        localStorage.setItem(PROMPT_STORE_KEY, JSON.stringify(_promptStore));
+    } catch (e) {
+        console.warn('[GIC] prompt store save failed:', e);
+    }
+}
+
+function setImagePrompt(charName, fileName, prompt) {
+    if (!charName || !fileName) return;
+    if (typeof prompt !== 'string' || !prompt.trim()) return;
+    const store = loadPromptStore();
+    store[`${charName}:${fileName}`] = prompt;
+    savePromptStore();
+}
+
+function getImagePrompt(charName, fileName) {
+    if (!charName || !fileName) return null;
+    const store = loadPromptStore();
+    return store[`${charName}:${fileName}`] || null;
+}
+
+// ============================================================
 // ★ /api/images/list で「元画像 → サムネイル」置換
 //    - _img_thum.png 自体はリストから除外（2倍表示防止）
 //    - 動画サムネイル (_thum.png) は置換対象外（二重サムネ防止）
@@ -762,7 +807,9 @@ function getCurrentCharacterName() {
     const panelSel      = GALLERY_PREVIEW_SELECTORS.join(', ');
     const closeSel      = GALLERY_PREVIEW_SELECTORS.map(s => `${s} .dragClose`).join(', ');
     const closeHoverSel = GALLERY_PREVIEW_SELECTORS.map(s => `${s}:hover .dragClose`).join(', ');
-
+    const promptOverlaySel = GALLERY_PREVIEW_SELECTORS.map(s => `${s} .gic-prompt-overlay`).join(', ');
+    const promptOverlayHoverSel = GALLERY_PREVIEW_SELECTORS.map(s => `${s}:hover .gic-prompt-overlay`).join(', ');
+    
     style.textContent = `
         ${panelSel} {
             position: fixed !important;
@@ -1313,6 +1360,20 @@ function getCurrentCharacterName() {
         #gic-floating-bulk-exit:hover {
             background-color: #c9302c;
         }
+
+        /* ============================================================
+           ★ 拡大ビュー用プロンプトオーバーレイ
+           ============================================================ */
+        ${promptOverlaySel} {
+            opacity: 0 !important;
+            pointer-events: none !important;
+            transition: opacity 0.15s ease !important;
+        }
+        ${promptOverlayHoverSel} {
+            opacity: 1 !important;
+            pointer-events: auto !important;
+        }
+        
     `;
     document.head.appendChild(style);
     console.log('[GIC] 🖼️ ギャラリー配置CSSを注入しました');
@@ -1478,17 +1539,6 @@ function setupTextStylingObserver() {
 async function maybeRenameGeneratedImage(message, originalUrl) {
     if (!message || !originalUrl) return null;
 
-    // 生成コンテキスト取得（gic_lorebook.js 側で設定）
-    const ctx = window.GicLorebook?.getPendingGenerationContext?.();
-    if (!ctx || !ctx.entryKey) return null;
-
-    // 60 秒以上前のコンテキストは無視（古いエントリの誤適用を防止）
-    if (Date.now() - (ctx.triggeredAt || 0) > 60000) return null;
-
-    // 二重リネーム防止
-    if (message.extra?.gicRenamed) return null;
-    if (originalUrl.includes(`_${ctx.entryKey}_`)) return null;
-
     // URL から char フォルダ名とファイル名を取得
     let urlPath = originalUrl.split('?')[0].split('#')[0];
     const urlParts = urlPath.split('/');
@@ -1502,7 +1552,21 @@ async function maybeRenameGeneratedImage(message, originalUrl) {
         return null;
     }
 
-    // ファイル名パターンを解析: {baseName}_{timestamp}.{ext}
+    // 生成コンテキスト取得
+    const ctx = window.GicLorebook?.getPendingGenerationContext?.();
+
+    // ★ リネーム前の時点で、まず元ファイル名でプロンプトを保存
+    //   （リネームがスキップされてもプロンプトは残る）
+    if (ctx?.prompt && ctx?.entryKey) {
+        setImagePrompt(charFolder, oldFileName, ctx.prompt);
+    }
+
+    if (!ctx || !ctx.entryKey) return null;
+    if (Date.now() - (ctx.triggeredAt || 0) > 60000) return null;
+    if (message.extra?.gicRenamed) return null;
+    if (originalUrl.includes(`_${ctx.entryKey}_`)) return null;
+
+    // ファイル名パターン解析
     const m = oldFileName.match(
         /^(.+?)_(\d{4}-\d{2}-\d{2}@\d{2}h\d{2}m\d{2}s\d{3}ms)\.(png|jpg|jpeg|webp)$/i
     );
@@ -1516,7 +1580,6 @@ async function maybeRenameGeneratedImage(message, originalUrl) {
     if (newFileName === oldFileName) return null;
 
     const oldPath = `/user/images/${charFolder}/${oldFileName}`;
-    const newPath = `/user/images/${charFolder}/${newFileName}`;
 
     // ---- 1. 旧ファイル取得 ----
     let blob;
@@ -1568,14 +1631,14 @@ async function maybeRenameGeneratedImage(message, originalUrl) {
         message.extra.gicRenamed = true;
     } catch (e) { /* ignore */ }
 
-    // ---- 4. チャットを保存 ----
+    // ---- 4. チャット保存 ----
     try {
         await saveChat();
     } catch (e) {
         console.warn('[GIC] リネーム: saveChat 失敗', e);
     }
 
-    // ---- 5. 旧ファイル削除（最後） ----
+    // ---- 5. 旧ファイル削除 ----
     try {
         await fetch('/api/images/delete', {
             method: 'POST',
@@ -1586,13 +1649,19 @@ async function maybeRenameGeneratedImage(message, originalUrl) {
         console.warn('[GIC] リネーム: 旧ファイル削除失敗', e);
     }
 
-    // ---- キャッシュ無効化（旧ファイル名分） ----
+    // ---- キャッシュ無効化 ----
     try {
         _thumbExistCache.delete(oldPath);
         _imgBlobUrlCache.delete(`${charFolder}:${oldFileName}`);
         _imgBlobUrlCache.delete(`${charFolder}:${oldFileName}:imgthumb`);
         _imgThumbKnown.delete(`${charFolder}:${oldFileName}`);
     } catch (e) { /* ignore */ }
+
+    // ★ リネーム後のファイル名でもプロンプトを保存
+    if (ctx.prompt) {
+        setImagePrompt(charFolder, newFileName, ctx.prompt);
+        console.log(`[GIC] 📝 プロンプト保存: ${charFolder}/${newFileName}`);
+    }
 
     // ---- コンテキストをクリア ----
     try { window.GicLorebook?.clearPendingGenerationContext?.(); } catch (e) { /* ignore */ }
@@ -4040,6 +4109,171 @@ function getAllPreviews() {
     return Array.from(document.querySelectorAll(selector));
 }
 
+// ============================================================
+// ★ 拡大ビュー用プロンプトオーバーレイ
+// ============================================================
+const PROMPT_OVERLAY_CLASS = 'gic-prompt-overlay';
+const PROMPT_PANEL_CLASS = 'gic-prompt-panel';
+const PROMPT_COPY_BTN_CLASS = 'gic-prompt-copy';
+
+function showCopyToast(message) {
+    try {
+        if (typeof window.toastr !== 'undefined' && typeof window.toastr.success === 'function') {
+            window.toastr.success(message, '', {
+                timeOut: 2000,
+                positionClass: 'toast-top-center',
+            });
+            return;
+        }
+    } catch (e) { /* ignore */ }
+
+    const toast = document.createElement('div');
+    toast.textContent = message;
+    Object.assign(toast.style, {
+        position: 'fixed',
+        top: '80px',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        padding: '10px 20px',
+        backgroundColor: '#48bb78',
+        color: '#ffffff',
+        fontSize: '14px',
+        fontWeight: 'bold',
+        fontFamily: 'sans-serif',
+        borderRadius: '6px',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+        zIndex: '2147483647',
+        pointerEvents: 'none',
+        transition: 'opacity 0.3s ease',
+        opacity: '1',
+    });
+    document.body.appendChild(toast);
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 350);
+    }, 2000);
+}
+
+async function copyPromptToClipboard(text) {
+    if (!text) return false;
+    try {
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+            await navigator.clipboard.writeText(text);
+            return true;
+        }
+    } catch (e) { /* fallback */ }
+    try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px;';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+function createPromptOverlay(panel) {
+    const overlay = document.createElement('div');
+    overlay.className = PROMPT_OVERLAY_CLASS;
+    overlay.style.cssText = `
+        position: absolute;
+        bottom: 8px;
+        left: 8px;
+        right: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        z-index: 15001;
+        box-sizing: border-box;
+    `;
+
+    const promptPanel = document.createElement('div');
+    promptPanel.className = PROMPT_PANEL_CLASS;
+    promptPanel.style.cssText = `
+        background: rgba(0, 0, 0, 0.88);
+        color: #ffffff;
+        padding: 10px 12px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-family: monospace;
+        max-height: 120px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        border: 1px solid #555;
+        box-sizing: border-box;
+        line-height: 1.4;
+    `;
+    overlay.appendChild(promptPanel);
+
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = PROMPT_COPY_BTN_CLASS;
+    copyBtn.textContent = 'プロンプトをコピー';
+    copyBtn.style.cssText = `
+        align-self: flex-start;
+        padding: 6px 12px;
+        background: #444;
+        color: #ffffff;
+        border: 1px solid #666;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 12px;
+        font-family: inherit;
+        pointer-events: auto;
+    `;
+    copyBtn.addEventListener('mouseenter', () => { copyBtn.style.background = '#666'; });
+    copyBtn.addEventListener('mouseleave', () => { copyBtn.style.background = '#444'; });
+    copyBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        const text = promptPanel.textContent || '';
+        const ok = await copyPromptToClipboard(text);
+        if (ok) {
+            showCopyToast('クリップボードにプロンプトをコピーしました');
+        } else {
+            showCopyToast('コピーに失敗しました');
+        }
+    });
+    overlay.appendChild(copyBtn);
+
+    panel.appendChild(overlay);
+    return overlay;
+}
+
+function removePromptOverlay(panel) {
+    if (!panel) return;
+    panel.querySelectorAll('.' + PROMPT_OVERLAY_CLASS).forEach(el => el.remove());
+}
+
+function updatePromptOverlay(panel) {
+    if (!panel) return;
+
+    const img = panel.querySelector('img');
+    if (!img) { removePromptOverlay(panel); return; }
+
+    const charName = img.dataset?.gicOrigChar;
+    const fileName = img.dataset?.gicOrigFile;
+    if (!charName || !fileName) { removePromptOverlay(panel); return; }
+
+    const prompt = getImagePrompt(charName, fileName);
+    if (!prompt) { removePromptOverlay(panel); return; }
+
+    let overlay = panel.querySelector('.' + PROMPT_OVERLAY_CLASS);
+    if (!overlay) {
+        overlay = createPromptOverlay(panel);
+    }
+
+    const promptPanel = overlay.querySelector('.' + PROMPT_PANEL_CLASS);
+    if (promptPanel && promptPanel.textContent !== prompt) {
+        promptPanel.textContent = prompt;
+    }
+}
+
 function closePreviewElement(el) {
     if (!el || !el.parentNode) return;
     const closeBtn = el.querySelector('.dragClose');
@@ -4524,6 +4758,10 @@ function fitPreviewToViewport(panel) {
                 ? cachedBlobUrl
                 : '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(origFile);
 
+            // ★ プロンプト表示用に元ファイル名を保持
+            img.dataset.gicOrigChar = charName;
+            img.dataset.gicOrigFile = origFile;            
+            
             console.log(
                 `[GIC] 🔍 プレビュー差し替え: ${thumbFileName} → ${origFile}` +
                 (cachedBlobUrl ? ' (cache)' : '')
@@ -5821,6 +6059,7 @@ function applyGalleryLayout() {
                 currentPreviewEl = latest;
             }
             fitPreviewToViewport(latest);
+            updatePromptOverlay(latest);   // ★ 追加
             return;
         }
 
