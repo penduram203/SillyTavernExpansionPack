@@ -1461,10 +1461,151 @@ function setupTextStylingObserver() {
     console.log('[GIC] 📝 Text_stylingパネル監視を開始しました（ポーリング方式）');
 }
 
+// ============================================================
+// ★ 生成画像を「キャラ名_エントリキー_タイムスタンプ.ext」にリネーム
+//
+//   ST 本体の SD 拡張は キャラ名_YYYY-MM-DD@HHhMMmSSsMMMms.png で保存する。
+//   gic_lorebook.js が /sd 実行前に保存した共有コンテキストの entryKey を
+//   挿入して、後付けでリネームする。
+//
+//   処理順:
+//     1. 旧ファイル取得（失敗 → 何もしない、次回リトライ）
+//     2. 新ファイルアップロード（失敗 → 何もしない、次回リトライ）
+//     3. message.extra.media[].url を新URLに更新（メモリ）
+//     4. saveChat（失敗してもスルー、旧URLはまだ存在するので安全）
+//     5. 旧ファイル削除（最後 - 失敗してもリネーム済みなので致命的でない）
+// ============================================================
+async function maybeRenameGeneratedImage(message, originalUrl) {
+    if (!message || !originalUrl) return null;
+
+    // 生成コンテキスト取得（gic_lorebook.js 側で設定）
+    const ctx = window.GicLorebook?.getPendingGenerationContext?.();
+    if (!ctx || !ctx.entryKey) return null;
+
+    // 60 秒以上前のコンテキストは無視（古いエントリの誤適用を防止）
+    if (Date.now() - (ctx.triggeredAt || 0) > 60000) return null;
+
+    // 二重リネーム防止
+    if (message.extra?.gicRenamed) return null;
+    if (originalUrl.includes(`_${ctx.entryKey}_`)) return null;
+
+    // URL から char フォルダ名とファイル名を取得
+    let urlPath = originalUrl.split('?')[0].split('#')[0];
+    const urlParts = urlPath.split('/');
+    if (urlParts.length < 2) return null;
+
+    let charFolder, oldFileName;
+    try {
+        charFolder = decodeURIComponent(urlParts[urlParts.length - 2]);
+        oldFileName = decodeURIComponent(urlParts[urlParts.length - 1]);
+    } catch (e) {
+        return null;
+    }
+
+    // ファイル名パターンを解析: {baseName}_{timestamp}.{ext}
+    const m = oldFileName.match(
+        /^(.+?)_(\d{4}-\d{2}-\d{2}@\d{2}h\d{2}m\d{2}s\d{3}ms)\.(png|jpg|jpeg|webp)$/i
+    );
+    if (!m) {
+        console.debug(`[GIC] リネーム: パターン不一致 ${oldFileName}`);
+        return null;
+    }
+
+    const [, baseName, timestamp, ext] = m;
+    const newFileName = `${baseName}_${ctx.entryKey}_${timestamp}.${ext.toLowerCase()}`;
+    if (newFileName === oldFileName) return null;
+
+    const oldPath = `/user/images/${charFolder}/${oldFileName}`;
+    const newPath = `/user/images/${charFolder}/${newFileName}`;
+
+    // ---- 1. 旧ファイル取得 ----
+    let blob;
+    try {
+        const resp = await fetch(oldPath);
+        if (!resp.ok) {
+            console.debug(`[GIC] リネーム: 旧ファイル取得失敗 ${oldFileName} (${resp.status})`);
+            return null;
+        }
+        blob = await resp.blob();
+    } catch (e) {
+        console.warn('[GIC] リネーム: 旧ファイル取得エラー', e);
+        return null;
+    }
+
+    // ---- 2. 新ファイルアップロード ----
+    try {
+        const dataUrl = await blobToBase64(blob);
+        const base64Data = String(dataUrl).split(',')[1];
+        const filenameNoExt = newFileName.replace(/\.[^.]+$/, '');
+        const uploadResp = await fetch('/api/images/upload', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify({
+                image: base64Data,
+                format: ext.toLowerCase(),
+                filename: filenameNoExt,
+                ch_name: charFolder,
+            }),
+        });
+        if (!uploadResp.ok) {
+            console.warn(`[GIC] リネーム: アップロード失敗 (${uploadResp.status})`);
+            return null;
+        }
+    } catch (e) {
+        console.warn('[GIC] リネーム: アップロードエラー', e);
+        return null;
+    }
+
+    // ---- 3. メッセージ内の URL を更新 ----
+    const newUrl = `/user/images/${charFolder}/${newFileName}`;
+    try {
+        if (Array.isArray(message.extra?.media)) {
+            for (const media of message.extra.media) {
+                if (media.url === originalUrl) media.url = newUrl;
+            }
+        }
+        message.extra = message.extra || {};
+        message.extra.gicRenamed = true;
+    } catch (e) { /* ignore */ }
+
+    // ---- 4. チャットを保存 ----
+    try {
+        await saveChat();
+    } catch (e) {
+        console.warn('[GIC] リネーム: saveChat 失敗', e);
+    }
+
+    // ---- 5. 旧ファイル削除（最後） ----
+    try {
+        await fetch('/api/images/delete', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify({ path: `/user/images/${charFolder}/${oldFileName}` }),
+        });
+    } catch (e) {
+        console.warn('[GIC] リネーム: 旧ファイル削除失敗', e);
+    }
+
+    // ---- キャッシュ無効化（旧ファイル名分） ----
+    try {
+        _thumbExistCache.delete(oldPath);
+        _imgBlobUrlCache.delete(`${charFolder}:${oldFileName}`);
+        _imgBlobUrlCache.delete(`${charFolder}:${oldFileName}:imgthumb`);
+        _imgThumbKnown.delete(`${charFolder}:${oldFileName}`);
+    } catch (e) { /* ignore */ }
+
+    // ---- コンテキストをクリア ----
+    try { window.GicLorebook?.clearPendingGenerationContext?.(); } catch (e) { /* ignore */ }
+
+    console.log(`[GIC] 📝 ファイル名変更: ${oldFileName} → ${newFileName}`);
+    return newUrl;
+}
+
 async function scanForGeneratedImages() {
     const context = getContext();
     if (!context?.chat) return;
 
+    // ── 最新の生成画像メッセージを探す ──
     let newest = null;
     let newestIdx = -1;
     for (let i = context.chat.length - 1; i >= 0; i--) {
@@ -1488,11 +1629,28 @@ async function scanForGeneratedImages() {
     const key = getMessageKey(newest);
     const alreadyProcessed = processedMessageKeys.has(key);
 
-    lastGeneratedImageUrl = url;
+    let finalUrl = url;
 
     if (!alreadyProcessed) {
+        // ★ リネーム（未処理メッセージのみ）
+        //   キャラ名_YYYY-MM-DD@... → キャラ名_エントリキー_YYYY-MM-DD@...
+        //   gic_lorebook.js が /sd 実行前に保存した共有コンテキストを参照する。
+        //   失敗時は null を返すので、そのままの URL を使う。
+        //   失敗した場合 alreadyProcessed に追加しないことで、次回ポーリングで
+        //   自動リトライされる（次回 scanForGeneratedImages 呼び出し時）。
+        try {
+            const renamedUrl = await maybeRenameGeneratedImage(newest, url);
+            if (renamedUrl) finalUrl = renamedUrl;
+        } catch (e) {
+            console.warn('[GIC] リネーム処理でエラー:', e);
+        }
+
+        // ★ リネーム後の URL を保存
+        lastGeneratedImageUrl = finalUrl;
         processedMessageKeys.add(key);
 
+        // ── 生成画像メッセージをシステム扱いにマーク ──
+        //   （チャット履歴の再描画時に非表示にする）
         if (!newest.is_system) {
             newest.is_system = true;
             try {
@@ -1503,42 +1661,43 @@ async function scanForGeneratedImages() {
             }
         }
 
-        // ★ 事前設定モード（isOverrideLocal=false）では生成画像を自動表示しない
-        //   背景生成モードの時だけ setOverrideImage を呼ぶ。
-        //   これにより「事前設定モードなのに勝手に画像が表示される」問題を防ぐ。
+        // ── 自動表示判定 ──
+        //   事前設定モード（isOverrideLocal=false）では生成画像を自動表示しない。
+        //   背景生成モード（isOverrideLocal=true）のときだけ setOverrideImage を呼ぶ。
         if (!isOverrideLocal) {
-            console.log(`[GIC] 事前設定モードのため生成画像の自動表示をスキップ: ${url}`);
-            // lastGeneratedImageUrl は更新済みなので、後で
-            // ユーザーが背景生成モードに切り替えた時に表示される
+            console.log(`[GIC] 事前設定モードのため生成画像の自動表示をスキップ: ${finalUrl}`);
         } else if (window.ImageDisplayExtension?.setOverrideImage) {
             try {
-                await window.ImageDisplayExtension.setOverrideImage(url);
+                await window.ImageDisplayExtension.setOverrideImage(finalUrl);
                 isOverrideLocal = true;
                 setButtonLabel(LABEL_OVERRIDE);
                 savePersistedState();
-                console.log(`[GIC] 🖼️ 最新の生成画像を背景に設定: ${url}`);
+                console.log(`[GIC] 🖼️ 最新の生成画像を背景に設定: ${finalUrl}`);
             } catch (e) {
                 console.error('[GIC] ImageDisplayExtension エラー:', e);
             }
         }
     } else {
+        // ── 既処理メッセージの追跡 ──
+        //   URL は記録するが、override 状態の自動復元は行わない。
+        //   （ユーザーが明示的に事前設定モードを選んだ直後に、過去の
+        //     is_system=true メッセージから勝手に override に戻すバグの原因
+        //     だったため、前回の修正で削除済み）
+        lastGeneratedImageUrl = url;
+
         if (!isOverrideLocal) {
+            // Image Display 側と同期（外部から setOverrideImage された場合）
             const ideIsOverride = window.ImageDisplayExtension?.isOverride?.();
             if (ideIsOverride) {
-                // ImageDisplay 側と同期（外部から setOverrideImage された場合）
                 isOverrideLocal = true;
                 setButtonLabel(LABEL_OVERRIDE);
                 savePersistedState();
             }
-            // ★ 削除: newest.is_system による自動復元
-            //   ユーザーが明示的に事前設定モードを選んだ直後に、
-            //   過去の生成画像メッセージ（is_system=true）を検出して
-            //   勝手に override 状態へ戻してしまうバグの原因だった。
-            //   リロード時の復元は loadPersistedState + validateRestoredOverride
-            //   が担当するため、ここでの復元は不要。
         }
     }
 
+    // ── 最新より古い生成画像メッセージも処理済みとしてマーク ──
+    //   （過去分は既にリネーム済み／リネーム不要とみなす）
     for (let i = 0; i < newestIdx; i++) {
         const msg = context.chat[i];
         if (isGeneratedImageMessage(msg)) {
@@ -1546,6 +1705,7 @@ async function scanForGeneratedImages() {
         }
     }
 
+    // ── 生成画像メッセージを DOM 上で非表示に ──
     markGeneratedMessagesInDom();
 }
 
