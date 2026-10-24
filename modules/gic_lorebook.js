@@ -457,20 +457,23 @@ async function executeSd(prompt) {
 async function processChoice(force = false) {
     if (!settings.enabled) return;
 
-    // ★ 事前設定モード（Image Display override 無効）では /sd を実行しない
-    //   背景生成モード（override 有効）の時だけ生成処理を走らせる。
-    //   これにより「事前設定モードなのに勝手に画像が生成される」問題を防ぐ。
+    // ★ 事前設定モードでは /sd を実行しない
+    //   GIC 側（isOverrideLocal）と Image Display 側（isOverrideActive）の
+    //   両方を確認し、どちらかが「背景生成モード」なら実行する。
+    //   起動直後の一時的な不整合にも対応するため、両方の source of truth を見る。
     try {
-        const hasIDE = typeof window.ImageDisplayExtension?.isOverride === 'function';
-        if (hasIDE && !window.ImageDisplayExtension.isOverride()) {
-            if (settings.verbose) {
-                console.log('[GIC-Lore] 事前設定モードのため /sd をスキップ');
-            }
+        let isOverride = false;
+        if (typeof window.GicApi?.isOverrideMode === 'function') {
+            isOverride = isOverride || window.GicApi.isOverrideMode() === true;
+        }
+        if (typeof window.ImageDisplayExtension?.isOverride === 'function') {
+            isOverride = isOverride || window.ImageDisplayExtension.isOverride() === true;
+        }
+        if (!isOverride) {
+            if (settings.verbose) console.log('[GIC-Lore] 事前設定モードのため /sd をスキップ');
             return;
         }
-    } catch (e) {
-        // ImageDisplay が利用できない場合は従来通り実行（フォールバック）
-    }
+    } catch (e) { /* ignore */ }
 
     if (processInFlight) {
         if (settings.verbose) console.log('[GIC-Lore] 処理中のため多重呼び出しをスキップ');
