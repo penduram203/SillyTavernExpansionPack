@@ -1,16 +1,13 @@
 // gic_lorebook.js
 // ロアブック駆動で画像生成プロンプトを切り替えるモジュール。
 //
-// ★ v3 修正:
-//   - SlashCommandParser/SlashCommand のインポートを複数パス試行
-//   - window / context グローバルからのフォールバック参照
-//   - HEAD リクエストで URL 存在チェック（404 の text/html を回避）
-//   - APP_READY 待機
-//   - エラー時の安全なフォールバック（機能停止させない）
-//
-// ★ v4 修正:
-//   - 動的 import のパス誤りを修正
-//     （'/scripts/script.js' → '/script.js'、'/scripts/extensions/world-info.js' → '/scripts/world-info.js'）
+// ★ v5 修正:
+//   - 既定トリガーを 'ai_reply' → 'user_send' に変更し、
+//     画像生成を LLM 応答と並行実行する
+//   - 生成コンテキスト (entryKey 等) を保持し、gic.js が生成画像の
+//     ファイル名を「キャラ名_エントリキー_タイムスタンプ.ext」に
+//     リネームできるよう window.GicLorebook に公開
+//   - v3 マイグレーション（triggerOn の自動切替）
 
 import { eventSource, event_types, getRequestHeaders } from '../../../../../script.js';
 import { getContext } from '../../../../extensions.js';
@@ -34,18 +31,19 @@ let processInFlight = false;
 let lastProcessedMsgIdx = -1;
 let listenersInstalled = false;
 
+// ★ 生成コンテキスト（リネーム用に gic.js へ引き渡す）
+let _pendingGenerationContext = null;
+
 // ===== SlashCommand モジュールキャッシュ =====
 let _slashParserModule = null;
 let _slashCommandModule = null;
 let _slashModulesResolved = false;
 
 // ===== インポートパス候補（SillyTavern のバージョン差を吸収） =====
-// 実行時ファイル位置: /scripts/extensions/third-party/SillyTavernExpansionPack/modules/gic_lorebook.js
-// → ../../../ は /scripts/extensions/ まで戻る
 const SLASH_PARSER_PATHS = [
-    '../../../slash-commands/SlashCommandParser.js',                 // /scripts/extensions/slash-commands/
-    '../../../../slash-commands/SlashCommandParser.js',              // /scripts/slash-commands/ (ST 1.12+)
-    '../../../../../slash-commands/SlashCommandParser.js',           // /slash-commands/
+    '../../../slash-commands/SlashCommandParser.js',
+    '../../../../slash-commands/SlashCommandParser.js',
+    '../../../../../slash-commands/SlashCommandParser.js',
 ];
 
 const SLASH_COMMAND_PATHS = [
@@ -57,16 +55,18 @@ const SLASH_COMMAND_PATHS = [
 function loadSettings() {
     const ctx = getContext();
     const stored = ctx.extensionSettings[MODULE_NAME] || {};
+    let migrated = false;
 
+    // v2 マイグレーション: quiet: true → false
     if (!stored.version || stored.version < 2) {
         console.log('[GIC-Lore] 設定を v2 に移行します（quiet: true → false）');
         stored.quiet = false;
         stored.version = 2;
+        migrated = true;
     }
 
+    // v3 マイグレーション: triggerOn の既定値を 'user_send' へ
     if (!stored.version || stored.version < 3) {
-        // v3: 画像生成を LLM 応答と並行実行するため、既定トリガーを user_send へ
-        //     明示的に 'ai_reply' 以外が設定されている場合は尊重する
         if (!stored.triggerOn || stored.triggerOn === 'ai_reply') {
             stored.triggerOn = 'user_send';
             console.log('[GIC-Lore] 設定を v3 に移行します（triggerOn: ai_reply → user_send）');
@@ -74,14 +74,16 @@ function loadSettings() {
             console.log(`[GIC-Lore] 設定を v3 に移行します（triggerOn は "${stored.triggerOn}" を維持）`);
         }
         stored.version = 3;
+        migrated = true;
     }
 
-    ctx.extensionSettings[MODULE_NAME] = stored;
+    if (migrated) {
+        ctx.extensionSettings[MODULE_NAME] = stored;
+        ctx.saveSettingsDebounced();
+    }
 
     settings = { ...DEFAULT_SETTINGS, ...stored };
-
     if (settings.verbose) console.log('[GIC-Lore] 設定:', settings);
-    ctx.saveSettingsDebounced();
 }
 
 function saveSettings() {
@@ -201,7 +203,6 @@ async function loadWorldInfoEntries(worldName) {
     } catch (e) { /* ignore */ }
 
     try {
-        // ★ 修正: /scripts/world-info.js に解決されるよう1階層深く
         const mod = await import('../../../../world-info.js');
         if (mod.world_info && mod.world_info[worldName] && mod.world_info[worldName].entries) {
             return Object.values(mod.world_info[worldName].entries);
@@ -239,6 +240,28 @@ function getEntryKeys(entry) {
     if (typeof entry.keys === 'string' && entry.keys.trim()) return [entry.keys];
     if (typeof entry.key === 'string' && entry.key.trim()) return [entry.key];
     return [];
+}
+
+// ============================================================
+// ★ エントリの「タイトル」を抽出（ファイル名に使う）
+//   - comment があれば優先（例: "002"）
+//   - 無ければ最初の key
+//   - ファイル名に使えない文字は '_' に置換
+// ============================================================
+function extractEntryKey(entry) {
+    if (!entry) return '';
+    let raw = '';
+    if (typeof entry.comment === 'string' && entry.comment.trim()) {
+        raw = entry.comment.trim();
+    } else {
+        const keys = getEntryKeys(entry);
+        if (keys.length > 0) raw = String(keys[0]).trim();
+    }
+    if (!raw) return '';
+    return raw
+        .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
+        .replace(/\s+/g, '_')
+        .trim();
 }
 
 function findEntryByChoice(entries, choiceNum) {
@@ -322,7 +345,6 @@ async function urlExists(url) {
         const resp = await fetch(url, { method: 'HEAD' });
         if (!resp.ok) return false;
         const ct = (resp.headers.get('content-type') || '').toLowerCase();
-        // text/html が返ってきたら SPA のフォールバック = 存在しない
         if (ct.includes('text/html')) return false;
         return true;
     } catch (e) {
@@ -337,7 +359,6 @@ async function loadSlashModules() {
     }
     _slashModulesResolved = true;
 
-    // ★ まず window グローバルを確認（最も安全）
     if (typeof window !== 'undefined') {
         if (window.SlashCommandParser && !_slashParserModule) {
             _slashParserModule = window.SlashCommandParser;
@@ -349,7 +370,6 @@ async function loadSlashModules() {
         }
     }
 
-    // ★ SillyTavern.getContext() 経由も試行
     if (!_slashParserModule) {
         try {
             const ctx = getContext();
@@ -364,7 +384,6 @@ async function loadSlashModules() {
         } catch (e) { /* ignore */ }
     }
 
-    // ★ 動的 import で試行（HEAD チェックで 404 を避ける）
     if (!_slashParserModule) {
         for (const path of SLASH_PARSER_PATHS) {
             try {
@@ -420,7 +439,6 @@ async function executeSd(prompt) {
     console.log(`[GIC-Lore] /sd 実行試行: ${cmd.slice(0, 120)}${cmd.length > 120 ? '...' : ''}`);
 
     try {
-        // ★ 修正: /script.js に解決されるよう1階層深く
         const mod = await import('../../../../../script.js');
         if (typeof mod.executeSlashCommandsWithOptions === 'function') {
             await mod.executeSlashCommandsWithOptions(cmd);
@@ -579,6 +597,19 @@ async function processChoice(force = false) {
             return;
         }
 
+        // ★ 生成コンテキストを保存（ファイル名リネーム用）
+        //   gic.js 側の maybeRenameGeneratedImage がこれを取得して
+        //   「キャラ名_エントリキー_タイムスタンプ.png」にリネームする。
+        _pendingGenerationContext = {
+            entryKey: extractEntryKey(entry),
+            uid: entry.uid,
+            worldName,
+            triggeredAt: Date.now(),
+        };
+        if (settings.verbose) {
+            console.log(`[GIC-Lore] 生成コンテキスト設定: entryKey="${_pendingGenerationContext.entryKey}"`);
+        }
+
         await executeSd(prompt);
     } catch (e) {
         console.error('[GIC-Lore] processChoice エラー:', e);
@@ -621,6 +652,7 @@ async function registerSlashCommand() {
                     console.log('5) 一致エントリ:', found ? `uid=${found.uid}` : 'なし');
                     if (found) {
                         console.log('6) 抽出プロンプト:', extractPromptFromEntry(found, wn));
+                        console.log('6b) entryKey (ファイル名用):', extractEntryKey(found));
                     }
                 }
                 try {
@@ -639,6 +671,7 @@ async function registerSlashCommand() {
                 }
             }
             console.log('8) 設定:', window.GicLorebook?.getSettings?.() || '(non-public)');
+            console.log('9) 保留中コンテキスト:', _pendingGenerationContext);
             console.groupEnd();
         } catch (e) {
             console.error('[GIC-Lore] 診断エラー:', e);
@@ -700,9 +733,10 @@ function setupListeners() {
     });
 
     if (settings.triggerOn === 'user_send') {
+        // ★ 画像生成と LLM 応答を並行実行するため、ユーザー送信直後に開始する
+        //   USER_MESSAGE_RENDERED は送信後すぐに発火するので、
+        //   ctx.chat への反映を待つため 150ms の猶予を置く
         safeOn(event_types.USER_MESSAGE_RENDERED, () => {
-            // ★ ユーザーメッセージが ctx.chat に確実に反映されてから開始
-            //   （message_sent が先に発火するので、通常 100ms で十分だが余裕を持たせる）
             setTimeout(() => {
                 processChoice(false).catch(e => console.error('[GIC-Lore] 処理エラー:', e));
             }, 150);
@@ -718,6 +752,8 @@ function setupListeners() {
         });
         console.log('[GIC-Lore] トリガー: ai_reply（LLM 応答完了後に画像生成）');
     }
+
+    console.log(`[GIC-Lore] イベント登録完了 (triggerOn=${settings.triggerOn}, quiet=${settings.quiet})`);
 }
 
 // ===== 初期化 =====
@@ -763,6 +799,7 @@ window.GicLorebook = {
     processChoice,
     extractChoiceNumber,
     extractPromptFromEntry,
+    extractEntryKey,
     getLexImgPrompt,
     loadWorldInfoEntries,
     findEntryByChoice,
@@ -773,6 +810,11 @@ window.GicLorebook = {
         lastProcessedMsgIdx = -1;
         console.log('[GIC-Lore] 重複防止状態をリセット');
     },
+
+    // ★ 生成コンテキスト（リネーム用）
+    getPendingGenerationContext: () => _pendingGenerationContext,
+    clearPendingGenerationContext: () => { _pendingGenerationContext = null; },
+
     // ★ デバッグ用: SlashCommand モジュールの状態を確認
     diagnoseSlashModules: () => {
         return {
