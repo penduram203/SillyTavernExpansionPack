@@ -971,7 +971,6 @@
         const bulkBtn = document.getElementById('stj_bulk_delete');
         const delCancelBtn = document.getElementById('stj_delete_cancel');
         const delExecBtn = document.getElementById('stj_delete_execute');
-        const saveBtn = document.getElementById('stj_save_data');
         const cancelBtn = document.getElementById('stj_cancel_export');
         const exportBtn = document.getElementById('stj_export_json');
 
@@ -979,7 +978,6 @@
         if (bulkBtn) bulkBtn.style.display = 'none';
         if (delCancelBtn) delCancelBtn.style.display = '';
         if (delExecBtn) delExecBtn.style.display = '';
-        if (saveBtn) saveBtn.disabled = true;
         if (cancelBtn) cancelBtn.disabled = true;
         if (exportBtn) exportBtn.disabled = true;
         document.querySelectorAll('.stj-keyword-item .stj-delete-row').forEach(btn => btn.disabled = true);
@@ -998,7 +996,6 @@
         const bulkBtn = document.getElementById('stj_bulk_delete');
         const delCancelBtn = document.getElementById('stj_delete_cancel');
         const delExecBtn = document.getElementById('stj_delete_execute');
-        const saveBtn = document.getElementById('stj_save_data');
         const cancelBtn = document.getElementById('stj_cancel_export');
         const exportBtn = document.getElementById('stj_export_json');
 
@@ -1006,7 +1003,6 @@
         if (bulkBtn) bulkBtn.style.display = '';
         if (delCancelBtn) delCancelBtn.style.display = 'none';
         if (delExecBtn) delExecBtn.style.display = 'none';
-        if (saveBtn) saveBtn.disabled = false;
         if (cancelBtn) cancelBtn.disabled = false;
         if (exportBtn) exportBtn.disabled = false;
         document.querySelectorAll('.stj-keyword-item .stj-delete-row').forEach(btn => btn.disabled = false);
@@ -1893,20 +1889,31 @@
     }
 
     async function loadExistingJSONData(charName) {
-        if (!charName) return;
+        if (!charName) {
+            console.warn('[STJ Editor] loadExistingJSONData: charName が空');
+            return;
+        }
         try {
             const jsonPath = `user/images/${charName}/${charName}_ext.json`;
             const response = await fetch(jsonPath);
-            if (response.ok) {
-                const data = await response.json();
-                const imageMap = findImageMapInData(data);
-                if (imageMap) {
-                    console.log(`✅ ${charName}_ext.json から既存データを読み込みました`);
-                    populateFormFromImageMap(imageMap);
-                }
+            if (!response.ok) {
+                console.warn(
+                    `[STJ Editor] _ext.json 取得失敗 (HTTP ${response.status}): ${jsonPath}`
+                );
+                return;
             }
+            const data = await response.json();
+            const imageMap = findImageMapInData(data);
+            if (!imageMap) {
+                console.warn(
+                    `[STJ Editor] _ext.json に image_display_extension が見つかりません: ${jsonPath}`
+                );
+                return;
+            }
+            console.log(`✅ ${charName}_ext.json から既存データを読み込みました`);
+            populateFormFromImageMap(imageMap);
         } catch (e) {
-            console.warn('既存JSONデータの取得に失敗しました:', e);
+            console.warn('[STJ Editor] 既存JSONデータの取得に失敗しました:', e);
         }
     }
 
@@ -2327,6 +2334,15 @@
             if (kw || images.length > 0) data.keywords.push({ keyword: kw, images });
         });
 
+        // ★ 空のデータで既存設定を上書きしない（オートセーブ時の保護）
+        if (silent &&
+            data.keywords.length === 0 &&
+            data.defaultImages.length === 0 &&
+            data.thumbnailImages.length === 0) {
+            console.debug('[STJ Editor] autoSave: フォームが空のため保存をスキップ（既存データ保護）');
+            return;
+        }
+
         const stjSettings = getExtensionSettings();
         stjSettings[charName] = data;
         persistSettings();
@@ -2360,13 +2376,23 @@
 
             const container = document.getElementById('stj_keywords_container');
             if (!container) return;
-            container.innerHTML = '';
-            if (data.keywords && data.keywords.length > 0) {
-                data.keywords.forEach((kw, index) => {
-                    const images = kw.images || (kw.imageName ? parseImageNames(kw.imageName) : []);
-                    addKeywordRowWithData(container, index, { keyword: kw.keyword, images });
-                });
+
+            // ★ data.keywords が空の場合は既存のフォーム（_ext.json 由来）を保持
+            //   空データで有効な _ext.json を上書きしないための保護
+            if (!Array.isArray(data.keywords) || data.keywords.length === 0) {
+                const existingCells = container.querySelectorAll('.stj-keyword-item').length;
+                console.log(
+                    `[STJ Editor] loadSavedData: keywords が空のため既存フォームを保持 ` +
+                    `(既存セル ${existingCells} 件)`
+                );
+                return;
             }
+
+            container.innerHTML = '';
+            data.keywords.forEach((kw, index) => {
+                const images = kw.images || (kw.imageName ? parseImageNames(kw.imageName) : []);
+                addKeywordRowWithData(container, index, { keyword: kw.keyword, images });
+            });
         } catch (e) { console.error('保存データの読み込みに失敗しました', e); }
     }
 
