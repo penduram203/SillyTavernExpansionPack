@@ -2933,6 +2933,17 @@ async function migrateCacheToDisk() {
 
                 if (!blob) { failed++; continue; }
 
+                const diskUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(thumbName);
+                if (await checkFileExists(diskUrl, false)) { skipped++; continue; }
+
+                // ★ 元画像が存在しない場合はサムネを書き出さない（孤立サムネ防止）
+                const origUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(imageFileName);
+                if (!(await checkFileExists(origUrl))) {
+                    console.debug(`[GIC] ⏭ 元画像なし → 移行スキップ: ${imageFileName}`);
+                    skipped++;
+                    continue;
+                }
+                
                 const ok = await uploadThumbnailBlob(charName, blob, thumbName);
                 if (ok) {
                     migrated++;
