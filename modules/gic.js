@@ -4310,60 +4310,55 @@ function fitPreviewToViewport(panel) {
     try {
         const charName = getCurrentCharacterName();
         panel.querySelectorAll('img').forEach(img => {
-            // ★ getAttribute を優先（プロパティの絶対URL解決を回避）
+            // 既に元画像へ差し替え済みならスキップ（二重処理防止）
+            if (img.dataset?.gicPreviewOriginal === '1') return;
+
             const srcAttr = img.getAttribute('src') || '';
             const src = srcAttr || img.src || '';
             if (!src) return;
-            if (src.startsWith('blob:') || src.startsWith('data:')) return;
 
-            // クエリ・フラグメントを除去
-            const cleanSrc = src.split('?')[0].split('#')[0];
-            const lastSegRaw = cleanSrc.split('/').pop() || '';
+            // サムネイル名を決定
+            //   ① src がインターセプタで blob に差し替えられている場合:
+            //      data-gic-pending-src に元の _img_thum.png URL が残っている
+            //   ② 旧経路（src が直接 _img_thum.png の URL）:
+            //      src から直接取り出す
+            let thumbFileName = null;
 
-            // ★ パーセントエンコードをデコード（日本語ファイル名対応）
-            let thumbFileName = lastSegRaw;
-            try {
-                thumbFileName = decodeURIComponent(lastSegRaw);
-            } catch (e) { /* ignore */ }
+            const pendingSrc = img.dataset?.gicPendingSrc || '';
+            if (pendingSrc && pendingSrc.includes('_img_thum.png')) {
+                const cleanPending = pendingSrc.split('?')[0].split('#')[0];
+                const lastSegRaw = cleanPending.split('/').pop() || '';
+                try { thumbFileName = decodeURIComponent(lastSegRaw); }
+                catch (e) { thumbFileName = lastSegRaw; }
+            } else if (!src.startsWith('blob:') && !src.startsWith('data:')) {
+                const cleanSrc = src.split('?')[0].split('#')[0];
+                const lastSegRaw = cleanSrc.split('/').pop() || '';
+                try { thumbFileName = decodeURIComponent(lastSegRaw); }
+                catch (e) { thumbFileName = lastSegRaw; }
+            }
 
-            if (!thumbFileName.endsWith(IMG_THUMB_SUFFIX)) return;
+            if (!thumbFileName || !thumbFileName.endsWith(IMG_THUMB_SUFFIX)) return;
 
             const origFile = resolveOriginalFileName(thumbFileName);
-            if (!origFile) {
-                console.debug(
-                    `[GIC] 🔍 プレビュー: 逆引き失敗 thumb="${thumbFileName}" ` +
-                    `(mapSize=${_imgThumbReverseMap.size})`
-                );
-                return;
-            }
+            if (!origFile) return;
             if (!charName) return;
 
-            /* ① メモリキャッシュの元画像 blob を優先 */
+            // 元画像 URL を決定（メモリキャッシュ優先、無ければ元画像 URL）
             const cacheKey = `${charName}:${origFile}`;
             const cachedBlobUrl = _imgBlobUrlCache.get(cacheKey);
-            let origSrc;
-            if (cachedBlobUrl) {
-                origSrc = cachedBlobUrl;
-            } else {
-                /* ② 未キャッシュ → 元画像 URL */
-                origSrc = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(origFile);
-            }
+            const origSrc = cachedBlobUrl
+                ? cachedBlobUrl
+                : '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(origFile);
 
-            // ★ 比較: blob は絶対URL、相対URLは getAttribute 同士で比較
-            const currentAttr = img.getAttribute('src') || '';
-            const isBlobOrig = origSrc.startsWith('blob:');
-            const needsSwap = isBlobOrig
-                ? img.src !== origSrc
-                : currentAttr !== origSrc;
+            console.log(
+                `[GIC] 🔍 プレビュー差し替え: ${thumbFileName} → ${origFile}` +
+                (cachedBlobUrl ? ' (cache)' : '')
+            );
 
-            if (needsSwap) {
-                console.log(
-                    `[GIC] 🔍 プレビュー差し替え: ${thumbFileName} → ${origFile}` +
-                    (cachedBlobUrl ? ' (cache)' : '')
-                );
-                img.src = origSrc;
-                img.dataset.gicFitBound = '';
-            }
+            // 二重差し替え防止フラグを立ててから src を更新
+            img.dataset.gicPreviewOriginal = '1';
+            img.src = origSrc;
+            img.dataset.gicFitBound = '';
         });
     } catch (e) {
         console.warn('[GIC] fitPreviewToViewport img差し替えエラー:', e);
