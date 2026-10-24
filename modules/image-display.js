@@ -25,6 +25,9 @@
     let isOverrideActive = false;
     let overrideImageUrl = null;
 
+    // ★ 送信時に確定したキーワード画像をロック（事前設定モード用）
+    let _lastSentKeywordImage = null;
+
     let lastMatchCache = { signature: null, url: null, timestamp: 0 };
     const MATCH_CACHE_TTL = 1500;
 
@@ -1103,6 +1106,17 @@
             }
             return;
         }
+
+        // ★ 事前設定モード（user モード）で送信時マッチ済みなら、その画像を固定表示する
+        //   送信後の MutationObserver / CHARACTER_MESSAGE_RENDERED / ストリーミング等で
+        //   履歴が再スキャンされ、別のキーワード画像に切り替わるのを防ぐ。
+        if (currentTextMode === 'user' && _lastSentKeywordImage) {
+            if (currentImageUrl !== _lastSentKeywordImage) {
+                await updateImageWithUrl(_lastSentKeywordImage);
+            }
+            return;
+        }
+
         const keywordMedia = findLastKeywordImage();
         let newUrl = keywordMedia || getRandomImageSource(currentImageMap.default) || currentImageMap.default;
         if (!newUrl || typeof newUrl !== 'string' || !newUrl.trim()) return;
@@ -1134,44 +1148,45 @@
         if (isSendInterceptionInstalled) return;
         isSendInterceptionInstalled = true;
 
-        // ★ GIC 背景生成モード（override 有効）中は、送信時のキーワード即時反映を
-        //    スキップする。/sd が画像を生成するまでの間、事前設定の背景が
-        //    一瞬表示されるのを防ぐ。
-        const isOverrideMode = () => isOverrideActive;
-
         document.addEventListener('keydown', (e) => {
             if (e.key !== 'Enter' || e.shiftKey) return;
             const target = e.target;
             if (!target || target.id !== 'send_textarea') return;
             if (currentTextMode !== 'user') return;
-            if (isOverrideMode()) return;   // ★ override 中はスキップ
             const text = target.value;
             if (!text || !text.trim()) return;
             const matchedUrl = findMatchingImageUrl(text);
-            if (matchedUrl) updateImageWithUrl(matchedUrl);
+            if (matchedUrl) {
+                _lastSentKeywordImage = matchedUrl;   // ★ ロック
+                updateImageWithUrl(matchedUrl);
+            }
         }, true);
 
         document.addEventListener('click', (e) => {
             const btn = e.target && e.target.closest ? e.target.closest('#send_but') : null;
             if (!btn) return;
             if (currentTextMode !== 'user') return;
-            if (isOverrideMode()) return;   // ★ override 中はスキップ
             const textarea = document.querySelector('#send_textarea');
             if (!textarea) return;
             const text = textarea.value;
             if (!text || !text.trim()) return;
             const matchedUrl = findMatchingImageUrl(text);
-            if (matchedUrl) updateImageWithUrl(matchedUrl);
+            if (matchedUrl) {
+                _lastSentKeywordImage = matchedUrl;   // ★ ロック
+                updateImageWithUrl(matchedUrl);
+            }
         }, true);
     }
 
     function toggleTextMode() {
         currentTextMode = currentTextMode === 'user' ? 'ai' : 'user';
         textModeButton.textContent = currentTextMode === 'user' ? 'UT' : 'AI';
+        _lastSentKeywordImage = null;   // ★ ロック解除
         invalidateMatchCache();
         saveDisplayState();
         safeUpdateImage();
     }
+    
     textModeButton.addEventListener('click', toggleTextMode);
 
     function handleStreamingUpdate() {
@@ -1637,7 +1652,11 @@
                 if (eventTypes.MESSAGE_DELETED) safeOn(eventTypes.MESSAGE_DELETED, immediateUpdate);
                 if (eventTypes.MESSAGE_EDITED) safeOn(eventTypes.MESSAGE_EDITED, immediateUpdate);
                 if (eventTypes.CHAT_LOADED) safeOn(eventTypes.CHAT_LOADED, immediateUpdate);
-                const onCharacterOrChatChanged = () => loadCharacterData(true);
+                const onCharacterOrChatChanged = () => {
+                    _lastSentKeywordImage = null;   // ★ ロック解除
+                    invalidateMatchCache();
+                    loadCharacterData(true);
+                };
                 safeOn(eventTypes.CHAT_CHANGED, onCharacterOrChatChanged);
                 safeOn(eventTypes.CHARACTER_SELECTED, onCharacterOrChatChanged);
             }
