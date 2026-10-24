@@ -16,12 +16,12 @@ import { eventSource, event_types, getRequestHeaders } from '../../../../../scri
 import { getContext } from '../../../../extensions.js';
 
 const MODULE_NAME = 'gic_lorebook_sd';
-const SETTINGS_VERSION = 2;
+const SETTINGS_VERSION = 3;
 
 const DEFAULT_SETTINGS = {
     version: SETTINGS_VERSION,
     enabled: true,
-    triggerOn: 'ai_reply',
+    triggerOn: 'user_send',
     quiet: false,
     fallbackToLast: false,
     verbose: true,
@@ -61,13 +61,27 @@ function loadSettings() {
     if (!stored.version || stored.version < 2) {
         console.log('[GIC-Lore] 設定を v2 に移行します（quiet: true → false）');
         stored.quiet = false;
-        stored.version = SETTINGS_VERSION;
-        ctx.extensionSettings[MODULE_NAME] = stored;
-        ctx.saveSettingsDebounced();
+        stored.version = 2;
     }
 
+    if (!stored.version || stored.version < 3) {
+        // v3: 画像生成を LLM 応答と並行実行するため、既定トリガーを user_send へ
+        //     明示的に 'ai_reply' 以外が設定されている場合は尊重する
+        if (!stored.triggerOn || stored.triggerOn === 'ai_reply') {
+            stored.triggerOn = 'user_send';
+            console.log('[GIC-Lore] 設定を v3 に移行します（triggerOn: ai_reply → user_send）');
+        } else {
+            console.log(`[GIC-Lore] 設定を v3 に移行します（triggerOn は "${stored.triggerOn}" を維持）`);
+        }
+        stored.version = 3;
+    }
+
+    ctx.extensionSettings[MODULE_NAME] = stored;
+
     settings = { ...DEFAULT_SETTINGS, ...stored };
+
     if (settings.verbose) console.log('[GIC-Lore] 設定:', settings);
+    ctx.saveSettingsDebounced();
 }
 
 function saveSettings() {
@@ -685,22 +699,25 @@ function setupListeners() {
         try { stripGicImgFromMessage(messageId); } catch (e) { console.error(e); }
     });
 
-    if (settings.triggerOn === 'ai_reply') {
+    if (settings.triggerOn === 'user_send') {
+        safeOn(event_types.USER_MESSAGE_RENDERED, () => {
+            // ★ ユーザーメッセージが ctx.chat に確実に反映されてから開始
+            //   （message_sent が先に発火するので、通常 100ms で十分だが余裕を持たせる）
+            setTimeout(() => {
+                processChoice(false).catch(e => console.error('[GIC-Lore] 処理エラー:', e));
+            }, 150);
+        });
+        console.log('[GIC-Lore] トリガー: user_send（画像生成と LLM 応答を並行実行）');
+    } else {
+        // 従来の ai_reply モード（フォールバック / 明示的に選択した場合）
         safeOn(event_types.CHARACTER_MESSAGE_RENDERED, () => {
             setTimeout(() => {
                 try { stripGicImgFromDom(); } catch (e) { /* ignore */ }
                 processChoice(false).catch(e => console.error('[GIC-Lore] 処理エラー:', e));
             }, 100);
         });
-    } else if (settings.triggerOn === 'user_send') {
-        safeOn(event_types.USER_MESSAGE_RENDERED, () => {
-            setTimeout(() => {
-                processChoice(false).catch(e => console.error('[GIC-Lore] 処理エラー:', e));
-            }, 100);
-        });
+        console.log('[GIC-Lore] トリガー: ai_reply（LLM 応答完了後に画像生成）');
     }
-
-    console.log(`[GIC-Lore] イベント登録完了 (triggerOn=${settings.triggerOn}, quiet=${settings.quiet})`);
 }
 
 // ===== 初期化 =====
