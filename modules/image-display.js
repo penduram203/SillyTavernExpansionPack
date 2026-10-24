@@ -1060,21 +1060,47 @@
         return null;
     }
 
-    async function updateImageWithUrl(targetUrl) {
-        console.log('[ImageDisplay] updateImageWithUrl:', String(targetUrl).slice(0, 120));
+    // ============================================================
+    // ★ サムネイル名 → 元ファイル名 変換
+    //   _ext.json に "_img_thum.png" / "_mp4_thum.png" 等が残っている
+    //   レガシーデータでも元ファイルを表示できるようにする。
+    // ============================================================
+    function resolveThumbToOriginal(url) {
+        if (!url || typeof url !== 'string') return url;
+        const lastSlash = url.lastIndexOf('/');
+        const dir = lastSlash >= 0 ? url.slice(0, lastSlash) : '';
+        const fileName = lastSlash >= 0 ? url.slice(lastSlash + 1) : url;
 
-        // ★ isDefaultImageFailed の復帰（非default要求で復帰）
+        // 動画サムネ: xxx_mp4_thum.png / xxx_webm_thum.png
+        const vm = fileName.match(/^(.+)_(mp4|webm)_thum\.png$/i);
+        if (vm) {
+            const resolved = `${vm[1]}.${vm[2].toLowerCase()}`;
+            return dir ? `${dir}/${resolved}` : resolved;
+        }
+
+        // 画像サムネ: xxx_img_thum.png
+        if (fileName.endsWith('_img_thum.png')) {
+            try {
+                if (window.GicApi?.resolveOriginalFileName) {
+                    const orig = window.GicApi.resolveOriginalFileName(fileName);
+                    if (orig) {
+                        return dir ? `${dir}/${orig}` : orig;
+                    }
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        return url;
+    }    
+    
+    async function updateImageWithUrl(targetUrl) {
         if (isDefaultImageFailed) {
             const isDefaultRequest = !targetUrl ||
                 /(?:^|\/)default\.(png|jpg|jpeg|webp|gif|avif|bmp|mp4|webm)(?:\?|#|$)/i.test(targetUrl) ||
                 targetUrl.endsWith('/default');
-            if (isDefaultRequest) {
-                console.log('[ImageDisplay] isDefaultImageFailed=true、default要求のためスキップ');
-                return;
-            }
+            if (isDefaultRequest) return;
             isDefaultImageFailed = false;
             mediaContainer.style.removeProperty('display');
-            console.log('[ImageDisplay] isDefaultImageFailed をリセット');
         }
 
         // override モードブロック
@@ -1085,7 +1111,6 @@
             }
         }
 
-        // 空 URL のフォールバック
         if (!targetUrl || typeof targetUrl !== 'string' || !targetUrl.trim()) {
             const fallback = getRandomImageSource(currentImageMap.default) || currentImageMap.default;
             if (fallback && fallback !== targetUrl && typeof fallback === 'string' && fallback.trim()) {
@@ -1094,8 +1119,16 @@
             return;
         }
 
-        // 拡張子チェック
         let newUrl = targetUrl.trim();
+
+        // ★ サムネイル名 → 元ファイル名 解決（レガシーデータ対応）
+        const resolvedUrl = resolveThumbToOriginal(newUrl);
+        if (resolvedUrl !== newUrl) {
+            console.log(`[ImageDisplay] 🔍 サムネイル名を解決: ${newUrl} → ${resolvedUrl}`);
+            newUrl = resolvedUrl;
+        }
+
+        // 拡張子チェック
         if (!newUrl.match(/\.(png|jpg|jpeg|webp|gif|avif|bmp|mp4|webm)$/i)) {
             const detected = await detectImageExtension(newUrl);
             if (detected) newUrl = detected;
@@ -1112,7 +1145,6 @@
         currentImageUrl = newUrl;
 
         if (isVideoUrl(newUrl)) {
-            console.log('[ImageDisplay] 動画ブランチ:', newUrl);
             const videoElement = document.createElement('video');
             videoElement.src = newUrl;
             videoElement.autoplay = true;
@@ -1128,11 +1160,7 @@
             mediaContainer.appendChild(videoElement);
             videoElement.play().catch(() => {});
         } else {
-            // ★ 画像ブランチ: シンプルに直接URLで読み込む
-            //   blob URL 化は fetch / サーバ / CORS 問題で失敗する場合があり、
-            //   失敗すると永久に表示されない状態になるため採用しない。
-            //   GIF は cache-buster を付与して Firefox での
-            //   アニメーション再開を試みる。
+            // ★ GIF は cache-buster で新規ロード（Firefox のキャッシュ済みアニメ停止対策）
             let urlForLoad = newUrl;
             const isGif = /\.gif(\?|#|$)/i.test(newUrl);
             if (isGif) {
@@ -1140,18 +1168,15 @@
                 urlForLoad = base + '?_t=' + Date.now();
             }
 
-            console.log('[ImageDisplay] 画像ブランチ:', { originalUrl: newUrl, loadUrl: urlForLoad });
+            console.log('[ImageDisplay] 画像ブランチ:', { resolvedUrl: newUrl, loadUrl: urlForLoad });
 
             const imgElement = document.createElement('img');
             imgElement.style.width = '100%';
             imgElement.style.height = '100%';
             imgElement.style.objectFit = 'contain';
-            imgElement.onerror = () => {
-                console.warn('[ImageDisplay] img 読み込みエラー:', urlForLoad);
-                handleMediaError(imgElement, newUrl);
-            };
+            imgElement.onerror = () => handleMediaError(imgElement, newUrl);
             imgElement.onload = () => {
-                console.log(`[ImageDisplay] img 読み込み成功: ${imgElement.naturalWidth}x${imgElement.naturalHeight}`);
+                console.log(`[ImageDisplay] img 読み込み成功: ${imgElement.naturalWidth}x${imgElement.naturalHeight} (${urlForLoad.slice(0, 80)})`);
             };
             imgElement.src = urlForLoad;
             mediaContainer.innerHTML = '';
