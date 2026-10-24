@@ -2173,11 +2173,9 @@
         const imageMap = {};
         const toPaths = (names) => names.map(name => {
             const cleaned = extractFileNameFromPath(name);
-            const m = cleaned.match(/^(.+)_(mp4|webm)_thum\.png$/i);
-            if (m) {
-                return `user/images/${charName}/${m[1]}.${m[2].toLowerCase()}`;
-            }
-            return `user/images/${charName}/${cleaned}`;
+            // ★ サムネイル名を元ファイル名に解決（動画・画像両対応）
+            const resolved = resolveThumbToOriginal(cleaned);
+            return `user/images/${charName}/${resolved}`;
         });
 
         const defaultCell = document.querySelector('.stj-special-item:nth-child(1)');
