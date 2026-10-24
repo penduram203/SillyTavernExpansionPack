@@ -1061,9 +1061,21 @@
     }
 
     async function updateImageWithUrl(targetUrl) {
-        if (isDefaultImageFailed) return;
+        // ★ isDefaultImageFailed の早期 return を緩和
+        //   デフォルト画像が無い状態でも、明示的なキーワード画像などは
+        //   表示できるようにする（フラグをリセットして復帰）
+        if (isDefaultImageFailed) {
+            const isDefaultRequest = !targetUrl ||
+                /(?:^|\/)default\.(png|jpg|jpeg|webp|gif|avif|bmp|mp4|webm)(?:\?|#|$)/i.test(targetUrl) ||
+                targetUrl.endsWith('/default');
+            if (isDefaultRequest) return;
+            isDefaultImageFailed = false;
+            if (mediaContainer.style.display === 'none') {
+                mediaContainer.style.display = '';
+            }
+        }
 
-        // ★ override モード中の物理ブロック
+        // override モードブロック
         if (isOverrideActive && overrideImageUrl) {
             if (targetUrl !== overrideImageUrl) {
                 console.log(
@@ -1093,7 +1105,7 @@
         currentImageUrl = newUrl;
 
         if (isVideoUrl(newUrl)) {
-            // ───── 動画ブランチ: 新しい video 要素を作成 ─────
+            // ───── 動画ブランチ（既存のまま） ─────
             const videoElement = document.createElement('video');
             videoElement.src = newUrl;
             videoElement.autoplay = true;
@@ -1109,27 +1121,19 @@
             mediaContainer.appendChild(videoElement);
             videoElement.play().catch(() => {});
         } else {
-            // ───── 画像ブランチ: 既存の img 要素を再利用する ─────
-            //   ★ 新しい img 要素を毎回作成するとアニメーションが最初から
-            //     再生し直されるため、既存要素の src だけを変更して
-            //     GIF アニメーションを維持する。
-            let imgElement = mediaContainer.querySelector(':scope > img');
-
-            if (imgElement) {
-                // 既存 img の src を変更（アニメーション継続）
-                imgElement.onerror = () => handleMediaError(imgElement, newUrl);
-                imgElement.src = newUrl;
-            } else {
-                // 初回: DOM に追加してから src を設定
-                imgElement = document.createElement('img');
-                imgElement.style.width = '100%';
-                imgElement.style.height = '100%';
-                imgElement.style.objectFit = 'contain';
-                imgElement.onerror = () => handleMediaError(imgElement, newUrl);
-                mediaContainer.innerHTML = '';
-                mediaContainer.appendChild(imgElement);
-                imgElement.src = newUrl;
-            }
+            // ───── 画像ブランチ ─────
+            // ★ ギャラリー・JSON 編集画面の拡大ビューと同じパターン:
+            //   src を先に設定してから append する。
+            //   （append を先にすると、アニメ GIF が最初のフレームだけ
+            //     表示される / 表示されない といった問題が起きる）
+            const imgElement = document.createElement('img');
+            imgElement.style.width = '100%';
+            imgElement.style.height = '100%';
+            imgElement.style.objectFit = 'contain';
+            imgElement.onerror = () => handleMediaError(imgElement, newUrl);
+            imgElement.src = newUrl;
+            mediaContainer.innerHTML = '';
+            mediaContainer.appendChild(imgElement);
         }
     }
 
