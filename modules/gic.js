@@ -2389,6 +2389,11 @@ function applyThumbnailBlobImmediately(thumb, blobUrl) {
         if (el.tagName === 'IMG') {
             el.style.setProperty('display', 'none', 'important');
             el.style.setProperty('visibility', 'hidden', 'important');
+            // ★ src を空にして 404 リクエストを抑止
+            if (el.getAttribute('src') && !el.getAttribute('src').startsWith('data:')) {
+                el.setAttribute('data-gic-orig-src', el.getAttribute('src'));
+                el.removeAttribute('src');
+            }
         }
     });
 
