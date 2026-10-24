@@ -2624,41 +2624,59 @@ function setupImmediateThumbCacheInterceptor() {
         const title = (thumb.getAttribute('title') || '').trim();
         if (!title) return;
 
-        /* 失敗済みはスキップ（無限リトライ防止） */
         if (_failedThumbs.has(title)) {
             thumb.dataset.gicImageReady = '1';
             return;
         }
 
-        if (isVideoFile(title)) return;
         if (title.endsWith('_thum_img_thum.png')) return;
+
+        const charName = getCurrentCharacterName();
+        if (!charName) return;
+
+        // ★ 動画サムネ (_thum.png) の処理
+        const vm = title.match(/^(.+)_(mp4|webm)_thum\.png$/i);
+        if (vm) {
+            const videoFileName = `${vm[1]}.${vm[2].toLowerCase()}`;
+            processing.add(thumb);
+            try {
+                const thumbUrl = await ensureThumbnailForVideo(videoFileName, charName);
+                if (thumbUrl) {
+                    applyThumbnailBlobImmediately(thumb, thumbUrl);
+                } else {
+                    _failedThumbs.add(title);
+                }
+                thumb.dataset.gicImageReady = '1';
+            } catch (e) {
+                console.warn('[GIC] processThumb (video) error:', e);
+                thumb.dataset.gicImageReady = '1';
+            } finally {
+                processing.delete(thumb);
+            }
+            return;
+        }
+
+        // 画像サムネ
+        if (isVideoFile(title)) return;
 
         const orig = resolveOriginalFileName(title);
         if (!orig) {
-            /* 逆引きマップに無い _img_thum.png → 背景画像（_img_thum.png）をそのまま使う */
             thumb.dataset.gicImageReady = '1';
             return;
         }
         if (!/\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(orig)) return;
 
-        const charName = getCurrentCharacterName();
-        if (!charName) return;
-
         processing.add(thumb);
-
         try {
             const thumbUrl = await ensureImageThumbnail(orig, charName);
             if (thumbUrl) {
                 applyThumbnailBlobImmediately(thumb, thumbUrl);
             } else {
-                /* 元画像が存在しない（404等）→ _img_thum.png の背景をそのまま使う */
-                thumb.dataset.gicImageReady = '1';
                 _failedThumbs.add(title);
-                console.debug(`[GIC] ⏭ 元画像なし → サムネ自体をそのまま表示: ${title}`);
             }
             thumb.dataset.gicImageReady = '1';
         } catch (e) {
-            console.warn('[GIC] processThumb error:', e);
+            console.warn('[GIC] processThumb (image) error:', e);
         } finally {
             processing.delete(thumb);
         }
@@ -2873,6 +2891,65 @@ async function migrateCacheToDisk() {
     } catch (e) {
         console.warn('[GIC] 移行エラー:', e);
         return { migrated, failed, skipped, error: e.message };
+    }
+}
+
+// ============================================================
+// ★ 既存ディスクサムネの一括削除（初回1回のみ、キャラクター別）
+//   IndexedDB-only モードへ移行するため
+// ============================================================
+async function cleanupDiskThumbnailsOnce() {
+    const charName = getCurrentCharacterName();
+    if (!charName) return;
+
+    const FLAG_KEY = `gic_disk_thumb_cleanup_v1_${charName}`;
+    if (localStorage.getItem(FLAG_KEY) === 'done') return;
+
+    console.log(`[GIC] 🧹 ディスクサムネイル一括削除開始: ${charName}`);
+
+    try {
+        const origFetch = window.__gicOriginalFetch || window.fetch;
+        const resp = await origFetch.call(window, '/api/images/list', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify({ folder: charName })
+        });
+        if (!resp.ok) return;
+
+        const files = await resp.json();
+        if (!Array.isArray(files)) return;
+
+        const toDelete = files.filter(f =>
+            typeof f === 'string' && (
+                f.endsWith(IMG_THUMB_SUFFIX) ||
+                (f.endsWith('_thum.png') && !f.endsWith('_img_thum.png'))
+            )
+        );
+
+        if (toDelete.length === 0) {
+            console.log(`[GIC] ✅ 削除対象なし（フラグ設定）: ${charName}`);
+            localStorage.setItem(FLAG_KEY, 'done');
+            return;
+        }
+
+        console.log(`[GIC] 🧹 ${toDelete.length}件のディスクサムネイルを削除`);
+
+        let removed = 0;
+        for (const f of toDelete) {
+            try {
+                const delResp = await origFetch.call(window, '/api/images/delete', {
+                    method: 'POST',
+                    headers: getRequestHeaders(),
+                    body: JSON.stringify({ path: `/user/images/${charName}/${f}` })
+                });
+                if (delResp.ok) removed++;
+            } catch (e) { /* ignore */ }
+        }
+
+        console.log(`[GIC] ✅ ディスクサムネイル削除完了: ${removed}/${toDelete.length}`);
+        localStorage.setItem(FLAG_KEY, 'done');
+    } catch (e) {
+        console.warn('[GIC] ディスクサムネイル削除エラー:', e);
     }
 }
 
@@ -6323,9 +6400,7 @@ function initializeGIC() {
 
     setTimeout(async () => {
         try {
-            await cleanupInvalidImgThumbs();
-            await cleanupOrphanThumbs();   // ★ 追加
-            await migrateCacheToDisk();
+            await cleanupDiskThumbnailsOnce();
         } catch (e) {
             console.warn('[GIC] 起動時クリーンアップでエラー:', e);
         }
