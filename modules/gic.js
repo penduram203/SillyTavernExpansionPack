@@ -2015,6 +2015,16 @@ async function ensureImageThumbnail(imageFileName, charName) {
     const manifestKey = `${charName}:${imageFileName}`;
     const cacheKey = `${charName}:${imageFileName}:imgthumb`;
 
+    /* 元画像の存在確認（1回だけ、以後はキャッシュ） */
+    async function originalExists() {
+        try {
+            const origUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(imageFileName);
+            return await checkFileExists(origUrl);
+        } catch (e) {
+            return false;
+        }
+    }
+
     /* メモリキャッシュヒット時もディスク存在確認 + 書き出し */
     if (_imgBlobUrlCache.has(cacheKey)) {
         const url = _imgBlobUrlCache.get(cacheKey);
@@ -2022,6 +2032,12 @@ async function ensureImageThumbnail(imageFileName, charName) {
         if (thumbName) {
             const diskUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(thumbName);
             if (!(await checkFileExists(diskUrl))) {
+                // ★ 元画像が存在しない場合はディスク書き出しをスキップ
+                if (!(await originalExists())) {
+                    console.debug(`[GIC] ⏭ 元画像なし → サムネ書き出しスキップ: ${imageFileName}`);
+                    _imgBlobUrlCache.delete(cacheKey);
+                    return url;
+                }
                 try {
                     const blob = await getImgFromDB(cacheKey);
                     if (blob) {
@@ -2035,6 +2051,7 @@ async function ensureImageThumbnail(imageFileName, charName) {
         return url;
     }
 
+    /* IndexedDB キャッシュヒット */
     const cachedBlob = await getImgFromDB(cacheKey);
     if (cachedBlob) {
         const url = URL.createObjectURL(cachedBlob);
@@ -2047,12 +2064,24 @@ async function ensureImageThumbnail(imageFileName, charName) {
         if (thumbName) {
             const diskUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(thumbName);
             if (!(await checkFileExists(diskUrl))) {
+                // ★ 元画像が存在しない場合はディスク書き出しをスキップ
+                if (!(await originalExists())) {
+                    console.debug(`[GIC] ⏭ 元画像なし → サムネ書き出しスキップ: ${imageFileName}`);
+                    return url;
+                }
                 console.log(`[GIC] 💾 IndexedDB → ディスク書き出し: ${thumbName}`);
                 await uploadThumbnailBlob(charName, cachedBlob, thumbName);
                 _thumbExistCache.delete(diskUrl);
             }
         }
         return url;
+    }
+
+    /* 新規生成 */
+    // ★ 元画像が存在しない場合は生成しない
+    if (!(await originalExists())) {
+        console.debug(`[GIC] ⏭ 元画像なし → サムネ生成スキップ: ${imageFileName}`);
+        return null;
     }
 
     const imageUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(imageFileName);
@@ -6049,6 +6078,34 @@ function exposeGicApi() {
         },
 
         forceGridLayout: () => enforceGalleryGridLayout(),
+        // ★ 診断: ページネーション状態をダンプ
+        debugPagination: () => {
+            const gallery = document.getElementById('gallery');
+            if (!gallery) return { error: 'no gallery' };
+            const nGY2El = gallery.querySelector('.nGY2Gallery');
+            const dots = document.querySelectorAll(
+                '.nGY2paginationRectangle, .nGY2paginationRectangleCurrentPage'
+            );
+            const thumbs = gallery.querySelectorAll(
+                '.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item'
+            );
+            const attrValues = {};
+            if (nGY2El) {
+                [
+                    'data-nanogallery2-pagination-totalpages',
+                    'data-nanogallery2-totalpages',
+                    'data-pagination-total',
+                ].forEach(a => { attrValues[a] = nGY2El.getAttribute(a); });
+            }
+            return {
+                dotsCount: dots.length,
+                thumbsCount: thumbs.length,
+                attrValues,
+                containerW: Math.round(gallery.getBoundingClientRect().width),
+                estimatedItemsPerPage: Math.round(gallery.getBoundingClientRect().width / 180) * 4,
+                expectedTotalPages: Math.ceil(thumbs.length / (Math.floor(gallery.getBoundingClientRect().width / 180) * 4)),
+            };
+        },
     };
 
     window.GicDebugPageBlack = function() {
@@ -6109,6 +6166,9 @@ function exposeGicApi() {
 
 // ============================================================
 // ★ nanogallery2 の galleryMaxRows を 4 に強制
+//   ★ 併せて thumbnailWidth = '33%' にして 3列を強制
+//      （固定pxだとコンテナ幅依存で4列になり、ページあたり16アイテム
+//        になって後半ページが欠落する）
 // ============================================================
 (function patchNanogallery2For4Rows() {
     if (window.__gicNG2Patched) return;
@@ -6125,13 +6185,15 @@ function exposeGicApi() {
                     console.log('[GIC] 🎯 galleryMaxRows:', options.galleryMaxRows, '→ 4');
                     options.galleryMaxRows = 4;
                 }
-                options.thumbnailWidth = '180px';
+                // ★ 33% で常に3列を強制
+                //    （実際の表示サイズは enforceGalleryGridLayout が 180px に固定）
+                options.thumbnailWidth = '33%';
                 options.thumbnailHeight = 180;
             }
         } catch (e) { /* ignore */ }
         return orig.apply(this, arguments);
     };
-    console.log('[GIC] ✅ nanogallery2 patch installed (galleryMaxRows ≤ 4, thumbnailWidth = 180px)');
+    console.log('[GIC] ✅ nanogallery2 patch installed (galleryMaxRows ≤ 4, thumbnailWidth = 33% = 3列固定)');
 })();
 
 // ============================================================
