@@ -685,6 +685,13 @@ async function validatePersistedState() {
 
     if (!lastGeneratedImageUrl) {
         console.log('[GIC] override状態（URL未指定）を確認しました');
+        // ★ Image Display へ状態を同期（起動時の不整合を解消）
+        if (window.ImageDisplayExtension?.setOverrideImage && !window.ImageDisplayExtension.isOverride()) {
+            try {
+                await window.ImageDisplayExtension.setOverrideImage('');
+                console.log('[GIC] override状態を Image Display と同期（URLなし）');
+            } catch (e) { /* ignore */ }
+        }
         return;
     }
 
@@ -694,19 +701,24 @@ async function validatePersistedState() {
         lastGeneratedImageUrl = null;
         isOverrideLocal = false;
         setButtonLabel(LABEL_NORMAL);
-
         if (window.ImageDisplayExtension?.clearOverrideImage) {
-            try {
-                window.ImageDisplayExtension.clearOverrideImage();
-                console.log('[GIC] Image Display の override も解除しました');
-            } catch (e) {
-                console.warn('[GIC] Image Display の override 解除に失敗:', e);
-            }
+            try { window.ImageDisplayExtension.clearOverrideImage(); } catch (e) { /* ignore */ }
         }
-
         savePersistedState();
     } else {
         console.log(`[GIC] 永続化された画像URLの存在を確認: ${lastGeneratedImageUrl}`);
+
+        // ★ Image Display 側の状態と同期（起動直後の不整合を解消）
+        //   GIC 側は isOverrideLocal=true でも、Image Display 側が false のままだと
+        //   gic_lorebook.js の processChoice が /sd をスキップしてしまう。
+        if (window.ImageDisplayExtension?.setOverrideImage && !window.ImageDisplayExtension.isOverride()) {
+            try {
+                await window.ImageDisplayExtension.setOverrideImage(lastGeneratedImageUrl);
+                console.log(`[GIC] override状態を Image Display と同期: ${lastGeneratedImageUrl}`);
+            } catch (e) {
+                console.warn('[GIC] Image Display との同期に失敗:', e);
+            }
+        }
     }
 }
 
@@ -6341,20 +6353,20 @@ function setupListeners() {
         safeOn(event_types.CHAT_CHANGED, () => {
             scanForGeneratedImages();
 
-            // ★ 新規チャット開始時にギャラリーを再読み込みしない
-            //   - prepareGalleryForCharacter() はここでは呼ばない
-            //     （内部で warmUpGallery がギャラリーを開閉するため）
-            //   - _galleryPreparedFor / _galleryPreloadState もここではリセットしない
-            //   - ギャラリーの準備は CHARACTER_SELECTED（キャラ変更時）と
-            //     アプリ初期化時のみ実行する
-            //   - IndexedDB からメモリキャッシュへのウォームアップは
-            //     ギャラリーを開かないので継続する（表示高速化のため）
-
+            // ★ ギャラリー準備を復活させる。
+            //   prepareGalleryForCharacter() は内部で
+            //     if (_galleryPreparedFor === charName && _galleryPreloadState === 'ready') return;
+            //   という自己スキップを持つため、以下の挙動になる:
+            //     - F5 リロード      : _galleryPreparedFor=null → 実行される ✓
+            //     - キャラ変更       : charName が変わる     → 実行される ✓
+            //     - 新規チャット開始 : 同一キャラで既に ready → 早期 return（ギャラリー開閉なし）✓
+            //   _galleryPreparedFor / _galleryPreloadState はここではリセットしない。
             setTimeout(() => {
                 const charName = getCurrentCharacterName();
                 if (charName) {
                     warmupImageMemoryCacheForChar(charName).catch(() => {});
                 }
+                prepareGalleryForCharacter().catch(() => {});
             }, 500);
         });
     }
@@ -6400,6 +6412,9 @@ function exposeGicApi() {
         closeGallery: () => closeGalleryProgrammatically(),
         isOpen: () => isGalleryOpen(),
 
+        // ★ GIC 側の override 状態を外部から参照できるようにする
+        isOverrideMode: () => isOverrideLocal,
+        
         ensureThumbnailForVideo,
         generateVideoThumbnailBlob,
         videoFileToThumbName,
