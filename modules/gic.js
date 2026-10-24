@@ -74,6 +74,24 @@ console.log('[GIC] モジュールロード開始');
                 filtered.push(f);
             }
 
+            // ★ nanogallery2 に返す前にサムネを事前生成（fire-and-forget）
+            //    - await しないので初回の応答速度には影響しない
+            //    - nanogallery2 の初期化と並行して IndexedDB に載る
+            try {
+                let charName = null;
+                const reqBody = init?.body ? JSON.parse(init.body) : null;
+                charName = reqBody?.folder || null;
+                if (charName) {
+                    for (const f of filtered) {
+                        if (typeof f !== 'string') continue;
+                        if (!f.endsWith(IMG_THUMB_SUFFIX)) continue;
+                        if (!window.__gicListReverseMap?.has(f)) continue;
+                        const orig = window.__gicListReverseMap.get(f);
+                        ensureImageThumbnail(orig, charName).catch(() => {});
+                    }
+                }
+            } catch (e) { /* ignore */ }
+            
             if (replaced === 0 && removed === 0 && duplicateKept === 0) return resp;
 
             console.debug(
