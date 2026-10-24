@@ -306,23 +306,14 @@
 
     async function ensureThumbForEditor(videoFileName, charName) {
         if (!videoFileName || !charName) return null;
+        // ★ IndexedDB-only モード: GicApi に一任（ディスクフォールバック削除）
         if (window.GicApi?.ensureThumbnailForVideo) {
             try {
-                const url = await window.GicApi.ensureThumbnailForVideo(videoFileName, charName);
-                if (url) return url;
-            } catch (e) { /* fall through */ }
+                return await window.GicApi.ensureThumbnailForVideo(videoFileName, charName);
+            } catch (e) {
+                return null;
+            }
         }
-        const key = `${charName}:${videoFileName}`;
-        if (_stjThumbUrlCache.has(key)) return _stjThumbUrlCache.get(key);
-
-        const thumbName = videoFileToThumbName(videoFileName);
-        if (!thumbName) return null;
-        const thumbUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(thumbName);
-        if (await stjCheckThumbExists(thumbUrl)) {
-            _stjThumbUrlCache.set(key, thumbUrl);
-            return thumbUrl;
-        }
-        _stjThumbUrlCache.set(key, null);
         return null;
     }
 
