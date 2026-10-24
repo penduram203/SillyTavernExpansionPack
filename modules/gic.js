@@ -6340,17 +6340,25 @@ function setupListeners() {
     if (event_types.CHAT_CHANGED) {
         safeOn(event_types.CHAT_CHANGED, () => {
             scanForGeneratedImages();
-            _galleryPreparedFor = null;
-            _galleryPreloadState = 'idle';
+
+            // ★ 新規チャット開始時にギャラリーを再読み込みしない
+            //   - prepareGalleryForCharacter() はここでは呼ばない
+            //     （内部で warmUpGallery がギャラリーを開閉するため）
+            //   - _galleryPreparedFor / _galleryPreloadState もここではリセットしない
+            //   - ギャラリーの準備は CHARACTER_SELECTED（キャラ変更時）と
+            //     アプリ初期化時のみ実行する
+            //   - IndexedDB からメモリキャッシュへのウォームアップは
+            //     ギャラリーを開かないので継続する（表示高速化のため）
+
             setTimeout(() => {
                 const charName = getCurrentCharacterName();
                 if (charName) {
                     warmupImageMemoryCacheForChar(charName).catch(() => {});
                 }
-                prepareGalleryForCharacter().catch(() => {});
             }, 500);
         });
     }
+    
     if (event_types.CHARACTER_SELECTED) {
         safeOn(event_types.CHARACTER_SELECTED, () => {
             _galleryPreparedFor = null;
