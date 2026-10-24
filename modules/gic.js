@@ -43,21 +43,18 @@ console.log('[GIC] モジュールロード開始');
             for (const f of data) {
                 if (typeof f !== 'string') { filtered.push(f); continue; }
 
-                /* _img_thum.png 自体は除外（2倍表示防止） */
                 if (f.endsWith('_img_thum.png')) { removed++; continue; }
 
-                /* 動画サムネイル (_thum.png) は置換対象外 */
                 if (f.endsWith('_thum.png')) {
                     filtered.push(f);
                     continue;
                 }
 
-                /* ★ 元画像 → サムネイル置換（ディスク存在チェックなし、常に置換） */
+                /* 元画像 → サムネイル名に常に置換（ディスク存在チェックなし） */
                 if (/\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(f)) {
                     const thumbName = imageFileToThumbName(f);
                     if (thumbName) {
                         if (usedThumbs.has(thumbName)) {
-                            /* 同じサムネ名が別ファイルに既に使われている → 元画像を維持 */
                             filtered.push(f);
                             duplicateKept++;
                             continue;
@@ -1976,7 +1973,6 @@ async function generateImageThumbnailBlob(imageUrl, size = IMG_THUMB_SIZE) {
 async function ensureImageThumbnail(imageFileName, charName) {
     if (!imageFileName || !charName) return null;
 
-    /* 動画サムネイル・画像サムネイル自体は処理対象外 */
     if (imageFileName.endsWith('_thum.png') || imageFileName.endsWith('_img_thum.png')) {
         return null;
     }
