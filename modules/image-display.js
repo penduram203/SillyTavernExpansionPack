@@ -1116,15 +1116,14 @@
             imgElement.style.width = '100%';
             imgElement.style.height = '100%';
             imgElement.style.objectFit = 'contain';
-            imgElement.onload = () => {
-                if (currentImageUrl === newUrl) {
-                    mediaContainer.innerHTML = '';
-                    mediaContainer.appendChild(imgElement);
-                }
-            };
             imgElement.onerror = () => handleMediaError(imgElement, newUrl);
+
+            // ★ DOM に追加してから src を設定
+            //   （DOM 外で完全ロード → 後から append するとアニメGIFが再生されない
+            //     ブラウザ実装があるため、append を先に行う）
+            mediaContainer.innerHTML = '';
+            mediaContainer.appendChild(imgElement);
             imgElement.src = newUrl;
-            if (typeof imgElement.decode === 'function') imgElement.decode().catch(() => {});
         }
     }
 
