@@ -1061,29 +1061,31 @@
     }
 
     async function updateImageWithUrl(targetUrl) {
-        // ★ isDefaultImageFailed の早期 return を緩和
+        console.log('[ImageDisplay] updateImageWithUrl:', String(targetUrl).slice(0, 120));
+
+        // ★ isDefaultImageFailed の復帰（非default要求で復帰）
         if (isDefaultImageFailed) {
             const isDefaultRequest = !targetUrl ||
                 /(?:^|\/)default\.(png|jpg|jpeg|webp|gif|avif|bmp|mp4|webm)(?:\?|#|$)/i.test(targetUrl) ||
                 targetUrl.endsWith('/default');
-            if (isDefaultRequest) return;
-            isDefaultImageFailed = false;
-            if (mediaContainer.style.display === 'none') {
-                mediaContainer.style.display = '';
+            if (isDefaultRequest) {
+                console.log('[ImageDisplay] isDefaultImageFailed=true、default要求のためスキップ');
+                return;
             }
+            isDefaultImageFailed = false;
+            mediaContainer.style.removeProperty('display');
+            console.log('[ImageDisplay] isDefaultImageFailed をリセット');
         }
 
         // override モードブロック
         if (isOverrideActive && overrideImageUrl) {
             if (targetUrl !== overrideImageUrl) {
-                console.log(
-                    `[ImageDisplay] 🛡️ overrideモード中のため切替をブロック: ` +
-                    `${String(targetUrl).slice(0, 120)}`
-                );
+                console.log(`[ImageDisplay] 🛡️ overrideモード中のため切替をブロック: ${String(targetUrl).slice(0, 120)}`);
                 return;
             }
         }
 
+        // 空 URL のフォールバック
         if (!targetUrl || typeof targetUrl !== 'string' || !targetUrl.trim()) {
             const fallback = getRandomImageSource(currentImageMap.default) || currentImageMap.default;
             if (fallback && fallback !== targetUrl && typeof fallback === 'string' && fallback.trim()) {
@@ -1092,18 +1094,25 @@
             return;
         }
 
+        // 拡張子チェック
         let newUrl = targetUrl.trim();
         if (!newUrl.match(/\.(png|jpg|jpeg|webp|gif|avif|bmp|mp4|webm)$/i)) {
             const detected = await detectImageExtension(newUrl);
             if (detected) newUrl = detected;
-            else return;
+            else {
+                console.log('[ImageDisplay] detectImageExtension で解決できず:', newUrl);
+                return;
+            }
         }
 
-        if (currentImageUrl === newUrl && mediaContainer.children.length > 0) return;
+        if (currentImageUrl === newUrl && mediaContainer.children.length > 0) {
+            console.log('[ImageDisplay] 同一URLのため再描画スキップ:', newUrl);
+            return;
+        }
         currentImageUrl = newUrl;
 
         if (isVideoUrl(newUrl)) {
-            // ───── 動画ブランチ ─────
+            console.log('[ImageDisplay] 動画ブランチ:', newUrl);
             const videoElement = document.createElement('video');
             videoElement.src = newUrl;
             videoElement.autoplay = true;
@@ -1119,48 +1128,55 @@
             mediaContainer.appendChild(videoElement);
             videoElement.play().catch(() => {});
         } else {
-            // ───── 画像ブランチ ─────
-            // ★ ポイント1: 既存の img 要素があれば src のみ変更して再利用
-            //    → ブラウザは「src 属性の変更」として扱い、アニメーションを
-            //      継続/再開する。要素の作り直しはアニメーション停止の原因になる。
-            // ★ ポイント2: 新規作成時は append してから src を設定
-            //    → DOM 外で src を設定すると Firefox でアニメーションが
-            //      開始されない既知の挙動を回避する。
-            let imgElement = mediaContainer.querySelector(':scope > img');
-
-            if (imgElement) {
-                // 既存 img を再利用（アニメーション継続）
-                imgElement.onerror = () => handleMediaError(imgElement, newUrl);
-                imgElement.src = newUrl;
-            } else {
-                // 新規 img 作成: append → src の順
-                imgElement = document.createElement('img');
-                imgElement.style.width = '100%';
-                imgElement.style.height = '100%';
-                imgElement.style.objectFit = 'contain';
-                imgElement.onerror = () => handleMediaError(imgElement, newUrl);
-                mediaContainer.innerHTML = '';
-                mediaContainer.appendChild(imgElement);
-                imgElement.src = newUrl;
+            // ★ 画像ブランチ: シンプルに直接URLで読み込む
+            //   blob URL 化は fetch / サーバ / CORS 問題で失敗する場合があり、
+            //   失敗すると永久に表示されない状態になるため採用しない。
+            //   GIF は cache-buster を付与して Firefox での
+            //   アニメーション再開を試みる。
+            let urlForLoad = newUrl;
+            const isGif = /\.gif(\?|#|$)/i.test(newUrl);
+            if (isGif) {
+                const base = newUrl.split('?')[0].split('#')[0];
+                urlForLoad = base + '?_t=' + Date.now();
             }
+
+            console.log('[ImageDisplay] 画像ブランチ:', { originalUrl: newUrl, loadUrl: urlForLoad });
+
+            const imgElement = document.createElement('img');
+            imgElement.style.width = '100%';
+            imgElement.style.height = '100%';
+            imgElement.style.objectFit = 'contain';
+            imgElement.onerror = () => {
+                console.warn('[ImageDisplay] img 読み込みエラー:', urlForLoad);
+                handleMediaError(imgElement, newUrl);
+            };
+            imgElement.onload = () => {
+                console.log(`[ImageDisplay] img 読み込み成功: ${imgElement.naturalWidth}x${imgElement.naturalHeight}`);
+            };
+            imgElement.src = urlForLoad;
+            mediaContainer.innerHTML = '';
+            mediaContainer.appendChild(imgElement);
         }
     }
 
     async function updateImage() {
-        if (isDefaultImageFailed) return;
+        // ★ isDefaultImageFailed の早期 return を削除
+        //   上流で return すると updateImageWithUrl の復帰ロジックに到達できず、
+        //   一度 true になると永久に復帰不能になる catch-22 が発生するため。
+        //   実際の判定は updateImageWithUrl 内で行う。
+
         if (isOverrideActive) {
             if (overrideImageUrl) {
                 if (currentImageUrl !== overrideImageUrl) await updateImageWithUrl(overrideImageUrl);
             } else {
                 const fallback = getRandomImageSource(currentImageMap.default) || currentImageMap.default;
-                if (fallback && typeof fallback === 'string' && fallback.trim() && currentImageUrl !== fallback) await updateImageWithUrl(fallback);
+                if (fallback && typeof fallback === 'string' && fallback.trim() && currentImageUrl !== fallback) {
+                    await updateImageWithUrl(fallback);
+                }
             }
             return;
         }
 
-        // ★ 事前設定モード（user モード）で送信時マッチ済みなら、その画像を固定表示する
-        //   送信後の MutationObserver / CHARACTER_MESSAGE_RENDERED / ストリーミング等で
-        //   履歴が再スキャンされ、別のキーワード画像に切り替わるのを防ぐ。
         if (currentTextMode === 'user' && _lastSentKeywordImage) {
             if (currentImageUrl !== _lastSentKeywordImage) {
                 await updateImageWithUrl(_lastSentKeywordImage);
