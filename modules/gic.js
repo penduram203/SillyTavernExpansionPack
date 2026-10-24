@@ -6243,10 +6243,10 @@ function exposeGicApi() {
 
 // ============================================================
 // ★ nanogallery2 の galleryMaxRows を 4 に強制
-//   ★ thumbnailWidth を「画面幅 / 3」の px にして 3 列を強制
-//     '33%' だと nanogallery2 が初期化時のコンテナ幅で幅を確定し、
-//     列数計算を画面幅基準で行うため 12 列（48 アイテム/ページ）
-//     になり、後半ページが欠落する
+//   ★ コンテナ幅を 568px に固定し、thumbnailWidth = 189px (568/3) で
+//     3列 × 4行 = 12アイテム/ページを強制
+//     （640px だとコンテナ/640 = 0.88 → 1列 → 4アイテム/ページになり、
+//       47ページに膨らむ）
 // ============================================================
 (function patchNanogallery2For4Rows() {
     if (window.__gicNG2Patched) return;
@@ -6259,21 +6259,38 @@ function exposeGicApi() {
     window.$.fn.nanogallery2 = function(options) {
         try {
             if (options && typeof options === 'object' && !Array.isArray(options)) {
+                // ★ 目標コンテナ幅: ST本来(480) + GALLERY_WINDOW_WIDTH_EXTRA(88) = 568
+                const TARGET_W = 480 + GALLERY_WINDOW_WIDTH_EXTRA;
+
+                // ★ nanogallery2 が参照する前にコンテナ幅を強制固定
+                //   （min-width を付けることで applyGalleryWindowLayout の測定時にも揺れない）
+                const containerEl = this[0];
+                if (containerEl) {
+                    try {
+                        containerEl.style.setProperty('width', TARGET_W + 'px', 'important');
+                        containerEl.style.setProperty('max-width', TARGET_W + 'px', 'important');
+                        containerEl.style.setProperty('min-width', TARGET_W + 'px', 'important');
+                    } catch (e) { /* ignore */ }
+                }
+
+                // 行数上限
                 if (typeof options.galleryMaxRows === 'number' && options.galleryMaxRows > 4) {
                     console.log('[GIC] 🎯 galleryMaxRows:', options.galleryMaxRows, '→ 4');
                     options.galleryMaxRows = 4;
                 }
-                // ★ 画面幅 / 3 の px で 3 列を強制
-                //    （実際の描画は enforceGalleryGridLayout が 180px に固定）
-                const colWidth = Math.floor(window.innerWidth / 3);
-                console.log('[GIC] 🎯 thumbnailWidth:', options.thumbnailWidth, '→', colWidth + 'px (画面幅/3 = 3列固定)');
-                options.thumbnailWidth = colWidth + 'px';
+
+                // ★ thumbnailWidth = TARGET_W / 3 = 189px
+                //   → 568 / 189 = 3.005 → floor 3列 ✓
+                //   （floor/round どちらの計算方式でも 3 になる）
+                const thumbnailW = Math.floor(TARGET_W / 3);
+                console.log('[GIC] 🎯 3列強制: container=' + TARGET_W + 'px, thumbnailWidth=' + thumbnailW + 'px');
+                options.thumbnailWidth = thumbnailW + 'px';
                 options.thumbnailHeight = 180;
             }
         } catch (e) { /* ignore */ }
         return orig.apply(this, arguments);
     };
-    console.log('[GIC] ✅ nanogallery2 patch installed (galleryMaxRows ≤ 4, thumbnailWidth = 画面幅/3 = 3列固定)');
+    console.log('[GIC] ✅ nanogallery2 patch installed (3列 × 4行 = 12アイテム/ページ強制)');
 })();
 
 // ============================================================
