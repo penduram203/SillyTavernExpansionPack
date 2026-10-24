@@ -1506,22 +1506,17 @@ async function scanForGeneratedImages() {
         if (!isOverrideLocal) {
             const ideIsOverride = window.ImageDisplayExtension?.isOverride?.();
             if (ideIsOverride) {
+                // ImageDisplay 側と同期（外部から setOverrideImage された場合）
                 isOverrideLocal = true;
                 setButtonLabel(LABEL_OVERRIDE);
                 savePersistedState();
-            } else if (newest.is_system) {
-                if (window.ImageDisplayExtension?.setOverrideImage) {
-                    try {
-                        await window.ImageDisplayExtension.setOverrideImage(url);
-                        isOverrideLocal = true;
-                        setButtonLabel(LABEL_OVERRIDE);
-                        savePersistedState();
-                        console.log(`[GIC] 🔄 リロード後のoverride状態を復元: ${url}`);
-                    } catch (e) {
-                        console.error('[GIC] override復元エラー:', e);
-                    }
-                }
             }
+            // ★ 削除: newest.is_system による自動復元
+            //   ユーザーが明示的に事前設定モードを選んだ直後に、
+            //   過去の生成画像メッセージ（is_system=true）を検出して
+            //   勝手に override 状態へ戻してしまうバグの原因だった。
+            //   リロード時の復元は loadPersistedState + validateRestoredOverride
+            //   が担当するため、ここでの復元は不要。
         }
     }
 
