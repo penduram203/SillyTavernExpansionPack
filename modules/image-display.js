@@ -1133,20 +1133,29 @@
     function setupSendInterception() {
         if (isSendInterceptionInstalled) return;
         isSendInterceptionInstalled = true;
+
+        // ★ GIC 背景生成モード（override 有効）中は、送信時のキーワード即時反映を
+        //    スキップする。/sd が画像を生成するまでの間、事前設定の背景が
+        //    一瞬表示されるのを防ぐ。
+        const isOverrideMode = () => isOverrideActive;
+
         document.addEventListener('keydown', (e) => {
             if (e.key !== 'Enter' || e.shiftKey) return;
             const target = e.target;
             if (!target || target.id !== 'send_textarea') return;
             if (currentTextMode !== 'user') return;
+            if (isOverrideMode()) return;   // ★ override 中はスキップ
             const text = target.value;
             if (!text || !text.trim()) return;
             const matchedUrl = findMatchingImageUrl(text);
             if (matchedUrl) updateImageWithUrl(matchedUrl);
         }, true);
+
         document.addEventListener('click', (e) => {
             const btn = e.target && e.target.closest ? e.target.closest('#send_but') : null;
             if (!btn) return;
             if (currentTextMode !== 'user') return;
+            if (isOverrideMode()) return;   // ★ override 中はスキップ
             const textarea = document.querySelector('#send_textarea');
             if (!textarea) return;
             const text = textarea.value;
