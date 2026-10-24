@@ -2915,6 +2915,14 @@ async function migrateCacheToDisk() {
 
             if (await checkFileExists(diskUrl, false)) { skipped++; continue; }
 
+            // ★ 元画像の存在確認（削除済み画像のサムネを作らない）
+            const origUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(imageFileName);
+            if (!(await checkFileExists(origUrl))) {
+                console.debug(`[GIC] ⏭ 元画像なし → 移行スキップ: ${imageFileName}`);
+                skipped++;
+                continue;
+            }
+
             try {
                 const blob = await new Promise((resolve, reject) => {
                     const tx = db.transaction(IMG_DB_STORE, 'readonly');
@@ -3000,6 +3008,74 @@ async function cleanupInvalidImgThumbs() {
         return { removed };
     } catch (e) {
         console.warn('[GIC] 不正サムネイル削除エラー:', e);
+        return { removed };
+    }
+}
+
+// ============================================================
+// ★ 孤立サムネ（元画像が削除済み）の一括削除
+//    xxx_img_thum.png の元 xxx.(png|jpg|...) が存在しないものを削除
+// ============================================================
+async function cleanupOrphanThumbs() {
+    const charName = getCurrentCharacterName();
+    if (!charName) return { removed: 0 };
+
+    let removed = 0;
+
+    try {
+        const origFetch = window.__gicOriginalFetch || window.fetch;
+        const resp = await origFetch.call(window, '/api/images/list', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify({ folder: charName })
+        });
+        if (!resp.ok) return { removed: 0 };
+
+        const files = await resp.json();
+        if (!Array.isArray(files)) return { removed: 0 };
+
+        const set = new Set(files.filter(f => typeof f === 'string'));
+        const orphans = [];
+
+        for (const f of files) {
+            if (typeof f !== 'string') continue;
+            if (!f.endsWith(IMG_THUMB_SUFFIX)) continue;
+            const base = f.slice(0, -IMG_THUMB_SUFFIX.length);
+            const exists = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif', 'bmp']
+                .some(ext => set.has(`${base}.${ext}`));
+            if (!exists) orphans.push(f);
+        }
+
+        if (orphans.length === 0) return { removed: 0 };
+
+        console.log(`[GIC] 🧹 孤立サムネ ${orphans.length}件を削除します`);
+
+        for (const f of orphans) {
+            try {
+                const delResp = await origFetch.call(window, '/api/images/delete', {
+                    method: 'POST',
+                    headers: getRequestHeaders(),
+                    body: JSON.stringify({ path: `/user/images/${charName}/${f}` })
+                });
+                if (delResp.ok) {
+                    removed++;
+                    const base = f.slice(0, -IMG_THUMB_SUFFIX.length);
+                    for (const ext of ['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif', 'bmp']) {
+                        const cacheKey = `${charName}:${base}.${ext}:imgthumb`;
+                        try {
+                            const db = await openImgDB();
+                            const tx = db.transaction(IMG_DB_STORE, 'readwrite');
+                            tx.objectStore(IMG_DB_STORE).delete(cacheKey);
+                        } catch (e) { /* ignore */ }
+                    }
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        console.log(`[GIC] ✅ 孤立サムネイル削除完了: ${removed}件`);
+        return { removed };
+    } catch (e) {
+        console.warn('[GIC] 孤立サムネイル削除エラー:', e);
         return { removed };
     }
 }
@@ -6018,6 +6094,7 @@ function exposeGicApi() {
         isImageThumbName,
         cleanupExistingImgThumbs,
         cleanupInvalidImgThumbs,
+        cleanupOrphanThumbs,
         migrateCacheToDisk,
         resolveOriginalFileName,
         isAnimatedImage,
@@ -6166,9 +6243,10 @@ function exposeGicApi() {
 
 // ============================================================
 // ★ nanogallery2 の galleryMaxRows を 4 に強制
-//   ★ 併せて thumbnailWidth = '33%' にして 3列を強制
-//      （固定pxだとコンテナ幅依存で4列になり、ページあたり16アイテム
-//        になって後半ページが欠落する）
+//   ★ thumbnailWidth を「画面幅 / 3」の px にして 3 列を強制
+//     '33%' だと nanogallery2 が初期化時のコンテナ幅で幅を確定し、
+//     列数計算を画面幅基準で行うため 12 列（48 アイテム/ページ）
+//     になり、後半ページが欠落する
 // ============================================================
 (function patchNanogallery2For4Rows() {
     if (window.__gicNG2Patched) return;
@@ -6185,15 +6263,17 @@ function exposeGicApi() {
                     console.log('[GIC] 🎯 galleryMaxRows:', options.galleryMaxRows, '→ 4');
                     options.galleryMaxRows = 4;
                 }
-                // ★ 33% で常に3列を強制
-                //    （実際の表示サイズは enforceGalleryGridLayout が 180px に固定）
-                options.thumbnailWidth = '33%';
+                // ★ 画面幅 / 3 の px で 3 列を強制
+                //    （実際の描画は enforceGalleryGridLayout が 180px に固定）
+                const colWidth = Math.floor(window.innerWidth / 3);
+                console.log('[GIC] 🎯 thumbnailWidth:', options.thumbnailWidth, '→', colWidth + 'px (画面幅/3 = 3列固定)');
+                options.thumbnailWidth = colWidth + 'px';
                 options.thumbnailHeight = 180;
             }
         } catch (e) { /* ignore */ }
         return orig.apply(this, arguments);
     };
-    console.log('[GIC] ✅ nanogallery2 patch installed (galleryMaxRows ≤ 4, thumbnailWidth = 33% = 3列固定)');
+    console.log('[GIC] ✅ nanogallery2 patch installed (galleryMaxRows ≤ 4, thumbnailWidth = 画面幅/3 = 3列固定)');
 })();
 
 // ============================================================
@@ -6307,6 +6387,7 @@ function initializeGIC() {
     setTimeout(async () => {
         try {
             await cleanupInvalidImgThumbs();
+            await cleanupOrphanThumbs();   // ★ 追加
             await migrateCacheToDisk();
         } catch (e) {
             console.warn('[GIC] 起動時クリーンアップでエラー:', e);
