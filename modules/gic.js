@@ -4182,8 +4182,9 @@ function createPromptOverlay(panel) {
     overlay.style.cssText = `
         position: absolute;
         bottom: 8px;
-        left: 50%;
-        transform: translateX(-50%);
+        left: 8px;
+        right: auto;
+        transform: none;
         width: max-content;
         max-width: min(700px, calc(100% - 16px));
         display: flex;
@@ -4191,6 +4192,7 @@ function createPromptOverlay(panel) {
         gap: 6px;
         z-index: 15001;
         box-sizing: border-box;
+        align-items: flex-start;
     `;
 
     const promptPanel = document.createElement('div');
@@ -4210,6 +4212,7 @@ function createPromptOverlay(panel) {
         line-height: 1.4;
         max-height: calc(100vh - 120px);
         overflow-y: auto;
+        width: 100%;
     `;
     overlay.appendChild(promptPanel);
 
