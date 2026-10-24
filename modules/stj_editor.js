@@ -1477,20 +1477,19 @@
                 io.observe(slot);
                 attachVideoBadge(slot, true, fileName, charName).catch(() => {});
             } else {
-                let displaySrc = fullPath;
-                if (/\.(gif|png)$/i.test(fileName)) {
-                    try {
-                        if (window.GicApi?.getStaticFrameUrl) {
-                            const staticUrl = await window.GicApi.getStaticFrameUrl(fileName, charName);
-                            if (myToken !== _currentGridRenderToken) return;
-                            if (staticUrl) displaySrc = staticUrl;
-                        }
-                    } catch (e) { /* ignore */ }
-                }
+                // 画像（GIF/APNG/通常 PNG/JPEG 等）
+                // ★ 260px サムネイルで表示（ギャラリーと同じ画像を流用）
+                let displaySrc = null;
+                try {
+                    if (window.GicApi?.ensureImageThumbnail) {
+                        displaySrc = await window.GicApi.ensureImageThumbnail(fileName, charName);
+                    }
+                } catch (e) { /* ignore */ }
+                if (!displaySrc) displaySrc = fullPath;   // フォールバック
 
                 const img = document.createElement('img');
                 img.src = displaySrc;
-                img.dataset.src = fullPath;
+                img.dataset.src = fullPath;   // ズームは元ファイルを開く
                 img.alt = fileName;
                 img.style.cssText =
                     'width:100%;height:100%;object-fit:contain;display:block;' +
@@ -1498,6 +1497,7 @@
                 img.addEventListener('click', openZoom);
                 slot.insertBefore(img, slot.firstChild);
 
+                // ★ 元ファイル名でバッジ判定（🎬 表示のみ、アニメはしない）
                 attachVideoBadge(slot, false, fileName, charName).catch(() => {});
             }
         }
@@ -2101,16 +2101,17 @@
             previewEl.dataset.currentPath = fullPath;
             removeLoading(); placeholderHide();
         } else {
-            let displaySrc = fullPath;
-            if (/\.(gif|png)$/i.test(origFileName)) {
-                try {
-                    if (window.GicApi?.getStaticFrameUrl) {
-                        const staticUrl = await window.GicApi.getStaticFrameUrl(origFileName, charName);
-                        if (_previewLoadGen.get(previewEl) !== myGen) { removeLoading(); return; }
-                        if (staticUrl) displaySrc = staticUrl;
-                    }
-                } catch (e) { /* ignore */ }
-            }
+            // 画像（GIF/APNG/通常 PNG/JPEG 等）
+            // ★ 260px サムネイルで表示（ギャラリーと同じ画像を流用）
+            let displaySrc = null;
+            try {
+                if (window.GicApi?.ensureImageThumbnail) {
+                    displaySrc = await window.GicApi.ensureImageThumbnail(fileName, charName);
+                }
+            } catch (e) { /* ignore */ }
+            if (!displaySrc) displaySrc = fullPath;   // フォールバック
+
+            if (_previewLoadGen.get(previewEl) !== myGen) { removeLoading(); return; }
 
             const img = new Image();
             img.src = displaySrc;
@@ -2139,7 +2140,7 @@
             img.style.objectFit = 'contain'; img.style.display = 'block';
             previewEl.appendChild(img);
             attachVideoBadge(previewEl, false, origFileName, charName).catch(() => {});
-            previewEl.dataset.currentPath = fullPath;
+            previewEl.dataset.currentPath = fullPath;   // ★ キャッシュ判定は元パスで
             removeLoading(); placeholderHide();
         }
     }
