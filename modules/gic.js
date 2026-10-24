@@ -1491,7 +1491,14 @@ async function scanForGeneratedImages() {
             }
         }
 
-        if (window.ImageDisplayExtension?.setOverrideImage) {
+        // ★ 事前設定モード（isOverrideLocal=false）では生成画像を自動表示しない
+        //   背景生成モードの時だけ setOverrideImage を呼ぶ。
+        //   これにより「事前設定モードなのに勝手に画像が表示される」問題を防ぐ。
+        if (!isOverrideLocal) {
+            console.log(`[GIC] 事前設定モードのため生成画像の自動表示をスキップ: ${url}`);
+            // lastGeneratedImageUrl は更新済みなので、後で
+            // ユーザーが背景生成モードに切り替えた時に表示される
+        } else if (window.ImageDisplayExtension?.setOverrideImage) {
             try {
                 await window.ImageDisplayExtension.setOverrideImage(url);
                 isOverrideLocal = true;
