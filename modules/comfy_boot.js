@@ -234,16 +234,14 @@
             ]);
             console.info(`[GIC-Boot] 🎬 サムネイル準備完了 (${Date.now() - genStart}ms)`);
 
-            // ★ 常に _thum.png をリストに追加（ディスク非依存）
-            //   ディスク存在チェックは行わない。ギャラリー側のインターセプタが
-            //   IndexedDB の blob URL に差し替える。
+            // ★ 常に _thum.png をリストに追加（ディスク存在チェックなし）
             const modified = [...images];
             let added = 0;
             for (const v of videos) {
                 const m = v.match(/^(.+)\.(mp4|webm)$/i);
                 if (!m) continue;
                 const thumbName = `${m[1]}_${m[2].toLowerCase()}_thum.png`;
-                if (existingThumbs.has(thumbName)) continue;   // 念のため
+                if (existingThumbs.has(thumbName)) continue;
                 modified.push(thumbName);
                 added++;
             }
