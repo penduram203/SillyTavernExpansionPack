@@ -10,13 +10,11 @@ console.log('[GIC] モジュールロード開始');
 // ============================================================
 // ★ HTMLImageElement.src インターセプタ（サムネ 404 防止）
 //
-//   nanogallery2 が <img src="..._img_thum.png"> を DOM に挿入すると、
-//   src 設定の瞬間にブラウザが GET を発行して 404 になる。
-//   MutationObserver では「DOM 挿入後」にしかフックできないため間に合わない。
-//
-//   そこで HTMLImageElement.prototype.src のセッター自体を上書きし、
-//   危険なサムネ URL がブラウザに渡る前に transparent な data: URI に
-//   差し替える。IndexedDB から blob URL を非同期取得でき次第、それを再設定する。
+//   - プロパティセッター / setAttribute / innerHTML のすべてを
+//     フックして、危険な _thum.png URL がブラウザに渡る前に
+//     blob URL（または data: URI）に差し替える
+//   - 要素の再利用時も毎回 intercept する（旧版のフラグガードを廃止）
+//   - 同期キャッシュヒット時は中間 transparent を挟まず直接 blob を設定
 // ============================================================
 (function installGicImageSrcInterceptor() {
     if (window.__gicImageSrcInterceptorInstalled) return;
@@ -24,13 +22,16 @@ console.log('[GIC] モジュールロード開始');
 
     const TRANSPARENT = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
+    // ---- URL 判定 ----
     function isBadThumbUrl(value) {
-        if (typeof value !== 'string') return false;
+        if (typeof value !== 'string' || value.length < 10) return false;
+        if (value.indexOf('_thum.png') === -1) return false;
         if (value.startsWith('data:') || value.startsWith('blob:')) return false;
-        return /_img_thum\.png(?:\?|$|#)|(?:^|[^_])_thum\.png(?:\?|$|#)/i.test(value);
+        return true;
     }
 
-    function resolveThumbUrl(badUrl) {
+    // ---- URL 解析 ----
+    function parseUrl(badUrl) {
         try {
             const urlObj = new URL(badUrl, window.location.origin);
             const m = urlObj.pathname.match(/^\/user\/images\/([^/]+)\/([^/]+)$/);
@@ -38,17 +39,19 @@ console.log('[GIC] モジュールロード開始');
             const charName = decodeURIComponent(m[1]);
             const thumbFileName = decodeURIComponent(m[2]);
 
-            // 画像サムネ: xxx_img_thum.png
             if (thumbFileName.endsWith('_img_thum.png')) {
                 const origName = window.__gicListReverseMap?.get(thumbFileName);
                 if (!origName) return null;
-                return window.GicApi?._ensureImageThumbCached?.(origName, charName) || null;
+                return { type: 'image', charName, origName, thumbFileName };
             }
-            // 動画サムネ: xxx_mp4_thum.png / xxx_webm_thum.png
             const vm = thumbFileName.match(/^(.+)_(mp4|webm)_thum\.png$/i);
             if (vm) {
-                const videoFileName = `${vm[1]}.${vm[2].toLowerCase()}`;
-                return window.GicApi?._ensureVideoThumbCached?.(videoFileName, charName) || null;
+                return {
+                    type: 'video',
+                    charName,
+                    videoFileName: `${vm[1]}.${vm[2].toLowerCase()}`,
+                    thumbFileName,
+                };
             }
             return null;
         } catch (e) {
@@ -56,30 +59,68 @@ console.log('[GIC] モジュールロード開始');
         }
     }
 
-    // 共通処理。true を返したら「インターセプト成功」＝呼び出し元は通常処理をスキップ
+    // ---- 同期キャッシュ参照（高速パス） ----
+    function resolveSync(info) {
+        if (!info) return null;
+        try {
+            if (info.type === 'image') {
+                const key = `${info.charName}:${info.origName}:imgthumb`;
+                return _imgBlobUrlCache?.get(key) || null;
+            }
+            if (info.type === 'video') {
+                const key = `${info.charName}:${info.videoFileName}`;
+                return _thumbUrlCache?.get(key) || null;
+            }
+        } catch (e) { /* ignore */ }
+        return null;
+    }
+
+    // ---- 非同期キャッシュ参照（フォールバック） ----
+    function resolveAsync(info) {
+        if (!info) return null;
+        try {
+            if (info.type === 'image') {
+                return window.GicApi?._ensureImageThumbCached?.(info.origName, info.charName) || null;
+            }
+            if (info.type === 'video') {
+                return window.GicApi?._ensureVideoThumbCached?.(info.videoFileName, info.charName) || null;
+            }
+        } catch (e) { /* ignore */ }
+        return null;
+    }
+
+    // ---- intercept コア ----
     function intercept(el, value, doSet) {
         if (!isBadThumbUrl(value)) return false;
-        if (el.dataset?.gicSrcIntercepted === '1') return false;
+        // 同一 URL を処理中の重複呼び出しはスキップ（無限ループ・二重 fetch 防止）
+        if (el.dataset && el.dataset.gicPendingSrc === value) return true;
 
-        el.dataset.gicSrcIntercepted = '1';
-        el.dataset.gicPendingSrc = value;
+        if (el.dataset) el.dataset.gicPendingSrc = value;
 
-        // ① 即座に transparent（ブラウザは data: URI を fetch しない）
+        const info = parseUrl(value);
+
+        // ① 同期キャッシュヒット → 中間 transparent を挟まず直接 blob を設定
+        const syncBlob = resolveSync(info);
+        if (syncBlob) {
+            doSet.call(el, syncBlob);
+            return true;
+        }
+
+        // ② 非同期パス：一旦 transparent にしてネットワーク I/O を止め、
+        //    blob が取れたら差し替え
         doSet.call(el, TRANSPARENT);
-
-        // ② 非同期で blob URL を取得できたら差し替え
-        const resolver = resolveThumbUrl(value);
-        if (resolver) {
-            Promise.resolve(resolver).then(blobUrl => {
-                if (blobUrl && el.dataset.gicPendingSrc === value) {
+        const asyncPromise = resolveAsync(info);
+        if (asyncPromise) {
+            Promise.resolve(asyncPromise).then(blobUrl => {
+                if (blobUrl && el.dataset && el.dataset.gicPendingSrc === value) {
                     doSet.call(el, blobUrl);
                 }
-            }).catch(() => {});
+            }).catch(() => { /* ignore */ });
         }
         return true;
     }
 
-    // ① src プロパティを上書き
+    // ---- (A) HTMLImageElement.prototype.src のセッター ----
     const desc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
     if (desc && desc.set && desc.get) {
         const origSet = desc.set;
@@ -93,10 +134,10 @@ console.log('[GIC] モジュールロード開始');
             },
         });
     } else {
-        console.warn('[GIC] HTMLImageElement.src descriptor unavailable — 404 防止は無効化されます');
+        console.warn('[GIC] ⚠️ HTMLImageElement.src descriptor unavailable');
     }
 
-    // ② setAttribute('src', ...) も上書き（jQuery.attr はこちらを使う）
+    // ---- (B) Element.prototype.setAttribute ----
     const origSetAttr = Element.prototype.setAttribute;
     Element.prototype.setAttribute = function(name, value) {
         if (this instanceof HTMLImageElement && name === 'src') {
@@ -105,7 +146,33 @@ console.log('[GIC] モジュールロード開始');
         return origSetAttr.call(this, name, value);
     };
 
-    console.log('[GIC] 🎯 HTMLImageElement.src インターセプタを設置しました（サムネ 404 防止）');
+    // ---- (C) innerHTML：サムネ URL を含む HTML パースを無効化 ----
+    //   nanogallery2 が innerHTML 経由で <img src="..._thum.png"> を作る場合の保険。
+    //   src を transparent に置換し、後段の MutationObserver で blob に差し替える。
+    try {
+        const descIH = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
+        if (descIH && descIH.set && descIH.get) {
+            const origSetIH = descIH.set;
+            Object.defineProperty(Element.prototype, 'innerHTML', {
+                configurable: true,
+                enumerable: descIH.enumerable,
+                get: descIH.get,
+                set: function(value) {
+                    if (typeof value === 'string' && value.indexOf('_thum.png') !== -1) {
+                        value = value.replace(
+                            /(<img\b[^>]*?\bsrc\s*=\s*["'])([^"']*_thum\.png[^"']*)(["'])/gi,
+                            (m, p1, p2, p3) => `${p1}${TRANSPARENT}${p3}`
+                        );
+                    }
+                    return origSetIH.call(this, value);
+                },
+            });
+        }
+    } catch (e) {
+        console.warn('[GIC] innerHTML フックをスキップ:', e);
+    }
+
+    console.log('[GIC] 🎯 画像 src/setAttribute/innerHTML インターセプタを設置しました（サムネ 404 防止）');
 })();
 
 // ============================================================
