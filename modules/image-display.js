@@ -1062,8 +1062,6 @@
 
     async function updateImageWithUrl(targetUrl) {
         // ★ isDefaultImageFailed の早期 return を緩和
-        //   デフォルト画像が無い状態でも、明示的なキーワード画像などは
-        //   表示できるようにする（フラグをリセットして復帰）
         if (isDefaultImageFailed) {
             const isDefaultRequest = !targetUrl ||
                 /(?:^|\/)default\.(png|jpg|jpeg|webp|gif|avif|bmp|mp4|webm)(?:\?|#|$)/i.test(targetUrl) ||
@@ -1105,7 +1103,7 @@
         currentImageUrl = newUrl;
 
         if (isVideoUrl(newUrl)) {
-            // ───── 動画ブランチ（既存のまま） ─────
+            // ───── 動画ブランチ ─────
             const videoElement = document.createElement('video');
             videoElement.src = newUrl;
             videoElement.autoplay = true;
@@ -1122,18 +1120,29 @@
             videoElement.play().catch(() => {});
         } else {
             // ───── 画像ブランチ ─────
-            // ★ ギャラリー・JSON 編集画面の拡大ビューと同じパターン:
-            //   src を先に設定してから append する。
-            //   （append を先にすると、アニメ GIF が最初のフレームだけ
-            //     表示される / 表示されない といった問題が起きる）
-            const imgElement = document.createElement('img');
-            imgElement.style.width = '100%';
-            imgElement.style.height = '100%';
-            imgElement.style.objectFit = 'contain';
-            imgElement.onerror = () => handleMediaError(imgElement, newUrl);
-            imgElement.src = newUrl;
-            mediaContainer.innerHTML = '';
-            mediaContainer.appendChild(imgElement);
+            // ★ ポイント1: 既存の img 要素があれば src のみ変更して再利用
+            //    → ブラウザは「src 属性の変更」として扱い、アニメーションを
+            //      継続/再開する。要素の作り直しはアニメーション停止の原因になる。
+            // ★ ポイント2: 新規作成時は append してから src を設定
+            //    → DOM 外で src を設定すると Firefox でアニメーションが
+            //      開始されない既知の挙動を回避する。
+            let imgElement = mediaContainer.querySelector(':scope > img');
+
+            if (imgElement) {
+                // 既存 img を再利用（アニメーション継続）
+                imgElement.onerror = () => handleMediaError(imgElement, newUrl);
+                imgElement.src = newUrl;
+            } else {
+                // 新規 img 作成: append → src の順
+                imgElement = document.createElement('img');
+                imgElement.style.width = '100%';
+                imgElement.style.height = '100%';
+                imgElement.style.objectFit = 'contain';
+                imgElement.onerror = () => handleMediaError(imgElement, newUrl);
+                mediaContainer.innerHTML = '';
+                mediaContainer.appendChild(imgElement);
+                imgElement.src = newUrl;
+            }
         }
     }
 
