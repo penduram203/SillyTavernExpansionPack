@@ -38,7 +38,7 @@ console.log('[GIC] モジュールロード開始');
             let removed = 0;
             let duplicateKept = 0;
             const filtered = [];
-            const usedThumbs = new Set();   // ★ 使用済みサムネ名を追跡
+            const usedThumbs = new Set();
 
             for (const f of data) {
                 if (typeof f !== 'string') { filtered.push(f); continue; }
@@ -46,29 +46,25 @@ console.log('[GIC] モジュールロード開始');
                 /* _img_thum.png 自体は除外（2倍表示防止） */
                 if (f.endsWith('_img_thum.png')) { removed++; continue; }
 
-                /* ★ 動画サムネイル (_thum.png) は置換対象外 */
+                /* 動画サムネイル (_thum.png) は置換対象外 */
                 if (f.endsWith('_thum.png')) {
                     filtered.push(f);
                     continue;
                 }
 
-                /* 元画像 → サムネイル置換（サムネが存在し、かつ未使用の時のみ） */
+                /* ★ 元画像 → サムネイル置換（ディスク存在チェックなし、常に置換） */
                 if (/\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(f)) {
                     const thumbName = imageFileToThumbName(f);
-                    if (thumbName && set.has(thumbName)) {
+                    if (thumbName) {
                         if (usedThumbs.has(thumbName)) {
-                            // ★ 同じサムネ名が別ファイルに既に使われている
-                            //    → このファイルは元画像名のまま残す（表示数維持）
+                            /* 同じサムネ名が別ファイルに既に使われている → 元画像を維持 */
                             filtered.push(f);
                             duplicateKept++;
-                            console.debug(`[GIC] 🔀 サムネ重複: ${f} (thumb=${thumbName} 使用済み) → 元画像を維持`);
                             continue;
                         }
-                        // 初回使用 → 置換
                         filtered.push(thumbName);
                         usedThumbs.add(thumbName);
                         replaced++;
-                        /* ★ 逆引き用マップ: サムネ → 元画像 */
                         try {
                             if (!window.__gicListReverseMap) {
                                 window.__gicListReverseMap = new Map();
@@ -1916,26 +1912,7 @@ async function ensureThumbnailForVideo(videoFileName, charName = getCurrentChara
         const url = URL.createObjectURL(cachedBlob);
         _thumbUrlCache.set(cacheKey, url);
         console.log(`[GIC] ⚡ thumbnail from IndexedDB: ${cacheKey}`);
-
-        const thumbName = videoFileToThumbName(videoFileName);
-        if (thumbName) {
-            const diskUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(thumbName);
-            if (!(await checkFileExists(diskUrl))) {
-                console.log(`[GIC] 💾 IndexedDB → ディスク書き出し: ${thumbName}`);
-                await uploadThumbnailBlob(charName, cachedBlob, thumbName);
-                _thumbExistCache.delete(diskUrl);
-            }
-        }
         return url;
-    }
-
-    const thumbName = videoFileToThumbName(videoFileName);
-    if (thumbName) {
-        const thumbUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(thumbName);
-        if (await checkFileExists(thumbUrl)) {
-            _thumbUrlCache.set(cacheKey, thumbUrl);
-            return thumbUrl;
-        }
     }
 
     const videoUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(videoFileName);
@@ -1948,14 +1925,6 @@ async function ensureThumbnailForVideo(videoFileName, charName = getCurrentChara
 
     const saved = await putThumbInDB(cacheKey, blob);
     if (!saved) console.warn(`[GIC] ⚠️ IndexedDB save failed: ${cacheKey}`);
-
-    if (thumbName) {
-        const ok = await uploadThumbnailBlob(charName, blob, thumbName);
-        if (ok) {
-            const diskUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(thumbName);
-            _thumbExistCache.delete(diskUrl);
-        }
-    }
 
     const url = URL.createObjectURL(blob);
     _thumbUrlCache.set(cacheKey, url);
@@ -2015,40 +1984,9 @@ async function ensureImageThumbnail(imageFileName, charName) {
     const manifestKey = `${charName}:${imageFileName}`;
     const cacheKey = `${charName}:${imageFileName}:imgthumb`;
 
-    /* 元画像の存在確認（1回だけ、以後はキャッシュ） */
-    async function originalExists() {
-        try {
-            const origUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(imageFileName);
-            return await checkFileExists(origUrl);
-        } catch (e) {
-            return false;
-        }
-    }
-
-    /* メモリキャッシュヒット時もディスク存在確認 + 書き出し */
+    /* メモリキャッシュヒット */
     if (_imgBlobUrlCache.has(cacheKey)) {
-        const url = _imgBlobUrlCache.get(cacheKey);
-        const thumbName = imageFileToThumbName(imageFileName);
-        if (thumbName) {
-            const diskUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(thumbName);
-            if (!(await checkFileExists(diskUrl))) {
-                // ★ 元画像が存在しない場合はディスク書き出しをスキップ
-                if (!(await originalExists())) {
-                    console.debug(`[GIC] ⏭ 元画像なし → サムネ書き出しスキップ: ${imageFileName}`);
-                    _imgBlobUrlCache.delete(cacheKey);
-                    return url;
-                }
-                try {
-                    const blob = await getImgFromDB(cacheKey);
-                    if (blob) {
-                        console.log(`[GIC] 💾 メモリキャッシュ → ディスク書き出し: ${thumbName}`);
-                        await uploadThumbnailBlob(charName, blob, thumbName);
-                        _thumbExistCache.delete(diskUrl);
-                    }
-                } catch (e) { /* ignore */ }
-            }
-        }
-        return url;
+        return _imgBlobUrlCache.get(cacheKey);
     }
 
     /* IndexedDB キャッシュヒット */
@@ -2060,44 +1998,15 @@ async function ensureImageThumbnail(imageFileName, charName) {
             _imgThumbKnown.add(manifestKey);
             saveImgThumbManifest();
         }
-        const thumbName = imageFileToThumbName(imageFileName);
-        if (thumbName) {
-            const diskUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(thumbName);
-            if (!(await checkFileExists(diskUrl))) {
-                // ★ 元画像が存在しない場合はディスク書き出しをスキップ
-                if (!(await originalExists())) {
-                    console.debug(`[GIC] ⏭ 元画像なし → サムネ書き出しスキップ: ${imageFileName}`);
-                    return url;
-                }
-                console.log(`[GIC] 💾 IndexedDB → ディスク書き出し: ${thumbName}`);
-                await uploadThumbnailBlob(charName, cachedBlob, thumbName);
-                _thumbExistCache.delete(diskUrl);
-            }
-        }
         return url;
     }
 
-    /* 新規生成 */
-    // ★ 元画像が存在しない場合は生成しない
-    if (!(await originalExists())) {
-        console.debug(`[GIC] ⏭ 元画像なし → サムネ生成スキップ: ${imageFileName}`);
-        return null;
-    }
-
+    /* 新規生成 → IndexedDB のみ保存 */
     const imageUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(imageFileName);
     const blob = await generateImageThumbnailBlob(imageUrl, IMG_THUMB_SIZE);
     if (!blob) return null;
 
     await putImgInDB(cacheKey, blob);
-
-    const thumbName = imageFileToThumbName(imageFileName);
-    if (thumbName) {
-        const ok = await uploadThumbnailBlob(charName, blob, thumbName);
-        if (ok) {
-            const diskUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(thumbName);
-            _thumbExistCache.delete(diskUrl);
-        }
-    }
 
     _imgThumbKnown.add(manifestKey);
     saveImgThumbManifest();
