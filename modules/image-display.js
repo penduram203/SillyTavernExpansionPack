@@ -1062,33 +1062,66 @@
 
     async function updateImageWithUrl(targetUrl) {
         if (isDefaultImageFailed) return;
+
+        // ★★★ 最強ガード: override モード中は override 画像以外への切替を拒否 ★★★
+        //   setupSendInterception / updateImage / 外部呼び出し すべてをここで捕捉する。
+        //   どの経路から呼ばれても、プリセット画像・デフォルト画像への切替は
+        //   override が解除されるまで物理的に不可能になる。
+        if (isOverrideActive && overrideImageUrl) {
+            const isOverrideTarget = (targetUrl === overrideImageUrl);
+            if (!isOverrideTarget) {
+                console.log(
+                    `[ImageDisplay] 🛡️ overrideモード中のため切替をブロック: ` +
+                    `${String(targetUrl).slice(0, 120)}`
+                );
+                return;
+            }
+        }
+
         if (!targetUrl || typeof targetUrl !== 'string' || !targetUrl.trim()) {
             const fallback = getRandomImageSource(currentImageMap.default) || currentImageMap.default;
-            if (fallback && fallback !== targetUrl && typeof fallback === 'string' && fallback.trim()) await updateImageWithUrl(fallback);
+            if (fallback && fallback !== targetUrl && typeof fallback === 'string' && fallback.trim()) {
+                await updateImageWithUrl(fallback);
+            }
             return;
         }
+
         let newUrl = targetUrl.trim();
         if (!newUrl.match(/\.(png|jpg|jpeg|webp|gif|avif|bmp|mp4|webm)$/i)) {
             const detected = await detectImageExtension(newUrl);
             if (detected) newUrl = detected;
             else return;
         }
+
         if (currentImageUrl === newUrl && mediaContainer.children.length > 0) return;
         currentImageUrl = newUrl;
+
         if (isVideoUrl(newUrl)) {
             const videoElement = document.createElement('video');
             videoElement.src = newUrl;
-            videoElement.autoplay = true; videoElement.loop = true; videoElement.muted = true;
-            videoElement.playsInline = true; videoElement.preload = 'auto';
-            videoElement.style.width = '100%'; videoElement.style.height = '100%';
+            videoElement.autoplay = true;
+            videoElement.loop = true;
+            videoElement.muted = true;
+            videoElement.playsInline = true;
+            videoElement.preload = 'auto';
+            videoElement.style.width = '100%';
+            videoElement.style.height = '100%';
             videoElement.style.objectFit = 'contain';
             videoElement.onerror = () => handleMediaError(videoElement, newUrl);
-            mediaContainer.innerHTML = ''; mediaContainer.appendChild(videoElement);
+            mediaContainer.innerHTML = '';
+            mediaContainer.appendChild(videoElement);
             videoElement.play().catch(() => {});
         } else {
             const imgElement = document.createElement('img');
-            imgElement.style.width = '100%'; imgElement.style.height = '100%'; imgElement.style.objectFit = 'contain';
-            imgElement.onload = () => { if (currentImageUrl === newUrl) { mediaContainer.innerHTML = ''; mediaContainer.appendChild(imgElement); } };
+            imgElement.style.width = '100%';
+            imgElement.style.height = '100%';
+            imgElement.style.objectFit = 'contain';
+            imgElement.onload = () => {
+                if (currentImageUrl === newUrl) {
+                    mediaContainer.innerHTML = '';
+                    mediaContainer.appendChild(imgElement);
+                }
+            };
             imgElement.onerror = () => handleMediaError(imgElement, newUrl);
             imgElement.src = newUrl;
             if (typeof imgElement.decode === 'function') imgElement.decode().catch(() => {});
@@ -1773,19 +1806,38 @@
             const cleanUrl = (url && typeof url === 'string') ? url.trim() : '';
             if (cleanUrl) {
                 const exists = await checkMediaExists(cleanUrl);
-                if (!exists) { clearOverrideState({ save: true }); safeUpdateImage(); return false; }
+                if (!exists) {
+                    clearOverrideState({ save: true });
+                    safeUpdateImage();
+                    return false;
+                }
             }
+
+            // ★ 事前設定モード用ロックをクリア（override へ切替）
+            _lastSentKeywordImage = null;
+
             overrideImageUrl = cleanUrl || null;
             isOverrideActive = true;
-            if (overrideImageUrl) await updateImageWithUrl(overrideImageUrl);
-            else {
+
+            if (overrideImageUrl) {
+                await updateImageWithUrl(overrideImageUrl);
+            } else {
                 const fallback = getRandomImageSource(currentImageMap.default) || currentImageMap.default;
-                if (fallback && typeof fallback === 'string' && fallback.trim()) await updateImageWithUrl(fallback);
+                if (fallback && typeof fallback === 'string' && fallback.trim()) {
+                    await updateImageWithUrl(fallback);
+                }
             }
             saveDisplayState();
             return true;
         },
-        clearOverrideImage: function () { clearOverrideState({ save: true }); safeUpdateImage(); },
+        
+        clearOverrideImage: function () {
+            // ★ 事前設定モードへ戻る際、送信ロックもクリア
+            _lastSentKeywordImage = null;
+            clearOverrideState({ save: true });
+            safeUpdateImage();
+        },
+        
         getCurrentImageUrl: function () { return currentImageUrl; },
         isOverride: function () { return isOverrideActive; },
         getOverrideImageUrl: function () { return overrideImageUrl; },
