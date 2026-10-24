@@ -5099,23 +5099,117 @@ function findGalleryHeaderControls() {
 
 function extractImagePathFromItem(item) {
     if (!item) return null;
-    const dataSrc = item.getAttribute('data-ngsrc') || item.getAttribute('data-src') || item.getAttribute('data-image');
-    if (dataSrc) return urlToServerPath(dataSrc);
+
+    let rawPath = null;
+
+    // ★ 最優先: src インターセプタが img に保存した元 URL
+    //   （src が data:/blob: に差し替えられていても、ここに元のサムネ URL が残っている）
     const img = item.querySelector('img');
     if (img) {
-        const src = img.getAttribute('data-src') || img.getAttribute('src');
-        if (src) return urlToServerPath(src);
+        const pending = img.dataset?.gicPendingSrc;
+        if (pending) {
+            const p = urlToServerPath(pending);
+            if (p) rawPath = p;
+        }
+        if (!rawPath) {
+            const origSrc = img.dataset?.gicOrigSrc;
+            if (origSrc) {
+                const p = urlToServerPath(origSrc);
+                if (p) rawPath = p;
+            }
+        }
     }
-    const link = item.querySelector('a');
-    if (link && link.getAttribute('href')) return urlToServerPath(link.getAttribute('href'));
-    const title = item.getAttribute('title');
-    if (title) return urlToServerPath(title);
-    return null;
+
+    // 通常の属性（data-ngsrc / data-src / data-image）
+    if (!rawPath) {
+        const dataSrc = item.getAttribute('data-ngsrc')
+            || item.getAttribute('data-src')
+            || item.getAttribute('data-image');
+        if (dataSrc) {
+            const p = urlToServerPath(dataSrc);
+            if (p) rawPath = p;
+        }
+    }
+
+    // img の data-src / src（blob: や data: は urlToServerPath が null を返す）
+    if (!rawPath && img) {
+        const src = img.getAttribute('data-src') || img.getAttribute('src');
+        if (src) {
+            const p = urlToServerPath(src);
+            if (p) rawPath = p;   // ★ null なら fall through
+        }
+    }
+
+    // a href
+    if (!rawPath) {
+        const link = item.querySelector('a');
+        if (link && link.getAttribute('href')) {
+            const p = urlToServerPath(link.getAttribute('href'));
+            if (p) rawPath = p;
+        }
+    }
+
+    // title（サムネイル名 or 元ファイル名）
+    if (!rawPath) {
+        const title = item.getAttribute('title');
+        if (title) {
+            const p = urlToServerPath(title);
+            if (p) rawPath = p;
+        }
+    }
+
+    if (!rawPath) return null;
+
+    // ★ サムネイル名 → 元ファイル名に変換
+    //   例:
+    //     xxx_img_thum.png → xxx.(元拡張子)
+    //     xxx_mp4_thum.png → xxx.mp4
+    //     xxx_webm_thum.png → xxx.webm
+    //   ディスクには元画像しか存在しないため、必ず元名で削除する必要がある。
+    const lastSlash = rawPath.lastIndexOf('/');
+    const folder = lastSlash >= 0 ? rawPath.slice(0, lastSlash) : '';
+    let fileName = lastSlash >= 0 ? rawPath.slice(lastSlash + 1) : rawPath;
+
+    // 動画サムネ
+    const vm = fileName.match(/^(.+)_(mp4|webm)_thum\.png$/i);
+    if (vm) {
+        fileName = `${vm[1]}.${vm[2].toLowerCase()}`;
+    } else if (fileName.endsWith('_img_thum.png')) {
+        // 画像サムネ: 逆引きマップから元ファイル名を取得
+        let orig = null;
+        try {
+            if (window.GicApi?.resolveOriginalFileName) {
+                orig = window.GicApi.resolveOriginalFileName(fileName);
+            }
+        } catch (e) { /* ignore */ }
+        if (!orig && window.__gicListReverseMap?.has(fileName)) {
+            orig = window.__gicListReverseMap.get(fileName);
+        }
+        if (!orig && _imgThumbReverseMap?.has(fileName)) {
+            orig = _imgThumbReverseMap.get(fileName);
+        }
+        if (orig) {
+            fileName = orig;
+        } else {
+            // 最終フォールバック: .png と仮定
+            fileName = fileName.slice(0, -'_img_thum.png'.length) + '.png';
+        }
+    }
+
+    // folder が無ければ charName で補完
+    if (!folder) {
+        const charName = getCurrentCharacterName();
+        if (!charName) return null;
+        return `user/images/${charName}/${fileName}`;
+    }
+
+    return `${folder}/${fileName}`;
 }
 
 function urlToServerPath(url) {
     if (!url || typeof url !== 'string') return null;
     if (url.startsWith('data:')) return null;
+    if (url.startsWith('blob:')) return null;   // ★ 追加: blob: は実パスではない
     let path = url;
     try {
         const u = new URL(url, window.location.origin);
