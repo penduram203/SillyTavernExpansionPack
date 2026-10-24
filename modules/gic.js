@@ -12,8 +12,7 @@ console.log('[GIC] モジュールロード開始');
 //    - _img_thum.png 自体はリストから除外（2倍表示防止）
 //    - 動画サムネイル (_thum.png) は置換対象外（二重サムネ防止）
 //    - 元画像 image.png を image_img_thum.png に置換（存在時のみ）
-//    - これにより nanogallery2 は最初からサムネイル URL を設定する
-//    - ブラウザは元画像 (1280x720) を一切 fetch しない
+//    - ★ 同一サムネ名の衝突時は元画像名のまま残す（表示数維持）
 // ============================================================
 (function installImgThumbListFilter() {
     if (window.__gicImgThumbListFilterInstalled) return;
@@ -37,7 +36,10 @@ console.log('[GIC] モジュールロード開始');
 
             let replaced = 0;
             let removed = 0;
+            let duplicateKept = 0;
             const filtered = [];
+            const usedThumbs = new Set();   // ★ 使用済みサムネ名を追跡
+
             for (const f of data) {
                 if (typeof f !== 'string') { filtered.push(f); continue; }
 
@@ -50,13 +52,23 @@ console.log('[GIC] モジュールロード開始');
                     continue;
                 }
 
-                /* 元画像 → サムネイル置換（サムネが存在する時のみ） */
+                /* 元画像 → サムネイル置換（サムネが存在し、かつ未使用の時のみ） */
                 if (/\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(f)) {
                     const thumbName = imageFileToThumbName(f);
                     if (thumbName && set.has(thumbName)) {
+                        if (usedThumbs.has(thumbName)) {
+                            // ★ 同じサムネ名が別ファイルに既に使われている
+                            //    → このファイルは元画像名のまま残す（表示数維持）
+                            filtered.push(f);
+                            duplicateKept++;
+                            console.debug(`[GIC] 🔀 サムネ重複: ${f} (thumb=${thumbName} 使用済み) → 元画像を維持`);
+                            continue;
+                        }
+                        // 初回使用 → 置換
                         filtered.push(thumbName);
+                        usedThumbs.add(thumbName);
                         replaced++;
-                        /* ★ 逆引き用マップ: サムネ → 元画像（拡大ビュー・削除処理で使用） */
+                        /* ★ 逆引き用マップ: サムネ → 元画像 */
                         try {
                             if (!window.__gicListReverseMap) {
                                 window.__gicListReverseMap = new Map();
@@ -69,9 +81,14 @@ console.log('[GIC] モジュールロード開始');
                 filtered.push(f);
             }
 
-            if (replaced === 0 && removed === 0) return resp;
+            if (replaced === 0 && removed === 0 && duplicateKept === 0) return resp;
 
-            console.debug(`[GIC] 🚫 /api/images/list: 元画像→サムネ置換 ${replaced}件, _img_thum除外 ${removed}件`);
+            console.debug(
+                `[GIC] 🚫 /api/images/list: 入力=${data.length}, ` +
+                `元画像→サムネ置換=${replaced}, サムネ除外=${removed}, ` +
+                `重複維持=${duplicateKept}, 出力=${filtered.length}`
+            );
+
             return new Response(JSON.stringify(filtered), {
                 status: resp.status,
                 statusText: resp.statusText,
@@ -81,7 +98,7 @@ console.log('[GIC] モジュールロード開始');
             return resp;
         }
     };
-    console.log('[GIC] 🚫 /api/images/list で元画像→サムネイル置換を有効化');
+    console.log('[GIC] 🚫 /api/images/list で元画像→サムネイル置換を有効化（重複対応）');
 })();
 
 // ===== 定数 =====
