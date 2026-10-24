@@ -457,6 +457,21 @@ async function executeSd(prompt) {
 async function processChoice(force = false) {
     if (!settings.enabled) return;
 
+    // ★ 事前設定モード（Image Display override 無効）では /sd を実行しない
+    //   背景生成モード（override 有効）の時だけ生成処理を走らせる。
+    //   これにより「事前設定モードなのに勝手に画像が生成される」問題を防ぐ。
+    try {
+        const hasIDE = typeof window.ImageDisplayExtension?.isOverride === 'function';
+        if (hasIDE && !window.ImageDisplayExtension.isOverride()) {
+            if (settings.verbose) {
+                console.log('[GIC-Lore] 事前設定モードのため /sd をスキップ');
+            }
+            return;
+        }
+    } catch (e) {
+        // ImageDisplay が利用できない場合は従来通り実行（フォールバック）
+    }
+
     if (processInFlight) {
         if (settings.verbose) console.log('[GIC-Lore] 処理中のため多重呼び出しをスキップ');
         return;
