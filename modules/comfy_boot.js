@@ -219,7 +219,7 @@
                 return resp;
             }
 
-            // ★ サムネイル生成を待つ（並列・各タイムアウト付き）
+            // ★ サムネイル生成を待つ（IndexedDB へウォームアップ）
             console.info(`[GIC-Boot] 🎬 ${videos.length}本の動画サムネイルを準備中...`);
             const genStart = Date.now();
             const tasks = videos.map(v =>
@@ -234,41 +234,21 @@
             ]);
             console.info(`[GIC-Boot] 🎬 サムネイル準備完了 (${Date.now() - genStart}ms)`);
 
-            // ★ ディスクに存在するものだけをリストに追加（HEADで確認）
-            //   既に images に含まれているものはスキップして重複を防ぐ
-            const results = await Promise.all(videos.map(async (v) => {
-                const m = v.match(/^(.+)\.(mp4|webm)$/i);
-                if (!m) return null;
-                const thumbName = `${m[1]}_${m[2].toLowerCase()}_thum.png`;
-
-                // ★ 既に画像リストに含まれているなら追加不要
-                if (existingThumbs.has(thumbName)) return null;
-
-                const thumbUrl = `/user/images/${encodeURIComponent(charName)}/${encodeURIComponent(thumbName)}`;
-                try {
-                    const head = await originalFetch.call(window, thumbUrl + '?t=' + Date.now(), {
-                        method: 'HEAD',
-                        cache: 'no-store',
-                    });
-                    if (!head.ok) return null;
-                    const ct = (head.headers.get('content-type') || '').toLowerCase();
-                    if (ct.includes('text/html')) return null;
-                    return thumbName;
-                } catch (e) {
-                    return null;
-                }
-            }));
-
+            // ★ 常に _thum.png をリストに追加（ディスク非依存）
+            //   ディスク存在チェックは行わない。ギャラリー側のインターセプタが
+            //   IndexedDB の blob URL に差し替える。
             const modified = [...images];
             let added = 0;
-            for (const thumbName of results) {
-                if (thumbName) {
-                    modified.push(thumbName);
-                    added++;
-                }
+            for (const v of videos) {
+                const m = v.match(/^(.+)\.(mp4|webm)$/i);
+                if (!m) continue;
+                const thumbName = `${m[1]}_${m[2].toLowerCase()}_thum.png`;
+                if (existingThumbs.has(thumbName)) continue;   // 念のため
+                modified.push(thumbName);
+                added++;
             }
 
-            console.debug(`[GIC-Boot] /api/images/list 書換: 動画 ${videos.length}件 → 新規追加 ${added}件（既存 ${existingThumbs.size}件）`);
+            console.debug(`[GIC-Boot] /api/images/list 書換: 動画 ${videos.length}件 → 追加 ${added}件`);
             return new Response(JSON.stringify(modified), {
                 status: resp.status,
                 statusText: resp.statusText,
