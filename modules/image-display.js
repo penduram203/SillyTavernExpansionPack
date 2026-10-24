@@ -1063,13 +1063,9 @@
     async function updateImageWithUrl(targetUrl) {
         if (isDefaultImageFailed) return;
 
-        // ★★★ 最強ガード: override モード中は override 画像以外への切替を拒否 ★★★
-        //   setupSendInterception / updateImage / 外部呼び出し すべてをここで捕捉する。
-        //   どの経路から呼ばれても、プリセット画像・デフォルト画像への切替は
-        //   override が解除されるまで物理的に不可能になる。
+        // ★ override モード中の物理ブロック
         if (isOverrideActive && overrideImageUrl) {
-            const isOverrideTarget = (targetUrl === overrideImageUrl);
-            if (!isOverrideTarget) {
+            if (targetUrl !== overrideImageUrl) {
                 console.log(
                     `[ImageDisplay] 🛡️ overrideモード中のため切替をブロック: ` +
                     `${String(targetUrl).slice(0, 120)}`
@@ -1097,6 +1093,7 @@
         currentImageUrl = newUrl;
 
         if (isVideoUrl(newUrl)) {
+            // ───── 動画ブランチ: 新しい video 要素を作成 ─────
             const videoElement = document.createElement('video');
             videoElement.src = newUrl;
             videoElement.autoplay = true;
@@ -1112,18 +1109,27 @@
             mediaContainer.appendChild(videoElement);
             videoElement.play().catch(() => {});
         } else {
-            const imgElement = document.createElement('img');
-            imgElement.style.width = '100%';
-            imgElement.style.height = '100%';
-            imgElement.style.objectFit = 'contain';
-            imgElement.onerror = () => handleMediaError(imgElement, newUrl);
+            // ───── 画像ブランチ: 既存の img 要素を再利用する ─────
+            //   ★ 新しい img 要素を毎回作成するとアニメーションが最初から
+            //     再生し直されるため、既存要素の src だけを変更して
+            //     GIF アニメーションを維持する。
+            let imgElement = mediaContainer.querySelector(':scope > img');
 
-            // ★ DOM に追加してから src を設定
-            //   （DOM 外で完全ロード → 後から append するとアニメGIFが再生されない
-            //     ブラウザ実装があるため、append を先に行う）
-            mediaContainer.innerHTML = '';
-            mediaContainer.appendChild(imgElement);
-            imgElement.src = newUrl;
+            if (imgElement) {
+                // 既存 img の src を変更（アニメーション継続）
+                imgElement.onerror = () => handleMediaError(imgElement, newUrl);
+                imgElement.src = newUrl;
+            } else {
+                // 初回: DOM に追加してから src を設定
+                imgElement = document.createElement('img');
+                imgElement.style.width = '100%';
+                imgElement.style.height = '100%';
+                imgElement.style.objectFit = 'contain';
+                imgElement.onerror = () => handleMediaError(imgElement, newUrl);
+                mediaContainer.innerHTML = '';
+                mediaContainer.appendChild(imgElement);
+                imgElement.src = newUrl;
+            }
         }
     }
 
