@@ -2383,6 +2383,9 @@ function scanAndSyncVideoBadges() {
 function applyThumbnailBlobImmediately(thumb, blobUrl) {
     if (!thumb || !blobUrl) return;
 
+    // ★ src を即座に無効化（404 防止）
+    purgeThumbImgSrc(thumb);
+
     thumb.querySelectorAll('.nGY2TnImg, .nGY2TnImgBack, .nGY2TnImg2, .nGY2GThumbnailImg').forEach(el => {
         el.style.setProperty('background-image', 'none', 'important');
         el.style.setProperty('opacity', '0', 'important');
@@ -2662,6 +2665,28 @@ async function warmupImageMemoryCacheForChar(charName) {
 }
 
 // ============================================================
+// ★ <img src="..._thum.png"> の src を即座に無効化（404 防止）
+//   ディスクに実体がない仮想名を指しているため、ブラウザが GET を
+//   発行して 404 になるのを防ぐ。1x1 透明 GIF に差し替える。
+// ============================================================
+const GIC_TRANSPARENT_GIF = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
+function purgeThumbImgSrc(thumb) {
+    if (!thumb) return;
+    thumb.querySelectorAll('.nGY2TnImg2, .nGY2GThumbnailImg, .nGY2TnImg, .nGY2TnImgBack').forEach(el => {
+        if (el.tagName !== 'IMG') return;
+        const src = el.getAttribute('src') || '';
+        if (!src) return;
+        if (src.startsWith('data:') || src.startsWith('blob:')) return;
+        // 元 src を退避（デバッグ用。復元は不要）
+        if (!el.dataset.gicOrigSrc) {
+            el.dataset.gicOrigSrc = src;
+        }
+        el.setAttribute('src', GIC_TRANSPARENT_GIF);
+    });
+}
+
+// ============================================================
 // ★ MutationObserver でサムネ追加を即検知し、キャッシュがあれば即座に swap
 //    ★ 失敗済みは _failedThumbs に記録し、無限リトライを防止
 // ============================================================
@@ -2740,11 +2765,14 @@ function setupImmediateThumbCacheInterceptor() {
             processing.delete(thumb);
         }
     }
-
+    
     const childObserver = new MutationObserver(() => {
         const gallery = document.getElementById('gallery');
         if (!gallery) return;
-        gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1').forEach(processThumb);
+        gallery.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1').forEach(thumb => {
+            purgeThumbImgSrc(thumb);   // ★ 先に src を無効化
+            processThumb(thumb);
+        });
     });
     childObserver.observe(document.body, { childList: true, subtree: true });
 
