@@ -159,7 +159,7 @@ const GALLERY_PREPARE_RETRY_INTERVAL_MS = 800;
 const GALLERY_PREPARE_MAX_RETRIES = 15;
 
 // === Video Thumbnail Cache ===
-const THUMB_SIZE = 200;
+const THUMB_SIZE = 260;
 const THUMB_SUFFIX = '_thum.png';
 const THUMB_CONCURRENCY = 2;
 const THUMB_GEN_TIMEOUT_MS = 30000;
@@ -179,8 +179,17 @@ const IMG_PRELOAD_DELAY_MS = 50;
 
 // === Image Thumbnail Cache (画像用 200x200 サムネイル) ===
 const IMG_THUMB_SUFFIX = '_img_thum.png';
-const IMG_THUMB_SIZE = 200;
+const IMG_THUMB_SIZE = 260;
 const IMG_THUMB_MANIFEST_KEY = 'gic_image_thumb_manifest';
+
+// ============================================================
+// ★ サムネキャッシュバージョン
+//   THUMB_SIZE / IMG_THUMB_SIZE を変更したらこの値を更新する。
+//   起動時に不一致を検出すると IndexedDB を自動クリアする。
+// ============================================================
+const THUMB_CACHE_VERSION = 260;
+const THUMB_CACHE_VERSION_KEY = 'gic_thumb_cache_version_v1';
+let _cacheVersionReadyPromise = null;
 
 // 既知の画像サムネイル（メモリマニフェスト）
 const _imgThumbKnown = new Set();
@@ -1781,6 +1790,34 @@ function openImgDB() {
     return _imgDbPromise;
 }
 
+function ensureThumbCacheVersion() {
+    if (_cacheVersionReadyPromise) return _cacheVersionReadyPromise;
+
+    _cacheVersionReadyPromise = (async () => {
+        const current = String(THUMB_CACHE_VERSION);
+        let stored = null;
+        try {
+            stored = localStorage.getItem(THUMB_CACHE_VERSION_KEY);
+        } catch (e) { /* ignore */ }
+
+        if (stored === current) return;
+
+        console.log(`[GIC] 🔄 サムネキャッシュバージョン変更: ${stored || '(none)'} → ${current}`);
+        try {
+            await clearAllThumbCache();
+            await clearAllImageCache();
+            try {
+                localStorage.setItem(THUMB_CACHE_VERSION_KEY, current);
+            } catch (e) { /* ignore */ }
+            console.log('[GIC] ✅ 旧サムネキャッシュを全削除しました');
+        } catch (e) {
+            console.warn('[GIC] サムネキャッシュクリア失敗:', e);
+        }
+    })();
+
+    return _cacheVersionReadyPromise;
+}
+
 async function getImgFromDB(key) {
     try {
         const db = await openImgDB();
@@ -2573,6 +2610,9 @@ async function preloadGalleryImagesInBackground() {
 // ============================================================
 async function warmupImageMemoryCacheForChar(charName) {
     if (!charName) return;
+    // ★ 旧キャッシュ削除完了を待つ（200px キャッシュが残っていると
+    //    260px 表示枠に 200px サムネが引き伸ばされて粗く見える）
+    await ensureThumbCacheVersion();
     if (window.__gicCacheWarmedFor === charName) return;
     window.__gicCacheWarmedFor = charName;
 
