@@ -48,6 +48,9 @@
     // ===== セルモーダル レンダートークン =====
     let _currentGridRenderToken = 0;
 
+    // ===== オートセーブ用 =====
+    let _autoSaveTimer = null;
+
     // ===== ★ 動画サムネイル用 🎬 バッジのCSS注入 =====
     (function injectStjVideoBadgeStyle() {
         if (document.getElementById('stj-video-badge-style')) return;
@@ -306,14 +309,23 @@
 
     async function ensureThumbForEditor(videoFileName, charName) {
         if (!videoFileName || !charName) return null;
-        // ★ IndexedDB-only モード: GicApi に一任（ディスクフォールバック削除）
         if (window.GicApi?.ensureThumbnailForVideo) {
             try {
-                return await window.GicApi.ensureThumbnailForVideo(videoFileName, charName);
-            } catch (e) {
-                return null;
-            }
+                const url = await window.GicApi.ensureThumbnailForVideo(videoFileName, charName);
+                if (url) return url;
+            } catch (e) { /* fall through */ }
         }
+        const key = `${charName}:${videoFileName}`;
+        if (_stjThumbUrlCache.has(key)) return _stjThumbUrlCache.get(key);
+
+        const thumbName = videoFileToThumbName(videoFileName);
+        if (!thumbName) return null;
+        const thumbUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(thumbName);
+        if (await stjCheckThumbExists(thumbUrl)) {
+            _stjThumbUrlCache.set(key, thumbUrl);
+            return thumbUrl;
+        }
+        _stjThumbUrlCache.set(key, null);
         return null;
     }
 
@@ -920,6 +932,7 @@
                 if (s.currentTarget && s.currentTarget !== s.sourceItem) {
                     swapCells(s.sourceItem, s.currentTarget);
                     runLiveTest();
+                    autoSave({ immediate: true });   // ★ セル入れ替えを保存
                 }
             } else {
                 const src = s.sourceItem;
@@ -1032,6 +1045,7 @@
 
     function closeExportModalInternal() {
         if (!stjModalEl) return;
+        flushAutoSave();   // ★ 保留中のオートセーブを即実行
         closeCellModal(false);
         stjModalEl.style.display = 'none';
         document.body.classList.remove('stj-editor-open');
@@ -1144,6 +1158,7 @@
                 removeImageFromCell(currentModalCell, fileName);
                 renderCellModalGrid(currentModalCell).catch(err => console.warn('[STJ Editor] render error:', err));
                 updateCellPreview(currentModalCell);
+                autoSave({ immediate: true });   // ★ 画像登録解除を保存
             }
         });
 
@@ -1154,7 +1169,7 @@
         if (!cell) return;
         if (isBulkDeleteMode || isDialogActive) return;
 
-        // ★ 二重起動防止（mouseup と click の両方が openCellModal を呼ぶため）
+        // 二重起動防止
         if (currentModalCell === cell &&
             currentCellModal &&
             currentCellModal.classList.contains('visible')) {
@@ -1305,6 +1320,7 @@
         }
         updateCellPreview(cell);
         runLiveTest();
+        autoSave({ immediate: true });   // ★ キーワード変更・画像変更を保存
         const popup = document.getElementById('stj_choices_popup');
         if (popup) popup.remove();
         const zoom = document.getElementById('stj_media_zoom');
@@ -1477,19 +1493,20 @@
                 io.observe(slot);
                 attachVideoBadge(slot, true, fileName, charName).catch(() => {});
             } else {
-                // 画像（GIF/APNG/通常 PNG/JPEG 等）
-                // ★ 260px サムネイルで表示（ギャラリーと同じ画像を流用）
-                let displaySrc = null;
-                try {
-                    if (window.GicApi?.ensureImageThumbnail) {
-                        displaySrc = await window.GicApi.ensureImageThumbnail(fileName, charName);
-                    }
-                } catch (e) { /* ignore */ }
-                if (!displaySrc) displaySrc = fullPath;   // フォールバック
+                let displaySrc = fullPath;
+                if (/\.(gif|png)$/i.test(fileName)) {
+                    try {
+                        if (window.GicApi?.getStaticFrameUrl) {
+                            const staticUrl = await window.GicApi.getStaticFrameUrl(fileName, charName);
+                            if (myToken !== _currentGridRenderToken) return;
+                            if (staticUrl) displaySrc = staticUrl;
+                        }
+                    } catch (e) { /* ignore */ }
+                }
 
                 const img = document.createElement('img');
                 img.src = displaySrc;
-                img.dataset.src = fullPath;   // ズームは元ファイルを開く
+                img.dataset.src = fullPath;
                 img.alt = fileName;
                 img.style.cssText =
                     'width:100%;height:100%;object-fit:contain;display:block;' +
@@ -1497,13 +1514,11 @@
                 img.addEventListener('click', openZoom);
                 slot.insertBefore(img, slot.firstChild);
 
-                // ★ 元ファイル名でバッジ判定（🎬 表示のみ、アニメはしない）
                 attachVideoBadge(slot, false, fileName, charName).catch(() => {});
             }
         }
     }
 
-    // ★ Escape / 外側クリックで閉じる
     function showMediaZoom(src, isVideo) {
         const existing = document.getElementById('stj_media_zoom');
         if (existing) existing.remove();
@@ -1613,6 +1628,7 @@
         }
 
         try { runLiveTest(); } catch (_) {}
+        autoSave({ immediate: true });   // ★ 画像登録を保存
         console.log(`[STJ Editor] 🖼️ ドロップで追加: ${fileName}`);
     }
 
@@ -1784,6 +1800,7 @@
                 showDeleteConfirmDialog('本当に削除しますか？', () => {
                     item.remove();
                     runLiveTest();
+                    autoSave({ immediate: true });   // ★ セル削除を保存
                 });
             });
         }
@@ -1872,6 +1889,7 @@
         setupCellDropTargets(newItem);
         modal.scrollTop = modal.scrollHeight;
         runLiveTest();
+        autoSave({ immediate: true });   // ★ セル追加を保存
     }
 
     async function loadExistingJSONData(charName) {
@@ -2101,17 +2119,16 @@
             previewEl.dataset.currentPath = fullPath;
             removeLoading(); placeholderHide();
         } else {
-            // 画像（GIF/APNG/通常 PNG/JPEG 等）
-            // ★ 260px サムネイルで表示（ギャラリーと同じ画像を流用）
-            let displaySrc = null;
-            try {
-                if (window.GicApi?.ensureImageThumbnail) {
-                    displaySrc = await window.GicApi.ensureImageThumbnail(fileName, charName);
-                }
-            } catch (e) { /* ignore */ }
-            if (!displaySrc) displaySrc = fullPath;   // フォールバック
-
-            if (_previewLoadGen.get(previewEl) !== myGen) { removeLoading(); return; }
+            let displaySrc = fullPath;
+            if (/\.(gif|png)$/i.test(origFileName)) {
+                try {
+                    if (window.GicApi?.getStaticFrameUrl) {
+                        const staticUrl = await window.GicApi.getStaticFrameUrl(origFileName, charName);
+                        if (_previewLoadGen.get(previewEl) !== myGen) { removeLoading(); return; }
+                        if (staticUrl) displaySrc = staticUrl;
+                    }
+                } catch (e) { /* ignore */ }
+            }
 
             const img = new Image();
             img.src = displaySrc;
@@ -2140,7 +2157,7 @@
             img.style.objectFit = 'contain'; img.style.display = 'block';
             previewEl.appendChild(img);
             attachVideoBadge(previewEl, false, origFileName, charName).catch(() => {});
-            previewEl.dataset.currentPath = fullPath;   // ★ キャッシュ判定は元パスで
+            previewEl.dataset.currentPath = fullPath;
             removeLoading(); placeholderHide();
         }
     }
@@ -2228,10 +2245,54 @@
         }, 3000);
     }
 
-    function saveData() {
+    // ============================================================
+    // ★ オートセーブ
+    //   ユーザー操作（セル追加/削除/入れ替え/キーワード確定/画像登録解除）で
+    //   自動保存する。短時間に複数回呼ばれた場合は 400ms デバウンス。
+    // ============================================================
+    function _doAutoSave() {
+        try {
+            const nameEl = document.getElementById('stj_char_name_display');
+            const charName = nameEl ? nameEl.textContent : '';
+            if (!charName) return;
+            saveData({ silent: true });
+        } catch (e) {
+            console.warn('[STJ Editor] autoSave error:', e);
+        }
+    }
+
+    function autoSave(options = {}) {
+        const { immediate = false } = options;
+        if (_autoSaveTimer) {
+            clearTimeout(_autoSaveTimer);
+            _autoSaveTimer = null;
+        }
+        if (immediate) {
+            _doAutoSave();
+            return;
+        }
+        _autoSaveTimer = setTimeout(() => {
+            _autoSaveTimer = null;
+            _doAutoSave();
+        }, 400);
+    }
+
+    function flushAutoSave() {
+        if (_autoSaveTimer) {
+            clearTimeout(_autoSaveTimer);
+            _autoSaveTimer = null;
+            _doAutoSave();
+        }
+    }
+
+    function saveData(options = {}) {
+        const { silent = false } = options;
         const nameEl = document.getElementById('stj_char_name_display');
         const charName = nameEl ? nameEl.textContent : '';
-        if (!charName) { alert('キャラクター名が設定されていません'); return; }
+        if (!charName) {
+            if (!silent) alert('キャラクター名が設定されていません');
+            return;
+        }
 
         const kwMap = new Map();
         const duplicates = [];
@@ -2245,7 +2306,9 @@
             }
         });
         if (duplicates.length > 0) {
-            showKeywordDuplicateWarning(duplicates[0]);
+            if (!silent) {
+                showKeywordDuplicateWarning(duplicates[0]);
+            }
             return;
         }
 
@@ -2267,7 +2330,10 @@
         const stjSettings = getExtensionSettings();
         stjSettings[charName] = data;
         persistSettings();
-        showCustomAlert('データを保存しました');
+
+        if (!silent) {
+            showCustomAlert('データを保存しました');
+        }
     }
 
     function loadSavedData(charName) {
@@ -2457,12 +2523,9 @@
                 </div>
             </div>
             <div class="stj-button-group">
-                <div class="stj-button-group-left">
-                    <button id="stj_save_data">セーブ</button>
+                <div class="stj-button-group-main">
                     <button id="stj_cancel_export">終了</button>
                     <button id="stj_export_json">JSON出力</button>
-                </div>
-                <div class="stj-button-group-right">
                     <button id="stj_add_keyword">セル追加</button>
                     <button id="stj_bulk_delete">一括削除</button>
                     <button id="stj_delete_cancel" style="display:none;">戻る</button>
@@ -2544,13 +2607,6 @@
             exportJSON();
         });
 
-        const saveBtn = document.getElementById('stj_save_data');
-        if (saveBtn) saveBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (isBulkDeleteMode || isDialogActive) return;
-            saveData();
-        });
-
         modal.querySelectorAll('.stj-special-item').forEach(item => {
             item.addEventListener('click', (e) => {
                 if (e.target.closest('button')) return;
@@ -2600,6 +2656,7 @@
                     if (delExecBtn) delExecBtn.disabled = false;
                     document.querySelectorAll('.stj-keyword-item.stj-marked-for-delete').forEach(el => el.remove());
                     runLiveTest();
+                    autoSave({ immediate: true });   // ★ 一括削除を保存
                 },
                 () => {
                     isDialogActive = false;
