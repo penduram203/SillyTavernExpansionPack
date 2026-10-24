@@ -604,6 +604,7 @@ async function processChoice(force = false) {
             entryKey: extractEntryKey(entry),
             uid: entry.uid,
             worldName,
+            prompt,   // ★ 追加: プロンプトも保存
             triggeredAt: Date.now(),
         };
         if (settings.verbose) {
