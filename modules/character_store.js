@@ -25,7 +25,9 @@ function _getCurrentAvatarUrl() {
 
 export function getCharacterExtension(namespace) {
     const ctx = _getCtx();
-    const ext = ctx?.character?.data?.extensions?.[namespace];
+    if (!ctx) return null;
+    const char = ctx.characters?.[ctx.characterId];
+    const ext = char?.data?.extensions?.[namespace];
     return ext && typeof ext === 'object' ? ext : null;
 }
 
