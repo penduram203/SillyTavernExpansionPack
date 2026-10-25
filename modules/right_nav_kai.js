@@ -76,44 +76,53 @@
     // --- キャラクター画像（サムネイル）パスの取得 ---
     async function getCharacterImageSrc(charName) {
         if (!charName) return null;
+        if (mediaCache.has(charName)) return mediaCache.get(charName);
 
-        if (mediaCache.has(charName)) {
-            return mediaCache.get(charName);
-        }
+        // ── ① 現在選択中のキャラなら character.data 優先 ──
+        try {
+            const ctx = SillyTavern.getContext();
+            const currentChar = ctx?.characters?.[ctx?.characterId];
+            if (currentChar?.name === charName) {
+                const ext = currentChar?.data?.extensions?.image_display_extension;
+                if (ext && typeof ext === 'object') {
+                    const candidate = ext.thumbnail || ext.default;
+                    if (candidate) {
+                        const src = Array.isArray(candidate) ? candidate[0] : candidate;
+                        if (await checkMediaExists(src)) {
+                            mediaCache.set(charName, src);
+                            return src;
+                        }
+                    }
+                }
+            }
+        } catch (e) { /* ignore */ }
 
-        // 1. _ext.json からのサムネイル/デフォルト画像検索
+        // ── ② 他キャラは従来通り _ext.json ──
         try {
             const extPath = `user/images/${charName}/${charName}_ext.json`;
             const resp = await fetch(extPath);
             if (resp.ok) {
                 const data = await resp.json();
                 let candidate = data.thumbnail || data.default;
-
                 if (!candidate && data.image_display_extension) {
                     candidate = data.image_display_extension.thumbnail || data.image_display_extension.default;
                 }
-
                 if (candidate) {
                     const src = Array.isArray(candidate) ? candidate[0] : candidate;
-                    const exists = await checkMediaExists(src);
-                    if (exists) {
+                    if (await checkMediaExists(src)) {
                         mediaCache.set(charName, src);
                         return src;
                     }
                 }
             }
-        } catch (e) {
-            // json読み込み失敗時は無視
-        }
+        } catch (e) { /* ignore */ }
 
-        // 2. フォールバック (defa.mp4)
+        // ── ③ defa.mp4 フォールバック ──
         const fallback = `user/images/${charName}/defa.mp4`;
-        const exists = await checkMediaExists(fallback);
-        if (exists) {
+        if (await checkMediaExists(fallback)) {
             mediaCache.set(charName, fallback);
             return fallback;
         }
-
         mediaCache.set(charName, null);
         return null;
     }
