@@ -76,20 +76,23 @@
     // --- キャラクター画像（サムネイル）パスの取得 ---
     async function getCharacterImageSrc(charName) {
         if (!charName) return null;
-        if (mediaCache.has(charName)) return mediaCache.get(charName);
 
-        // ── ① 現在選択中のキャラなら character.data 優先 ──
+        // ── ① 現在選択中のキャラなら character.data を最優先（キャッシュより先）──
         try {
             const ctx = SillyTavern.getContext();
             const currentChar = ctx?.characters?.[ctx?.characterId];
             if (currentChar?.name === charName) {
                 const ext = currentChar?.data?.extensions?.image_display_extension;
                 if (ext && typeof ext === 'object') {
-                    const candidate = ext.thumbnail || ext.default;
-                    if (candidate) {
+                    // thumbnail → default の順で存在するものを採用
+                    for (const key of ['thumbnail', 'default']) {
+                        const candidate = ext[key];
+                        if (!candidate) continue;
                         const src = Array.isArray(candidate) ? candidate[0] : candidate;
                         if (await checkMediaExists(src)) {
-                            mediaCache.set(charName, src);
+                            if (mediaCache.get(charName) !== src) {
+                                mediaCache.set(charName, src);
+                            }
                             return src;
                         }
                     }
@@ -97,7 +100,12 @@
             }
         } catch (e) { /* ignore */ }
 
-        // ── ② 他キャラは従来通り _ext.json ──
+        // ── ② キャッシュチェック（現在キャラ以外 or データ取得失敗時）──
+        if (mediaCache.has(charName)) {
+            return mediaCache.get(charName);
+        }
+
+        // ── ③ 他キャラは従来通り _ext.json ──
         try {
             const extPath = `user/images/${charName}/${charName}_ext.json`;
             const resp = await fetch(extPath);
@@ -117,7 +125,7 @@
             }
         } catch (e) { /* ignore */ }
 
-        // ── ③ defa.mp4 フォールバック ──
+        // ── ④ defa.mp4 フォールバック ──
         const fallback = `user/images/${charName}/defa.mp4`;
         if (await checkMediaExists(fallback)) {
             mediaCache.set(charName, fallback);
