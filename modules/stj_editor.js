@@ -1893,13 +1893,20 @@
 
         let imageMap = null;
 
-        // ── ① character.data.extensions.image_display_extension（一次情報源）──
+        // ── ① ctx.characters[characterId] → ctx.character の順（一次情報源）──
         try {
             const context = getSTContext();
-            const ext = context?.character?.data?.extensions?.image_display_extension;
+
+            const charFromList = context?.characters?.[context?.characterId];
+            let ext = charFromList?.data?.extensions?.image_display_extension;
+
+            if (!ext || typeof ext !== 'object' || Object.keys(ext).length === 0) {
+                ext = context?.character?.data?.extensions?.image_display_extension;
+            }
+
             if (ext && typeof ext === 'object' && Object.keys(ext).length > 0) {
                 imageMap = ext;
-                console.log(`[STJ Editor] ✅ character.data から読み込み`);
+                console.log(`[STJ Editor] ✅ image_display_extension を読込 (${Object.keys(ext).length} entries)`);
             }
         } catch (e) { /* ignore */ }
 
