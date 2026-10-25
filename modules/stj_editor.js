@@ -1889,31 +1889,45 @@
     }
 
     async function loadExistingJSONData(charName) {
-        if (!charName) {
-            console.warn('[STJ Editor] loadExistingJSONData: charName が空');
-            return;
-        }
+        if (!charName) { console.warn('[STJ Editor] charName 空'); return; }
+
+        let imageMap = null;
+
+        // ── ① character.data.extensions.image_display_extension（一次情報源）──
         try {
-            const jsonPath = `user/images/${charName}/${charName}_ext.json`;
-            const response = await fetch(jsonPath);
-            if (!response.ok) {
-                console.warn(
-                    `[STJ Editor] _ext.json 取得失敗 (HTTP ${response.status}): ${jsonPath}`
-                );
-                return;
+            const context = getSTContext();
+            const ext = context?.character?.data?.extensions?.image_display_extension;
+            if (ext && typeof ext === 'object' && Object.keys(ext).length > 0) {
+                imageMap = ext;
+                console.log(`[STJ Editor] ✅ character.data から読み込み`);
             }
-            const data = await response.json();
-            const imageMap = findImageMapInData(data);
-            if (!imageMap) {
-                console.warn(
-                    `[STJ Editor] _ext.json に image_display_extension が見つかりません: ${jsonPath}`
-                );
-                return;
-            }
-            console.log(`✅ ${charName}_ext.json から既存データを読み込みました`);
+        } catch (e) { /* ignore */ }
+
+        // ── ② 移行フォールバック: _ext.json ──
+        if (!imageMap) {
+            try {
+                const jsonPath = `user/images/${charName}/${charName}_ext.json`;
+                const resp = await fetch(jsonPath);
+                if (resp.ok) {
+                    const data = await resp.json();
+                    const legacy = findImageMapInData(data);
+                    if (legacy && Object.keys(legacy).length > 0) {
+                        imageMap = legacy;
+                        console.log(`[STJ Editor] 🔄 _ext.json から読込。character.json へ移行`);
+                        try {
+                            window.CharStore?.saveCharacterExtension?.(
+                                'image_display_extension', legacy, { immediate: true }
+                            );
+                        } catch (e) { /* ignore */ }
+                    }
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        if (imageMap) {
             populateFormFromImageMap(imageMap);
-        } catch (e) {
-            console.warn('[STJ Editor] 既存JSONデータの取得に失敗しました:', e);
+        } else {
+            console.log(`[STJ Editor] image_display_extension が見つかりません（新規作成）`);
         }
     }
 
@@ -2260,7 +2274,26 @@
             const nameEl = document.getElementById('stj_char_name_display');
             const charName = nameEl ? nameEl.textContent : '';
             if (!charName) return;
+
+            // 既存: UI復元用に editor 状態を extensionSettings に保存（残してよい）
             saveData({ silent: true });
+
+            // ★ 新規: image_display_extension 形式へ変換して character.json に保存
+            try {
+                const imageMap = buildImageMapFromForm(charName);
+                if (window.CharStore?.saveCharacterExtension) {
+                    window.CharStore.saveCharacterExtension('image_display_extension', imageMap);
+                    // 即時反映用のカスタムイベント
+                    window.dispatchEvent(new CustomEvent('lbe-image-map-updated', {
+                        detail: { charName, imageMap }
+                    }));
+                    console.log(`[STJ Editor] image_display_extension を保存 (${Object.keys(imageMap).length} entries)`);
+                } else {
+                    console.warn('[STJ Editor] CharStore 未ロードのため character.json 保存スキップ');
+                }
+            } catch (e) {
+                console.warn('[STJ Editor] character.json 保存エラー:', e);
+            }
         } catch (e) {
             console.warn('[STJ Editor] autoSave error:', e);
         }
