@@ -3,6 +3,7 @@
 //   各拡張をモジュールとして読み込むエントリポイント
 // ============================================================
 
+import './modules/character_store.js';
 // ---- Image Display ----
 // ★ text-styling.js が window.ImageDisplayExtension を参照するため先に読み込む
 import './modules/image-display.js';
