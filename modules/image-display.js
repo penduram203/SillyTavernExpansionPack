@@ -1348,18 +1348,45 @@
         }
         if (!forceRefresh && currentCharacter === charName && currentImageMap !== defaultImageMap) return;
         currentCharacter = charName;
+
         if (!forceRefresh && imageMapCache.has(charName)) {
             currentImageMap = imageMapCache.get(charName);
             invalidateAllCaches(); preloadCharacterImages(currentImageMap); safeUpdateImage();
             return;
         }
+
         let loadedMap = null;
+
+        // ── ① 一次情報源: character.data.extensions.image_display_extension ──
         try {
-            const resp = await fetch(`user/images/${charName}/${charName}_ext.json`);
-            if (resp.ok) { const data = await resp.json(); loadedMap = findImageMapInData(data); }
+            const context = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+            const ext = context?.character?.data?.extensions?.image_display_extension;
+            if (ext && typeof ext === 'object' && Object.keys(ext).length > 0) {
+                loadedMap = ext;
+                console.log(`[ImageDisplay] character.data から image_display_extension を読込 (${Object.keys(ext).length} entries)`);
+            }
         } catch (e) { /* ignore */ }
-        const context = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
-        if (!loadedMap && context && context.character && context.character.data) loadedMap = findImageMapInData(context.character.data);
+
+        // ── ② 移行フォールバック: _ext.json（character.data が空の時のみ）──
+        if (!loadedMap) {
+            try {
+                const resp = await fetch(`user/images/${charName}/${charName}_ext.json`);
+                if (resp.ok) {
+                    const data = await resp.json();
+                    const legacy = findImageMapInData(data);
+                    if (legacy && typeof legacy === 'object' && Object.keys(legacy).length > 0) {
+                        loadedMap = legacy;
+                        console.log(`[ImageDisplay] 🔄 _ext.json を検出。character.data へ移行します`);
+                        try {
+                            window.CharStore?.saveCharacterExtension?.(
+                                'image_display_extension', legacy, { immediate: true }
+                            );
+                        } catch (migErr) { console.warn('[ImageDisplay] 移行エラー:', migErr); }
+                    }
+                }
+            } catch (e) { /* ignore */ }
+        }
+
         if (loadedMap) {
             const detectedMap = await detectImageMapExtensions(loadedMap);
             currentImageMap = detectedMap;
@@ -1367,7 +1394,9 @@
         } else {
             currentImageMap = await detectImageMapExtensions(defaultImageMap);
         }
-        invalidateAllCaches(); preloadCharacterImages(currentImageMap); safeUpdateImage();
+        invalidateAllCaches();
+        preloadCharacterImages(currentImageMap);
+        safeUpdateImage();
     }
 
     function toggleCustomWindow() { if (isCustomWindowOpen) closeCustomWindow(); else openCustomWindow(); }
@@ -1728,7 +1757,7 @@
         syncChatHeaderPosition();
         syncChatResizeHandlePosition();
     }, 500);
-
+    
     function setupEventSourceListeners() {
         if (typeof SillyTavern !== 'undefined' && SillyTavern.getContext) {
             const context = SillyTavern.getContext();
@@ -1755,7 +1784,39 @@
         }
     }
 
+    function setupCharStoreListener() {
+        // ① STJ Editor からの即時更新通知
+        window.addEventListener('lbe-image-map-updated', (e) => {
+            const { charName, imageMap } = e.detail || {};
+            if (!charName || !imageMap) return;
+            if (charName !== currentCharacter) return;
+
+            console.log(`[ImageDisplay] image_display_extension 更新通知: ${charName}`);
+            detectImageMapExtensions(imageMap).then((detected) => {
+                imageMapCache.set(charName, detected);
+                currentImageMap = detected;
+                invalidateAllCaches();
+                preloadCharacterImages(currentImageMap);
+                safeUpdateImage();
+            });
+        });
+
+        // ② ST ネイティブイベント（外部編集・他経路の更新を拾う）
+        try {
+            const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+            if (ctx?.eventSource && ctx?.eventTypes?.CHARACTER_EDITED) {
+                ctx.eventSource.on(ctx.eventTypes.CHARACTER_EDITED, () => {
+                    console.log('[ImageDisplay] CHARACTER_EDITED 受信 → キャッシュ破棄');
+                    const charName = getCharacterNameFromDOM();
+                    if (charName) imageMapCache.delete(charName);
+                    loadCharacterData(true);
+                });
+            }
+        } catch (e) { /* ignore */ }
+    }
+    
     setupEventSourceListeners();
+    setupCharStoreListener();
     setupSendInterception();
     loadCharacterData(true);
     setupChatDomObserver();
