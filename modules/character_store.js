@@ -20,7 +20,7 @@ function _getCurrentAvatarUrl() {
     const id = ctx.characterId;
     if (id === undefined || id === null) return null;
     const char = ctx.characters?.[id];
-    return char?.avatar || null;   // 例: "アリス.png" または "sub/アリス.png"
+    return char?.avatar || null;
 }
 
 export function getCharacterExtension(namespace) {
@@ -35,10 +35,13 @@ export function getCharacterExtensionRaw() {
 
 function _updateMemory(namespace, payload) {
     const ctx = _getCtx();
-    if (!ctx?.character) return;
-    if (!ctx.character.data) ctx.character.data = {};
-    if (!ctx.character.data.extensions) ctx.character.data.extensions = {};
-    ctx.character.data.extensions[namespace] = payload;
+    if (!ctx) return;
+    const id = ctx.characterId;
+    const char = ctx.characters?.[id];
+    if (!char) return;
+    if (!char.data) char.data = {};
+    if (!char.data.extensions) char.data.extensions = {};
+    char.data.extensions[namespace] = payload;
 }
 
 async function _pushToServer(namespace, payload) {
