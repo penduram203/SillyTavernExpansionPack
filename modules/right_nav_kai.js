@@ -229,9 +229,15 @@
                     }
                 };
 
-                safeOn(eventTypes.CHAT_CHANGED, debouncedUpdate);
-                safeOn(eventTypes.CHARACTER_SELECTED, debouncedUpdate);
-                safeOn(eventTypes.CHARACTER_PAGE_LOADED, debouncedUpdate);
+                // ★ キャラ切替時に mediaCache をクリア（古い defa.mp4 等の残留防止）
+                const clearCacheAndUpdate = () => {
+                    mediaCache.clear();
+                    debouncedUpdate();
+                };
+
+                safeOn(eventTypes.CHAT_CHANGED, clearCacheAndUpdate);
+                safeOn(eventTypes.CHARACTER_SELECTED, clearCacheAndUpdate);
+                safeOn(eventTypes.CHARACTER_PAGE_LOADED, clearCacheAndUpdate);
 
                 console.log(`${LOG_PREFIX} Event listeners registered successfully`);
             }
