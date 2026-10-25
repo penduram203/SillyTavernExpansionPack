@@ -42,25 +42,53 @@ function _updateMemory(namespace, payload) {
 }
 
 async function _pushToServer(namespace, payload) {
-    const avatarUrl = _getCurrentAvatarUrl();
-    if (!avatarUrl) {
-        console.warn(`${LOG} avatar_url 取得失敗 (${namespace})`);
+    const ctx = _getCtx();
+    if (!ctx) return false;
+
+    const id = ctx.characterId;
+    const char = ctx.characters?.[id];
+    if (!char) {
+        console.warn(`${LOG} 現在キャラ取得失敗 (id=${id})`);
         return false;
     }
+
+    // avatar_url の正規化（"none" や拡張子なしを補正）
+    let avatarUrl = char.avatar;
+    if (!avatarUrl || avatarUrl === 'none') {
+        avatarUrl = `${char.name}.png`;
+        console.warn(`${LOG} avatar が異常値のため推定使用: ${avatarUrl}`);
+    }
+    if (!avatarUrl.match(/\.(png|webp|jpg)$/i) && !avatarUrl.includes('/')) {
+        avatarUrl = `${avatarUrl}.png`;
+    }
+
+    // ★ 修正点: avatar と avatar_url の両方を送る
+    const body = {
+        avatar: avatarUrl,           // ← これが本命（サーバーが参照）
+        avatar_url: avatarUrl,       // ← 旧バージョン互換・保険
+        ch_name: char.name,
+        data: { extensions: { [namespace]: payload } },
+    };
+
+    console.log(`${LOG} merge-attributes 送信:`, {
+        avatar: body.avatar,
+        avatar_url: body.avatar_url,
+        ch_name: body.ch_name,
+        payloadSize: JSON.stringify(payload).length,
+    });
+
     try {
         const resp = await fetch('/api/characters/merge-attributes', {
             method: 'POST',
             headers: getRequestHeaders(),
-            body: JSON.stringify({
-                avatar_url: avatarUrl,
-                data: { extensions: { [namespace]: payload } },
-            }),
+            body: JSON.stringify(body),
         });
         if (!resp.ok) {
             const text = await resp.text().catch(() => '');
-            console.warn(`${LOG} merge-attributes 失敗 (${resp.status}): ${text.slice(0, 200)}`);
+            console.warn(`${LOG} merge-attributes 失敗 (${resp.status}): ${text.slice(0, 300)}`);
             return false;
         }
+        console.log(`${LOG} ✅ ${namespace} を character.json に保存 (avatar=${body.avatar})`);
         return true;
     } catch (e) {
         console.warn(`${LOG} merge-attributes 例外:`, e);
