@@ -1357,13 +1357,22 @@
 
         let loadedMap = null;
 
-        // ── ① 一次情報源: character.data.extensions.image_display_extension ──
+        // ── ① 一次情報源: ctx.characters[characterId] → ctx.character の順 ──
         try {
             const context = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
-            const ext = context?.character?.data?.extensions?.image_display_extension;
+
+            // 1a. ctx.characters[characterId] を最優先
+            const charFromList = context?.characters?.[context?.characterId];
+            let ext = charFromList?.data?.extensions?.image_display_extension;
+
+            // 1b. ctx.character 経由（フォールバック）
+            if (!ext || typeof ext !== 'object' || Object.keys(ext).length === 0) {
+                ext = context?.character?.data?.extensions?.image_display_extension;
+            }
+
             if (ext && typeof ext === 'object' && Object.keys(ext).length > 0) {
                 loadedMap = ext;
-                console.log(`[ImageDisplay] character.data から image_display_extension を読込 (${Object.keys(ext).length} entries)`);
+                console.log(`[ImageDisplay] image_display_extension を読込 (${Object.keys(ext).length} entries)`);
             }
         } catch (e) { /* ignore */ }
 
