@@ -544,7 +544,33 @@ function triggerWorldInfoSave() {
         const worldName = getCurrentWorldName();
         if (!worldName) return;
         const mod = await getWorldInfoModule();
+
         try {
+            // ★ world_info[worldName] が未ロードなら /api/worldinfo/get で復元してから保存
+            if (mod && (!mod.world_info || !mod.world_info[worldName])) {
+                debugLog(`world_info["${worldName}"] 未ロード → 復元を試行`);
+                try {
+                    const resp = await fetch('/api/worldinfo/get', {
+                        method: 'POST',
+                        headers: getRequestHeaders(),
+                        body: JSON.stringify({ name: worldName }),
+                    });
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        if (data && data.entries) {
+                            if (!mod.world_info) mod.world_info = {};
+                            mod.world_info[worldName] = {
+                                entries: data.entries,
+                                name: data.name || worldName,
+                            };
+                            debugLog(`world_info["${worldName}"] 復元完了`);
+                        }
+                    }
+                } catch (e) {
+                    console.warn(LOG, 'world_info 復元失敗:', e);
+                }
+            }
+
             if (mod && typeof mod.saveWorldInfo === 'function') {
                 await mod.saveWorldInfo(worldName, true);
                 debugLog('saveWorldInfo 実行:', worldName);
