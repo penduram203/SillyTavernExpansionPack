@@ -123,6 +123,36 @@ function cleanPrompt(prompt) {
 }
 
 function getLexImgPrompt(worldName, uid, entry) {
+    // ★ 新: character.data.extensions.lorebook_expansion を最優先
+    try {
+        const ctx = getContext();
+        const char = ctx?.characters?.[ctx?.characterId];
+        const charLex = char?.data?.extensions?.lorebook_expansion;
+        if (charLex && typeof charLex === 'object') {
+            let charKey = null;
+            if (entry && typeof entry.comment === 'string' && entry.comment.trim()) {
+                charKey = entry.comment.trim();
+            } else {
+                const keys = getEntryKeys(entry);
+                if (keys.length > 0 && String(keys[0]).trim()) {
+                    charKey = String(keys[0]).trim();
+                } else {
+                    charKey = String(uid);
+                }
+            }
+            const rec = charLex[charKey];
+            if (rec && typeof rec.img_prompt === 'string' && rec.img_prompt.trim()) {
+                if (settings.verbose) {
+                    console.log(`[GIC-Lore] character.data から img_prompt 読込 (charKey=${charKey})`);
+                }
+                return cleanPrompt(rec.img_prompt);
+            }
+        }
+    } catch (e) {
+        console.warn('[GIC-Lore] character.data 読み込み失敗:', e);
+    }
+
+    // 既存: extension_settings を参照
     try {
         const ctx = getContext();
         const lex = ctx?.extensionSettings?.lorebook_expansion;
@@ -139,6 +169,7 @@ function getLexImgPrompt(worldName, uid, entry) {
         console.warn('[GIC-Lore] LEXストア読み込み失敗:', e);
     }
 
+    // 既存: entry.extensions からの読み取り
     if (entry && entry.extensions && typeof entry.extensions === 'object') {
         const lexExt = entry.extensions.lorebook_expansion;
         if (lexExt && typeof lexExt.img_prompt === 'string' && lexExt.img_prompt.trim()) {
