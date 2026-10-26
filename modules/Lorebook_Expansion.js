@@ -4,15 +4,25 @@
 //   - Img_prompt : 画像生成プロンプト (gic_lorebook.js が読み取る)
 //   - choices    : 応答末尾に自動表示される選択肢群 (番号 + 文言)
 //
-// ★ データ保存先:
-//   一次: extension_settings.lorebook_expansion.data[worldName][uid]
-//   二次: entry.extensions.lorebook_expansion (best effort ミラー)
-//   読込時は一次を優先。一次が無ければ二次から移行（マイグレーション）。
+// ★ データ保存先 (Phase 2 改修):
+//   一次: character.data.extensions.lorebook_expansion[charKey]
+//         charKey = entry.comment || entry.keys[0] || String(uid)
+//   二次: extension_settings.lorebook_expansion.data[worldName][uid]  (互換用)
+//   三次: entry.extensions.lorebook_expansion  (world ファイルミラー / WI注入用)
+//
+//   読込時は一次を優先。無ければ二次→三次の順でフォールバックし、
+//   内容があれば一次へ lazy 移行する。
 //
 // ★ v6 修正:
 //   - ST起動時のWIドロワー自動オープン問題への対策を強化
 //     ST本体が jQuery.trigger('click') や classList.add を直接使う場合でも
 //     MutationObserver で強制クローズする
+//
+// ★ Phase 2 修正:
+//   - character.data.extensions.lorebook_expansion を一次情報源に
+//   - charKey = entry.comment / keys[0] / String(uid) の優先順で決定
+//   - getDataFor/setDataFor に character.data 連携を追加
+//   - init() で現在キャラの件数をログ出力
 
 import {
     extension_settings,
@@ -120,10 +130,84 @@ function normalizeLexData(raw) {
     };
 }
 
+// ============================================================
+// ★ Phase 2: character.data.extensions.lorebook_expansion 連携
+// ============================================================
+
+/**
+ * エントリの安定キーを決定する。
+ *   priority: entry.comment → entry.keys[0]/key[0] → String(uid)
+ */
+function getCharKey(entry, uid) {
+    if (entry && typeof entry.comment === 'string' && entry.comment.trim()) {
+        return entry.comment.trim();
+    }
+    const keys = getEntryKeys(entry);
+    if (keys.length > 0 && String(keys[0]).trim()) {
+        return String(keys[0]).trim();
+    }
+    return String(uid);
+}
+
+function getCharacterLexData() {
+    try {
+        const ctx = getContext();
+        const char = ctx?.characters?.[ctx?.characterId];
+        const ext = char?.data?.extensions?.lorebook_expansion;
+        return ext && typeof ext === 'object' ? ext : {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function saveToCharacterLex(charKey, data) {
+    try {
+        if (!charKey) return false;
+        const ctx = getContext();
+        const char = ctx?.characters?.[ctx?.characterId];
+        if (!char || !char.avatar) return false;
+
+        if (!char.data) char.data = {};
+        if (!char.data.extensions) char.data.extensions = {};
+        if (!char.data.extensions.lorebook_expansion) {
+            char.data.extensions.lorebook_expansion = {};
+        }
+        char.data.extensions.lorebook_expansion[charKey] = data;
+
+        if (window.CharStore?.saveCharacterExtension) {
+            window.CharStore.saveCharacterExtension(
+                'lorebook_expansion',
+                char.data.extensions.lorebook_expansion
+            );
+            return true;
+        }
+        return false;
+    } catch (e) {
+        console.warn(LOG, 'character.data 保存エラー:', e);
+        return false;
+    }
+}
+
+// ============================================================
+// ★ Phase 2: getDataFor — character.data を最優先、無ければ settings → entry
+// ============================================================
 function getDataFor(worldName, uid, entry) {
     if (!worldName || uid === null || uid === undefined) {
         return { img_prompt: '', choices: [] };
     }
+
+    const charKey = getCharKey(entry, uid);
+
+    // ── ① 一次情報源: character.data.extensions.lorebook_expansion ──
+    if (charKey) {
+        const charLex = getCharacterLexData();
+        const charRec = charLex[charKey];
+        if (charRec && typeof charRec === 'object') {
+            return normalizeLexData(charRec);
+        }
+    }
+
+    // ── ② 互換: extension_settings.lorebook_expansion.data[world][uid] ──
     const store = getLexStore();
     const wKey = String(worldName);
     const uKey = String(uid);
@@ -132,14 +216,24 @@ function getDataFor(worldName, uid, entry) {
     const wd = store[wKey];
 
     if (wd[uKey] && typeof wd[uKey] === 'object') {
-        return normalizeLexData(wd[uKey]);
+        const normalized = normalizeLexData(wd[uKey]);
+        // settings に有効データがあれば character.data へ lazy 移行
+        if (charKey && (normalized.img_prompt || normalized.choices.length > 0)) {
+            saveToCharacterLex(charKey, normalized);
+            debugLog(`lazy移行: ${charKey} (settings→character.data)`);
+        }
+        return normalized;
     }
 
+    // ── ③ レガシー: entry.extensions.lorebook_expansion (world ファイルミラー) ──
     if (entry && entry.extensions && entry.extensions[MODULE_NAME]) {
         const migrated = normalizeLexData(entry.extensions[MODULE_NAME]);
         wd[uKey] = migrated;
         saveSettings();
-        debugLog(`レガシーデータを移行: world=${worldName}, uid=${uid}`);
+        if (charKey && (migrated.img_prompt || migrated.choices.length > 0)) {
+            saveToCharacterLex(charKey, migrated);
+            debugLog(`レガシー移行: world=${worldName}, uid=${uid}, charKey=${charKey}`);
+        }
         return migrated;
     }
 
@@ -148,20 +242,34 @@ function getDataFor(worldName, uid, entry) {
     return def;
 }
 
+// ============================================================
+// ★ Phase 2: setDataFor — character.data へ一次保存 + 互換ミラー
+// ============================================================
 function setDataFor(worldName, uid, entry, data) {
     if (!worldName || uid === null || uid === undefined) return;
+
+    const normalized = normalizeLexData(data);
+
+    // ── ① 一次情報源: character.data.extensions.lorebook_expansion ──
+    const charKey = getCharKey(entry, uid);
+    if (charKey) {
+        saveToCharacterLex(charKey, normalized);
+    }
+
+    // ── ② 互換: extension_settings へ保存（Phase 3 で削除予定）──
     const store = getLexStore();
     const wKey = String(worldName);
     const uKey = String(uid);
     if (!store[wKey]) store[wKey] = {};
-
-    const normalized = normalizeLexData(data);
     store[wKey][uKey] = normalized;
     saveSettings();
 
+    // ── ③ world ファイルミラー（SillyTavern の WI 注入用）──
     if (entry && typeof entry === 'object') {
         try {
-            if (!entry.extensions || typeof entry.extensions !== 'object') entry.extensions = {};
+            if (!entry.extensions || typeof entry.extensions !== 'object') {
+                entry.extensions = {};
+            }
             entry.extensions[MODULE_NAME] = JSON.parse(JSON.stringify(normalized));
             triggerWorldInfoSave();
         } catch (e) {
@@ -834,6 +942,22 @@ function registerEventListeners() {
 async function init() {
     console.log(LOG, 'Lorebook Expansion 初期化開始');
     loadSettings();
+
+    // ★ Phase 2: 起動時に現在キャラの character.data 状態をログ出力
+    try {
+        const ctx = getContext();
+        const char = ctx?.characters?.[ctx?.characterId];
+        if (char?.data && char?.data?.extensions) {
+            const existing = char.data.extensions.lorebook_expansion;
+            console.log(
+                LOG,
+                `character.data.extensions.lorebook_expansion: ${
+                    existing ? Object.keys(existing).length : 0
+                } 件`
+            );
+        }
+    } catch (e) { /* ignore */ }
+
     setupObserver();
     registerEventListeners();
 
@@ -1033,6 +1157,19 @@ window.LorebookExpansion = {
 
     dumpStore: () => JSON.parse(JSON.stringify(getLexStore())),
 
+    // ★ Phase 2 追加: character.data 側のダンプ
+    dumpCharacterLex: () => {
+        try {
+            const ctx = getContext();
+            const char = ctx?.characters?.[ctx?.characterId];
+            const lex = char?.data?.extensions?.lorebook_expansion || {};
+            return JSON.parse(JSON.stringify(lex));
+        } catch (e) { return {}; }
+    },
+
+    // ★ Phase 2 追加: charKey 決定ロジックを外部から確認できるように
+    getCharKey,
+
     clearWorldData: (worldName) => {
         const store = getLexStore();
         if (store[worldName]) {
@@ -1062,6 +1199,13 @@ window.LorebookExpansion = {
         const toggles = document.querySelectorAll('.lbe-extras-toggle');
         const togglables = document.querySelectorAll('.lbe-collapsible');
         const store = getLexStore();
+        const charLex = (() => {
+            try {
+                const ctx = getContext();
+                const char = ctx?.characters?.[ctx?.characterId];
+                return char?.data?.extensions?.lorebook_expansion || {};
+            } catch (e) { return {}; }
+        })();
         return {
             worldName,
             entryCount: entries ? Object.keys(entries).length : 0,
@@ -1074,6 +1218,8 @@ window.LorebookExpansion = {
             storeEntryCounts: Object.fromEntries(
                 Object.entries(store).map(([w, m]) => [w, Object.keys(m).length])
             ),
+            characterLexCount: Object.keys(charLex).length,
+            characterLexKeys: Object.keys(charLex),
             settings: { ...settings, data: undefined },
         };
     },
