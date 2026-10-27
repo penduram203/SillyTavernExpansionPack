@@ -205,36 +205,45 @@ export async function flushAll() {
     if (window.__charStoreEditorOpenInstalled) return;
     window.__charStoreEditorOpenInstalled = true;
 
-    const SELECTORS = [
-        '#character_edit_button',
-        '#character_edit',
-        '[title*="Edit character"]',
-        '[title*="キャラクターを編集"]',
-        'button[data-i18n*="edit" i]',
-        '.character_edit_button',
-    ];
+    function isEditButton(btn) {
+        if (!btn) return false;
+        const combined = [
+            btn.id,
+            btn.textContent,
+            btn.title,
+            btn.className,
+            btn.getAttribute?.('data-i18n'),
+            btn.getAttribute?.('aria-label'),
+        ].filter(Boolean).join(' ').toLowerCase();
+        if (/delete|remove|import|export|save/i.test(combined)) return false;
+        return /edit|編集/.test(combined);
+    }
 
     document.addEventListener('click', async (e) => {
-        const btn = e.target?.closest?.(SELECTORS.join(','));
+        const btn = e.target?.closest?.('button, [role="button"], a');
         if (!btn) return;
+        if (!isEditButton(btn)) return;
         if (window.__charStoreEditorOpenInFlight) return;
 
-        // pending が無ければ素通し
         const hasPending =
             _saveTimers.size > 0 ||
             _pendingPayloads.size > 0 ||
             _saveInFlight.size > 0;
-        if (!hasPending) return;
+
+        if (!hasPending) {
+            console.log(`[CharStore] edit open 検出 (pending なし): id="${btn.id}"`);
+            return;
+        }
 
         window.__charStoreEditorOpenInFlight = true;
         e.preventDefault();
         e.stopImmediatePropagation();
         try {
-            console.log(`${LOG} キャラ編集画面 open 前に保存を待機...`);
+            console.log(`[CharStore] キャラ編集画面 open 前に保存を待機... (id="${btn.id}")`);
             await flushAll();
-            console.log(`${LOG} 保存完了。キャラ編集画面を開きます`);
+            console.log(`[CharStore] 保存完了。キャラ編集画面を開きます`);
         } catch (err) {
-            console.warn(`${LOG} flush 失敗:`, err);
+            console.warn(`${CharStore} flush 失敗:`, err);
         }
         setTimeout(() => {
             window.__charStoreEditorOpenInFlight = false;
