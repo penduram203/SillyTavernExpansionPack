@@ -646,9 +646,55 @@
         return false;
     }
 
+    // ============================================================
+    // ★ 別キャラ画像エントリの「一度きり」マイグレーション管理
+    //   image-display.js と同じフラグを共有する。
+    // ============================================================
+    const STJ_MIGRATION_META_NS = 'image_display_extension_meta';
+    const STJ_MIGRATION_FLAG_KEY = 'foreign_cleaned_version';
+    const STJ_MIGRATION_VERSION = 1;
+
+    function isMigrationDoneForChar(charName) {
+        if (!charName) return false;
+        try {
+            const ctx = getSTContext();
+            const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
+            if (char?.name !== charName) return false;
+            const v = char?.data?.extensions?.[STJ_MIGRATION_META_NS]?.[STJ_MIGRATION_FLAG_KEY] || 0;
+            return v >= STJ_MIGRATION_VERSION;
+        } catch (e) { return false; }
+    }
+
+    function markMigrationDoneForChar(charName) {
+        if (!charName) return false;
+        try {
+            const ctx = getSTContext();
+            const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
+            if (char?.name !== charName) return false;
+            if (!char.data) char.data = {};
+            if (!char.data.extensions) char.data.extensions = {};
+            if (!char.data.extensions[STJ_MIGRATION_META_NS]) {
+                char.data.extensions[STJ_MIGRATION_META_NS] = {};
+            }
+            char.data.extensions[STJ_MIGRATION_META_NS][STJ_MIGRATION_FLAG_KEY] = STJ_MIGRATION_VERSION;
+            if (window.CharStore?.saveCharacterExtension) {
+                window.CharStore.saveCharacterExtension(
+                    STJ_MIGRATION_META_NS,
+                    char.data.extensions[STJ_MIGRATION_META_NS]
+                );
+            }
+            return true;
+        } catch (e) { return false; }
+    }
+    
     function cleanForeignImageEntries(imageMap, charName) {
         if (!imageMap || typeof imageMap !== 'object' || !charName) return imageMap;
 
+        // ★ このキャラで既にクリーンアップ済みなら何もしない
+        if (isMigrationDoneForChar(charName)) {
+            return imageMap;
+        }        
+        
         let removed = 0;
         const cleaned = {};
 
@@ -696,6 +742,9 @@
             } catch (e) { /* ignore */ }
         }
 
+        // ★ クリーンアップ完了をマーク
+        markMigrationDoneForChar(charName);
+        
         return cleaned;
     }    
     
