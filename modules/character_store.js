@@ -390,6 +390,37 @@ window.CharStore = {
     console.log('[CharStore] 🎯 /api/characters/edit への backup 注入フックを設置');
 })();
 
+(function installCharacterEditedSync() {
+    if (window.__charStoreEditedSyncInstalled) return;
+    window.__charStoreEditedSyncInstalled = true;
+
+    const tryInstall = () => {
+        const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+        if (!ctx?.eventSource || !ctx?.eventTypes?.CHARACTER_EDITED) {
+            setTimeout(tryInstall, 1000);
+            return;
+        }
+        ctx.eventSource.on(ctx.eventTypes.CHARACTER_EDITED, () => {
+            // 同期実行: export が characters[chid] を読む前に間に合わせる
+            const char = ctx.characters?.[ctx.characterId];
+            if (!char) return;
+            let restored = 0;
+            for (const [ns, payload] of Object.entries(_backup)) {
+                if (!payload) continue;
+                if (!char.data) char.data = {};
+                if (!char.data.extensions) char.data.extensions = {};
+                char.data.extensions[ns] = JSON.parse(JSON.stringify(payload));
+                restored++;
+            }
+            if (restored > 0) {
+                console.log(`[CharStore] 🎯 CHARACTER_EDITED 直後に memory を backup で復元 (${restored})`);
+            }
+        });
+        console.log('[CharStore] 🎯 CHARACTER_EDITED 同期フックを設置');
+    };
+    tryInstall();
+})();
+
 // ============================================================
 // ★ 最終防衛: export/ダウンロード系ボタン押下時に backup を強制注入
 // ============================================================
