@@ -6534,12 +6534,14 @@ async function warmUpGallery() {
     // ★ 完了処理を 1 箇所に集約（aborted / error / success で共通）
     const finalize = (nextState) => {
         warmupState = nextState;
-        forceHideGallery();
+        // ★ 'aborted' はユーザーが warmup を中断して開いたケース → 隠さない
+        const skipHide = (nextState === 'aborted');
+        if (!skipHide) forceHideGallery();
         clearInterval(hideInterval);
         // 300ms 遅延で hideStyle を外すが、gallery には display:none を残す
         setTimeout(() => {
             try { hideStyle.remove(); } catch (e) {}
-            forceHideGallery();
+            if (!skipHide) forceHideGallery();
             hideGalleryUploadMessage();
         }, 300);
     };
@@ -6866,6 +6868,10 @@ function createGalleryButton() {
             clearGalleryOpenInFlight();
             const hs = document.getElementById('gic-gallery-warmup-hide');
             if (hs) hs.remove();
+        }
+        // ★ warmup中断時もユーザー意図をマーク（warmup の forceHide で閉じられるのを防ぐ）
+        if (typeof window.__gicMarkUserOpened === 'function') {
+            window.__gicMarkUserOpened();
         }
         if (!isGalleryOpen() && warmupState !== 'running') clearGalleryOpenInFlight();
         flashBlue();
@@ -7318,6 +7324,8 @@ function bootstrapGIC() {
     window.__gicGalleryAutoCloseInstalled = true;
 
     let _lastUserOpenTime = 0;
+    // ★ ユーザーが明示的にギャラリーを開いたか（このフラグが立っている間は絶対に閉じない）
+    let _userExplicitlyOpened = false;
     const USER_GRACE_MS = 2000;
     // warmup 中かどうか（この間はユーザー意図なしとみなす）
     const isWarmupRunning = () => (typeof warmupState !== 'undefined' && warmupState === 'running');
@@ -7332,18 +7340,31 @@ function bootstrapGIC() {
     ];
     ['pointerdown', 'click'].forEach(t => {
         document.addEventListener(t, (e) => {
+            // ★ warmup 中の programmatic click（el.click()）はユーザー意図とみなさない
+            if (isWarmupRunning()) return;
             for (const sel of USER_TRIGGERS) {
-                if (e.target?.closest?.(sel)) { _lastUserOpenTime = Date.now(); return; }
+                if (e.target?.closest?.(sel)) {
+                    _lastUserOpenTime = Date.now();
+                    _userExplicitlyOpened = true;   // ★ ユーザー意図フラグを立てる
+                    return;
+                }
             }
         }, true);
     });
 
+    // ★ 外部（triggerAction / warmUpGallery 中断時）からユーザー意図を明示マークするフック
+    window.__gicMarkUserOpened = () => {
+        _lastUserOpenTime = Date.now();
+        _userExplicitlyOpened = true;
+    };
+    window.__gicIsUserOpened = () => _userExplicitlyOpened;
+
     // ---- (A) 新規 #gallery 要素を監視して即 display:none ----
-    //     warmup 中 + user-open 意図なしの間だけ即時 hide する
     function forceHideNewGallery(g) {
         if (!g) return;
+        if (_userExplicitlyOpened) return;   // ★ ユーザーが開いた場合は触らない
         const userOpened = (Date.now() - _lastUserOpenTime) < USER_GRACE_MS;
-        if (userOpened) return;  // ユーザーが開いた場合は触らない
+        if (userOpened) return;
         g.style.setProperty('display', 'none', 'important');
         g.style.setProperty('visibility', 'hidden', 'important');
     }
@@ -7356,6 +7377,7 @@ function bootstrapGIC() {
                 if (node.id === 'gallery') g = node;
                 else if (node.querySelector) g = node.querySelector('#gallery');
                 if (g) {
+                    if (_userExplicitlyOpened) continue;   // ★ ユーザーオープン中は無視
                     console.log('[GIC] 🚫 新規 #gallery を検出 → 即時 hide');
                     forceHideNewGallery(g);
                 }
@@ -7365,11 +7387,11 @@ function bootstrapGIC() {
     mo.observe(document.body, { childList: true, subtree: true });
 
     // ---- (B) 既存 #gallery の style 変化も監視 ----
-    //     ST が display を上書きしたら即座に戻す
     function attachStyleObserver(g) {
         if (!g || g.dataset.gicStyleObserved === '1') return;
         g.dataset.gicStyleObserved = '1';
         const so = new MutationObserver(() => {
+            if (_userExplicitlyOpened) return;   // ★ ユーザーオープン中は無視
             if ((Date.now() - _lastUserOpenTime) < USER_GRACE_MS) return;
             if (isWarmupRunning()) return;
             const cs = window.getComputedStyle(g);
@@ -7389,20 +7411,27 @@ function bootstrapGIC() {
     // ---- (C) 既存ポーリングの安全網（バックアップ） ----
     setInterval(() => {
         if (isWarmupRunning()) return;
-        if (!isGalleryOpen()) return;
+        if (!isGalleryOpen()) {
+            // ★ ギャラリーが閉じられたらユーザー意図フラグをリセット
+            _userExplicitlyOpened = false;
+            return;
+        }
+        if (_userExplicitlyOpened) return;   // ★ ユーザーが開いた場合は絶対に閉じない
         if (Date.now() - _lastUserOpenTime < USER_GRACE_MS) return;
         console.log('[GIC] 🚫 ユーザー操作なしのギャラリーを検出 → 強制クローズ');
         try { hideGalleryAttachmentsImmediately('auto-open guard'); } catch (e) {}
         let attempts = 0;
         const retry = setInterval(() => {
             attempts++;
+            // ★ リトライ中にユーザーが開いた場合は中止
+            if (_userExplicitlyOpened) { clearInterval(retry); return; }
             if (!isGalleryOpen()) { clearInterval(retry); return; }
             if (attempts > 10) { clearInterval(retry); return; }
             try { hideGalleryAttachmentsImmediately('auto-open guard retry'); } catch (e) {}
         }, 150);
     }, 400);
 
-    console.log('[GIC] 🛡️ ギャラリー自動クローズガードを設置（MutationObserver + ポーリング）');
+    console.log('[GIC] 🛡️ ギャラリー自動クローズガードを設置（MutationObserver + ポーリング、ユーザー明示オープン対応）');
 })();
 
 bootstrapGIC();
