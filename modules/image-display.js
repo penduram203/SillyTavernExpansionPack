@@ -1354,9 +1354,58 @@
         return false;
     }
 
+    // ============================================================
+    // ★ 別キャラ画像エントリの「一度きり」マイグレーション管理
+    //   character.data.extensions.image_display_extension_meta に
+    //   foreign_cleaned_version: 1 を保存し、2回目以降はクリーンアップをスキップ。
+    //   - 新規インポートされたキャラはフラグを持たないため、初回のみクリーンアップが走る
+    //   - バージョンを上げれば将来の再マイグレーションにも対応可能
+    // ============================================================
+    const IMG_MIGRATION_META_NS = 'image_display_extension_meta';
+    const IMG_MIGRATION_FLAG_KEY = 'foreign_cleaned_version';
+    const IMG_MIGRATION_VERSION = 1;
+
+    function isMigrationDoneForChar(charName) {
+        if (!charName) return false;
+        try {
+            const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+            const char = ctx?.characters?.[ctx?.characterId];
+            if (char?.name !== charName) return false;
+            const v = char?.data?.extensions?.[IMG_MIGRATION_META_NS]?.[IMG_MIGRATION_FLAG_KEY] || 0;
+            return v >= IMG_MIGRATION_VERSION;
+        } catch (e) { return false; }
+    }
+
+    function markMigrationDoneForChar(charName) {
+        if (!charName) return false;
+        try {
+            const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+            const char = ctx?.characters?.[ctx?.characterId];
+            if (char?.name !== charName) return false;
+            if (!char.data) char.data = {};
+            if (!char.data.extensions) char.data.extensions = {};
+            if (!char.data.extensions[IMG_MIGRATION_META_NS]) {
+                char.data.extensions[IMG_MIGRATION_META_NS] = {};
+            }
+            char.data.extensions[IMG_MIGRATION_META_NS][IMG_MIGRATION_FLAG_KEY] = IMG_MIGRATION_VERSION;
+            if (window.CharStore?.saveCharacterExtension) {
+                window.CharStore.saveCharacterExtension(
+                    IMG_MIGRATION_META_NS,
+                    char.data.extensions[IMG_MIGRATION_META_NS]
+                );
+            }
+            return true;
+        } catch (e) { return false; }
+    }
+    
     function cleanForeignImageEntries(imageMap, charName) {
         if (!imageMap || typeof imageMap !== 'object' || !charName) return imageMap;
 
+        // ★ このキャラで既にクリーンアップ済みなら何もしない
+        if (isMigrationDoneForChar(charName)) {
+            return imageMap;
+        }
+        
         let removed = 0;
         const cleaned = {};
 
@@ -1405,6 +1454,10 @@
             } catch (e) { /* ignore */ }
         }
 
+        // ★ クリーンアップ完了をマーク（removed=0 でもマーク）
+        //    これ以降、このキャラではクリーンアップ関数が即 return する
+        markMigrationDoneForChar(charName);
+        
         return cleaned;
     }
             
@@ -2115,6 +2168,32 @@
                 return { changed: false, error: String(e) };
             }
         },
+
+        // ★ マイグレーションフラグをリセット（手動で再クリーンアップしたい時用）
+        resetMigration: function () {
+            const charName = getCharacterNameFromDOM();
+            if (!charName) return { ok: false, message: 'no charName' };
+            try {
+                const ctx = SillyTavern.getContext();
+                const char = ctx?.characters?.[ctx?.characterId];
+                if (char?.name !== charName) {
+                    return { ok: false, message: 'char mismatch' };
+                }
+                if (char?.data?.extensions?.[IMG_MIGRATION_META_NS]) {
+                    delete char.data.extensions[IMG_MIGRATION_META_NS][IMG_MIGRATION_FLAG_KEY];
+                    if (window.CharStore?.saveCharacterExtension) {
+                        window.CharStore.saveCharacterExtension(
+                            IMG_MIGRATION_META_NS,
+                            char.data.extensions[IMG_MIGRATION_META_NS]
+                        );
+                    }
+                }
+                return { ok: true, charName };
+            } catch (e) {
+                return { ok: false, error: String(e) };
+            }
+        },
+        
         getCurrentMode: function () { return currentMode; },
         openCustomWindow: function () { try { openCustomWindow(); } catch (e) { console.warn(e); } },
         closeCustomWindow: function () { try { closeCustomWindow(); } catch (e) { console.warn(e); } },
