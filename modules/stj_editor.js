@@ -1008,6 +1008,39 @@
         document.querySelectorAll('.stj-keyword-item .stj-delete-row').forEach(btn => btn.disabled = false);
     }
 
+    // ============================================================
+    // ★ フォームを完全リセット（別キャラのセル内容が残らないように）
+    //    openExportModal で毎回呼び出し、その後に loadExistingJSONData / loadSavedData
+    //    で新しいキャラの内容を読み込む。
+    // ============================================================
+    function resetFormToEmpty() {
+        // 特殊セル（デフォルト・サムネイル）を空に
+        const defaultCell = document.querySelector('.stj-special-item:nth-child(1)');
+        if (defaultCell) {
+            setCellImages(defaultCell, []);
+            updateCellPreview(defaultCell);
+        }
+
+        const thumbnailCell = document.querySelector('.stj-special-item:nth-child(2)');
+        if (thumbnailCell) {
+            setCellImages(thumbnailCell, []);
+            updateCellPreview(thumbnailCell);
+        }
+
+        // キーワードコンテナを空にして、空セル1個だけ配置
+        const container = document.getElementById('stj_keywords_container');
+        if (container) {
+            container.innerHTML = '';
+            addKeywordRowWithData(container, 0, { keyword: '', images: [] });
+        }
+
+        // テスト入力欄もクリア
+        const testInput = document.getElementById('stj_test_input');
+        if (testInput) testInput.value = '';
+
+        runLiveTest();
+    }
+    
     function openExportModal() {
         if (!stjModalEl) return;
         if (stjModalEl.style.display === 'block') return;
@@ -1029,6 +1062,11 @@
         const nameEl = document.getElementById('stj_char_name_display');
         if (nameEl) nameEl.textContent = charName;
 
+        // ★ 前回編集した別キャラのセル内容が残らないよう、必ず先にフォームをリセット
+        //    (新規キャラでデータが無い場合、旧キャラのセルが残ったままになり
+        //     autoSave で新キャラ側に誤保存されるのを防ぐ)
+        resetFormToEmpty();
+        
         (async () => {
             try {
                 await loadExistingJSONData(charName);
@@ -2281,6 +2319,19 @@
             const nameEl = document.getElementById('stj_char_name_display');
             const charName = nameEl ? nameEl.textContent : '';
             if (!charName) return;
+
+            // ★ 現在アクティブなキャラと不一致なら保存しない（別キャラへのデータ混入防止）
+            try {
+                const ctx = getSTContext();
+                const currentChar = ctx?.characters?.[ctx?.characterId] || ctx?.character;
+                const currentCharName = currentChar?.name || '';
+                if (currentCharName && currentCharName !== charName) {
+                    console.debug(
+                        `[STJ Editor] autoSave: キャラ不一致 (editor="${charName}", current="${currentCharName}") → 保存スキップ`
+                    );
+                    return;
+                }
+            } catch (e) { /* ignore */ }
 
             // 既存: UI復元用に editor 状態を extensionSettings に保存（残してよい）
             saveData({ silent: true });
