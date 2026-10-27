@@ -299,4 +299,75 @@ window.CharStore = {
     flushCharacterExtension,
     flushAll,
 };
+
+// ============================================================
+// ★ 最終防衛: export/ダウンロード系ボタン押下時に backup を強制注入
+// ============================================================
+(function installExportGuard() {
+    if (window.__charStoreExportGuardInstalled) return;
+    window.__charStoreExportGuardInstalled = true;
+
+    // キャラクター JSON / PNG の export ボタン判定（ID/テキスト/title/class/data-i18n）
+    function isExportButton(btn) {
+        if (!btn) return false;
+        const combined = [
+            btn.id,
+            btn.textContent,
+            btn.title,
+            btn.className,
+            btn.getAttribute?.('data-i18n'),
+            btn.getAttribute?.('aria-label'),
+        ].filter(Boolean).join(' ').toLowerCase();
+
+        // STJ Editor は除外（別物）
+        if (/stj|_ext/.test(combined)) return false;
+        if (/import|cancel|close/.test(combined)) return false;
+
+        return /export|download|ダウンロード|エクスポート|json|\.png/.test(combined);
+    }
+
+    function restoreBackupToMemory() {
+        const ctx = _getCtx();
+        const char = ctx?.characters?.[ctx?.characterId];
+        if (!char) return 0;
+        let restored = 0;
+        for (const [ns, payload] of Object.entries(_backup)) {
+            if (!payload) continue;
+            if (!char.data) char.data = {};
+            if (!char.data.extensions) char.data.extensions = {};
+            char.data.extensions[ns] = JSON.parse(JSON.stringify(payload));
+            restored++;
+        }
+        if (restored > 0) {
+            console.log(`[CharStore] 🎯 export 直前に backup から ${restored} namespace を復元`);
+            for (const ns of Object.keys(_backup)) {
+                const ip = _backup[ns]?.['003']?.img_prompt?.slice(0, 30);
+                if (ip) console.log(`  ${ns}.003: ${JSON.stringify(ip)}`);
+            }
+        }
+        return restored;
+    }
+
+    // capture phase で実行（ST のハンドラより先）
+    document.addEventListener('click', (e) => {
+        const btn = e.target?.closest?.('button, [role="button"], a');
+        if (!btn) return;
+        if (!isExportButton(btn)) return;
+        console.log(`[CharStore] 🎯 export ボタン検出: id="${btn.id}" text="${(btn.textContent || '').trim().slice(0, 20)}"`);
+        restoreBackupToMemory();
+    }, true);
+
+    // pointerdown/mousedown でも発火（click より早いタイミング）
+    ['pointerdown', 'mousedown'].forEach(evt => {
+        document.addEventListener(evt, (e) => {
+            const btn = e.target?.closest?.('button, [role="button"], a');
+            if (!btn) return;
+            if (!isExportButton(btn)) return;
+            restoreBackupToMemory();
+        }, true);
+    });
+
+    console.log('[CharStore] 🎯 export 直前ガードをインストールしました');
+})();
+
 console.log(`${LOG} 公開APIを window.CharStore に登録`);
