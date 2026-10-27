@@ -1136,8 +1136,6 @@ window.LorebookExpansion = {
     getData: getExpansionData,
     setData: setExpansionData,
 
-    dumpStore: () => JSON.parse(JSON.stringify(getLexStore())),
-
     // ★ Phase 2 追加: character.data 側のダンプ
     dumpCharacterLex: () => {
         try {
@@ -1150,15 +1148,6 @@ window.LorebookExpansion = {
 
     // ★ Phase 2 追加: charKey 決定ロジックを外部から確認できるように
     getCharKey,
-
-    clearWorldData: (worldName) => {
-        const store = getLexStore();
-        if (store[worldName]) {
-            delete store[worldName];
-            saveSettings();
-            console.log(LOG, `world "${worldName}" の LEX データを削除`);
-        }
-    },
 
     extractChoiceNumber,
     findEntryByChoice,
