@@ -7319,12 +7319,16 @@ function bootstrapGIC() {
 
     let _lastUserOpenTime = 0;
     const USER_GRACE_MS = 2000;
+    // warmup 中かどうか（この間はユーザー意図なしとみなす）
+    const isWarmupRunning = () => (typeof warmupState !== 'undefined' && warmupState === 'running');
 
     const USER_TRIGGERS = [
         '#gic-open-gallery-button',
         '[forchar="gallery"]',
         '#gallery_button',
         '.gallery-button',
+        '.drawer-icon[title*="allery" i]',
+        '.drawer-icon[title*="ギャラリー"]',
     ];
     ['pointerdown', 'click'].forEach(t => {
         document.addEventListener(t, (e) => {
@@ -7334,8 +7338,57 @@ function bootstrapGIC() {
         }, true);
     });
 
+    // ---- (A) 新規 #gallery 要素を監視して即 display:none ----
+    //     warmup 中 + user-open 意図なしの間だけ即時 hide する
+    function forceHideNewGallery(g) {
+        if (!g) return;
+        const userOpened = (Date.now() - _lastUserOpenTime) < USER_GRACE_MS;
+        if (userOpened) return;  // ユーザーが開いた場合は触らない
+        g.style.setProperty('display', 'none', 'important');
+        g.style.setProperty('visibility', 'hidden', 'important');
+    }
+
+    const mo = new MutationObserver((mutations) => {
+        for (const m of mutations) {
+            for (const node of m.addedNodes) {
+                if (node.nodeType !== 1) continue;
+                let g = null;
+                if (node.id === 'gallery') g = node;
+                else if (node.querySelector) g = node.querySelector('#gallery');
+                if (g) {
+                    console.log('[GIC] 🚫 新規 #gallery を検出 → 即時 hide');
+                    forceHideNewGallery(g);
+                }
+            }
+        }
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+
+    // ---- (B) 既存 #gallery の style 変化も監視 ----
+    //     ST が display を上書きしたら即座に戻す
+    function attachStyleObserver(g) {
+        if (!g || g.dataset.gicStyleObserved === '1') return;
+        g.dataset.gicStyleObserved = '1';
+        const so = new MutationObserver(() => {
+            if ((Date.now() - _lastUserOpenTime) < USER_GRACE_MS) return;
+            if (isWarmupRunning()) return;
+            const cs = window.getComputedStyle(g);
+            if (cs.display !== 'none') {
+                g.style.setProperty('display', 'none', 'important');
+            }
+        });
+        so.observe(g, { attributes: true, attributeFilter: ['style', 'class'] });
+    }
+    function attachAllExisting() {
+        const g = document.getElementById('gallery');
+        if (g) attachStyleObserver(g);
+    }
+    attachAllExisting();
+    setInterval(attachAllExisting, 500);
+
+    // ---- (C) 既存ポーリングの安全網（バックアップ） ----
     setInterval(() => {
-        if (warmupState === 'running') return;  // warmUpGallery 実行中は触らない
+        if (isWarmupRunning()) return;
         if (!isGalleryOpen()) return;
         if (Date.now() - _lastUserOpenTime < USER_GRACE_MS) return;
         console.log('[GIC] 🚫 ユーザー操作なしのギャラリーを検出 → 強制クローズ');
@@ -7349,7 +7402,7 @@ function bootstrapGIC() {
         }, 150);
     }, 400);
 
-    console.log('[GIC] 🛡️ ギャラリー自動クローズガードを設置');
+    console.log('[GIC] 🛡️ ギャラリー自動クローズガードを設置（MutationObserver + ポーリング）');
 })();
 
 bootstrapGIC();
