@@ -189,7 +189,7 @@ function saveToCharacterLex(charKey, data) {
 }
 
 // ============================================================
-// ★ Phase 2: getDataFor — character.data を最優先、無ければ settings → entry
+// ★ Phase 3: getDataFor — character.data を最優先、無ければ settings → entry
 // ============================================================
 function getDataFor(worldName, uid, entry) {
     if (!worldName || uid === null || uid === undefined) {
@@ -207,17 +207,15 @@ function getDataFor(worldName, uid, entry) {
         }
     }
 
-    // ── ② 互換: extension_settings.lorebook_expansion.data[world][uid] ──
+    // ── ② 互換: extension_settings.lorebook_expansion.data[world][uid]（読み取り専用）──
     const store = getLexStore();
     const wKey = String(worldName);
     const uKey = String(uid);
-
-    if (!store[wKey]) store[wKey] = {};
-    const wd = store[wKey];
+    const wd = store[wKey] || {};
 
     if (wd[uKey] && typeof wd[uKey] === 'object') {
         const normalized = normalizeLexData(wd[uKey]);
-        // settings に有効データがあれば character.data へ lazy 移行
+        // ★ character.data への一方向移行のみ（settings には書き戻さない）
         if (charKey && (normalized.img_prompt || normalized.choices.length > 0)) {
             saveToCharacterLex(charKey, normalized);
             debugLog(`lazy移行: ${charKey} (settings→character.data)`);
@@ -225,21 +223,18 @@ function getDataFor(worldName, uid, entry) {
         return normalized;
     }
 
-    // ── ③ レガシー: entry.extensions.lorebook_expansion (world ファイルミラー) ──
+    // ── ③ 互換: entry.extensions.lorebook_expansion（読み取り専用）──
     if (entry && entry.extensions && entry.extensions[MODULE_NAME]) {
         const migrated = normalizeLexData(entry.extensions[MODULE_NAME]);
-        wd[uKey] = migrated;
-        saveSettings();
+        // ★ character.data への一方向移行のみ（settings には書き戻さない）
         if (charKey && (migrated.img_prompt || migrated.choices.length > 0)) {
             saveToCharacterLex(charKey, migrated);
-            debugLog(`レガシー移行: world=${worldName}, uid=${uid}, charKey=${charKey}`);
+            debugLog(`lazy移行: ${charKey} (entry.extensions→character.data)`);
         }
         return migrated;
     }
 
-    const def = { img_prompt: '', choices: [] };
-    wd[uKey] = def;
-    return def;
+    return { img_prompt: '', choices: [] };
 }
 
 // ============================================================
