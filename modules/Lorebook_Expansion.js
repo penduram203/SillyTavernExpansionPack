@@ -196,42 +196,14 @@ function getDataFor(worldName, uid, entry) {
         return { img_prompt: '', choices: [] };
     }
 
+    // ── Phase 4: character.data のみを参照 ──
     const charKey = getCharKey(entry, uid);
+    if (!charKey) return { img_prompt: '', choices: [] };
 
-    // ── ① 一次情報源: character.data.extensions.lorebook_expansion ──
-    if (charKey) {
-        const charLex = getCharacterLexData();
-        const charRec = charLex[charKey];
-        if (charRec && typeof charRec === 'object') {
-            return normalizeLexData(charRec);
-        }
-    }
-
-    // ── ② 互換: extension_settings.lorebook_expansion.data[world][uid]（読み取り専用）──
-    const store = getLexStore();
-    const wKey = String(worldName);
-    const uKey = String(uid);
-    const wd = store[wKey] || {};
-
-    if (wd[uKey] && typeof wd[uKey] === 'object') {
-        const normalized = normalizeLexData(wd[uKey]);
-        // ★ character.data への一方向移行のみ（settings には書き戻さない）
-        if (charKey && (normalized.img_prompt || normalized.choices.length > 0)) {
-            saveToCharacterLex(charKey, normalized);
-            debugLog(`lazy移行: ${charKey} (settings→character.data)`);
-        }
-        return normalized;
-    }
-
-    // ── ③ 互換: entry.extensions.lorebook_expansion（読み取り専用）──
-    if (entry && entry.extensions && entry.extensions[MODULE_NAME]) {
-        const migrated = normalizeLexData(entry.extensions[MODULE_NAME]);
-        // ★ character.data への一方向移行のみ（settings には書き戻さない）
-        if (charKey && (migrated.img_prompt || migrated.choices.length > 0)) {
-            saveToCharacterLex(charKey, migrated);
-            debugLog(`lazy移行: ${charKey} (entry.extensions→character.data)`);
-        }
-        return migrated;
+    const charLex = getCharacterLexData();
+    const charRec = charLex[charKey];
+    if (charRec && typeof charRec === 'object') {
+        return normalizeLexData(charRec);
     }
 
     return { img_prompt: '', choices: [] };
