@@ -594,6 +594,9 @@ window.CharStore = {
         if (!btn) return;
         if (!isStJsonExportButton(btn)) return;
 
+        // ★ 追加: PNG export (installOwnPngExport) が処理するので、Shift 無しはスキップ
+        if (!e.shiftKey) return;
+        
         // backup が無ければ ST に任せる
         const hasBackup = Object.keys(_backup).some(ns => _backup[ns]);
         if (!hasBackup) {
