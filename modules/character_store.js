@@ -1,4 +1,4 @@
-// modules/character_store.js
+// character_store.js
 //
 // character.data.extensions.{namespace} への読み書きを一元化するヘルパー。
 //
