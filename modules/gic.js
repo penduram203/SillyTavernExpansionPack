@@ -6357,6 +6357,13 @@ function openGalleryFromGic() {
 function hideGalleryAttachmentsImmediately(reason = '') {
     if (reason) console.log(`[GIC] 🚪 付属UIを即座に非表示 (${reason})`);
 
+    // ★ ギャラリー本体も display: none で強制クローズ（closeGalleryProgrammatically の実効性担保）
+    const g = document.getElementById('gallery');
+    if (g) {
+        g.style.setProperty('display', 'none', 'important');
+        g.style.setProperty('visibility', 'hidden', 'important');
+    }
+    
     window.__gicPendingPreview = null;
 
     const pager = document.querySelector('.gic-pagination-pager');
@@ -6497,13 +6504,16 @@ async function preloadGalleryImages(timeoutMs = GALLERY_WARMUP_PRELOAD_TIMEOUT_M
 async function warmUpGallery() {
     if (warmupState !== 'idle') return;
     if (isGalleryOpen()) { warmupState = 'done'; return; }
-
     warmupState = 'running';
 
+    // ★ 強化版 hideStyle: ギャラリーを完全に不可視化
     const hideStyle = document.createElement('style');
     hideStyle.id = 'gic-gallery-warmup-hide';
     hideStyle.textContent = `
-        #gallery, .nGY2Gallery, .nGY2GalleryTop, .nGY2GalleryBottom, [forchar="gallery"] {
+        #gallery, #gallery *,
+        .nGY2Gallery, .nGY2Gallery *,
+        .nGY2GalleryTop, .nGY2GalleryBottom,
+        [forchar="gallery"] {
             visibility: hidden !important;
             opacity: 0 !important;
             pointer-events: none !important;
@@ -6511,24 +6521,48 @@ async function warmUpGallery() {
     `;
     document.head.appendChild(hideStyle);
 
+    // ★ 開いた瞬間から display: none を強制し続ける（DOM 構築は走る／画面には出ない）
+    const forceHideGallery = () => {
+        const g = document.getElementById('gallery');
+        if (g) {
+            g.style.setProperty('display', 'none', 'important');
+            g.style.setProperty('visibility', 'hidden', 'important');
+        }
+    };
+    const hideInterval = setInterval(forceHideGallery, 50);
+
+    // ★ 完了処理を 1 箇所に集約（aborted / error / success で共通）
+    const finalize = (nextState) => {
+        warmupState = nextState;
+        forceHideGallery();
+        clearInterval(hideInterval);
+        // 300ms 遅延で hideStyle を外すが、gallery には display:none を残す
+        setTimeout(() => {
+            try { hideStyle.remove(); } catch (e) {}
+            forceHideGallery();
+            hideGalleryUploadMessage();
+        }, 300);
+    };
+
     try {
         if (!openGalleryFromGic()) {
-            warmupState = 'idle';
-            hideStyle.remove();
+            console.log('[GIC] warmUpGallery: openGalleryFromGic 失敗 → 中止');
+            finalize('idle');
             return;
         }
 
         let galleryEl = null;
         for (let round = 0; round < 3 && !galleryEl; round++) {
-            if (warmupState === 'aborted') { hideStyle.remove(); return; }
-            const appearStart = Date.now();
-            while (Date.now() - appearStart < 8000) {
-                if (warmupState === 'aborted') { hideStyle.remove(); return; }
+            if (warmupState === 'aborted') { finalize('aborted'); return; }
+            const start = Date.now();
+            while (Date.now() - start < 8000) {
+                if (warmupState === 'aborted') { finalize('aborted'); return; }
                 galleryEl = document.getElementById('gallery');
                 if (galleryEl) break;
                 await wait(200);
             }
             if (galleryEl) break;
+            // 見つからない場合は閉じて再試行
             closeGalleryProgrammatically();
             await wait(700);
             clearGalleryOpenInFlight();
@@ -6539,36 +6573,42 @@ async function warmUpGallery() {
         }
 
         if (!galleryEl) {
-            warmupState = 'idle';
-            hideStyle.remove();
-            closeGalleryProgrammatically();
+            console.log('[GIC] warmUpGallery: gallery DOM 出現せず → 中止');
+            finalize('idle');
             return;
         }
 
+        // コンテンツ出現待ち（最大 5 秒に短縮）
         const contentStart = Date.now();
-        while (Date.now() - contentStart < 15000) {
-            if (warmupState === 'aborted') { hideStyle.remove(); return; }
+        while (Date.now() - contentStart < 5000) {
+            if (warmupState === 'aborted') { finalize('aborted'); return; }
             const ng2 = galleryEl.querySelector('.nGY2Gallery');
             const thumbs = galleryEl.querySelectorAll('.nGY2GThumbnail, .nGY2GThumbnail_l1');
             if (ng2 || thumbs.length > 0) break;
             await wait(200);
         }
 
-        await preloadGalleryImages();
-        if (warmupState === 'aborted') { hideStyle.remove(); return; }
+        // 画像プリロード（最大 5 秒に短縮）
+        await preloadGalleryImages(5000);
+        if (warmupState === 'aborted') { finalize('aborted'); return; }
 
-        await wait(GALLERY_WARMUP_HOLD_MS);
-        if (warmupState === 'aborted') { hideStyle.remove(); return; }
+        // レイアウト計算が走るよう 500ms 待つ（旧 3000ms から短縮）
+        await wait(500);
 
+        // ★ 確実に閉じる: 3 段階
+        forceHideGallery();
         closeGalleryProgrammatically();
-        setTimeout(() => {
-            hideStyle.remove();
-            hideGalleryUploadMessage();
-        }, 500);
-        warmupState = 'done';
+        await wait(150);
+        forceHideGallery();
+        closeGalleryProgrammatically();
+        await wait(150);
+        forceHideGallery();
+
+        finalize('done');
+        console.log('[GIC] ✅ warmUpGallery 完了（ギャラリー非表示を維持）');
     } catch (e) {
-        warmupState = 'idle';
-        try { hideStyle.remove(); } catch (_) { /* ignore */ }
+        console.warn('[GIC] warmUpGallery 例外:', e);
+        finalize('idle');
     }
 }
 
@@ -7269,6 +7309,48 @@ function bootstrapGIC() {
         else startOnce();
     }
 }
+
+// ============================================================
+// ★ 万一 warmUpGallery が失敗してギャラリーが残った場合の安全網
+// ============================================================
+(function installGalleryAutoCloseGuard() {
+    if (window.__gicGalleryAutoCloseInstalled) return;
+    window.__gicGalleryAutoCloseInstalled = true;
+
+    let _lastUserOpenTime = 0;
+    const USER_GRACE_MS = 2000;
+
+    const USER_TRIGGERS = [
+        '#gic-open-gallery-button',
+        '[forchar="gallery"]',
+        '#gallery_button',
+        '.gallery-button',
+    ];
+    ['pointerdown', 'click'].forEach(t => {
+        document.addEventListener(t, (e) => {
+            for (const sel of USER_TRIGGERS) {
+                if (e.target?.closest?.(sel)) { _lastUserOpenTime = Date.now(); return; }
+            }
+        }, true);
+    });
+
+    setInterval(() => {
+        if (warmupState === 'running') return;  // warmUpGallery 実行中は触らない
+        if (!isGalleryOpen()) return;
+        if (Date.now() - _lastUserOpenTime < USER_GRACE_MS) return;
+        console.log('[GIC] 🚫 ユーザー操作なしのギャラリーを検出 → 強制クローズ');
+        try { hideGalleryAttachmentsImmediately('auto-open guard'); } catch (e) {}
+        let attempts = 0;
+        const retry = setInterval(() => {
+            attempts++;
+            if (!isGalleryOpen()) { clearInterval(retry); return; }
+            if (attempts > 10) { clearInterval(retry); return; }
+            try { hideGalleryAttachmentsImmediately('auto-open guard retry'); } catch (e) {}
+        }, 150);
+    }, 400);
+
+    console.log('[GIC] 🛡️ ギャラリー自動クローズガードを設置');
+})();
 
 bootstrapGIC();
 
