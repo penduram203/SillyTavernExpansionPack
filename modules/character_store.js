@@ -310,6 +310,111 @@ window.CharStore = {
 };
 
 // ============================================================
+// ★ 最終解: ST の export を完全に迂回し、自前で JSON を生成する
+//    ST の export は createOrEditCharacter() を経由して memory を
+//    フォーム状態（= lorebook_expansion が無い）で上書きするため、
+//    export 経路を完全に奪って自前で生成する
+// ============================================================
+(function installOwnJsonExport() {
+    if (window.__charStoreOwnExportInstalled) return;
+    window.__charStoreOwnExportInstalled = true;
+
+    function isStJsonExportButton(btn) {
+        if (!btn) return false;
+        const combined = [
+            btn.id, btn.textContent, btn.title, btn.className,
+        ].filter(Boolean).join(' ').toLowerCase();
+        // STJ Editor は除外
+        if (/stj|_ext/.test(combined)) return false;
+        // export 系のみ
+        if (!/export/.test(combined)) return false;
+        // PNG export と区別するため、明示的に JSON export 系のボタンのみ対象
+        // （ST の export_button は JSON を出す）
+        return btn.id === 'export_button';
+    }
+
+    function buildExportJson() {
+        const ctx = _getCtx();
+        const char = ctx?.characters?.[ctx?.characterId];
+        if (!char) return null;
+
+        // backup を memory に強制注入
+        for (const [ns, payload] of Object.entries(_backup)) {
+            if (!payload) continue;
+            if (!char.data) char.data = {};
+            if (!char.data.extensions) char.data.extensions = {};
+            char.data.extensions[ns] = JSON.parse(JSON.stringify(payload));
+        }
+
+        // ST と同じ形式でエクスポートデータを構築
+        const exportData = JSON.parse(JSON.stringify(char));
+        exportData.create_date = exportData.create_date || new Date().toISOString();
+        exportData.avatar_url = char.avatar || '';
+        exportData.ch_name = char.name || '';
+
+        return { char, exportData };
+    }
+
+    function downloadJson(jsonStr, filename) {
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => {
+            try { URL.revokeObjectURL(url); } catch (e) { /* ignore */ }
+        }, 2000);
+    }
+
+    document.addEventListener('click', (e) => {
+        const btn = e.target?.closest?.('button, [role="button"]');
+        if (!btn) return;
+        if (!isStJsonExportButton(btn)) return;
+
+        // backup が無ければ ST に任せる
+        const hasBackup = Object.keys(_backup).some(ns => _backup[ns]);
+        if (!hasBackup) {
+            console.log('[CharStore] backup なし → ST の export に任せます');
+            return;
+        }
+
+        e.preventDefault();
+        e.stopImmediatePropagation();
+
+        try {
+            const built = buildExportJson();
+            if (!built) {
+                console.warn('[CharStore] export データ構築失敗 → ST に任せます');
+                return;
+            }
+            const { char, exportData } = built;
+
+            console.log('[CharStore] 🎯 自前 export を実行（ST 迂回）');
+            for (const [ns, payload] of Object.entries(_backup)) {
+                if (!payload) continue;
+                const ip = payload?.['003']?.img_prompt?.slice(0, 40);
+                if (ip) console.log(`  ${ns}.003: ${JSON.stringify(ip)}`);
+            }
+
+            const jsonStr = JSON.stringify(exportData, null, 4);
+            const filename = `${char.name || 'character'}.json`;
+            downloadJson(jsonStr, filename);
+            console.log(`[CharStore] 🎯 自前 export 完了: ${filename} (${jsonStr.length} bytes)`);
+        } catch (err) {
+            console.error('[CharStore] 自前 export エラー:', err);
+            // フォールバック: ST のハンドラを再実行
+            try { btn.click(); } catch (e2) { /* ignore */ }
+        }
+    }, true);  // capture phase で ST より先に処理
+
+    console.log('[CharStore] 🎯 自前 JSON export フックをインストール');
+})();
+
+// ============================================================
 // ★ 最終防衛: Blob コンストラクタをパッチして、JSON export 時に
 //    _backup を強制的に data.extensions へ注入する
 //    ST が characters[chid] ではなく内部スナップショットから
