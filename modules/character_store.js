@@ -310,6 +310,225 @@ window.CharStore = {
 };
 
 // ============================================================
+// ★ PNG export: ST の export_button を乗っ取り、自前で PNG 生成
+//    - avatar ファイルを取得（avatar="none" でも <name>.png を試す）
+//    - chara / ccv3 の tEXt チャンクを _backup で書き換え
+//    - 単独クリック → PNG、Shift+Click → JSON
+// ============================================================
+(function installOwnPngExport() {
+    if (window.__charStoreOwnPngInstalled) return;
+    window.__charStoreOwnPngInstalled = true;
+
+    // CRC32 テーブル
+    const CRC_TABLE = (() => {
+        const t = new Uint32Array(256);
+        for (let i = 0; i < 256; i++) {
+            let c = i;
+            for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+            t[i] = c;
+        }
+        return t;
+    })();
+
+    function crc32(bytes) {
+        let crc = -1;
+        for (let i = 0; i < bytes.length; i++) crc = (crc >>> 8) ^ CRC_TABLE[(crc ^ bytes[i]) & 0xFF];
+        return (crc ^ -1) >>> 0;
+    }
+
+    function makeChunk(type, data) {
+        const typeBytes = new TextEncoder().encode(type);
+        const lb = new ArrayBuffer(4); new DataView(lb).setUint32(0, data.length, false);
+        const crcInput = new Uint8Array(4 + data.length);
+        crcInput.set(typeBytes, 0); crcInput.set(data, 4);
+        const cb = new ArrayBuffer(4); new DataView(cb).setUint32(0, crc32(crcInput), false);
+        const chunk = new Uint8Array(12 + data.length);
+        chunk.set(new Uint8Array(lb), 0);
+        chunk.set(typeBytes, 4);
+        chunk.set(data, 8);
+        chunk.set(new Uint8Array(cb), 8 + data.length);
+        return chunk;
+    }
+
+    function utf8ToBase64(str) { return btoa(unescape(encodeURIComponent(str))); }
+    function base64ToUtf8(b64) { return decodeURIComponent(escape(atob(b64))); }
+
+    // avatar ファイルを取得（avatar="none" でも <name>.png を試す）
+    async function fetchAvatarPngBytes() {
+        const ctx = _getCtx();
+        const char = ctx?.characters?.[ctx?.characterId];
+        if (!char) return null;
+
+        const t = Date.now();
+        const candidates = [];
+        if (char.avatar && char.avatar !== 'none') {
+            candidates.push(`/characters/${encodeURIComponent(char.avatar)}?t=${t}`);
+            candidates.push(`/user/characters/${encodeURIComponent(char.avatar)}?t=${t}`);
+            candidates.push(`/user/avatars/${encodeURIComponent(char.avatar)}?t=${t}`);
+        }
+        if (char.name) {
+            const namePng = `${char.name}.png`;
+            candidates.push(`/characters/${encodeURIComponent(namePng)}?t=${t}`);
+            candidates.push(`/user/characters/${encodeURIComponent(namePng)}?t=${t}`);
+            candidates.push(`/user/avatars/${encodeURIComponent(namePng)}?t=${t}`);
+        }
+
+        for (const url of candidates) {
+            try {
+                const resp = await fetch(url, { cache: 'no-store' });
+                if (!resp.ok) continue;
+                const bytes = new Uint8Array(await resp.arrayBuffer());
+                if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) {
+                    console.log(`[CharStore] avatar PNG 取得: ${url}`);
+                    return bytes;
+                }
+            } catch (e) { /* next */ }
+        }
+        return null;
+    }
+
+    // chara / ccv3 チャンクを _backup でパッチ
+    function patchPngBytes(bytes) {
+        const chunks = [];
+        let pos = 8;
+        const patchIndices = [];
+        const PATCH_KEYS = new Set(['chara', 'ccv3']);
+
+        while (pos + 12 <= bytes.length) {
+            const length = (bytes[pos] << 24) | (bytes[pos+1] << 16) | (bytes[pos+2] << 8) | bytes[pos+3];
+            const type = String.fromCharCode(bytes[pos+4], bytes[pos+5], bytes[pos+6], bytes[pos+7]);
+            const dataStart = pos + 8;
+            const dataEnd = dataStart + length;
+            const chunkEnd = dataEnd + 4;
+            if (chunkEnd > bytes.length || length < 0) break;
+
+            chunks.push({ type, dataStart, dataEnd, raw: bytes.slice(pos, chunkEnd) });
+
+            if (type === 'tEXt') {
+                const textData = bytes.slice(dataStart, dataEnd);
+                const nullIdx = textData.indexOf(0);
+                if (nullIdx > 0 && nullIdx < 8) {
+                    const key = String.fromCharCode(...textData.slice(0, nullIdx));
+                    if (PATCH_KEYS.has(key)) patchIndices.push({ idx: chunks.length - 1, key });
+                }
+            }
+
+            if (type === 'IEND') break;
+            pos = chunkEnd;
+        }
+
+        if (patchIndices.length === 0) {
+            console.log('[CharStore] PNG: chara/ccv3 チャンクなし');
+            return bytes;
+        }
+
+        const newChunks = [...chunks];
+        for (const { idx, key } of patchIndices) {
+            const c = chunks[idx];
+            const textData = bytes.slice(c.dataStart, c.dataEnd);
+            const nullIdx = textData.indexOf(0);
+            const base64Data = String.fromCharCode(...textData.slice(nullIdx + 1));
+            let json;
+            try {
+                json = JSON.parse(base64ToUtf8(base64Data));
+            } catch (e) {
+                console.warn(`[CharStore] PNG ${key} パース失敗:`, e);
+                continue;
+            }
+
+            const data = json.data || json;
+            if (!data.extensions) data.extensions = {};
+            let injected = 0;
+            for (const [ns, payload] of Object.entries(_backup)) {
+                if (!payload) continue;
+                data.extensions[ns] = JSON.parse(JSON.stringify(payload));
+                injected++;
+            }
+            if (injected === 0) continue;
+
+            const newJson = JSON.stringify(json);
+            const newBase64 = utf8ToBase64(newJson);
+            const newTextData = new TextEncoder().encode(key + '\0' + newBase64);
+            newChunks[idx] = { type: 'tEXt', raw: makeChunk('tEXt', newTextData) };
+
+            console.log(`[CharStore] 🎯 PNG ${key} チャンクをパッチ (${injected} ns)`);
+            for (const ns of Object.keys(_backup)) {
+                const ip = _backup[ns]?.['003']?.img_prompt?.slice(0, 30);
+                if (ip) console.log(`  ${ns}.003: ${JSON.stringify(ip)}`);
+            }
+        }
+
+        const totalLen = 8 + newChunks.reduce((s, c) => s + c.raw.length, 0);
+        const result = new Uint8Array(totalLen);
+        result.set(bytes.slice(0, 8), 0);
+        let off = 8;
+        for (const c of newChunks) { result.set(c.raw, off); off += c.raw.length; }
+        return result;
+    }
+
+    async function doPngExport() {
+        const ctx = _getCtx();
+        const char = ctx?.characters?.[ctx?.characterId];
+        if (!char) return false;
+
+        console.log('[CharStore] 🎯 自前 PNG export 開始');
+
+        const bytes = await fetchAvatarPngBytes();
+        if (!bytes) {
+            console.warn('[CharStore] PNG: avatar 取得失敗');
+            return false;
+        }
+
+        const patched = patchPngBytes(bytes);
+        const blob = new Blob([patched], { type: 'image/png' });
+        const url = URL.createObjectURL(blob);
+
+        const filename = (char.name || 'character') + '.png';
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+
+        console.log(`[CharStore] 🎯 PNG export 完了: ${filename} (${patched.length} bytes)`);
+        return true;
+    }
+
+    // export_button: 単独クリック → PNG、Shift+クリック → JSON
+    document.addEventListener('click', async (e) => {
+        const btn = e.target?.closest?.('button, [role="button"]');
+        if (!btn) return;
+        if (btn.id !== 'export_button') return;
+        if (!Object.keys(_backup).some(ns => _backup[ns])) return;
+
+        // Shift 押下 → JSON export フックに任せる
+        if (e.shiftKey) {
+            console.log('[CharStore] Shift+Click → JSON export');
+            return;
+        }
+
+        e.preventDefault();
+        e.stopImmediatePropagation();
+
+        const ok = await doPngExport();
+        if (!ok) {
+            console.log('[CharStore] PNG 不可 → JSON export にフォールバック');
+            // JSON export フックを再発火（Shift扱いで通す）
+            const fake = new MouseEvent('click', {
+                bubbles: true, cancelable: true, shiftKey: true,
+                clientX: e.clientX, clientY: e.clientY,
+            });
+            btn.dispatchEvent(fake);
+        }
+    }, true);
+
+    console.log('[CharStore] 🎯 自前 PNG export フックをインストール (Shift+Click で JSON)');
+})();
+
+// ============================================================
 // ★ 最終解: ST の export を完全に迂回し、自前で JSON を生成する
 //    ST の export は createOrEditCharacter() を経由して memory を
 //    フォーム状態（= lorebook_expansion が無い）で上書きするため、
