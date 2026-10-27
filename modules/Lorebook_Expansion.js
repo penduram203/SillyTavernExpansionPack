@@ -243,38 +243,26 @@ function getDataFor(worldName, uid, entry) {
 }
 
 // ============================================================
-// ★ Phase 2: setDataFor — character.data へ一次保存 + 互換ミラー
+// ★ Phase 3: setDataFor — character.data へ一次保存 + 互換ミラー
 // ============================================================
 function setDataFor(worldName, uid, entry, data) {
     if (!worldName || uid === null || uid === undefined) return;
 
     const normalized = normalizeLexData(data);
 
-    // ── ① 一次情報源: character.data.extensions.lorebook_expansion ──
+    // ── Phase 3: character.data.extensions.lorebook_expansion のみに保存 ──
+    // extension_settings と world ファイルへの新規書き込みは停止
     const charKey = getCharKey(entry, uid);
-    if (charKey) {
-        saveToCharacterLex(charKey, normalized);
+    if (!charKey) {
+        debugLog('charKey 取得失敗のため保存スキップ:', { worldName, uid });
+        return;
     }
 
-    // ── ② 互換: extension_settings へ保存（Phase 3 で削除予定）──
-    const store = getLexStore();
-    const wKey = String(worldName);
-    const uKey = String(uid);
-    if (!store[wKey]) store[wKey] = {};
-    store[wKey][uKey] = normalized;
-    saveSettings();
-
-    // ── ③ world ファイルミラー（SillyTavern の WI 注入用）──
-    if (entry && typeof entry === 'object') {
-        try {
-            if (!entry.extensions || typeof entry.extensions !== 'object') {
-                entry.extensions = {};
-            }
-            entry.extensions[MODULE_NAME] = JSON.parse(JSON.stringify(normalized));
-            triggerWorldInfoSave();
-        } catch (e) {
-            debugLog('ミラー書込に失敗:', e);
-        }
+    const saved = saveToCharacterLex(charKey, normalized);
+    if (saved) {
+        debugLog(`character.data に保存: ${charKey}`);
+    } else {
+        console.warn(LOG, `character.data 保存失敗: ${charKey} (world=${worldName}, uid=${uid})`);
     }
 }
 
