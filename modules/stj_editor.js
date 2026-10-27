@@ -622,6 +622,83 @@
         return name;
     }
 
+    // ============================================================
+    // ★ 別キャラの画像エントリ検出・除去（残留データ対策）
+    //   image-display.js と同じロジック。
+    // ============================================================
+    function getKnownCharacterNames() {
+        try {
+            const ctx = getSTContext();
+            const chars = ctx?.characters || [];
+            return chars.map(c => c?.name).filter(n => typeof n === 'string' && n);
+        } catch (e) { return []; }
+    }
+
+    function isForeignImageFileName(fileName, currentCharName) {
+        if (!fileName || !currentCharName) return false;
+        if (fileName.startsWith(currentCharName + '_')) return false;
+        const knownChars = getKnownCharacterNames();
+        for (const other of knownChars) {
+            if (other && other !== currentCharName && fileName.startsWith(other + '_')) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function cleanForeignImageEntries(imageMap, charName) {
+        if (!imageMap || typeof imageMap !== 'object' || !charName) return imageMap;
+
+        let removed = 0;
+        const cleaned = {};
+
+        const processValue = (val) => {
+            if (Array.isArray(val)) {
+                const filtered = val.filter(p => {
+                    if (typeof p !== 'string') return true;
+                    const fn = extractFileNameFromPath(p);
+                    if (!fn) return true;
+                    if (isForeignImageFileName(fn, charName)) {
+                        console.log(`[STJ Editor] 🧹 別キャラの画像エントリを除外: ${fn}`);
+                        removed++;
+                        return false;
+                    }
+                    return true;
+                });
+                if (filtered.length === 0) return null;
+                return filtered.length === 1 ? filtered[0] : filtered;
+            } else if (typeof val === 'string') {
+                const fn = extractFileNameFromPath(val);
+                if (fn && isForeignImageFileName(fn, charName)) {
+                    console.log(`[STJ Editor] 🧹 別キャラの画像エントリを除外: ${fn}`);
+                    removed++;
+                    return null;
+                }
+                return val;
+            }
+            return val;
+        };
+
+        for (const [key, val] of Object.entries(imageMap)) {
+            const result = processValue(val);
+            if (result !== null) cleaned[key] = result;
+        }
+
+        if (removed > 0) {
+            console.log(
+                `[STJ Editor] 🧹 別キャラの画像エントリ ${removed} 件を整理 ` +
+                `(${Object.keys(imageMap).length} → ${Object.keys(cleaned).length} entries)`
+            );
+            try {
+                if (window.CharStore?.saveCharacterExtension) {
+                    window.CharStore.saveCharacterExtension('image_display_extension', cleaned);
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        return cleaned;
+    }    
+    
     function parseImageNames(input) {
         if (!input) return [];
         return input.split(',').map(name => name.trim()).filter(name => name.length > 0);
@@ -1970,7 +2047,9 @@
         }
 
         if (imageMap) {
-            populateFormFromImageMap(imageMap);
+            // ★ 別キャラの画像エントリを先に除外（過去のバグの残留データ対策）
+            const cleanedMap = cleanForeignImageEntries(imageMap, charName);
+            populateFormFromImageMap(cleanedMap);
         } else {
             console.log(`[STJ Editor] image_display_extension が見つかりません（新規作成）`);
         }
