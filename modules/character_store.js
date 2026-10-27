@@ -310,6 +310,87 @@ window.CharStore = {
 };
 
 // ============================================================
+// ★ 最終防衛: /api/characters/edit と merge-attributes の fetch を
+//   傍受し、backup を強制的に注入する
+//   ST が export 前に createOrEditCharacter() でフォームから
+//   data.extensions を再構築して古い値で上書きするのを防ぐ
+// ============================================================
+(function installEditFetchInterceptor() {
+    if (window.__charStoreEditFetchInstalled) return;
+    window.__charStoreEditFetchInstalled = true;
+
+    const origFetch = window.fetch;
+    window.fetch = async function(input, init) {
+        try {
+            const url = typeof input === 'string' ? input : (input?.url || '');
+            const method = (init?.method || 'GET').toUpperCase();
+            if (method !== 'POST') return origFetch.apply(this, arguments);
+            if (!url.includes('/api/characters/edit') &&
+                !url.includes('/api/characters/merge-attributes')) {
+                return origFetch.apply(this, arguments);
+            }
+
+            // body をパース
+            let body = null;
+            try {
+                body = init?.body ? JSON.parse(init.body) : null;
+            } catch (e) { body = null; }
+
+            if (!body || typeof body !== 'object') {
+                return origFetch.apply(this, arguments);
+            }
+
+            // backup を data.extensions に強制注入
+            let injected = 0;
+            const injectedNamespaces = [];
+            for (const [ns, payload] of Object.entries(_backup)) {
+                if (!payload) continue;
+                if (!body.data) body.data = {};
+                if (!body.data.extensions) body.data.extensions = {};
+                // ST がセットした値を上書き
+                body.data.extensions[ns] = JSON.parse(JSON.stringify(payload));
+                injected++;
+                injectedNamespaces.push(ns);
+            }
+
+            if (injected === 0) {
+                return origFetch.apply(this, arguments);
+            }
+
+            // body を書き換えた新しい init を作成
+            const newInit = { ...init, body: JSON.stringify(body) };
+
+            console.log(`[CharStore] 🎯 ${url.includes('merge') ? 'merge-attributes' : 'edit'} に backup を注入: [${injectedNamespaces.join(', ')}]`);
+            for (const ns of injectedNamespaces) {
+                const ip = _backup[ns]?.['003']?.img_prompt?.slice(0, 30);
+                if (ip) console.log(`  ${ns}.003: ${JSON.stringify(ip)}`);
+            }
+
+            const resp = await origFetch.call(this, input, newInit);
+
+            // 成功したら memory も同期（念のため）
+            if (resp.ok) {
+                const ctx = _getCtx();
+                const char = ctx?.characters?.[ctx?.characterId];
+                if (char) {
+                    for (const ns of injectedNamespaces) {
+                        if (!char.data) char.data = {};
+                        if (!char.data.extensions) char.data.extensions = {};
+                        char.data.extensions[ns] = JSON.parse(JSON.stringify(_backup[ns]));
+                    }
+                }
+            }
+
+            return resp;
+        } catch (e) {
+            console.warn('[CharStore] edit fetch インターセプト失敗:', e);
+            return origFetch.apply(this, arguments);
+        }
+    };
+    console.log('[CharStore] 🎯 /api/characters/edit への backup 注入フックを設置');
+})();
+
+// ============================================================
 // ★ 最終防衛: export/ダウンロード系ボタン押下時に backup を強制注入
 // ============================================================
 (function installExportGuard() {
