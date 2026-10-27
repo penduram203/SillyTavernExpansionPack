@@ -123,7 +123,7 @@ function cleanPrompt(prompt) {
 }
 
 function getLexImgPrompt(worldName, uid, entry) {
-    // ★ 新: character.data.extensions.lorebook_expansion を最優先
+    // ── Phase 4: character.data のみを参照 ──
     try {
         const ctx = getContext();
         const char = ctx?.characters?.[ctx?.characterId];
@@ -152,35 +152,15 @@ function getLexImgPrompt(worldName, uid, entry) {
         console.warn('[GIC-Lore] character.data 読み込み失敗:', e);
     }
 
-    // 既存: extension_settings を参照
-    try {
-        const ctx = getContext();
-        const lex = ctx?.extensionSettings?.lorebook_expansion;
-        if (lex && lex.data && worldName && uid !== null && uid !== undefined) {
-            const wd = lex.data[String(worldName)];
-            if (wd) {
-                const rec = wd[String(uid)];
-                if (rec && typeof rec.img_prompt === 'string' && rec.img_prompt.trim()) {
-                    return cleanPrompt(rec.img_prompt);
-                }
-            }
-        }
-    } catch (e) {
-        console.warn('[GIC-Lore] LEXストア読み込み失敗:', e);
+    // ── 最終フォールバック: entry.prompt / entry.content の [GIC_IMG:] タグのみ ──
+    if (entry && typeof entry.prompt === 'string' && entry.prompt.trim()) {
+        return cleanPrompt(entry.prompt);
     }
 
-    // 既存: entry.extensions からの読み取り
-    if (entry && entry.extensions && typeof entry.extensions === 'object') {
-        const lexExt = entry.extensions.lorebook_expansion;
-        if (lexExt && typeof lexExt.img_prompt === 'string' && lexExt.img_prompt.trim()) {
-            return cleanPrompt(lexExt.img_prompt);
-        }
-    }
-
-    if (entry && entry.extensions && typeof entry.extensions === 'object') {
-        const ext = entry.extensions;
-        if (ext.gic_prompt && typeof ext.gic_prompt === 'string' && ext.gic_prompt.trim()) {
-            return cleanPrompt(ext.gic_prompt);
+    if (entry && typeof entry.content === 'string') {
+        for (const pat of CONTENT_PROMPT_PATTERNS) {
+            const m = entry.content.match(pat);
+            if (m && m[1]) return cleanPrompt(m[1]);
         }
     }
 
