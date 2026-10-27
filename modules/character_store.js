@@ -1,15 +1,31 @@
 // modules/character_store.js
+//
+// character.data.extensions.{namespace} への読み書きを一元化するヘルパー。
+//
+// 設計:
+//   一次: ctx.characters[characterId].data.extensions[namespace]
+//   永続: /api/characters/merge-attributes → character.json (PNG)
+//
+// レース対策:
+//   - SAVE_DEBOUNCE_MS = 100 (旧 600 から短縮)
+//   - キャラ編集画面を開くクリックで flushAll() を強制
+//   - CHARACTER_EDITOR_OPENED 後に backup との差分を検査して復元
+
 import { getContext } from '../../../../extensions.js';
 import { getRequestHeaders } from '../../../../../script.js';
 
 const LOG = '[CharStore]';
-const SAVE_DEBOUNCE_MS = 600;
+const SAVE_DEBOUNCE_MS = 100;
 const SAVE_RETRY_DELAYS_MS = [0, 1000, 2000, 5000];
 
 const _saveTimers = new Map();       // namespace → timer
 const _pendingPayloads = new Map();  // namespace → payload
 const _saveInFlight = new Map();     // namespace → promise
+const _backup = {};                  // namespace → 最後の payload の deep copy
 
+// ============================================================
+// 内部ヘルパー
+// ============================================================
 function _getCtx() {
     try { return getContext(); } catch (e) { return null; }
 }
@@ -23,27 +39,24 @@ function _getCurrentAvatarUrl() {
     return char?.avatar || null;
 }
 
-export function getCharacterExtension(namespace) {
-    const ctx = _getCtx();
-    if (!ctx) return null;
-    const char = ctx.characters?.[ctx.characterId];
-    const ext = char?.data?.extensions?.[namespace];
-    return ext && typeof ext === 'object' ? ext : null;
-}
-
-export function getCharacterExtensionRaw() {
-    return _getCtx()?.character?.data?.extensions || {};
-}
-
 function _updateMemory(namespace, payload) {
     const ctx = _getCtx();
     if (!ctx) return;
     const id = ctx.characterId;
     const char = ctx.characters?.[id];
     if (!char) return;
+
+    // ① ctx.characters[characterId] を更新（一次情報源）
     if (!char.data) char.data = {};
     if (!char.data.extensions) char.data.extensions = {};
     char.data.extensions[namespace] = payload;
+
+    // ② ctx.character が存在すれば同期（ST バージョン互換）
+    if (ctx.character && ctx.character !== char) {
+        if (!ctx.character.data) ctx.character.data = {};
+        if (!ctx.character.data.extensions) ctx.character.data.extensions = {};
+        ctx.character.data.extensions[namespace] = payload;
+    }
 }
 
 async function _pushToServer(namespace, payload) {
@@ -67,20 +80,12 @@ async function _pushToServer(namespace, payload) {
         avatarUrl = `${avatarUrl}.png`;
     }
 
-    // ★ 修正点: avatar と avatar_url の両方を送る
     const body = {
-        avatar: avatarUrl,           // ← これが本命（サーバーが参照）
-        avatar_url: avatarUrl,       // ← 旧バージョン互換・保険
+        avatar: avatarUrl,
+        avatar_url: avatarUrl,
         ch_name: char.name,
         data: { extensions: { [namespace]: payload } },
     };
-
-    console.log(`${LOG} merge-attributes 送信:`, {
-        avatar: body.avatar,
-        avatar_url: body.avatar_url,
-        ch_name: body.ch_name,
-        payloadSize: JSON.stringify(payload).length,
-    });
 
     try {
         const resp = await fetch('/api/characters/merge-attributes', {
@@ -93,7 +98,7 @@ async function _pushToServer(namespace, payload) {
             console.warn(`${LOG} merge-attributes 失敗 (${resp.status}): ${text.slice(0, 300)}`);
             return false;
         }
-        console.log(`${LOG} ✅ ${namespace} を character.json に保存 (avatar=${body.avatar})`);
+        console.log(`${LOG} ✅ ${namespace} を character.json に保存 (avatar=${avatarUrl})`);
         return true;
     } catch (e) {
         console.warn(`${LOG} merge-attributes 例外:`, e);
@@ -115,11 +120,34 @@ async function _retrySave(namespace, payload, attempt = 0) {
     return _retrySave(namespace, payload, attempt + 1);
 }
 
+// ============================================================
+// 公開 API
+// ============================================================
+export function getCharacterExtension(namespace) {
+    const ctx = _getCtx();
+    if (!ctx) return null;
+    const char = ctx.characters?.[ctx.characterId];
+    const ext = char?.data?.extensions?.[namespace];
+    return ext && typeof ext === 'object' ? ext : null;
+}
+
+export function getCharacterExtensionRaw() {
+    const ctx = _getCtx();
+    const char = ctx?.characters?.[ctx?.characterId];
+    return char?.data?.extensions || {};
+}
+
 export function saveCharacterExtension(namespace, payload, options = {}) {
     const { immediate = false } = options;
 
+    // ★ backup を更新（意図した最新値のスナップショット）
+    try {
+        _backup[namespace] = JSON.parse(JSON.stringify(payload));
+    } catch (e) { /* ignore */ }
+
     _updateMemory(namespace, payload);
 
+    // 既存タイマーをキャンセル
     if (_saveTimers.has(namespace)) {
         clearTimeout(_saveTimers.get(namespace));
         _saveTimers.delete(namespace);
@@ -160,11 +188,115 @@ export async function flushCharacterExtension(namespace) {
     await _retrySave(namespace, pending);
 }
 
-// 他モジュールから参照する公開 API
+export async function flushAll() {
+    const namespaces = new Set([
+        ..._saveTimers.keys(),
+        ..._saveInFlight.keys(),
+        ..._pendingPayloads.keys(),
+    ]);
+    await Promise.all([...namespaces].map(ns => flushCharacterExtension(ns)));
+    return true;
+}
+
+// ============================================================
+// ★ レース対策 1: キャラ編集画面を開くクリックをキャプチャして flush
+// ============================================================
+(function interceptCharacterEditorOpen() {
+    if (window.__charStoreEditorOpenInstalled) return;
+    window.__charStoreEditorOpenInstalled = true;
+
+    const SELECTORS = [
+        '#character_edit_button',
+        '#character_edit',
+        '[title*="Edit character"]',
+        '[title*="キャラクターを編集"]',
+        'button[data-i18n*="edit" i]',
+        '.character_edit_button',
+    ];
+
+    document.addEventListener('click', async (e) => {
+        const btn = e.target?.closest?.(SELECTORS.join(','));
+        if (!btn) return;
+        if (window.__charStoreEditorOpenInFlight) return;
+
+        // pending が無ければ素通し
+        const hasPending =
+            _saveTimers.size > 0 ||
+            _pendingPayloads.size > 0 ||
+            _saveInFlight.size > 0;
+        if (!hasPending) return;
+
+        window.__charStoreEditorOpenInFlight = true;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        try {
+            console.log(`${LOG} キャラ編集画面 open 前に保存を待機...`);
+            await flushAll();
+            console.log(`${LOG} 保存完了。キャラ編集画面を開きます`);
+        } catch (err) {
+            console.warn(`${LOG} flush 失敗:`, err);
+        }
+        setTimeout(() => {
+            window.__charStoreEditorOpenInFlight = false;
+            btn.click();
+        }, 30);
+    }, true);
+})();
+
+// ============================================================
+// ★ レース対策 2: CHARACTER_EDITOR_OPENED 後の安全網
+//    ST がサーバの古い値で memory を上書きした場合に、
+//    backup との差分を検出して復元する
+// ============================================================
+(function installEditorOpenedSync() {
+    if (window.__charStoreEditorOpenedSyncInstalled) return;
+    window.__charStoreEditorOpenedSyncInstalled = true;
+
+    let installed = false;
+    const tryInstall = () => {
+        if (installed) return;
+        const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+        if (!ctx?.eventSource || !ctx?.eventTypes?.CHARACTER_EDITOR_OPENED) {
+            setTimeout(tryInstall, 1000);
+            return;
+        }
+        installed = true;
+
+        ctx.eventSource.on(ctx.eventTypes.CHARACTER_EDITOR_OPENED, () => {
+            // ST 側の再構築が終わるのを少し待つ
+            setTimeout(async () => {
+                try {
+                    const ns = 'lorebook_expansion';
+                    const backup = _backup[ns];
+                    if (!backup) return;
+
+                    const ctx2 = _getCtx();
+                    const char = ctx2?.characters?.[ctx2?.characterId];
+                    const current = char?.data?.extensions?.[ns];
+                    if (!current) return;
+
+                    const curStr = JSON.stringify(current);
+                    const bakStr = JSON.stringify(backup);
+                    if (curStr === bakStr) return;
+
+                    console.log(`${LOG} editor open 後に差分検出 → backup で復元`);
+                    await saveCharacterExtension(ns, backup, { immediate: true });
+                } catch (e) { /* ignore */ }
+            }, 300);
+        });
+        console.log(`${LOG} CHARACTER_EDITOR_OPENED 同期フックを設置`);
+    };
+    tryInstall();
+})();
+
+// ============================================================
+// 外部公開
+// ============================================================
 window.CharStore = {
     getCharacterExtension,
     getCharacterExtensionRaw,
     saveCharacterExtension,
     flushCharacterExtension,
+    flushAll,
 };
 console.log(`${LOG} 公開APIを window.CharStore に登録`);
