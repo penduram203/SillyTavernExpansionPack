@@ -199,11 +199,29 @@ export async function flushAll() {
     const tryInstall = () => {
         const ctx = _getCtx();
         if (!ctx?.eventSource || !ctx?.eventTypes) { setTimeout(tryInstall, 1000); return; }
-        ctx.eventSource.on(ctx.eventTypes.CHARACTER_SELECTED, () => {
+
+        const clearPending = () => {
             for (const k of _pendingPayloads.keys()) _pendingPayloads.delete(k);
             for (const [k, t] of _saveTimers.entries()) { clearTimeout(t); _saveTimers.delete(k); }
-            console.log(`${LOG} キャラ切替: pending をクリア（_backup は avatar 別で保持）`);
-        });
+            console.log('[CharStore] キャラ切替: pending をクリア');
+        };
+
+        const es = ctx.eventSource;
+        const et = ctx.eventTypes;
+        let installed = 0;
+        if (et.CHARACTER_SELECTED && typeof es.on === 'function') {
+            es.on(et.CHARACTER_SELECTED, clearPending);
+            installed++;
+        }
+        if (et.CHAT_CHANGED && typeof es.on === 'function') {
+            es.on(et.CHAT_CHANGED, () => setTimeout(clearPending, 200));
+            installed++;
+        }
+        if (installed === 0) {
+            console.warn('[CharStore] 利用可能な切替イベントが見つかりません（スキップ）');
+        } else {
+            console.log(`[CharStore] 🎯 キャラ切替クリーンアップフックを設置 (${installed} events)`);
+        }
     };
     tryInstall();
 })();
