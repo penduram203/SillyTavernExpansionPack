@@ -310,6 +310,77 @@ window.CharStore = {
 };
 
 // ============================================================
+// ★ 最終防衛: Blob コンストラクタをパッチして、JSON export 時に
+//    _backup を強制的に data.extensions へ注入する
+//    ST が characters[chid] ではなく内部スナップショットから
+//    export していても、最終ファイルの中身を書き換える
+// ============================================================
+(function patchBlobForExport() {
+    if (window.__charStoreBlobPatched) return;
+    window.__charStoreBlobPatched = true;
+
+    const OrigBlob = window.Blob;
+
+    function tryPatchJson(text) {
+        try {
+            const json = JSON.parse(text);
+            if (!json || typeof json !== 'object') return text;
+
+            // キャラクターカードの構造かチェック（data.extensions がある or トップレベルに name）
+            const data = json.data || json;
+            if (!data || typeof data !== 'object') return text;
+            if (!data.extensions) data.extensions = {};
+
+            let injected = 0;
+            const injectedNamespaces = [];
+            for (const [ns, payload] of Object.entries(_backup)) {
+                if (!payload) continue;
+                // ST が古い値を持っていても、_backup で上書き
+                data.extensions[ns] = JSON.parse(JSON.stringify(payload));
+                injected++;
+                injectedNamespaces.push(ns);
+            }
+
+            if (injected === 0) return text;
+
+            console.log(`[CharStore] 🎯 export Blob に backup を注入: [${injectedNamespaces.join(', ')}]`);
+            for (const ns of injectedNamespaces) {
+                const ip = _backup[ns]?.['003']?.img_prompt?.slice(0, 30);
+                if (ip) console.log(`  ${ns}.003: ${JSON.stringify(ip)}`);
+            }
+
+            return JSON.stringify(json, null, 4);
+        } catch (e) {
+            return text;
+        }
+    }
+
+    window.Blob = function(parts, options) {
+        try {
+            const type = options?.type || '';
+            // JSON export のみ対象（PNG は別途）
+            if (type.includes('application/json') && Array.isArray(parts)) {
+                const text = parts
+                    .map(p => (typeof p === 'string' ? p : ''))
+                    .join('');
+                if (text && text.trim().startsWith('{')) {
+                    const patched = tryPatchJson(text);
+                    parts = [patched];
+                }
+            }
+        } catch (e) {
+            console.warn('[CharStore] Blob patch エラー:', e);
+        }
+        return new OrigBlob(parts, options);
+    };
+    // static メソッド/プロトタイプを継承
+    Object.setPrototypeOf(window.Blob, OrigBlob);
+    window.Blob.prototype = OrigBlob.prototype;
+
+    console.log('[CharStore] 🎯 Blob パッチ（JSON export 用）をインストールしました');
+})();
+
+// ============================================================
 // ★ 最終防衛: /api/characters/edit と merge-attributes の fetch を
 //   傍受し、backup を強制的に注入する
 //   ST が export 前に createOrEditCharacter() でフォームから
