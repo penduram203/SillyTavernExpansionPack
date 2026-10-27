@@ -1316,6 +1316,98 @@
         return null;
     }
 
+    // ============================================================
+    // ★ 別キャラの画像エントリ検出・除去
+    //   過去のバグで別キャラのファイル名が保存されてしまった残留データを、
+    //   読み込み時に検出して除去する。
+    //   - 生成画像は {キャラ名}_{キー}_{timestamp}.png の命名なので、
+    //     ファイル名が別の既知キャラ名 + "_" で始まる場合は別キャラ由来と判定。
+    //   - 現在キャラ名で始まる場合は除外しない（誤判定防止）。
+    // ============================================================
+    function extractFileNameForCleanup(path) {
+        if (!path || typeof path !== 'string') return '';
+        if (path.startsWith('data:')) return '';
+        const clean = path.split('?')[0].split('#')[0];
+        const parts = clean.split('/');
+        const name = parts[parts.length - 1];
+        if (!name || name.startsWith('data:')) return '';
+        return name;
+    }
+
+    function getKnownCharacterNames() {
+        try {
+            const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+            const chars = ctx?.characters || [];
+            return chars.map(c => c?.name).filter(n => typeof n === 'string' && n);
+        } catch (e) { return []; }
+    }
+
+    function isForeignImageFileName(fileName, currentCharName) {
+        if (!fileName || !currentCharName) return false;
+        if (fileName.startsWith(currentCharName + '_')) return false;
+        const knownChars = getKnownCharacterNames();
+        for (const other of knownChars) {
+            if (other && other !== currentCharName && fileName.startsWith(other + '_')) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function cleanForeignImageEntries(imageMap, charName) {
+        if (!imageMap || typeof imageMap !== 'object' || !charName) return imageMap;
+
+        let removed = 0;
+        const cleaned = {};
+
+        const processValue = (val) => {
+            if (Array.isArray(val)) {
+                const filtered = val.filter(p => {
+                    if (typeof p !== 'string') return true;
+                    const fn = extractFileNameForCleanup(p);
+                    if (!fn) return true;
+                    if (isForeignImageFileName(fn, charName)) {
+                        console.log(`[ImageDisplay] 🧹 別キャラの画像エントリを除外: ${fn}`);
+                        removed++;
+                        return false;
+                    }
+                    return true;
+                });
+                if (filtered.length === 0) return null;
+                return filtered.length === 1 ? filtered[0] : filtered;
+            } else if (typeof val === 'string') {
+                const fn = extractFileNameForCleanup(val);
+                if (fn && isForeignImageFileName(fn, charName)) {
+                    console.log(`[ImageDisplay] 🧹 別キャラの画像エントリを除外: ${fn}`);
+                    removed++;
+                    return null;
+                }
+                return val;
+            }
+            return val;
+        };
+
+        for (const [key, val] of Object.entries(imageMap)) {
+            const result = processValue(val);
+            if (result !== null) cleaned[key] = result;
+        }
+
+        if (removed > 0) {
+            console.log(
+                `[ImageDisplay] 🧹 別キャラの画像エントリ ${removed} 件を整理 ` +
+                `(${Object.keys(imageMap).length} → ${Object.keys(cleaned).length} entries)`
+            );
+            // クリーンアップ後のデータを character.data に保存し直す
+            try {
+                if (window.CharStore?.saveCharacterExtension) {
+                    window.CharStore.saveCharacterExtension('image_display_extension', cleaned);
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        return cleaned;
+    }
+            
     function getCharacterNameFromDOM() {
         const context = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
         const userName = (context && (context.name1 || context.user_name)) || 'ユーザー';
@@ -1397,7 +1489,11 @@
         }
 
         if (loadedMap) {
-            const detectedMap = await detectImageMapExtensions(loadedMap);
+            // ★ 別キャラの画像エントリを先に除外する
+            //    （detectImageMapExtensions が HEAD リクエストを発行する前に除去することで
+            //     無駄な 404 リクエストを抑止する）
+            const preCleanedMap = cleanForeignImageEntries(loadedMap, charName);
+            const detectedMap = await detectImageMapExtensions(preCleanedMap);
             currentImageMap = detectedMap;
             imageMapCache.set(charName, detectedMap);
         } else {
@@ -1994,8 +2090,32 @@
             applyHalfMaximizeMode();
             saveDisplayState();
         },
+        // ★ 既存の残留データを手動でクリーンアップする（デバッグ・復旧用）
+        cleanForeignEntries: function () {
+            const charName = getCharacterNameFromDOM();
+            if (!charName) return { changed: false, message: 'no charName' };
+            try {
+                const ctx = SillyTavern.getContext();
+                const charFromList = ctx?.characters?.[ctx?.characterId];
+                let ext = charFromList?.data?.extensions?.image_display_extension;
+                if (!ext || typeof ext !== 'object') {
+                    return { changed: false, message: 'no data' };
+                }
+                const before = Object.keys(ext).length;
+                const cleaned = cleanForeignImageEntries(ext, charName);
+                const after = Object.keys(cleaned).length;
+                return {
+                    charName,
+                    changed: before !== after,
+                    before,
+                    after,
+                    removed: before - after,
+                };
+            } catch (e) {
+                return { changed: false, error: String(e) };
+            }
+        },
         getCurrentMode: function () { return currentMode; },
-
         openCustomWindow: function () { try { openCustomWindow(); } catch (e) { console.warn(e); } },
         closeCustomWindow: function () { try { closeCustomWindow(); } catch (e) { console.warn(e); } },
         isCustomWindowOpen: function () { return isCustomWindowOpen; },
