@@ -149,6 +149,76 @@ function getCharKey(entry, uid) {
     return String(uid);
 }
 
+/**
+ * ストレージキー用の区切り文字。
+ * ユーザー入力の comment / keys に含まれる可能性が無い制御文字 (Unit Separator) を使用。
+ */
+const STORAGE_KEY_SEPARATOR = '\x1f';
+
+/**
+ * 複合ストレージキーを生成する。
+ *   worldName + SEP + charKey
+ *   worldName を含めることで、キャラが異なるロアブックを編集しても
+ *   エントリが衝突しない。
+ */
+function getStorageKey(worldName, charKey) {
+    if (!worldName || charKey === null || charKey === undefined) return null;
+    return `${worldName}${STORAGE_KEY_SEPARATOR}${charKey}`;
+}
+
+/**
+ * 現在選択中キャラの名前と「本来のロアブック名」を返す。
+ * 移行時の「旧形式キーをどのロアブックに引き継ぐか」の判定に使用。
+ */
+function getCurrentCharacterInfo() {
+    try {
+        const ctx = getContext();
+        const char = ctx?.characters?.[ctx?.characterId];
+        if (!char) return null;
+        return {
+            name: typeof char.name === 'string' ? char.name : '',
+            associatedWorld:
+                (typeof char.data?.extensions?.world === 'string' && char.data.extensions.world) ||
+                (typeof char.data?.world === 'string' && char.data.world) ||
+                '',
+        };
+    } catch (e) {
+        return null;
+    }
+}
+
+/**
+ * 旧形式キー(charKey)で保存されていたデータを新形式キー(worldName::charKey)へ移行する。
+ * char.data のメモリを直接更新し、CharStore 経由で即時保存する。
+ */
+function migrateLegacyKey(worldName, charKey, legacyData) {
+    try {
+        const ctx = getContext();
+        const char = ctx?.characters?.[ctx?.characterId];
+        if (!char?.data?.extensions?.lorebook_expansion) return false;
+
+        const charLex = char.data.extensions.lorebook_expansion;
+        const storageKey = getStorageKey(worldName, charKey);
+        if (!storageKey) return false;
+
+        charLex[storageKey] = legacyData;
+        delete charLex[charKey];
+
+        if (window.CharStore?.saveCharacterExtension) {
+            window.CharStore.saveCharacterExtension(
+                'lorebook_expansion',
+                charLex,
+                { immediate: true }
+            );
+        }
+        debugLog(`旧形式データを移行: "${charKey}" → "${storageKey}"`);
+        return true;
+    } catch (e) {
+        console.warn(LOG, 'マイグレーション失敗:', e);
+        return false;
+    }
+}
+
 function getCharacterLexData() {
     try {
         const ctx = getContext();
@@ -189,47 +259,68 @@ function saveToCharacterLex(charKey, data) {
 }
 
 // ============================================================
-// ★ Phase 3: getDataFor — character.data を最優先、無ければ settings → entry
+// ★ Phase 4 改訂: getDataFor — worldName::charKey の複合キーで参照
 // ============================================================
 function getDataFor(worldName, uid, entry) {
     if (!worldName || uid === null || uid === undefined) {
         return { img_prompt: '', choices: [] };
     }
 
-    // ── Phase 4: character.data のみを参照 ──
     const charKey = getCharKey(entry, uid);
     if (!charKey) return { img_prompt: '', choices: [] };
 
     const charLex = getCharacterLexData();
-    const charRec = charLex[charKey];
-    if (charRec && typeof charRec === 'object') {
-        return normalizeLexData(charRec);
+    const storageKey = getStorageKey(worldName, charKey);
+
+    // ── ① 新形式キー（worldName::charKey）を最優先 ──
+    if (storageKey && charLex[storageKey] && typeof charLex[storageKey] === 'object') {
+        return normalizeLexData(charLex[storageKey]);
+    }
+
+    // ── ② 旧形式キー(charKey のみ)へのフォールバック + マイグレーション ──
+    //    旧形式のデータは「どのロアブック用か」が不明なため、
+    //    現在キャラの本来のロアブック（キャラ名 or char.data.world）と一致する場合のみ
+    //    移行する。これにより、別ロアブックへのデータ混入を防ぐ。
+    const charInfo = getCurrentCharacterInfo();
+    const isOwnLorebook = !!charInfo && (
+        (charInfo.name && worldName === charInfo.name) ||
+        (charInfo.associatedWorld && worldName === charInfo.associatedWorld)
+    );
+
+    if (isOwnLorebook && charLex[charKey] && typeof charLex[charKey] === 'object') {
+        const legacyData = normalizeLexData(charLex[charKey]);
+        migrateLegacyKey(worldName, charKey, legacyData);
+        return legacyData;
     }
 
     return { img_prompt: '', choices: [] };
 }
 
 // ============================================================
-// ★ Phase 3: setDataFor — character.data へ一次保存 + 互換ミラー
+// ★ Phase 4 改訂: setDataFor — worldName::charKey の複合キーで保存
 // ============================================================
 function setDataFor(worldName, uid, entry, data) {
     if (!worldName || uid === null || uid === undefined) return;
 
     const normalized = normalizeLexData(data);
 
-    // ── Phase 3: character.data.extensions.lorebook_expansion のみに保存 ──
-    // extension_settings と world ファイルへの新規書き込みは停止
     const charKey = getCharKey(entry, uid);
     if (!charKey) {
         debugLog('charKey 取得失敗のため保存スキップ:', { worldName, uid });
         return;
     }
 
-    const saved = saveToCharacterLex(charKey, normalized);
+    const storageKey = getStorageKey(worldName, charKey);
+    if (!storageKey) {
+        debugLog('storageKey 取得失敗のため保存スキップ:', { worldName, charKey });
+        return;
+    }
+
+    const saved = saveToCharacterLex(storageKey, normalized);
     if (saved) {
-        debugLog(`character.data に保存: ${charKey}`);
+        debugLog(`character.data に保存: ${storageKey}`);
     } else {
-        console.warn(LOG, `character.data 保存失敗: ${charKey} (world=${worldName}, uid=${uid})`);
+        console.warn(LOG, `character.data 保存失敗: ${storageKey} (world=${worldName}, uid=${uid})`);
     }
 }
 
