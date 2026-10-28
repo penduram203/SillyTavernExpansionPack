@@ -23,7 +23,7 @@
         return new Promise((resolve) => {
             if (!mediaUrl || typeof mediaUrl !== 'string' || !mediaUrl.trim()) return resolve(false);
 
-            const timeout = setTimeout(() => resolve(false), 3000); // 3秒でタイムアウト
+            const timeout = setTimeout(() => resolve(false), 1500); // 3秒 → 1.5秒
 
             if (isVideoUrl(mediaUrl)) {
                 const video = document.createElement('video');
@@ -85,18 +85,17 @@
         if (!charName) return null;
 
         // ── ① character.data を最優先（全キャラ対象・現在キャラに限定しない）──
-        //    ★ character_page_loaded 時点では ctx.characterId が未確定のことがあるため、
-        //      ctx.characters 配列から名前で検索する。
-        //    ★ character.data が未ロードのケースに備え、短いリトライを行う。
+        //    ★ character.data が未ロードのケースに備え、2秒(10回×200ms)のリトライを行う
         let extKeyExists = false;
-        let matchedChar = null;
+        let charDataLoaded = false;
 
-        for (let attempt = 0; attempt < 5; attempt++) {
+        for (let attempt = 0; attempt < 10; attempt++) {
             try {
                 const ctx = SillyTavern.getContext();
                 const allChars = ctx?.characters || [];
-                matchedChar = allChars.find(c => c?.name === charName);
+                const matchedChar = allChars.find(c => c?.name === charName);
                 if (matchedChar?.data) {
+                    charDataLoaded = true;
                     const ext = matchedChar.data.extensions?.image_display_extension;
                     extKeyExists = ext !== undefined;
                     if (extKeyExists) {
@@ -119,7 +118,7 @@
                     if (extKeyExists) break;  // キー確定 → リトライ不要
                 }
             } catch (e) { /* ignore */ }
-            if (attempt < 4) await new Promise(r => setTimeout(r, 100));
+            if (attempt < 9) await new Promise(r => setTimeout(r, 200));
         }
 
         // ── ② キャッシュチェック ──
@@ -127,10 +126,7 @@
             return mediaCache.get(charName);
         }
 
-        // ── ③ _ext.json フォールバック ──
-        //    ★ _newSystemConfirmed が true なら(いずれかのキャラで新システムを確認済み)
-        //      新規キャラも旧システムのはずがないのでスキップして null を返す
-        //    ★ セッション内で試行済みのキャラもスキップ
+        // ── ③ _ext.json フォールバック（旧システムからの移行用・1回のみ）──
         if (!extKeyExists && !_newSystemConfirmed && !_extJsonAttemptedInSession.has(charName)) {
             _extJsonAttemptedInSession.add(charName);
             try {
@@ -151,19 +147,19 @@
                     }
                 }
             } catch (e) { /* ignore */ }
-        } else if (!extKeyExists) {
-            // ★ _newSystemConfirmed またはセッション試行済み → 「なし」で確定
-            mediaCache.set(charName, null);
-            return null;
         }
 
-        // ── ④ defa.mp4 フォールバック ──
-        const fallback = `user/images/${charName}/defa.mp4`;
-        if (await checkMediaExists(fallback)) {
-            mediaCache.set(charName, fallback);
-            return fallback;
+        // ── ④ defa.mp4 フォールバックは完全削除 ──
+        //    ★ 理由: defa.mp4 が存在する環境で誤って「登録済み」扱いになり、
+        //      character.data の正しいサムネイルを上書きしてしまうため。
+        //      character.data / _ext.json にサムネイルが無い場合は null を返し、
+        //      呼び出し側でST本来のアバターを維持する。
+
+        // ★ charDataLoaded が true（=character.data はロード済みだがサムネなし）の場合のみ
+        //   mediaCache に null を保存する。未ロードの場合は保存せず、次回リトライを許容する。
+        if (charDataLoaded) {
+            mediaCache.set(charName, null);
         }
-        mediaCache.set(charName, null);
         return null;
     }
 
