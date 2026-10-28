@@ -2085,23 +2085,46 @@
 
         // ── ② 移行フォールバック: _ext.json ──
         if (!imageMap) {
+            // ★ character.data に image_display_extension キーが既に存在すれば
+            //    （たとえ空 {} でも）新システム使用中とみなし、_ext.json をスキップ
+            let hasExtKeyInCharData = false;
             try {
-                const jsonPath = `user/images/${charName}/${charName}_ext.json`;
-                const resp = await fetch(jsonPath);
-                if (resp.ok) {
-                    const data = await resp.json();
-                    const legacy = findImageMapInData(data);
-                    if (legacy && Object.keys(legacy).length > 0) {
-                        imageMap = legacy;
-                        console.log(`[STJ Editor] 🔄 _ext.json から読込。character.json へ移行`);
-                        try {
-                            window.CharStore?.saveCharacterExtension?.(
-                                'image_display_extension', legacy, { immediate: true }
-                            );
-                        } catch (e) { /* ignore */ }
-                    }
+                const ctx = getSTContext();
+                const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
+                if (char?.name === charName) {
+                    hasExtKeyInCharData = char?.data?.extensions?.image_display_extension !== undefined;
                 }
             } catch (e) { /* ignore */ }
+
+            if (!hasExtKeyInCharData) {
+                try {
+                    const jsonPath = `user/images/${charName}/${charName}_ext.json`;
+                    const resp = await fetch(jsonPath);
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        const legacy = findImageMapInData(data);
+                        if (legacy && Object.keys(legacy).length > 0) {
+                            imageMap = legacy;
+                            console.log(`[STJ Editor] 🔄 _ext.json から読込。character.json へ移行`);
+                            try {
+                                window.CharStore?.saveCharacterExtension?.(
+                                    'image_display_extension', legacy, { immediate: true }
+                                );
+                            } catch (e) { /* ignore */ }
+                        } else {
+                            // 空の _ext.json → 「確認済み・データなし」として空データ保存
+                            window.CharStore?.saveCharacterExtension?.(
+                                'image_display_extension', {}, { immediate: true }
+                            );
+                        }
+                    } else if (resp.status === 404) {
+                        // _ext.json なし → 「確認済み・データなし」として空データ保存
+                        window.CharStore?.saveCharacterExtension?.(
+                            'image_display_extension', {}, { immediate: true }
+                        );
+                    }
+                } catch (e) { /* ignore */ }
+            }
         }
 
         if (imageMap) {
