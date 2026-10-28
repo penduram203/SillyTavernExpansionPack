@@ -123,7 +123,7 @@ function cleanPrompt(prompt) {
 }
 
 function getLexImgPrompt(worldName, uid, entry) {
-    // ── Phase 4: character.data のみを参照 ──
+    // ── Phase 4 改訂: character.data を worldName::charKey の複合キーで参照 ──
     try {
         const ctx = getContext();
         const char = ctx?.characters?.[ctx?.characterId];
@@ -140,10 +140,34 @@ function getLexImgPrompt(worldName, uid, entry) {
                     charKey = String(uid);
                 }
             }
-            const rec = charLex[charKey];
+
+            // ★ 新形式キー: worldName + \x1f + charKey
+            const STORAGE_KEY_SEPARATOR = '\x1f';
+            const storageKey = worldName ? `${worldName}${STORAGE_KEY_SEPARATOR}${charKey}` : null;
+
+            let rec = null;
+            if (storageKey && charLex[storageKey] && typeof charLex[storageKey] === 'object') {
+                rec = charLex[storageKey];
+            } else {
+                // ★ 旧形式キーへのフォールバック
+                //    現在キャラ本来のロアブックの場合のみ（別ロアブックへの混入防止）
+                const charName = typeof char?.name === 'string' ? char.name : '';
+                const associatedWorld =
+                    (typeof char?.data?.extensions?.world === 'string' && char.data.extensions.world) ||
+                    (typeof char?.data?.world === 'string' && char.data.world) ||
+                    '';
+                const isOwnLorebook = !!worldName && (
+                    (charName && worldName === charName) ||
+                    (associatedWorld && worldName === associatedWorld)
+                );
+                if (isOwnLorebook && charLex[charKey] && typeof charLex[charKey] === 'object') {
+                    rec = charLex[charKey];
+                }
+            }
+
             if (rec && typeof rec.img_prompt === 'string' && rec.img_prompt.trim()) {
                 if (settings.verbose) {
-                    console.log(`[GIC-Lore] character.data から img_prompt 読込 (charKey=${charKey})`);
+                    console.log(`[GIC-Lore] character.data から img_prompt 読込 (key=${storageKey || charKey})`);
                 }
                 return cleanPrompt(rec.img_prompt);
             }
