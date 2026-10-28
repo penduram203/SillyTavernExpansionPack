@@ -678,9 +678,11 @@
             }
             char.data.extensions[STJ_MIGRATION_META_NS][STJ_MIGRATION_FLAG_KEY] = STJ_MIGRATION_VERSION;
             if (window.CharStore?.saveCharacterExtension) {
+                // ★ STコアの再取得でデータが上書きされるのを防ぐため即時保存
                 window.CharStore.saveCharacterExtension(
                     STJ_MIGRATION_META_NS,
-                    char.data.extensions[STJ_MIGRATION_META_NS]
+                    char.data.extensions[STJ_MIGRATION_META_NS],
+                    { immediate: true }
                 );
             }
             return true;
@@ -690,11 +692,10 @@
     function cleanForeignImageEntries(imageMap, charName) {
         if (!imageMap || typeof imageMap !== 'object' || !charName) return imageMap;
 
-        // ★ このキャラで既にクリーンアップ済みなら何もしない
-        if (isMigrationDoneForChar(charName)) {
-            return imageMap;
-        }        
-        
+        // ★ フラグは「per-item ログ抑制」のためだけに使う。
+        //   データが壊れている場合はフラグ済みでも毎回クリーンアップする
+        const alreadyMigrated = isMigrationDoneForChar(charName);
+
         let removed = 0;
         const cleaned = {};
 
@@ -705,7 +706,9 @@
                     const fn = extractFileNameFromPath(p);
                     if (!fn) return true;
                     if (isForeignImageFileName(fn, charName)) {
-                        console.log(`[STJ Editor] 🧹 別キャラの画像エントリを除外: ${fn}`);
+                        if (!alreadyMigrated) {
+                            console.log(`[STJ Editor] 🧹 別キャラの画像エントリを除外: ${fn}`);
+                        }
                         removed++;
                         return false;
                     }
@@ -716,7 +719,9 @@
             } else if (typeof val === 'string') {
                 const fn = extractFileNameFromPath(val);
                 if (fn && isForeignImageFileName(fn, charName)) {
-                    console.log(`[STJ Editor] 🧹 別キャラの画像エントリを除外: ${fn}`);
+                    if (!alreadyMigrated) {
+                        console.log(`[STJ Editor] 🧹 別キャラの画像エントリを除外: ${fn}`);
+                    }
                     removed++;
                     return null;
                 }
@@ -733,20 +738,24 @@
         if (removed > 0) {
             console.log(
                 `[STJ Editor] 🧹 別キャラの画像エントリ ${removed} 件を整理 ` +
-                `(${Object.keys(imageMap).length} → ${Object.keys(cleaned).length} entries)`
+                `(${Object.keys(imageMap).length} → ${Object.keys(cleaned).length} entries)` +
+                (alreadyMigrated ? ' [STコアによるデータ再取得を検知]' : '')
             );
             try {
                 if (window.CharStore?.saveCharacterExtension) {
-                    window.CharStore.saveCharacterExtension('image_display_extension', cleaned);
+                    // ★ STコアの再取得で上書きされるのを防ぐため即時保存
+                    window.CharStore.saveCharacterExtension('image_display_extension', cleaned, { immediate: true });
                 }
             } catch (e) { /* ignore */ }
         }
 
-        // ★ クリーンアップ完了をマーク
-        markMigrationDoneForChar(charName);
-        
+        // ★ フラグ未設定なら初回としてマーク
+        if (!alreadyMigrated) {
+            markMigrationDoneForChar(charName);
+        }
+
         return cleaned;
-    }    
+    }   
     
     function parseImageNames(input) {
         if (!input) return [];
