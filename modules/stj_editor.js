@@ -2132,7 +2132,22 @@
             const cleanedMap = cleanForeignImageEntries(imageMap, charName);
             populateFormFromImageMap(cleanedMap);
         } else {
-            console.log(`[STJ Editor] image_display_extension が見つかりません（新規作成）`);
+            // ★ 空の image_display_extension が既に保存されている場合は
+            //    「新規作成」ではなく「空データ（確認済み）」とログを分ける
+            let hasEmptyExt = false;
+            try {
+                const ctx = getSTContext();
+                const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
+                if (char?.name === charName) {
+                    const ext = char?.data?.extensions?.image_display_extension;
+                    hasEmptyExt = ext !== undefined && typeof ext === 'object';
+                }
+            } catch (e) { /* ignore */ }
+            if (hasEmptyExt) {
+                console.log(`[STJ Editor] image_display_extension は空です（確認済み・_ ext.json フォールバック不要）`);
+            } else {
+                console.log(`[STJ Editor] image_display_extension が見つかりません（新規作成）`);
+            }
         }
     }
 
