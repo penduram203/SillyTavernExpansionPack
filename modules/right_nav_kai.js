@@ -5,6 +5,11 @@
 
     // --- メディア検出結果のキャッシュ ---
     const mediaCache = new Map();
+    // ★ _ext.json をこのセッションで既に試行したキャラのセット
+    //    （非現在キャラは character.data がロードされていないため、
+    //      _ext.json フォールバックが必要だが、同一セッション内での
+    //      重複fetchを防ぐ）
+    const _extJsonAttemptedInSession = new Set();
 
     function isVideoUrl(url) {
         if (!url || typeof url !== 'string') return false;
@@ -111,7 +116,15 @@
 
         // ── ③ 他キャラは従来通り _ext.json ──
         // ★ 現在キャラが image_display_extension キーを持つ場合は _ext.json をスキップ
+        // ★ セッション内で既に試行済みのキャラもスキップ
         if (!extKeyExists) {
+            if (_extJsonAttemptedInSession.has(charName)) {
+                // 既にこのセッションで試行済み → 結果は「なし」で確定
+                mediaCache.set(charName, null);
+                return null;
+            }
+            _extJsonAttemptedInSession.add(charName);
+
             try {
                 const extPath = `user/images/${charName}/${charName}_ext.json`;
                 const resp = await fetch(extPath);
