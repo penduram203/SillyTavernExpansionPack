@@ -4,12 +4,14 @@
     const LOG_PREFIX = '[RightNavKai DEBUG]';
 
     // --- メディア検出結果のキャッシュ ---
+    // --- メディア検出結果のキャッシュ ---
     const mediaCache = new Map();
     // ★ _ext.json をこのセッションで既に試行したキャラのセット
-    //    （非現在キャラは character.data がロードされていないため、
-    //      _ext.json フォールバックが必要だが、同一セッション内での
-    //      重複fetchを防ぐ）
     const _extJsonAttemptedInSession = new Set();
+    // ★ 新システム(character.data.extensions)が使用中と確認できたか
+    //    一度でも image_display_extension キーを検出したら true になり、
+    //    以降は _ext.json フォールバックを完全スキップする
+    let _newSystemConfirmed = false;
 
     function isVideoUrl(url) {
         if (!url || typeof url !== 'string') return false;
@@ -82,49 +84,55 @@
     async function getCharacterImageSrc(charName) {
         if (!charName) return null;
 
-        // ── ① 現在選択中のキャラなら character.data を最優先（キャッシュより先）──
-        // ★ extKeyExists: 現在キャラが image_display_extension キーを持つか
-        //    （空 {} でも true - 新システム使用中とみなす）
+        // ── ① character.data を最優先（全キャラ対象・現在キャラに限定しない）──
+        //    ★ character_page_loaded 時点では ctx.characterId が未確定のことがあるため、
+        //      ctx.characters 配列から名前で検索する。
+        //    ★ character.data が未ロードのケースに備え、短いリトライを行う。
         let extKeyExists = false;
-        try {
-            const ctx = SillyTavern.getContext();
-            const currentChar = ctx?.characters?.[ctx?.characterId];
-            if (currentChar?.name === charName) {
-                const ext = currentChar?.data?.extensions?.image_display_extension;
-                extKeyExists = ext !== undefined;
-                if (ext && typeof ext === 'object') {
-                    // thumbnail → default の順で存在するものを採用
-                    for (const key of ['thumbnail', 'default']) {
-                        const candidate = ext[key];
-                        if (!candidate) continue;
-                        const src = Array.isArray(candidate) ? candidate[0] : candidate;
-                        if (await checkMediaExists(src)) {
-                            if (mediaCache.get(charName) !== src) {
-                                mediaCache.set(charName, src);
+        let matchedChar = null;
+
+        for (let attempt = 0; attempt < 5; attempt++) {
+            try {
+                const ctx = SillyTavern.getContext();
+                const allChars = ctx?.characters || [];
+                matchedChar = allChars.find(c => c?.name === charName);
+                if (matchedChar?.data) {
+                    const ext = matchedChar.data.extensions?.image_display_extension;
+                    extKeyExists = ext !== undefined;
+                    if (extKeyExists) {
+                        // ★ 新システム使用中を確認 → 以降の _ext.json を全スキップ
+                        _newSystemConfirmed = true;
+                    }
+                    if (ext && typeof ext === 'object') {
+                        for (const key of ['thumbnail', 'default']) {
+                            const candidate = ext[key];
+                            if (!candidate) continue;
+                            const src = Array.isArray(candidate) ? candidate[0] : candidate;
+                            if (await checkMediaExists(src)) {
+                                if (mediaCache.get(charName) !== src) {
+                                    mediaCache.set(charName, src);
+                                }
+                                return src;
                             }
-                            return src;
                         }
                     }
+                    if (extKeyExists) break;  // キー確定 → リトライ不要
                 }
-            }
-        } catch (e) { /* ignore */ }
+            } catch (e) { /* ignore */ }
+            if (attempt < 4) await new Promise(r => setTimeout(r, 100));
+        }
 
-        // ── ② キャッシュチェック（現在キャラ以外 or データ取得失敗時）──
+        // ── ② キャッシュチェック ──
         if (mediaCache.has(charName)) {
             return mediaCache.get(charName);
         }
 
-        // ── ③ 他キャラは従来通り _ext.json ──
-        // ★ 現在キャラが image_display_extension キーを持つ場合は _ext.json をスキップ
-        // ★ セッション内で既に試行済みのキャラもスキップ
-        if (!extKeyExists) {
-            if (_extJsonAttemptedInSession.has(charName)) {
-                // 既にこのセッションで試行済み → 結果は「なし」で確定
-                mediaCache.set(charName, null);
-                return null;
-            }
+        // ── ③ _ext.json フォールバック ──
+        //    ★ _newSystemConfirmed が true なら(いずれかのキャラで新システムを確認済み)
+        //      新規キャラも旧システムのはずがないのでスキップして null を返す
+        //    ★ セッション内で試行済みのキャラもスキップ
+        if (!extKeyExists && !_newSystemConfirmed && !_extJsonAttemptedInSession.has(charName)) {
             _extJsonAttemptedInSession.add(charName);
-
             try {
                 const extPath = `user/images/${charName}/${charName}_ext.json`;
                 const resp = await fetch(extPath);
@@ -143,6 +151,10 @@
                     }
                 }
             } catch (e) { /* ignore */ }
+        } else if (!extKeyExists) {
+            // ★ _newSystemConfirmed またはセッション試行済み → 「なし」で確定
+            mediaCache.set(charName, null);
+            return null;
         }
 
         // ── ④ defa.mp4 フォールバック ──
