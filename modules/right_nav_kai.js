@@ -78,11 +78,15 @@
         if (!charName) return null;
 
         // ── ① 現在選択中のキャラなら character.data を最優先（キャッシュより先）──
+        // ★ extKeyExists: 現在キャラが image_display_extension キーを持つか
+        //    （空 {} でも true - 新システム使用中とみなす）
+        let extKeyExists = false;
         try {
             const ctx = SillyTavern.getContext();
             const currentChar = ctx?.characters?.[ctx?.characterId];
             if (currentChar?.name === charName) {
                 const ext = currentChar?.data?.extensions?.image_display_extension;
+                extKeyExists = ext !== undefined;
                 if (ext && typeof ext === 'object') {
                     // thumbnail → default の順で存在するものを採用
                     for (const key of ['thumbnail', 'default']) {
@@ -106,24 +110,27 @@
         }
 
         // ── ③ 他キャラは従来通り _ext.json ──
-        try {
-            const extPath = `user/images/${charName}/${charName}_ext.json`;
-            const resp = await fetch(extPath);
-            if (resp.ok) {
-                const data = await resp.json();
-                let candidate = data.thumbnail || data.default;
-                if (!candidate && data.image_display_extension) {
-                    candidate = data.image_display_extension.thumbnail || data.image_display_extension.default;
-                }
-                if (candidate) {
-                    const src = Array.isArray(candidate) ? candidate[0] : candidate;
-                    if (await checkMediaExists(src)) {
-                        mediaCache.set(charName, src);
-                        return src;
+        // ★ 現在キャラが image_display_extension キーを持つ場合は _ext.json をスキップ
+        if (!extKeyExists) {
+            try {
+                const extPath = `user/images/${charName}/${charName}_ext.json`;
+                const resp = await fetch(extPath);
+                if (resp.ok) {
+                    const data = await resp.json();
+                    let candidate = data.thumbnail || data.default;
+                    if (!candidate && data.image_display_extension) {
+                        candidate = data.image_display_extension.thumbnail || data.image_display_extension.default;
+                    }
+                    if (candidate) {
+                        const src = Array.isArray(candidate) ? candidate[0] : candidate;
+                        if (await checkMediaExists(src)) {
+                            mediaCache.set(charName, src);
+                            return src;
+                        }
                     }
                 }
-            }
-        } catch (e) { /* ignore */ }
+            } catch (e) { /* ignore */ }
+        }
 
         // ── ④ defa.mp4 フォールバック ──
         const fallback = `user/images/${charName}/defa.mp4`;
