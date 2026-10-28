@@ -1531,22 +1531,49 @@
 
         // ── ② 移行フォールバック: _ext.json（character.data が空の時のみ）──
         if (!loadedMap) {
+            // ★ character.data に image_display_extension キーが既に存在すれば
+            //    （たとえ空 {} でも）「新システム使用中・確認済み」とみなし、
+            //    _ext.json フォールバックを完全スキップする
+            let hasExtKeyInCharData = false;
             try {
-                const resp = await fetch(`user/images/${charName}/${charName}_ext.json`);
-                if (resp.ok) {
-                    const data = await resp.json();
-                    const legacy = findImageMapInData(data);
-                    if (legacy && typeof legacy === 'object' && Object.keys(legacy).length > 0) {
-                        loadedMap = legacy;
-                        console.log(`[ImageDisplay] 🔄 _ext.json を検出。character.data へ移行します`);
-                        try {
-                            window.CharStore?.saveCharacterExtension?.(
-                                'image_display_extension', legacy, { immediate: true }
-                            );
-                        } catch (migErr) { console.warn('[ImageDisplay] 移行エラー:', migErr); }
-                    }
+                const context = SillyTavern.getContext();
+                const char = context?.characters?.[context?.characterId];
+                if (char?.name === charName) {
+                    hasExtKeyInCharData = char?.data?.extensions?.image_display_extension !== undefined;
                 }
             } catch (e) { /* ignore */ }
+
+            if (!hasExtKeyInCharData) {
+                try {
+                    const resp = await fetch(`user/images/${charName}/${charName}_ext.json`);
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        const legacy = findImageMapInData(data);
+                        if (legacy && typeof legacy === 'object' && Object.keys(legacy).length > 0) {
+                            loadedMap = legacy;
+                            console.log(`[ImageDisplay] 🔄 _ext.json を検出。character.data へ移行します`);
+                            try {
+                                window.CharStore?.saveCharacterExtension?.(
+                                    'image_display_extension', legacy, { immediate: true }
+                                );
+                            } catch (migErr) { console.warn('[ImageDisplay] 移行エラー:', migErr); }
+                        } else {
+                            // _ext.json は存在するが中身が空 → 「確認済み・データなし」として空データ保存
+                            window.CharStore?.saveCharacterExtension?.(
+                                'image_display_extension', {}, { immediate: true }
+                            );
+                        }
+                    } else if (resp.status === 404) {
+                        // _ext.json なし → 「確認済み・データなし」として空データ保存
+                        //   これにより次回以降は hasExtKeyInCharData が true になり
+                        //   不要な 404 リクエストが発生しない
+                        window.CharStore?.saveCharacterExtension?.(
+                            'image_display_extension', {}, { immediate: true }
+                        );
+                    }
+                    // 5xx などの一時的エラーは保存せず、次回リトライを許容
+                } catch (e) { /* ignore */ }
+            }
         }
 
         if (loadedMap) {
