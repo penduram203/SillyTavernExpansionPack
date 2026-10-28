@@ -8,6 +8,12 @@
 //     ファイル名を「キャラ名_エントリキー_タイムスタンプ.ext」に
 //     リネームできるよう window.GicLorebook に公開
 //   - v3 マイグレーション（triggerOn の自動切替）
+//
+// ★ Phase 5 修正:
+//   - LEX データの参照先を per-world ストア
+//     (extension_settings.lorebook_expansion.data[worldName][charKey])
+//     に変更。キャラとロアブックが別でも正しくプロンプトを取得できる。
+//   - character.data の旧データはフォールバックとして参照
 
 import { eventSource, event_types, getRequestHeaders } from '../../../../../script.js';
 import { getContext } from '../../../../extensions.js';
@@ -51,6 +57,9 @@ const SLASH_COMMAND_PATHS = [
     '../../../../slash-commands/SlashCommand.js',
     '../../../../../slash-commands/SlashCommand.js',
 ];
+
+// ★ Phase 5: ストレージキー区切り文字（Lorebook_Expansion.js と一致させる）
+const STORAGE_KEY_SEPARATOR = '\x1f';
 
 function loadSettings() {
     const ctx = getContext();
@@ -122,35 +131,70 @@ function cleanPrompt(prompt) {
         .trim();
 }
 
+// ===== key / keys 両対応 =====
+function getEntryKeys(entry) {
+    if (!entry) return [];
+    if (Array.isArray(entry.keys) && entry.keys.length) return entry.keys;
+    if (Array.isArray(entry.key) && entry.key.length) return entry.key;
+    if (typeof entry.keys === 'string' && entry.keys.trim()) return [entry.keys];
+    if (typeof entry.key === 'string' && entry.key.trim()) return [entry.key];
+    return [];
+}
+
+// ===== エントリキー決定 =====
+function getEntryCharKey(entry, uid) {
+    if (entry && typeof entry.comment === 'string' && entry.comment.trim()) {
+        return entry.comment.trim();
+    }
+    const keys = getEntryKeys(entry);
+    if (keys.length > 0 && String(keys[0]).trim()) {
+        return String(keys[0]).trim();
+    }
+    return uid !== null && uid !== undefined ? String(uid) : null;
+}
+
+// ============================================================
+// ★ Phase 5: LEX データから img_prompt を取得
+//   一次: extension_settings.lorebook_expansion.data[worldName][charKey]
+//   二次: character.data.extensions.lorebook_expansion
+//         (旧データ・デバッグ用フォールバック)
+// ============================================================
 function getLexImgPrompt(worldName, uid, entry) {
-    // ── Phase 4 改訂: character.data を worldName::charKey の複合キーで参照 ──
+    const charKey = getEntryCharKey(entry, uid);
+    if (!worldName || !charKey) {
+        return getFallbackPromptFromEntry(entry);
+    }
+
+    // ── ① Primary: per-world store ──
+    try {
+        const ctx = getContext();
+        const lexData = ctx?.extensionSettings?.lorebook_expansion?.data;
+        if (lexData && typeof lexData === 'object' && lexData[worldName]) {
+            const rec = lexData[worldName][charKey];
+            if (rec && typeof rec === 'object' &&
+                typeof rec.img_prompt === 'string' && rec.img_prompt.trim()) {
+                if (settings.verbose) {
+                    console.log(`[GIC-Lore] per-world store から img_prompt 読込 (${worldName}::${charKey})`);
+                }
+                return cleanPrompt(rec.img_prompt);
+            }
+        }
+    } catch (e) {
+        console.warn('[GIC-Lore] per-world store 読み込み失敗:', e);
+    }
+
+    // ── ② Fallback: character.data (旧データ・デバッグ用) ──
     try {
         const ctx = getContext();
         const char = ctx?.characters?.[ctx?.characterId];
         const charLex = char?.data?.extensions?.lorebook_expansion;
         if (charLex && typeof charLex === 'object') {
-            let charKey = null;
-            if (entry && typeof entry.comment === 'string' && entry.comment.trim()) {
-                charKey = entry.comment.trim();
-            } else {
-                const keys = getEntryKeys(entry);
-                if (keys.length > 0 && String(keys[0]).trim()) {
-                    charKey = String(keys[0]).trim();
-                } else {
-                    charKey = String(uid);
-                }
-            }
-
-            // ★ 新形式キー: worldName + \x1f + charKey
-            const STORAGE_KEY_SEPARATOR = '\x1f';
-            const storageKey = worldName ? `${worldName}${STORAGE_KEY_SEPARATOR}${charKey}` : null;
-
+            const storageKey = `${worldName}${STORAGE_KEY_SEPARATOR}${charKey}`;
             let rec = null;
-            if (storageKey && charLex[storageKey] && typeof charLex[storageKey] === 'object') {
+            if (charLex[storageKey] && typeof charLex[storageKey] === 'object') {
                 rec = charLex[storageKey];
-            } else {
-                // ★ 旧形式キーへのフォールバック
-                //    現在キャラ本来のロアブックの場合のみ（別ロアブックへの混入防止）
+            } else if (charLex[charKey] && typeof charLex[charKey] === 'object') {
+                // 旧形式キーは現在キャラ本来のロアブック時のみ
                 const charName = typeof char?.name === 'string' ? char.name : '';
                 const associatedWorld =
                     (typeof char?.data?.extensions?.world === 'string' && char.data.extensions.world) ||
@@ -160,14 +204,13 @@ function getLexImgPrompt(worldName, uid, entry) {
                     (charName && worldName === charName) ||
                     (associatedWorld && worldName === associatedWorld)
                 );
-                if (isOwnLorebook && charLex[charKey] && typeof charLex[charKey] === 'object') {
+                if (isOwnLorebook) {
                     rec = charLex[charKey];
                 }
             }
-
             if (rec && typeof rec.img_prompt === 'string' && rec.img_prompt.trim()) {
                 if (settings.verbose) {
-                    console.log(`[GIC-Lore] character.data から img_prompt 読込 (key=${storageKey || charKey})`);
+                    console.log(`[GIC-Lore] character.data から img_prompt 読込 (フォールバック)`);
                 }
                 return cleanPrompt(rec.img_prompt);
             }
@@ -176,7 +219,11 @@ function getLexImgPrompt(worldName, uid, entry) {
         console.warn('[GIC-Lore] character.data 読み込み失敗:', e);
     }
 
-    // ── 最終フォールバック: entry.prompt / entry.content の [GIC_IMG:] タグのみ ──
+    // ── ③ 最終フォールバック: entry.prompt / entry.content の [GIC_IMG:] タグ ──
+    return getFallbackPromptFromEntry(entry);
+}
+
+function getFallbackPromptFromEntry(entry) {
     if (entry && typeof entry.prompt === 'string' && entry.prompt.trim()) {
         return cleanPrompt(entry.prompt);
     }
@@ -187,7 +234,6 @@ function getLexImgPrompt(worldName, uid, entry) {
             if (m && m[1]) return cleanPrompt(m[1]);
         }
     }
-
     return null;
 }
 
@@ -264,16 +310,6 @@ async function loadWorldInfoEntries(worldName) {
     }
 
     console.warn('[GIC-Lore] ロアブックのエントリを取得できませんでした:', worldName);
-    return [];
-}
-
-// ===== key / keys 両対応 =====
-function getEntryKeys(entry) {
-    if (!entry) return [];
-    if (Array.isArray(entry.keys) && entry.keys.length) return entry.keys;
-    if (Array.isArray(entry.key) && entry.key.length) return entry.key;
-    if (typeof entry.keys === 'string' && entry.keys.trim()) return [entry.keys];
-    if (typeof entry.key === 'string' && entry.key.trim()) return [entry.key];
     return [];
 }
 
@@ -525,9 +561,6 @@ async function processChoice(force = false) {
     if (!settings.enabled) return;
 
     // ★ 事前設定モードでは /sd を実行しない
-    //   GIC 側（isOverrideLocal）と Image Display 側（isOverrideActive）の
-    //   両方を確認し、どちらかが「背景生成モード」なら実行する。
-    //   起動直後の一時的な不整合にも対応するため、両方の source of truth を見る。
     try {
         let isOverride = false;
         if (typeof window.GicApi?.isOverrideMode === 'function') {
@@ -621,11 +654,11 @@ async function processChoice(force = false) {
                     const ctx = getContext();
                     const lex = ctx?.extensionSettings?.lorebook_expansion?.data;
                     if (lex && lex[worldName]) {
-                        const uid = String(entry.uid);
-                        const rec = lex[worldName][uid];
-                        console.log(`[GIC-Lore] LEXストア[${worldName}][${uid}] =`, rec);
+                        const charKey = getEntryCharKey(entry, entry.uid);
+                        const rec = lex[worldName][charKey];
+                        console.log(`[GIC-Lore] per-world ストア[${worldName}][${charKey}] =`, rec);
                     } else {
-                        console.log(`[GIC-Lore] LEXストアに ${worldName} のエントリがありません`);
+                        console.log(`[GIC-Lore] per-world ストアに ${worldName} のエントリがありません`);
                     }
                 } catch (e) { /* ignore */ }
             }
@@ -633,13 +666,11 @@ async function processChoice(force = false) {
         }
 
         // ★ 生成コンテキストを保存（ファイル名リネーム用）
-        //   gic.js 側の maybeRenameGeneratedImage がこれを取得して
-        //   「キャラ名_エントリキー_タイムスタンプ.png」にリネームする。
         _pendingGenerationContext = {
             entryKey: extractEntryKey(entry),
             uid: entry.uid,
             worldName,
-            prompt,   // ★ 追加: プロンプトも保存
+            prompt,
             triggeredAt: Date.now(),
         };
         if (settings.verbose) {
@@ -695,15 +726,15 @@ async function registerSlashCommand() {
                     const ctx = getContext();
                     const lex = ctx?.extensionSettings?.lorebook_expansion?.data;
                     if (lex && lex[wn]) {
-                        console.log(`7) LEXストア[${wn}]:`);
-                        Object.entries(lex[wn]).forEach(([uid, rec]) => {
-                            console.log(`   uid=${uid}:`, rec);
+                        console.log(`7) per-world ストア[${wn}]:`);
+                        Object.entries(lex[wn]).forEach(([charKey, rec]) => {
+                            console.log(`   charKey=${charKey}:`, rec);
                         });
                     } else {
-                        console.log(`7) LEXストアに ${wn} のエントリがありません`);
+                        console.log(`7) per-world ストアに ${wn} のエントリがありません`);
                     }
                 } catch (e) {
-                    console.log('7) LEXストア読み込みエラー:', e);
+                    console.log('7) per-world ストア読み込みエラー:', e);
                 }
             }
             console.log('8) 設定:', window.GicLorebook?.getSettings?.() || '(non-public)');
@@ -770,8 +801,6 @@ function setupListeners() {
 
     if (settings.triggerOn === 'user_send') {
         // ★ 画像生成と LLM 応答を並行実行するため、ユーザー送信直後に開始する
-        //   USER_MESSAGE_RENDERED は送信後すぐに発火するので、
-        //   ctx.chat への反映を待つため 150ms の猶予を置く
         safeOn(event_types.USER_MESSAGE_RENDERED, () => {
             setTimeout(() => {
                 processChoice(false).catch(e => console.error('[GIC-Lore] 処理エラー:', e));
