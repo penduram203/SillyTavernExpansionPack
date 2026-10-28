@@ -4,25 +4,28 @@
 //   - Img_prompt : 画像生成プロンプト (gic_lorebook.js が読み取る)
 //   - choices    : 応答末尾に自動表示される選択肢群 (番号 + 文言)
 //
-// ★ データ保存先 (Phase 2 改修):
-//   一次: character.data.extensions.lorebook_expansion[charKey]
+// ★ データ保存先 (Phase 5 改修):
+//   一次: extension_settings.lorebook_expansion.data[worldName][charKey]
 //         charKey = entry.comment || entry.keys[0] || String(uid)
-//   二次: extension_settings.lorebook_expansion.data[worldName][uid]  (互換用)
-//   三次: entry.extensions.lorebook_expansion  (world ファイルミラー / WI注入用)
+//         LEX データは本来ロアブックエントリのプロパティであり、
+//         キャラクターには依存しない。per-world ストアで一元管理する。
+//         これにより、キャラとロアブックが一致しない場合も正しく反映される。
 //
-//   読込時は一次を優先。無ければ二次→三次の順でフォールバックし、
-//   内容があれば一次へ lazy 移行する。
+//   移行元: character.data.extensions.lorebook_expansion
+//          Phase 2〜4 で保存された旧データを起動時に per-world ストアへ移行する。
+//          ・新形式キー (worldName\x1fcharKey): 該当 world へ
+//          ・旧形式キー (charKey のみ): キャラ本来のロアブックへ
 //
 // ★ v6 修正:
 //   - ST起動時のWIドロワー自動オープン問題への対策を強化
 //     ST本体が jQuery.trigger('click') や classList.add を直接使う場合でも
 //     MutationObserver で強制クローズする
 //
-// ★ Phase 2 修正:
-//   - character.data.extensions.lorebook_expansion を一次情報源に
-//   - charKey = entry.comment / keys[0] / String(uid) の優先順で決定
-//   - getDataFor/setDataFor に character.data 連携を追加
-//   - init() で現在キャラの件数をログ出力
+// ★ Phase 5 修正:
+//   - LEX データの保存先を per-world ストアに変更
+//   - 旧 character.data からの一括移行 (lexStorageMigratedV1 フラグ)
+//   - getDataFor/setDataFor は per-world ストアを一次情報源とする
+//   - init() / CHARACTER_PAGE_LOADED で移行を試行
 
 import {
     extension_settings,
@@ -46,11 +49,15 @@ const DEFAULT_SETTINGS = {
     debug: false,
     extrasCollapsedByDefault: true,
     contentHeightRatio: 0.6,
+    lexStorageMigratedV1: false,
 };
 
 // ★ リトライ設定
 const WORLDIINFO_FETCH_MAX_RETRIES = 3;
 const WORLDIINFO_FETCH_RETRY_DELAY_MS = 500;
+
+// ★ Phase 5: ストレージキー区切り文字（ユーザー入力に含まれない制御文字）
+const STORAGE_KEY_SEPARATOR = '\x1f';
 
 let settings = { ...DEFAULT_SETTINGS };
 
@@ -79,6 +86,7 @@ function loadSettings() {
         debug: settings.debug,
         extrasCollapsedByDefault: settings.extrasCollapsedByDefault,
         contentHeightRatio: settings.contentHeightRatio,
+        lexStorageMigratedV1: settings.lexStorageMigratedV1,
         dataWorlds: Object.keys(stored.data).length,
     });
 }
@@ -93,6 +101,7 @@ function saveSettings() {
     s.debug = settings.debug;
     s.extrasCollapsedByDefault = settings.extrasCollapsedByDefault;
     s.contentHeightRatio = settings.contentHeightRatio;
+    s.lexStorageMigratedV1 = settings.lexStorageMigratedV1 === true;
 
     if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
 }
@@ -131,9 +140,23 @@ function normalizeLexData(raw) {
 }
 
 // ============================================================
-// ★ Phase 2: character.data.extensions.lorebook_expansion 連携
+// ★ Phase 5: per-world ストア
 // ============================================================
+function getWorldLexStore(worldName) {
+    const store = getLexStore();
+    if (!store[worldName] || typeof store[worldName] !== 'object') {
+        store[worldName] = {};
+    }
+    return store[worldName];
+}
 
+function saveLexStore() {
+    if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+}
+
+// ============================================================
+// ★ Phase 5: ストレージキー関連ヘルパー
+// ============================================================
 /**
  * エントリの安定キーを決定する。
  *   priority: entry.comment → entry.keys[0]/key[0] → String(uid)
@@ -150,16 +173,8 @@ function getCharKey(entry, uid) {
 }
 
 /**
- * ストレージキー用の区切り文字。
- * ユーザー入力の comment / keys に含まれる可能性が無い制御文字 (Unit Separator) を使用。
- */
-const STORAGE_KEY_SEPARATOR = '\x1f';
-
-/**
  * 複合ストレージキーを生成する。
  *   worldName + SEP + charKey
- *   worldName を含めることで、キャラが異なるロアブックを編集しても
- *   エントリが衝突しない。
  */
 function getStorageKey(worldName, charKey) {
     if (!worldName || charKey === null || charKey === undefined) return null;
@@ -168,7 +183,6 @@ function getStorageKey(worldName, charKey) {
 
 /**
  * 現在選択中キャラの名前と「本来のロアブック名」を返す。
- * 移行時の「旧形式キーをどのロアブックに引き継ぐか」の判定に使用。
  */
 function getCurrentCharacterInfo() {
     try {
@@ -187,38 +201,84 @@ function getCurrentCharacterInfo() {
     }
 }
 
-/**
- * 旧形式キー(charKey)で保存されていたデータを新形式キー(worldName::charKey)へ移行する。
- * char.data のメモリを直接更新し、CharStore 経由で即時保存する。
- */
-function migrateLegacyKey(worldName, charKey, legacyData) {
+// ============================================================
+// ★ Phase 5: character.data → per-world store の一括移行
+//   起動時に一度だけ実行。新形式キーは該当 world へ、
+//   旧形式キーはキャラ本来のロアブックへ割り当てる。
+// ============================================================
+function migrateCharacterLexDataToWorldStore() {
+    if (settings.lexStorageMigratedV1 === true) return;
+
     try {
         const ctx = getContext();
-        const char = ctx?.characters?.[ctx?.characterId];
-        if (!char?.data?.extensions?.lorebook_expansion) return false;
+        const chars = ctx?.characters || [];
+        if (chars.length === 0) {
+            debugLog('移行スキップ: キャラクター未ロード');
+            return; // フラグは立てず、CHARACTER_PAGE_LOADED での再試行を許容
+        }
 
-        const charLex = char.data.extensions.lorebook_expansion;
-        const storageKey = getStorageKey(worldName, charKey);
-        if (!storageKey) return false;
+        const store = getLexStore();
+        let migrated = 0;
+        let conflicts = 0;
 
-        charLex[storageKey] = legacyData;
-        delete charLex[charKey];
+        for (const char of chars) {
+            const charLex = char?.data?.extensions?.lorebook_expansion;
+            if (!charLex || typeof charLex !== 'object') continue;
 
-        if (window.CharStore?.saveCharacterExtension) {
-            window.CharStore.saveCharacterExtension(
-                'lorebook_expansion',
-                charLex,
-                { immediate: true }
+            const charName = typeof char.name === 'string' ? char.name : '';
+            const assocWorld =
+                (typeof char.data?.extensions?.world === 'string' && char.data.extensions.world) ||
+                (typeof char.data?.world === 'string' && char.data.world) ||
+                '';
+            const ownWorld = assocWorld || charName;
+
+            for (const [key, value] of Object.entries(charLex)) {
+                if (!value || typeof value !== 'object') continue;
+
+                let worldName, charKey;
+                if (key.includes(STORAGE_KEY_SEPARATOR)) {
+                    const idx = key.indexOf(STORAGE_KEY_SEPARATOR);
+                    worldName = key.slice(0, idx);
+                    charKey = key.slice(idx + 1);
+                } else {
+                    if (!ownWorld) continue;
+                    worldName = ownWorld;
+                    charKey = key;
+                }
+
+                if (!worldName || !charKey) continue;
+
+                if (!store[worldName] || typeof store[worldName] !== 'object') {
+                    store[worldName] = {};
+                }
+
+                if (!store[worldName][charKey]) {
+                    store[worldName][charKey] = normalizeLexData(value);
+                    migrated++;
+                } else {
+                    conflicts++;
+                }
+            }
+        }
+
+        if (migrated > 0 || conflicts > 0) {
+            saveLexStore();
+            console.log(
+                `${LOG} character.data → per-world store 移行: ${migrated} 件` +
+                (conflicts > 0 ? ` (既存値優先で ${conflicts} 件スキップ)` : '')
             );
         }
-        debugLog(`旧形式データを移行: "${charKey}" → "${storageKey}"`);
-        return true;
+
+        settings.lexStorageMigratedV1 = true;
+        saveSettings();
     } catch (e) {
-        console.warn(LOG, 'マイグレーション失敗:', e);
-        return false;
+        console.warn(LOG, 'character.data 移行エラー:', e);
     }
 }
 
+// ============================================================
+// ★ Phase 5: character.data 読み込み (移行フォールバック専用)
+// ============================================================
 function getCharacterLexData() {
     try {
         const ctx = getContext();
@@ -230,36 +290,8 @@ function getCharacterLexData() {
     }
 }
 
-function saveToCharacterLex(charKey, data) {
-    try {
-        if (!charKey) return false;
-        const ctx = getContext();
-        const char = ctx?.characters?.[ctx?.characterId];
-        if (!char || !char.avatar) return false;
-
-        if (!char.data) char.data = {};
-        if (!char.data.extensions) char.data.extensions = {};
-        if (!char.data.extensions.lorebook_expansion) {
-            char.data.extensions.lorebook_expansion = {};
-        }
-        char.data.extensions.lorebook_expansion[charKey] = data;
-
-        if (window.CharStore?.saveCharacterExtension) {
-            window.CharStore.saveCharacterExtension(
-                'lorebook_expansion',
-                char.data.extensions.lorebook_expansion
-            );
-            return true;
-        }
-        return false;
-    } catch (e) {
-        console.warn(LOG, 'character.data 保存エラー:', e);
-        return false;
-    }
-}
-
 // ============================================================
-// ★ Phase 4 改訂: getDataFor — worldName::charKey の複合キーで参照
+// ★ Phase 5: getDataFor — per-world ストアを一次情報源とする
 // ============================================================
 function getDataFor(worldName, uid, entry) {
     if (!worldName || uid === null || uid === undefined) {
@@ -269,59 +301,64 @@ function getDataFor(worldName, uid, entry) {
     const charKey = getCharKey(entry, uid);
     if (!charKey) return { img_prompt: '', choices: [] };
 
-    const charLex = getCharacterLexData();
-    const storageKey = getStorageKey(worldName, charKey);
-
-    // ── ① 新形式キー（worldName::charKey）を最優先 ──
-    if (storageKey && charLex[storageKey] && typeof charLex[storageKey] === 'object') {
-        return normalizeLexData(charLex[storageKey]);
+    // ── ① Primary: per-world store ──
+    const store = getWorldLexStore(worldName);
+    const rec = store[charKey];
+    if (rec && typeof rec === 'object') {
+        return normalizeLexData(rec);
     }
 
-    // ── ② 旧形式キー(charKey のみ)へのフォールバック + マイグレーション ──
-    //    旧形式のデータは「どのロアブック用か」が不明なため、
-    //    現在キャラの本来のロアブック（キャラ名 or char.data.world）と一致する場合のみ
-    //    移行する。これにより、別ロアブックへのデータ混入を防ぐ。
-    const charInfo = getCurrentCharacterInfo();
-    const isOwnLorebook = !!charInfo && (
-        (charInfo.name && worldName === charInfo.name) ||
-        (charInfo.associatedWorld && worldName === charInfo.associatedWorld)
-    );
+    // ── ② character.data に残っている旧データの遅延移行 ──
+    //   ・新形式キー(worldName\x1fcharKey): 対応する world のエントリとして移行
+    //   ・旧形式キー(charKeyのみ): 現在キャラ本来のロアブックの場合のみ移行
+    try {
+        const charLex = getCharacterLexData();
+        const storageKey = getStorageKey(worldName, charKey);
+        let legacyData = null;
 
-    if (isOwnLorebook && charLex[charKey] && typeof charLex[charKey] === 'object') {
-        const legacyData = normalizeLexData(charLex[charKey]);
-        migrateLegacyKey(worldName, charKey, legacyData);
-        return legacyData;
+        if (storageKey && charLex[storageKey] && typeof charLex[storageKey] === 'object') {
+            legacyData = normalizeLexData(charLex[storageKey]);
+        } else if (charLex[charKey] && typeof charLex[charKey] === 'object') {
+            const charInfo = getCurrentCharacterInfo();
+            const isOwnLorebook = !!charInfo && (
+                (charInfo.name && worldName === charInfo.name) ||
+                (charInfo.associatedWorld && worldName === charInfo.associatedWorld)
+            );
+            if (isOwnLorebook) {
+                legacyData = normalizeLexData(charLex[charKey]);
+            }
+        }
+
+        if (legacyData) {
+            store[charKey] = legacyData;
+            saveLexStore();
+            debugLog(`character.data から per-world store へ移行: ${worldName}::${charKey}`);
+            return legacyData;
+        }
+    } catch (e) {
+        console.warn(LOG, 'character.data からの移行に失敗:', e);
     }
 
     return { img_prompt: '', choices: [] };
 }
 
 // ============================================================
-// ★ Phase 4 改訂: setDataFor — worldName::charKey の複合キーで保存
+// ★ Phase 5: setDataFor — per-world ストアへ保存
 // ============================================================
 function setDataFor(worldName, uid, entry, data) {
     if (!worldName || uid === null || uid === undefined) return;
 
     const normalized = normalizeLexData(data);
-
     const charKey = getCharKey(entry, uid);
     if (!charKey) {
         debugLog('charKey 取得失敗のため保存スキップ:', { worldName, uid });
         return;
     }
 
-    const storageKey = getStorageKey(worldName, charKey);
-    if (!storageKey) {
-        debugLog('storageKey 取得失敗のため保存スキップ:', { worldName, charKey });
-        return;
-    }
-
-    const saved = saveToCharacterLex(storageKey, normalized);
-    if (saved) {
-        debugLog(`character.data に保存: ${storageKey}`);
-    } else {
-        console.warn(LOG, `character.data 保存失敗: ${storageKey} (world=${worldName}, uid=${uid})`);
-    }
+    const store = getWorldLexStore(worldName);
+    store[charKey] = normalized;
+    saveLexStore();
+    debugLog(`per-world store に保存: ${worldName}::${charKey}`);
 }
 
 // ============================================================
@@ -778,7 +815,7 @@ function reorganizeEntryLayout(entryEl) {
     const edit = entryEl.querySelector('.world_entry_edit');
     if (!edit) return;
 
-    const existingToggle = edit.querySelector(':scope > .' + TOGGLE_BTN_CLASS);
+    const existingToggle = edit.querySelector(':scope > ' + TOGGLE_BTN_CLASS);
     if (existingToggle) {
         return;
     }
@@ -1009,11 +1046,20 @@ function registerEventListeners() {
     if (event_types.MESSAGE_DELETED) {
         eventSource.on(event_types.MESSAGE_DELETED, onMessageUpdatedOrDeleted);
     }
+    // ★ Phase 5: キャラクター一覧ロード時に移行を再試行
+    if (event_types.CHARACTER_PAGE_LOADED) {
+        eventSource.on(event_types.CHARACTER_PAGE_LOADED, () => {
+            migrateCharacterLexDataToWorldStore();
+        });
+    }
 }
 
 async function init() {
     console.log(LOG, 'Lorebook Expansion 初期化開始');
     loadSettings();
+
+    // ★ Phase 5: character.data → per-world store の一括移行
+    migrateCharacterLexDataToWorldStore();
 
     // ★ Phase 2: 起動時に現在キャラの character.data 状態をログ出力
     try {
@@ -1084,23 +1130,17 @@ function bootstrap() {
                document.querySelector('.drawer[id*="WorldInfo" i]');
     }
 
-    /**
-     * WIドロワーを閉じた状態に強制する。
-     * 変更があれば true を返す。
-     */
     function forceCloseWIDrawer(reason) {
         const wi = findWIDrawer();
         if (!wi) return false;
 
         let changed = false;
 
-        // #WorldInfo 本体の openDrawer クラス除去
         if (wi.classList.contains('openDrawer')) {
             wi.classList.remove('openDrawer');
             changed = true;
         }
 
-        // 内部の drawer 関連要素から openDrawer を除去
         wi.querySelectorAll('.drawer-content, .drawer-toggle, .drawer-header, .drawer-icon').forEach(el => {
             if (el.classList.contains('openDrawer')) {
                 el.classList.remove('openDrawer');
@@ -1108,7 +1148,6 @@ function bootstrap() {
             }
         });
 
-        // .drawer-content は closedDrawer 状態を保証
         const content = wi.querySelector('.drawer-content');
         if (content && !content.classList.contains('closedDrawer')) {
             content.classList.add('closedDrawer');
@@ -1186,10 +1225,8 @@ function bootstrap() {
         if (released) return;
         released = true;
 
-        // 解除直前に最終強制クローズ（まだ blocking=true のうち）
         forceCloseWIDrawer('final-close');
 
-        // その後でブロック解除
         blocking = false;
         clearInterval(attachWatcher);
         clearInterval(safetyWatcher);
@@ -1200,13 +1237,11 @@ function bootstrap() {
     const scheduleRelease = () => {
         if (releaseScheduled) return;
         releaseScheduled = true;
-        // ST本体のオープン処理が済むまで十分待つ
         setTimeout(releaseBlocking, 1500);
     };
 
     if (eventSource && event_types && event_types.APP_READY) {
         eventSource.on(event_types.APP_READY, scheduleRelease);
-        // フォールバック: APP_READY が来ない環境向け
         setTimeout(scheduleRelease, 8000);
     } else {
         setTimeout(scheduleRelease, 8000);
@@ -1237,8 +1272,24 @@ window.LorebookExpansion = {
         } catch (e) { return {}; }
     },
 
+    // ★ Phase 5 追加: per-world ストア全体のダンプ
+    dumpWorldLex: () => {
+        try {
+            return JSON.parse(JSON.stringify(getLexStore()));
+        } catch (e) { return {}; }
+    },
+
+    // ★ Phase 5 追加: 移行フラグを手動でリセット（再移行用）
+    resetMigration: () => {
+        settings.lexStorageMigratedV1 = false;
+        saveSettings();
+        console.log(`${LOG} 移行フラグをリセットしました（次回起動時に再移行）`);
+        return true;
+    },
+
     // ★ Phase 2 追加: charKey 決定ロジックを外部から確認できるように
     getCharKey,
+    getStorageKey,
 
     extractChoiceNumber,
     findEntryByChoice,
@@ -1281,6 +1332,7 @@ window.LorebookExpansion = {
             ),
             characterLexCount: Object.keys(charLex).length,
             characterLexKeys: Object.keys(charLex),
+            lexStorageMigratedV1: settings.lexStorageMigratedV1,
             settings: { ...settings, data: undefined },
         };
     },
