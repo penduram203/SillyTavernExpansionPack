@@ -51,6 +51,49 @@
     // ===== オートセーブ用 =====
     let _autoSaveTimer = null;
 
+    // ============================================================
+    // ★ 別キャラ画像エントリの「一度きり」マイグレーション管理
+    //   image-display.js と同じフラグを共有する。
+    // ============================================================
+    const STJ_MIGRATION_META_NS = 'image_display_extension_meta';
+    const STJ_MIGRATION_FLAG_KEY = 'foreign_cleaned_version';
+    const STJ_MIGRATION_VERSION = 1;
+
+    function isMigrationDoneForChar(charName) {
+        if (!charName) return false;
+        try {
+            const ctx = getSTContext();
+            const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
+            if (char?.name !== charName) return false;
+            const v = char?.data?.extensions?.[STJ_MIGRATION_META_NS]?.[STJ_MIGRATION_FLAG_KEY] || 0;
+            return v >= STJ_MIGRATION_VERSION;
+        } catch (e) { return false; }
+    }
+
+    function markMigrationDoneForChar(charName) {
+        if (!charName) return false;
+        try {
+            const ctx = getSTContext();
+            const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
+            if (char?.name !== charName) return false;
+            if (!char.data) char.data = {};
+            if (!char.data.extensions) char.data.extensions = {};
+            if (!char.data.extensions[STJ_MIGRATION_META_NS]) {
+                char.data.extensions[STJ_MIGRATION_META_NS] = {};
+            }
+            char.data.extensions[STJ_MIGRATION_META_NS][STJ_MIGRATION_FLAG_KEY] = STJ_MIGRATION_VERSION;
+            if (window.CharStore?.saveCharacterExtension) {
+                // ★ STコアの再取得でデータが上書きされるのを防ぐため即時保存
+                window.CharStore.saveCharacterExtension(
+                    STJ_MIGRATION_META_NS,
+                    char.data.extensions[STJ_MIGRATION_META_NS],
+                    { immediate: true }
+                );
+            }
+            return true;
+        } catch (e) { return false; }
+    }
+
     // ===== ★ 動画サムネイル用 🎬 バッジのCSS注入 =====
     (function injectStjVideoBadgeStyle() {
         if (document.getElementById('stj-video-badge-style')) return;
@@ -622,9 +665,32 @@
         return name;
     }
 
+    function parseImageNames(input) {
+        if (!input) return [];
+        return input.split(',').map(name => name.trim()).filter(name => name.length > 0);
+    }
+
+    function findImageMapInData(data) {
+        if (data === null || typeof data !== 'object') return null;
+        if (data.hasOwnProperty('image_display_extension')) {
+            const potentialMap = data.image_display_extension;
+            if (typeof potentialMap === 'object' && potentialMap !== null) return potentialMap;
+        }
+        for (const key in data) {
+            if (data.hasOwnProperty(key)) {
+                const result = findImageMapInData(data[key]);
+                if (result !== null) return result;
+            }
+        }
+        return null;
+    }
+
     // ============================================================
     // ★ 別キャラの画像エントリ検出・除去（残留データ対策）
     //   image-display.js と同じロジック。
+    //   フラグはログ抑制専用。データが壊れている場合は
+    //   フラグ済みでも毎回クリーンアップする
+    //   (STコアが古いデータを再取得して上書きするケースがあるため)。
     // ============================================================
     function getKnownCharacterNames() {
         try {
@@ -646,49 +712,6 @@
         return false;
     }
 
-    // ============================================================
-    // ★ 別キャラ画像エントリの「一度きり」マイグレーション管理
-    //   image-display.js と同じフラグを共有する。
-    // ============================================================
-    const STJ_MIGRATION_META_NS = 'image_display_extension_meta';
-    const STJ_MIGRATION_FLAG_KEY = 'foreign_cleaned_version';
-    const STJ_MIGRATION_VERSION = 1;
-
-    function isMigrationDoneForChar(charName) {
-        if (!charName) return false;
-        try {
-            const ctx = getSTContext();
-            const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
-            if (char?.name !== charName) return false;
-            const v = char?.data?.extensions?.[STJ_MIGRATION_META_NS]?.[STJ_MIGRATION_FLAG_KEY] || 0;
-            return v >= STJ_MIGRATION_VERSION;
-        } catch (e) { return false; }
-    }
-
-    function markMigrationDoneForChar(charName) {
-        if (!charName) return false;
-        try {
-            const ctx = getSTContext();
-            const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
-            if (char?.name !== charName) return false;
-            if (!char.data) char.data = {};
-            if (!char.data.extensions) char.data.extensions = {};
-            if (!char.data.extensions[STJ_MIGRATION_META_NS]) {
-                char.data.extensions[STJ_MIGRATION_META_NS] = {};
-            }
-            char.data.extensions[STJ_MIGRATION_META_NS][STJ_MIGRATION_FLAG_KEY] = STJ_MIGRATION_VERSION;
-            if (window.CharStore?.saveCharacterExtension) {
-                // ★ STコアの再取得でデータが上書きされるのを防ぐため即時保存
-                window.CharStore.saveCharacterExtension(
-                    STJ_MIGRATION_META_NS,
-                    char.data.extensions[STJ_MIGRATION_META_NS],
-                    { immediate: true }
-                );
-            }
-            return true;
-        } catch (e) { return false; }
-    }
-    
     function cleanForeignImageEntries(imageMap, charName) {
         if (!imageMap || typeof imageMap !== 'object' || !charName) return imageMap;
 
@@ -755,26 +778,6 @@
         }
 
         return cleaned;
-    }   
-    
-    function parseImageNames(input) {
-        if (!input) return [];
-        return input.split(',').map(name => name.trim()).filter(name => name.length > 0);
-    }
-
-    function findImageMapInData(data) {
-        if (data === null || typeof data !== 'object') return null;
-        if (data.hasOwnProperty('image_display_extension')) {
-            const potentialMap = data.image_display_extension;
-            if (typeof potentialMap === 'object' && potentialMap !== null) return potentialMap;
-        }
-        for (const key in data) {
-            if (data.hasOwnProperty(key)) {
-                const result = findImageMapInData(data[key]);
-                if (result !== null) return result;
-            }
-        }
-        return null;
     }
 
     // ===== 条件評価 =====
@@ -1067,7 +1070,7 @@
                 if (s.currentTarget && s.currentTarget !== s.sourceItem) {
                     swapCells(s.sourceItem, s.currentTarget);
                     runLiveTest();
-                    autoSave({ immediate: true });   // ★ セル入れ替えを保存
+                    autoSave({ immediate: true });
                 }
             } else {
                 const src = s.sourceItem;
@@ -1175,7 +1178,7 @@
 
         runLiveTest();
     }
-    
+
     function openExportModal() {
         if (!stjModalEl) return;
         if (stjModalEl.style.display === 'block') return;
@@ -1201,7 +1204,7 @@
         //    (新規キャラでデータが無い場合、旧キャラのセルが残ったままになり
         //     autoSave で新キャラ側に誤保存されるのを防ぐ)
         resetFormToEmpty();
-        
+
         (async () => {
             try {
                 await loadExistingJSONData(charName);
@@ -1214,7 +1217,7 @@
 
     function closeExportModalInternal() {
         if (!stjModalEl) return;
-        flushAutoSave();   // ★ 保留中のオートセーブを即実行
+        flushAutoSave();
         closeCellModal(false);
         stjModalEl.style.display = 'none';
         document.body.classList.remove('stj-editor-open');
@@ -1327,7 +1330,7 @@
                 removeImageFromCell(currentModalCell, fileName);
                 renderCellModalGrid(currentModalCell).catch(err => console.warn('[STJ Editor] render error:', err));
                 updateCellPreview(currentModalCell);
-                autoSave({ immediate: true });   // ★ 画像登録解除を保存
+                autoSave({ immediate: true });
             }
         });
 
@@ -1338,7 +1341,6 @@
         if (!cell) return;
         if (isBulkDeleteMode || isDialogActive) return;
 
-        // 二重起動防止
         if (currentModalCell === cell &&
             currentCellModal &&
             currentCellModal.classList.contains('visible')) {
@@ -1489,7 +1491,7 @@
         }
         updateCellPreview(cell);
         runLiveTest();
-        autoSave({ immediate: true });   // ★ キーワード変更・画像変更を保存
+        autoSave({ immediate: true });
         const popup = document.getElementById('stj_choices_popup');
         if (popup) popup.remove();
         const zoom = document.getElementById('stj_media_zoom');
@@ -1797,7 +1799,7 @@
         }
 
         try { runLiveTest(); } catch (_) {}
-        autoSave({ immediate: true });   // ★ 画像登録を保存
+        autoSave({ immediate: true });
         console.log(`[STJ Editor] 🖼️ ドロップで追加: ${fileName}`);
     }
 
@@ -1969,7 +1971,7 @@
                 showDeleteConfirmDialog('本当に削除しますか？', () => {
                     item.remove();
                     runLiveTest();
-                    autoSave({ immediate: true });   // ★ セル削除を保存
+                    autoSave({ immediate: true });
                 });
             });
         }
@@ -2058,7 +2060,7 @@
         setupCellDropTargets(newItem);
         modal.scrollTop = modal.scrollHeight;
         runLiveTest();
-        autoSave({ immediate: true });   // ★ セル追加を保存
+        autoSave({ immediate: true });
     }
 
     async function loadExistingJSONData(charName) {
@@ -2946,7 +2948,7 @@
                     if (delExecBtn) delExecBtn.disabled = false;
                     document.querySelectorAll('.stj-keyword-item.stj-marked-for-delete').forEach(el => el.remove());
                     runLiveTest();
-                    autoSave({ immediate: true });   // ★ 一括削除を保存
+                    autoSave({ immediate: true });
                 },
                 () => {
                     isDialogActive = false;
@@ -2957,6 +2959,152 @@
         }, 1000);
     }
 
+    // ============================================================
+    // ★ ギャラリーからの画像削除通知(gic-image-deleted)を購読し、
+    //    ・character.data.extensions.image_display_extension から該当ファイルを除去
+    //    ・JSON 編集画面が開いていれば、全セルからも除去して autoSave
+    // ============================================================
+    function setupImageDeletedListener() {
+        if (window.__stjImageDeletedListenerInstalled) return;
+        window.__stjImageDeletedListenerInstalled = true;
+
+        window.addEventListener('gic-image-deleted', (e) => {
+            const { charName, fileNames } = e.detail || {};
+            if (!charName || !Array.isArray(fileNames) || fileNames.length === 0) return;
+
+            const deleteSet = new Set(fileNames.map(n => String(n)));
+            console.log(
+                `[STJ Editor] 📢 gic-image-deleted 受信: ${fileNames.length} 件 (char="${charName}")`
+            );
+
+            // ── ① character.data.extensions.image_display_extension を直接クリーン ──
+            //    エディタが閉じていてもデータを整合させる。
+            //    これを怠ると、後からエディタを開いた時に削除済み画像が復活する。
+            try {
+                const ctx = getSTContext();
+                let char = null;
+                if (ctx?.characterId !== undefined && ctx?.characters?.[ctx.characterId]?.name === charName) {
+                    char = ctx.characters[ctx.characterId];
+                }
+                if (!char && ctx?.character?.name === charName) {
+                    char = ctx.character;
+                }
+                if (!char && Array.isArray(ctx?.characters)) {
+                    char = ctx.characters.find(c => c?.name === charName);
+                }
+
+                const ext = char?.data?.extensions?.image_display_extension;
+                if (ext && typeof ext === 'object') {
+                    let dataChanged = false;
+                    const newExt = {};
+
+                    for (const [key, val] of Object.entries(ext)) {
+                        const processValue = (v) => {
+                            if (Array.isArray(v)) {
+                                const filtered = v.filter(p => {
+                                    if (typeof p !== 'string') return true;
+                                    const fn = extractFileNameFromPath(p);
+                                    if (!fn) return true;
+                                    const resolved = resolveThumbToOriginal(fn);
+                                    if (deleteSet.has(fn) || deleteSet.has(resolved)) {
+                                        dataChanged = true;
+                                        return false;
+                                    }
+                                    return true;
+                                });
+                                if (filtered.length === 0) return null;
+                                return filtered.length === 1 ? filtered[0] : filtered;
+                            } else if (typeof v === 'string') {
+                                const fn = extractFileNameFromPath(v);
+                                if (fn) {
+                                    const resolved = resolveThumbToOriginal(fn);
+                                    if (deleteSet.has(fn) || deleteSet.has(resolved)) {
+                                        dataChanged = true;
+                                        return null;
+                                    }
+                                }
+                                return v;
+                            }
+                            return v;
+                        };
+                        const result = processValue(val);
+                        if (result !== null) newExt[key] = result;
+                    }
+
+                    if (dataChanged) {
+                        window.CharStore?.saveCharacterExtension?.(
+                            'image_display_extension', newExt, { immediate: true }
+                        );
+                        // image-display.js に即時反映
+                        try {
+                            window.dispatchEvent(new CustomEvent('lbe-image-map-updated', {
+                                detail: { charName, imageMap: newExt }
+                            }));
+                        } catch (e) { /* ignore */ }
+                        console.log(
+                            `[STJ Editor] 🧹 character.data から削除画像を除去して保存 ` +
+                            `(${Object.keys(ext).length} → ${Object.keys(newExt).length} entries)`
+                        );
+                    }
+                }
+            } catch (e) {
+                console.warn('[STJ Editor] character.data クリーンアップ失敗:', e);
+            }
+
+            // ── ② エディタが開いていて、対象キャラと一致するなら UI も更新 ──
+            const nameEl = document.getElementById('stj_char_name_display');
+            const editorCharName = nameEl ? nameEl.textContent : '';
+            if (!editorCharName || editorCharName !== charName) {
+                console.log(
+                    `[STJ Editor] エディタのキャラと不一致のため UI 更新スキップ ` +
+                    `(editor="${editorCharName}", deleted="${charName}")`
+                );
+                return;
+            }
+
+            let affectedCells = 0;
+            let removedCount = 0;
+
+            document.querySelectorAll('.stj-special-item, .stj-keyword-item').forEach(cell => {
+                const currentImages = getCellImages(cell);
+                if (currentImages.length === 0) return;
+
+                const filtered = currentImages.filter(fn => {
+                    const clean = String(fn).trim();
+                    if (!clean) return false;
+                    const resolved = resolveThumbToOriginal(clean);
+                    if (deleteSet.has(clean) || deleteSet.has(resolved)) {
+                        removedCount++;
+                        return false;
+                    }
+                    return true;
+                });
+
+                if (filtered.length !== currentImages.length) {
+                    setCellImages(cell, filtered);
+                    updateCellPreview(cell);
+                    affectedCells++;
+
+                    // セルポップアップモーダルが開いていて対象セルならグリッド再描画
+                    if (currentModalCell === cell && currentCellModal && currentCellModal.classList.contains('visible')) {
+                        renderCellModalGrid(cell).catch(e => console.warn('[STJ Editor] render error:', e));
+                    }
+                }
+            });
+
+            if (removedCount > 0) {
+                console.log(
+                    `[STJ Editor] 🧹 ギャラリー削除に追従: ${removedCount} 件の画像を ${affectedCells} セルから除去`
+                );
+                // 変更を即時保存（キーワードからの画像登録解除を確定させる）
+                autoSave({ immediate: true });
+                try { runLiveTest(); } catch (e) { /* ignore */ }
+            }
+        });
+
+        console.log('[STJ Editor] 📢 gic-image-deleted リスナーを設置しました');
+    }
+
     function initStjEditor() {
         const context = getSTContext();
         if (!context) { setTimeout(initStjEditor, 500); return; }
@@ -2964,6 +3112,9 @@
         if (!stjModalEl || !document.body.contains(stjModalEl)) {
             createExportModal();
         }
+
+        // ★ ギャラリーからの画像削除を購読
+        setupImageDeletedListener();
 
         window.STJEditor = {
             open: function () {
