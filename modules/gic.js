@@ -5234,6 +5234,9 @@ function enterBulkDeleteMode() {
     updateBulkDeleteButton();
     updateBulkDeleteBanner();
 
+    // ★ ネイティブ 🗑 ボタンを表示・有効化
+    setNativeTrashButtonVisible(true);
+
     ensureFloatingBulkButton();
     requestAnimationFrame(() => positionFloatingBulkButton());
 }
@@ -5246,6 +5249,9 @@ function exitBulkDeleteMode() {
     document.querySelectorAll('.gic-bulk-selected').forEach(el => el.classList.remove('gic-bulk-selected'));
     showBulkDeleteToast('一括選択モードを終了しました');
     updateBulkDeleteButton();
+
+    // ★ ネイティブ 🗑 ボタンを非表示・無効化
+    setNativeTrashButtonVisible(false);
 
     // ★ page switch 状態もリセット
     if (isPageSwitchStale()) forceResetPageSwitch('exit bulk mode');
@@ -5587,7 +5593,32 @@ async function refreshGalleryAfterBulkDelete() {
     _galleryOpenCache = { value: false, timestamp: 0 };
     lastGalleryStateForGic = null;
     clearGalleryOpenInFlight();
+
+    // ★ 再オープン中フラグを立てて、自動クローズガードによる強制クローズを抑止
+    if (typeof window.__gicMarkPendingReopen === 'function') {
+        window.__gicMarkPendingReopen();
+    }
+
     openGalleryFromGic();
+
+    // ★ ギャラリーが実際に開くまで待つ（最大3秒）
+    //   この待機中も pending reopen フラグが立っているので、ポーリングの
+    //   auto-close guard は閉じに来ない
+    const openStart = Date.now();
+    while (!isGalleryOpen() && Date.now() - openStart < 3000) {
+        await wait(100);
+    }
+
+    // ★ ユーザー明示オープン扱いにマーク → 以降は自動クローズガード対象外
+    if (typeof window.__gicMarkUserOpened === 'function') {
+        window.__gicMarkUserOpened();
+    }
+
+    // ★ pending reopen は user-opened にバトンタッチして解除
+    if (typeof window.__gicClearPendingReopen === 'function') {
+        window.__gicClearPendingReopen();
+    }
+
     await wait(900);
     await restoreGalleryUiState(savedState);
 
@@ -5596,6 +5627,23 @@ async function refreshGalleryAfterBulkDelete() {
     _galleryTotalPagesCache = 0;
     applyPageNumbers();
     applyGalleryLayout();
+
+    // ★ STJ Editor の再オープンを明示的に促す（念のため）
+    //   syncGalleryButtonVisibility のポーリングでも呼ばれるが、
+    //   ここでも一度呼んでおくことで、再オープン後の初回周期を待たずに済む
+    try {
+        if (typeof window.STJEditor?.open === 'function' && !window.STJEditor.isOpen?.()) {
+            // 少し待ってから STJEditor を開く（ギャラリーのレイアウト安定を待つ）
+            setTimeout(() => {
+                try {
+                    if (isGalleryOpen() && !window.STJEditor?.isOpen?.()) {
+                        window.STJEditor.open();
+                        console.log('[GIC] ✅ bulk delete 後の STJEditor 再オープン');
+                    }
+                } catch (e) { console.warn('[GIC] STJEditor 再オープン失敗:', e); }
+            }, 300);
+        }
+    } catch (e) { /* ignore */ }
 }
 
 function captureGalleryUiState() {
@@ -5626,6 +5674,39 @@ async function restoreGalleryUiState(state) {
         if (ng2) ng2.scrollTop = state.scrollTop;
     }
     if (typeof state.pagerWindowStart === 'number') _paginationWindowStart = state.pagerWindowStart;
+}
+
+// ============================================================
+// ★ ネイティブ 🗑 ボタン（ST 標準の Delete mode）の表示制御
+//   一括選択モード中のみ表示し、それ以外では完全非表示・クリック不可
+// ============================================================
+const NATIVE_TRASH_SELECTORS = [
+    '.right_menu_button[title="Delete mode"]',
+    '.right_menu_button[title*="Delete" i]',
+    '.right_menu_button[title*="削除"]',
+    '.right_menu_button.fa-trash',
+    '.right_menu_button[class*="fa-trash"]',
+].join(', ');
+
+function setNativeTrashButtonVisible(visible) {
+    const gallery = document.getElementById('gallery');
+    if (!gallery) return;
+    gallery.querySelectorAll(NATIVE_TRASH_SELECTORS).forEach(btn => {
+        if (visible) {
+            btn.style.removeProperty('display');
+            btn.style.removeProperty('visibility');
+            btn.style.removeProperty('opacity');
+            btn.style.setProperty('pointer-events', 'auto', 'important');
+        } else {
+            // display: none !important で確実にクリック不可にする
+            // （restructureGalleryHeader が pointer-events:auto を上書きしても
+            //   display:none なら要素自体がレンダリングされず、クリックは届かない）
+            btn.style.setProperty('display', 'none', 'important');
+            btn.style.setProperty('visibility', 'hidden', 'important');
+            btn.style.setProperty('opacity', '0', 'important');
+            btn.style.setProperty('pointer-events', 'none', 'important');
+        }
+    });
 }
 
 function installBulkDeleteDocumentHandlers() {
@@ -5708,12 +5789,15 @@ function installBulkDeleteDocumentHandlers() {
 function removeBulkOverlays() {
     document.querySelectorAll('.gic-bulk-overlay').forEach(el => el.remove());
 }
-
 function setupBulkDelete() {
     const gallery = document.getElementById('gallery');
     if (!gallery) return;
     const controls = findGalleryHeaderControls();
     placeBulkDeleteButton(controls);
+
+    // ★ ネイティブ 🗑 ボタンの表示状態を _bulkDeleteMode に同期
+    //   ギャラリーDOMが再構築されても、この周期呼び出しで状態が復元される
+    setNativeTrashButtonVisible(_bulkDeleteMode);
 
     if (!_bulkDeleteHeaderObserver && controls.header) {
         _bulkDeleteHeaderObserver = new MutationObserver(() => {
@@ -5737,7 +5821,6 @@ function setupBulkDelete() {
         rowObserver.observe(controls.folderRow, { childList: true, subtree: true });
     }
 }
-
 function restructureGalleryHeader() {
     const gallery = document.getElementById('gallery');
     if (!gallery) return;
@@ -7327,8 +7410,24 @@ function bootstrapGIC() {
     // ★ ユーザーが明示的にギャラリーを開いたか（このフラグが立っている間は絶対に閉じない）
     let _userExplicitlyOpened = false;
     const USER_GRACE_MS = 2000;
+
+    // ★ 「プログラムから意図的に再オープン中」を表す一時フラグ
+    //    このフラグが立っている間は、ユーザー明示オープンでなくても
+    //    強制クローズを抑止する（自前の refreshGalleryAfterBulkDelete 用）
+    let _pendingReopenAt = 0;
+    const PENDING_REOPEN_GRACE_MS = 8000;
+
     // warmup 中かどうか（この間はユーザー意図なしとみなす）
     const isWarmupRunning = () => (typeof warmupState !== 'undefined' && warmupState === 'running');
+
+    function isPendingReopen() {
+        if (!_pendingReopenAt) return false;
+        if (Date.now() - _pendingReopenAt > PENDING_REOPEN_GRACE_MS) {
+            _pendingReopenAt = 0;
+            return false;
+        }
+        return true;
+    }
 
     const USER_TRIGGERS = [
         '#gic-open-gallery-button',
@@ -7359,10 +7458,19 @@ function bootstrapGIC() {
     };
     window.__gicIsUserOpened = () => _userExplicitlyOpened;
 
+    // ★ 外部（refreshGalleryAfterBulkDelete）から「再オープン中」をマークするフック
+    window.__gicMarkPendingReopen = () => {
+        _pendingReopenAt = Date.now();
+    };
+    window.__gicClearPendingReopen = () => {
+        _pendingReopenAt = 0;
+    };
+
     // ---- (A) 新規 #gallery 要素を監視して即 display:none ----
     function forceHideNewGallery(g) {
         if (!g) return;
         if (_userExplicitlyOpened) return;   // ★ ユーザーが開いた場合は触らない
+        if (isPendingReopen()) return;        // ★ 自前再オープン中は触らない
         const userOpened = (Date.now() - _lastUserOpenTime) < USER_GRACE_MS;
         if (userOpened) return;
         g.style.setProperty('display', 'none', 'important');
@@ -7378,6 +7486,7 @@ function bootstrapGIC() {
                 else if (node.querySelector) g = node.querySelector('#gallery');
                 if (g) {
                     if (_userExplicitlyOpened) continue;   // ★ ユーザーオープン中は無視
+                    if (isPendingReopen()) continue;        // ★ 自前再オープン中は無視
                     console.log('[GIC] 🚫 新規 #gallery を検出 → 即時 hide');
                     forceHideNewGallery(g);
                 }
@@ -7392,6 +7501,7 @@ function bootstrapGIC() {
         g.dataset.gicStyleObserved = '1';
         const so = new MutationObserver(() => {
             if (_userExplicitlyOpened) return;   // ★ ユーザーオープン中は無視
+            if (isPendingReopen()) return;        // ★ 自前再オープン中は無視
             if ((Date.now() - _lastUserOpenTime) < USER_GRACE_MS) return;
             if (isWarmupRunning()) return;
             const cs = window.getComputedStyle(g);
@@ -7413,18 +7523,21 @@ function bootstrapGIC() {
         if (isWarmupRunning()) return;
         if (!isGalleryOpen()) {
             // ★ ギャラリーが閉じられたらユーザー意図フラグをリセット
+            //   pending reopen は TTL 管理なのでここでは触らない
             _userExplicitlyOpened = false;
             return;
         }
         if (_userExplicitlyOpened) return;   // ★ ユーザーが開いた場合は絶対に閉じない
+        if (isPendingReopen()) return;        // ★ 自前再オープン中は閉じない
         if (Date.now() - _lastUserOpenTime < USER_GRACE_MS) return;
         console.log('[GIC] 🚫 ユーザー操作なしのギャラリーを検出 → 強制クローズ');
         try { hideGalleryAttachmentsImmediately('auto-open guard'); } catch (e) {}
         let attempts = 0;
         const retry = setInterval(() => {
             attempts++;
-            // ★ リトライ中にユーザーが開いた場合は中止
+            // ★ リトライ中にユーザーが開いた / pending reopen の場合は中止
             if (_userExplicitlyOpened) { clearInterval(retry); return; }
+            if (isPendingReopen()) { clearInterval(retry); return; }
             if (!isGalleryOpen()) { clearInterval(retry); return; }
             if (attempts > 10) { clearInterval(retry); return; }
             try { hideGalleryAttachmentsImmediately('auto-open guard retry'); } catch (e) {}
