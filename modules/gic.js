@@ -5484,6 +5484,19 @@ function convertThumbPathToOriginal(rawPath) {
     return folder ? `${folder}/${originalName}` : originalName;
 }
 
+// ============================================================
+// ★ 一括削除パスから元ファイル名を抽出
+//    （JSON 編集画面のセルとの照合に使用）
+// ============================================================
+function extractFileNameFromBulkPath(rawPath) {
+    if (!rawPath || typeof rawPath !== 'string') return null;
+    const cleaned = rawPath.replace(/^\/+/, '');
+    const lastSlash = cleaned.lastIndexOf('/');
+    const name = lastSlash >= 0 ? cleaned.slice(lastSlash + 1) : cleaned;
+    if (!name) return null;
+    if (!/\.(png|jpe?g|gif|webp|avif|bmp|mp4|webm)$/i.test(name)) return null;
+    try { return decodeURIComponent(name); } catch (e) { return name; }
+}
 
 async function tryDeleteImage(rawPath) {
     if (!rawPath || typeof rawPath !== 'string') return { ok: false };
@@ -5533,6 +5546,10 @@ async function executeBulkDelete() {
     _bulkDeleteSelected.forEach(path => { if (path) paths.push(path); });
     if (paths.length === 0) { console.warn('[GIC-Bulk] 有効なパスがありません'); return; }
 
+    // ★ 削除成功した元ファイル名を収集（JSON 編集画面への通知用）
+    const deletedFileNames = new Set();
+    const currentCharName = getCurrentCharacterName();
+
     let successCount = 0, failCount = 0;
     for (const path of paths) {
         // ★ サムネイルパスなら元ファイルパスに変換して優先削除
@@ -5559,9 +5576,33 @@ async function executeBulkDelete() {
             }
         }
 
-        if (ok) successCount++; else failCount++;
+        if (ok) {
+            successCount++;
+            // ★ 削除成功した元ファイル名を収集
+            const fileName = extractFileNameFromBulkPath(originalPath);
+            if (fileName) deletedFileNames.add(fileName);
+        } else {
+            failCount++;
+        }
     }
     console.log(`[GIC-Bulk] 完了: 成功 ${successCount} / 失敗 ${failCount}`);
+
+    // ★ JSON 編集画面 / image_display_extension に削除を通知
+    //    （character.data からの除去と、開いているエディタのセルからの除去）
+    if (deletedFileNames.size > 0 && currentCharName) {
+        const fileNames = [...deletedFileNames];
+        try {
+            window.dispatchEvent(new CustomEvent('gic-image-deleted', {
+                detail: { charName: currentCharName, fileNames }
+            }));
+            console.log(
+                `[GIC-Bulk] 📢 gic-image-deleted を発火: ${fileNames.length} 件 ` +
+                `(char="${currentCharName}")`
+            );
+        } catch (e) {
+            console.warn('[GIC-Bulk] gic-image-deleted 発火失敗:', e);
+        }
+    }
 
     if (lastGeneratedImageUrl) {
         const targetNormalized = (() => {
