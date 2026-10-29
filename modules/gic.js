@@ -5320,6 +5320,10 @@ function updateBulkDeleteButton() {
         btn.classList.remove('gic-bulk-delete-disabled');
         btn.disabled = false;
         btn.textContent = text;
+        // ★ 幅固定を再保証（DOM 再構築時に style が消えるケース対策）
+        btn.style.setProperty('min-width', '120px', 'important');
+        btn.style.setProperty('box-sizing', 'border-box', 'important');
+        btn.style.setProperty('text-align', 'center', 'important');
     }
     if (floatingBtn) {
         floatingBtn.textContent = text;
@@ -5346,6 +5350,11 @@ function createBulkDeleteButton() {
     btn.className = 'gic-bulk-delete-button';
     btn.textContent = '一括選択';
     btn.title = '一括選択モードの開始／終了';
+    // ★ 幅を固定して、テキスト変化（一括選択 ⇄ 選択終了 (N)）で
+    //    header の flex レイアウトが変わり後続ボタンがずれるのを防ぐ
+    btn.style.setProperty('min-width', '120px', 'important');
+    btn.style.setProperty('box-sizing', 'border-box', 'important');
+    btn.style.setProperty('text-align', 'center', 'important');
     btn.addEventListener('click', (e) => {
         e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
         if (_bulkDeleteMode) {
@@ -5697,14 +5706,18 @@ function setNativeTrashButtonVisible(visible) {
             btn.style.removeProperty('visibility');
             btn.style.removeProperty('opacity');
             btn.style.setProperty('pointer-events', 'auto', 'important');
+            // ★ 右に 20px ずらす（表示・非表示どちらでも常時適用して位置を安定させる）
+            btn.style.setProperty('margin-left', '20px', 'important');
         } else {
-            // display: none !important で確実にクリック不可にする
-            // （restructureGalleryHeader が pointer-events:auto を上書きしても
-            //   display:none なら要素自体がレンダリングされず、クリックは届かない）
-            btn.style.setProperty('display', 'none', 'important');
+            // ★ visibility:hidden でレイアウトスペースを保持しつつ非表示・クリック不可にする
+            //   （display:none だと header の flex レイアウトが変わり、
+            //    一括選択ボタンの位置がずれてしまう）
+            btn.style.removeProperty('display');
             btn.style.setProperty('visibility', 'hidden', 'important');
             btn.style.setProperty('opacity', '0', 'important');
             btn.style.setProperty('pointer-events', 'none', 'important');
+            // ★ レイアウトスペース維持のため margin-left は残す
+            btn.style.setProperty('margin-left', '20px', 'important');
         }
     });
 }
@@ -5874,6 +5887,16 @@ function restructureGalleryHeader() {
         el.style.setProperty('position', 'relative', 'important');
         el.style.setProperty('z-index', '200', 'important');
         el.style.setProperty('pointer-events', 'auto', 'important');
+        // ★ 一括選択ボタンの幅固定を保証（restructure で style が消えるのを防ぐ）
+        if (el.id === 'gic-bulk-delete-button') {
+            el.style.setProperty('min-width', '120px', 'important');
+            el.style.setProperty('box-sizing', 'border-box', 'important');
+            el.style.setProperty('text-align', 'center', 'important');
+        }
+        // ★ ネイティブ 🗑 ボタンに margin-left を保証
+        if (el.matches && el.matches(NATIVE_TRASH_SELECTORS)) {
+            el.style.setProperty('margin-left', '20px', 'important');
+        }
     });
 }
 
