@@ -645,6 +645,30 @@
         });
     }
 
+    // ============================================================
+    // ★ サーバー上の実ファイル存在チェック (ブラウザキャッシュ無効)
+    //    checkMediaExists は内部で new Image()/video の onload/onerror を
+    //    使うため、ブラウザキャッシュに残っている画像は「存在する」と
+    //    誤判定される。ローカルディスク削除を確実に検知するため、
+    //    fetch HEAD + cache:no-store で実ディスクを確認する。
+    // ============================================================
+    async function checkFileExistsOnServer(charName, fileName) {
+        if (!charName || !fileName) return false;
+        const path = `/user/images/${encodeURIComponent(charName)}/${encodeURIComponent(fileName)}`;
+        try {
+            const resp = await fetch(path, {
+                method: 'HEAD',
+                cache: 'no-store',
+            });
+            if (!resp.ok) return false;
+            const ct = (resp.headers.get('content-type') || '').toLowerCase();
+            if (ct.includes('text/html')) return false;
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+    
     async function detectImageExtension(charName, fileNameWithExt) {
         if (!charName || !fileNameWithExt) return null;
         const path = fileNameWithExt.startsWith('user/images/')
@@ -785,12 +809,13 @@
     //    ローカルディスクから画像を直接削除した場合、
     //    character.data.extensions.image_display_extension に
     //    キーワードとファイル名のマッピングだけが残ってしまう。
-    //    ここで実際のファイル存在を確認し、無い場合はマッピングを除去する。
+    //    ここで実ファイルの存在を fetch HEAD で確認し、
+    //    無い場合はマッピングを除去する。
     // ============================================================
     async function cleanMissingImageFiles(imageMap, charName) {
         if (!imageMap || typeof imageMap !== 'object' || !charName) return imageMap;
 
-        // 1. 全ファイル名を収集
+        // 1. 全ファイル名を収集（元ファイル名に正規化）
         const fileNames = new Set();
         const addFile = (p) => {
             if (typeof p !== 'string') return;
@@ -805,19 +830,13 @@
         }
         if (fileNames.size === 0) return imageMap;
 
-        // 2. 並列でファイル存在チェック
-        //    ★ キャッシュをバイパス: ディスク直接削除を確実に検知するため
-        //      mediaCache は exists=true を無期限キャッシュするので、
-        //      事前に delete しないと削除済みファイルを "存在する" と誤判定する
+        // 2. 並列で実ファイル存在チェック (ブラウザキャッシュ無効)
+        //    ★ checkMediaExists ではなく checkFileExistsOnServer を使う:
+        //      checkMediaExists は new Image() の onload で判定するため、
+        //      ブラウザキャッシュに残っている画像を「存在する」と誤判定する。
         const existMap = new Map();
         await Promise.all([...fileNames].map(async (fn) => {
-            const path = `user/images/${charName}/${fn}`;
-            mediaCache.delete(path);
-            mediaCache.delete('/' + path);
-            let exists = false;
-            try {
-                exists = await checkMediaExists(path);
-            } catch (e) { exists = false; }
+            const exists = await checkFileExistsOnServer(charName, fn);
             existMap.set(fn, exists);
         }));
 
