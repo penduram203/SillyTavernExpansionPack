@@ -84,11 +84,11 @@
   flex-wrap: wrap;
 }
 
-#stj_cancel_export { background-color: #e53e3e; color: white; }
-#stj_add_keyword { background-color: #b8860b; color: white; }
-#stj_add_keyword:hover { background-color: #96700a; }
-#stj_bulk_delete { background-color: #dd6b20; color: white; }
-#stj_bulk_delete:hover { background-color: #c05621; }
+#stj_cancel_export { background-color: #dd8800; color: white; }
+#stj_add_keyword { background-color: #009900; color: white; }
+#stj_add_keyword:hover { background-color: #007700; }
+#stj_bulk_delete { background-color: #e53e3e; color: white; }
+#stj_bulk_delete:hover { background-color: #c53030; }
 #stj_delete_cancel { background-color: #4a5568; color: white; }
 #stj_delete_cancel:hover { background-color: #2d3748; }
 #stj_delete_execute { background-color: #e53e3e; color: white; }
