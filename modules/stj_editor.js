@@ -761,7 +761,8 @@
                     }
                     return true;
                 });
-                if (filtered.length === 0) return null;
+                // ★ 空配列でもキーを保持する（画像全削除されたキーワードを残すため）
+                if (filtered.length === 0) return [];
                 return filtered.length === 1 ? filtered[0] : filtered;
             } else if (typeof val === 'string') {
                 const fn = extractFileNameFromPath(val);
@@ -770,7 +771,8 @@
                         console.log(`[STJ Editor] 🧹 別キャラの画像エントリを除外: ${fn}`);
                     }
                     removed++;
-                    return null;
+                    // ★ 空配列に変換してキーを保持（セルとキーワードを残す）
+                    return [];
                 }
                 return val;
             }
@@ -831,16 +833,13 @@
         if (fileNames.size === 0) return imageMap;
 
         // 2. 並列で実ファイル存在チェック (ブラウザキャッシュ無効)
-        //    ★ checkMediaExists ではなく checkFileExistsOnServer を使う:
-        //      checkMediaExists は new Image() の onload で判定するため、
-        //      ブラウザキャッシュに残っている画像を「存在する」と誤判定する。
         const existMap = new Map();
         await Promise.all([...fileNames].map(async (fn) => {
             const exists = await checkFileExistsOnServer(charName, fn);
             existMap.set(fn, exists);
         }));
 
-        // 3. 欠損しているファイルを除去
+        // 3. 欠損しているファイルを除去（ただしキーは保持）
         let removed = 0;
         const cleaned = {};
         const isMissing = (p) => {
@@ -861,12 +860,14 @@
                     }
                     return true;
                 });
-                if (filtered.length === 0) continue;
-                cleaned[key] = filtered.length === 1 ? filtered[0] : filtered;
+                // ★ 空配列でもキーを保持する（画像全削除されたキーワードを残すため）
+                cleaned[key] = filtered.length === 0 ? [] : (filtered.length === 1 ? filtered[0] : filtered);
             } else if (typeof val === 'string') {
                 if (isMissing(val)) {
                     console.log(`[STJ Editor] 🗑️ 存在しないファイルを除去: key="${key}" → ${val}`);
                     removed++;
+                    // ★ 空配列でキーを保持（セルとキーワードを残す）
+                    cleaned[key] = [];
                     continue;
                 }
                 cleaned[key] = val;
@@ -3131,7 +3132,8 @@
                                     }
                                     return true;
                                 });
-                                if (filtered.length === 0) return null;
+                                // ★ 空配列でもキーを保持（セルとキーワードを残す）
+                                if (filtered.length === 0) return [];
                                 return filtered.length === 1 ? filtered[0] : filtered;
                             } else if (typeof v === 'string') {
                                 const fn = extractFileNameFromPath(v);
@@ -3139,7 +3141,8 @@
                                     const resolved = resolveThumbToOriginal(fn);
                                     if (deleteSet.has(fn) || deleteSet.has(resolved)) {
                                         dataChanged = true;
-                                        return null;
+                                        // ★ 単一文字列 → 空配列に変換してキーを保持
+                                        return [];
                                     }
                                 }
                                 return v;
