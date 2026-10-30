@@ -1682,7 +1682,7 @@
         return '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(fileName);
     }
 
-    async function renderCellModalGrid(cell) {
+     async function renderCellModalGrid(cell) {
         if (!currentCellModal || !cell) return;
 
         const myToken = ++_currentGridRenderToken;
@@ -2266,17 +2266,9 @@
             //    （空 {} でも）character.data を権威ソースとして扱う
             if (ext !== undefined && typeof ext === 'object') {
                 hasCharData = true;
-                // ★ null 値（削除マーカー）を除外する
-                //    merge-attributes の深いマージで残った削除済みキーを無視するため。
-                const filteredExt = {};
-                for (const [k, v] of Object.entries(ext)) {
-                    if (v !== null && v !== undefined) {
-                        filteredExt[k] = v;
-                    }
-                }
-                if (Object.keys(filteredExt).length > 0) {
-                    imageMap = filteredExt;
-                    console.log(`[STJ Editor] ✅ image_display_extension を読込 (${Object.keys(filteredExt).length} entries)`);
+                if (Object.keys(ext).length > 0) {
+                    imageMap = ext;
+                    console.log(`[STJ Editor] ✅ image_display_extension を読込 (${Object.keys(ext).length} entries)`);
                 } else {
                     console.log(`[STJ Editor] image_display_extension は空 ({}) → 空フォーム維持`);
                 }
@@ -2372,12 +2364,8 @@
 
     function populateFormFromImageMap(imageMap) {
         const toFileNames = (val) => {
-            if (val === null || val === undefined) return [];
             const arr = Array.isArray(val) ? val : [val];
-            return arr
-                .filter(p => p !== null && p !== undefined)
-                .map(p => extractFileNameFromPath(p))
-                .filter(Boolean);
+            return arr.map(p => extractFileNameFromPath(p)).filter(Boolean);
         };
 
         const defaultCell = document.querySelector('.stj-special-item:nth-child(1)');
@@ -2715,56 +2703,18 @@
             // ★ 新規: image_display_extension 形式へ変換して character.json に保存
             try {
                 const imageMap = buildImageMapFromForm(charName);
-
-                // ★ 削除されたキーを null で明示的に上書きする
-                //    merge-attributes は lodash.merge で深いマージを行うため、
-                //    フォームにないキーを null で送らないとサーバ側に残り続け、
-                //    再起動時に削除したセルが復活してしまう。
-                let payload = imageMap;
-                let keysToDelete = [];
-                try {
-                    const ctx = getSTContext();
-                    const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
-                    if (char?.name === charName) {
-                        const currentExt = char?.data?.extensions?.image_display_extension;
-                        if (currentExt && typeof currentExt === 'object') {
-                            keysToDelete = Object.keys(currentExt).filter(
-                                k => !(k in imageMap) && currentExt[k] !== null
-                            );
-                            if (keysToDelete.length > 0) {
-                                payload = { ...imageMap };
-                                for (const k of keysToDelete) {
-                                    payload[k] = null;
-                                }
-                                console.log(`[STJ Editor] 🗑️ 削除キーを null で上書き: ${keysToDelete.join(', ')}`);
-                            }
-                        }
-                    }
-                } catch (e) { /* ignore */ }
-
                 if (window.CharStore?.saveCharacterExtension) {
                     // ★ { immediate: true } でデバウンスをバイパス
                     //    CharStore は 100ms のデバウンスを持つが、モーダル閉じなどで
                     //    pending 保存がキャンセルされるケースがあるため、即時保存する。
+                    //    これによりキーワードのみの編集（画像0枚のセル）も確実に
+                    //    character.data に保存される。
                     window.CharStore.saveCharacterExtension(
                         'image_display_extension',
-                        payload,
+                        imageMap,
                         { immediate: true }
                     );
-
-                    // ★ _updateMemory が payload（null 付き）でメモリを上書きするため、
-                    //    送信後にメモリを正しい imageMap で修正する。
-                    if (keysToDelete.length > 0) {
-                        try {
-                            const ctx = getSTContext();
-                            const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
-                            if (char?.name === charName && char.data?.extensions) {
-                                char.data.extensions.image_display_extension = imageMap;
-                            }
-                        } catch (e) { /* ignore */ }
-                    }
-
-                    // 即時反映用のカスタムイベント（null を除外した imageMap を渡す）
+                    // 即時反映用のカスタムイベント
                     window.dispatchEvent(new CustomEvent('lbe-image-map-updated', {
                         detail: { charName, imageMap }
                     }));
@@ -3076,7 +3026,7 @@
             <div class="stj-button-group">
                 <div class="stj-button-group-main">
                     <button id="stj_cancel_export">終了</button>
-                    <button id="stj_export_json">JSON出力</button>
+                    <button id="stj_add_keyword">セル追加</button>
                     <button id="stj_bulk_delete">一括削除</button>
                     <button id="stj_delete_cancel" style="display:none;">戻る</button>
                     <button id="stj_delete_execute" style="display:none;">削除実行</button>
