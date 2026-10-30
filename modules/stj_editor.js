@@ -1027,15 +1027,19 @@
         messageDialogEl.style.display = 'none';
     }
 
-    function swapCells(a, b) {
-        if (!a || !b || a === b) return;
-        const parent = a.parentNode;
-        if (!parent || parent !== b.parentNode) return;
-        const placeholder = document.createComment('stj-swap');
-        parent.insertBefore(placeholder, a);
-        parent.insertBefore(a, b);
-        parent.insertBefore(b, placeholder);
-        parent.removeChild(placeholder);
+    // ============================================================
+    // ★ セル挿入（参照セルの前後に移動し、他セルをずらす）
+    // ============================================================
+    function insertCellAt(source, reference, position) {
+        if (!source || !reference || source === reference) return;
+        const parent = source.parentNode;
+        if (!parent || parent !== reference.parentNode) return;
+
+        if (position === 'before') {
+            parent.insertBefore(source, reference);
+        } else {
+            parent.insertBefore(source, reference.nextSibling);
+        }
     }
 
     function findScrollableAncestor(el) {
@@ -1089,15 +1093,109 @@
         } else stopAutoScroll();
     }
 
-    function updateDragTarget(s, x, y) {
+    // ============================================================
+    // ★ ドロップゾーン判定
+    //   セル中央部  → 入れ替え（swap）
+    //   セル左/右端 → そのセルの前/後に挿入（insert）
+    //   セル間の隙間 → 最近傍セルを基準に挿入
+    // ============================================================
+    function findDropZone(s, x, y) {
+        const container = document.getElementById('stj_keywords_container');
+        if (!container) return null;
+
         const el = document.elementFromPoint(x, y);
-        const target = el && el.closest ? el.closest('.stj-keyword-item') : null;
-        const validTarget = (target && target !== s.sourceItem) ? target : null;
-        if (s.currentTarget && s.currentTarget !== validTarget) {
-            s.currentTarget.classList.remove('stj-drag-over');
+        const hoveredCell = el && el.closest ? el.closest('.stj-keyword-item') : null;
+
+        // ① キーワードセルの上
+        if (hoveredCell && container.contains(hoveredCell)) {
+            if (hoveredCell === s.sourceItem) return null; // 自分自身の上は無反応
+            const rect = hoveredCell.getBoundingClientRect();
+            if (rect.width <= 0 || rect.height <= 0) return null;
+            const relX = (x - rect.left) / rect.width;
+            if (relX < 0.15) {
+                return { type: 'insert', reference: hoveredCell, position: 'before' };
+            }
+            if (relX > 0.85) {
+                return { type: 'insert', reference: hoveredCell, position: 'after' };
+            }
+            return { type: 'swap', cell: hoveredCell };
         }
-        s.currentTarget = validTarget;
-        if (validTarget) validTarget.classList.add('stj-drag-over');
+
+        // ② セルの上ではない → コンテナ内なら「挿入」扱い
+        const containerRect = container.getBoundingClientRect();
+        const margin = 60;
+        if (x < containerRect.left - margin || x > containerRect.right + margin ||
+            y < containerRect.top - margin || y > containerRect.bottom + margin) {
+            return null;
+        }
+
+        const cells = Array.from(container.querySelectorAll('.stj-keyword-item'))
+            .filter(c => c !== s.sourceItem);
+        if (cells.length === 0) return null;
+
+        let nearest = null;
+        let nearestDist = Infinity;
+        for (const cell of cells) {
+            const rect = cell.getBoundingClientRect();
+            if (rect.width === 0 || rect.height === 0) continue;
+            const cx = rect.left + rect.width / 2;
+            const cy = rect.top + rect.height / 2;
+            const dx = Math.max(0, Math.abs(x - cx) - rect.width / 2);
+            const dy = Math.max(0, Math.abs(y - cy) - rect.height / 2);
+            const dist = dx * dx + dy * dy;
+            if (dist < nearestDist) {
+                nearestDist = dist;
+                nearest = cell;
+            }
+        }
+        if (!nearest) return null;
+
+        const rect = nearest.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        const dx = x - cx;
+        const dy = y - cy;
+
+        let insertBefore;
+        if (Math.abs(dx) > rect.width * 0.15) {
+            insertBefore = dx < 0;
+        } else if (Math.abs(dy) > rect.height * 0.15) {
+            insertBefore = dy < 0;
+        } else {
+            insertBefore = dx < 0;
+        }
+
+        return { type: 'insert', reference: nearest, position: insertBefore ? 'before' : 'after' };
+    }
+    
+    function updateDragTarget(s, x, y) {
+        const zone = findDropZone(s, x, y);
+
+        const newTarget = (zone && zone.type === 'swap') ? zone.cell : null;
+        const newInsertRef = (zone && zone.type === 'insert') ? zone.reference : null;
+
+        // 既存の視覚インジケーターをクリア（対象が変わったものだけ）
+        if (s.currentTarget && s.currentTarget !== newTarget) {
+            s.currentTarget.classList.remove('stj-drag-over');
+            s.currentTarget = null;
+        }
+        if (s.insertReference && s.insertReference !== newInsertRef) {
+            s.insertReference.classList.remove('stj-insert-before', 'stj-insert-after');
+            s.insertReference = null;
+        }
+
+        s.insertZone = null;
+
+        if (!zone) return;
+
+        if (zone.type === 'swap') {
+            s.currentTarget = zone.cell;
+            zone.cell.classList.add('stj-drag-over');
+        } else if (zone.type === 'insert') {
+            s.insertZone = zone;
+            s.insertReference = zone.reference;
+            zone.reference.classList.add(zone.position === 'before' ? 'stj-insert-before' : 'stj-insert-after');
+        }
     }
 
     function createDragGhost(sourceItem, cursorX, cursorY) {
@@ -1186,6 +1284,7 @@
             if (stjModalEl) stjModalEl.classList.remove('stj-drag-active');
             if (s.sourceItem) s.sourceItem.classList.remove('stj-dragging');
             if (s.currentTarget) s.currentTarget.classList.remove('stj-drag-over');
+            if (s.insertReference) s.insertReference.classList.remove('stj-insert-before', 'stj-insert-after');
             removeDragGhost(s.ghostState);
 
             if (s.isDragging || s.hasMoved) {
@@ -1193,7 +1292,13 @@
             }
 
             if (s.isDragging) {
-                if (s.currentTarget && s.currentTarget !== s.sourceItem) {
+                if (s.insertZone && s.insertZone.reference && s.insertZone.reference !== s.sourceItem) {
+                    // ★ 挿入モード（隙間ドロップ）
+                    insertCellAt(s.sourceItem, s.insertZone.reference, s.insertZone.position);
+                    runLiveTest();
+                    autoSave({ immediate: true });
+                } else if (s.currentTarget && s.currentTarget !== s.sourceItem) {
+                    // ★ 入れ替えモード（重ねドロップ）
                     swapCells(s.sourceItem, s.currentTarget);
                     runLiveTest();
                     autoSave({ immediate: true });
@@ -1221,6 +1326,7 @@
             if (stjModalEl) stjModalEl.classList.remove('stj-drag-active');
             if (s.sourceItem) s.sourceItem.classList.remove('stj-dragging');
             if (s.currentTarget) s.currentTarget.classList.remove('stj-drag-over');
+            if (s.insertReference) s.insertReference.classList.remove('stj-insert-before', 'stj-insert-after');
             removeDragGhost(s.ghostState);
         });
     }
@@ -2090,6 +2196,7 @@
                         isDragging: false, isBulkDelete: true,
                         hasMoved: false,
                         currentTarget: null, ghostState: null, scrollContainer: null
+                        insertReference: null, insertZone: null
                     };
                     return;
                 }
@@ -2103,6 +2210,7 @@
                     isDragging: false, isBulkDelete: false,
                     hasMoved: false,
                     currentTarget: null, ghostState: null, scrollContainer: null
+                    insertReference: null, insertZone: null
                 };
             });
         }
