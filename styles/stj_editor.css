@@ -84,7 +84,6 @@
   flex-wrap: wrap;
 }
 
-#stj_export_json { background-color: #48bb78; color: white; margin-left: 0 !important; }
 #stj_cancel_export { background-color: #e53e3e; color: white; }
 #stj_add_keyword { background-color: #b8860b; color: white; }
 #stj_add_keyword:hover { background-color: #96700a; }
