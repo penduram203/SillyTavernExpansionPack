@@ -85,6 +85,7 @@
 }
 
 #stj_cancel_export { background-color: #dd8800; color: white; }
+#stj_cancel_export:hover { background-color: #bc7400; }
 #stj_add_keyword { background-color: #009900; color: white; }
 #stj_add_keyword:hover { background-color: #007700; }
 #stj_bulk_delete { background-color: #e53e3e; color: white; }
