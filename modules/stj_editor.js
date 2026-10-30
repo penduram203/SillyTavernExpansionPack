@@ -780,6 +780,101 @@
         return cleaned;
     }
 
+    // ============================================================
+    // ★ ディスク上に存在しない画像エントリを検出・除去
+    //    ローカルディスクから画像を直接削除した場合、
+    //    character.data.extensions.image_display_extension に
+    //    キーワードとファイル名のマッピングだけが残ってしまう。
+    //    ここで実際のファイル存在を確認し、無い場合はマッピングを除去する。
+    // ============================================================
+    async function cleanMissingImageFiles(imageMap, charName) {
+        if (!imageMap || typeof imageMap !== 'object' || !charName) return imageMap;
+
+        // 1. 全ファイル名を収集
+        const fileNames = new Set();
+        const addFile = (p) => {
+            if (typeof p !== 'string') return;
+            const fn = extractFileNameFromPath(p);
+            if (!fn) return;
+            const resolved = resolveThumbToOriginal(fn);
+            if (resolved) fileNames.add(resolved);
+        };
+        for (const val of Object.values(imageMap)) {
+            if (Array.isArray(val)) val.forEach(addFile);
+            else if (typeof val === 'string') addFile(val);
+        }
+        if (fileNames.size === 0) return imageMap;
+
+        // 2. 並列でファイル存在チェック
+        //    ★ キャッシュをバイパス: ディスク直接削除を確実に検知するため
+        //      mediaCache は exists=true を無期限キャッシュするので、
+        //      事前に delete しないと削除済みファイルを "存在する" と誤判定する
+        const existMap = new Map();
+        await Promise.all([...fileNames].map(async (fn) => {
+            const path = `user/images/${charName}/${fn}`;
+            mediaCache.delete(path);
+            mediaCache.delete('/' + path);
+            let exists = false;
+            try {
+                exists = await checkMediaExists(path);
+            } catch (e) { exists = false; }
+            existMap.set(fn, exists);
+        }));
+
+        // 3. 欠損しているファイルを除去
+        let removed = 0;
+        const cleaned = {};
+        const isMissing = (p) => {
+            if (typeof p !== 'string') return false;
+            const fn = extractFileNameFromPath(p);
+            if (!fn) return false;
+            const resolved = resolveThumbToOriginal(fn);
+            return existMap.get(resolved) === false;
+        };
+
+        for (const [key, val] of Object.entries(imageMap)) {
+            if (Array.isArray(val)) {
+                const filtered = val.filter(p => {
+                    if (isMissing(p)) {
+                        console.log(`[STJ Editor] 🗑️ 存在しないファイルを除去: key="${key}" → ${p}`);
+                        removed++;
+                        return false;
+                    }
+                    return true;
+                });
+                if (filtered.length === 0) continue;
+                cleaned[key] = filtered.length === 1 ? filtered[0] : filtered;
+            } else if (typeof val === 'string') {
+                if (isMissing(val)) {
+                    console.log(`[STJ Editor] 🗑️ 存在しないファイルを除去: key="${key}" → ${val}`);
+                    removed++;
+                    continue;
+                }
+                cleaned[key] = val;
+            } else {
+                cleaned[key] = val;
+            }
+        }
+
+        if (removed > 0) {
+            console.log(
+                `[STJ Editor] 🧹 存在しないファイル ${removed} 件を整理 ` +
+                `(${Object.keys(imageMap).length} → ${Object.keys(cleaned).length} entries)`
+            );
+            try {
+                window.CharStore?.saveCharacterExtension?.(
+                    'image_display_extension', cleaned, { immediate: true }
+                );
+                // image-display.js に即時反映
+                window.dispatchEvent(new CustomEvent('lbe-image-map-updated', {
+                    detail: { charName, imageMap: cleaned }
+                }));
+            } catch (e) { /* ignore */ }
+        }
+
+        return cleaned;
+    }
+
     // ===== 条件評価 =====
     function normalizeConditionExpression(expr) {
         if (!expr || typeof expr !== 'string') return '';
@@ -2132,7 +2227,12 @@
         if (imageMap) {
             // ★ 別キャラの画像エントリを先に除外（過去のバグの残留データ対策）
             const cleanedMap = cleanForeignImageEntries(imageMap, charName);
-            populateFormFromImageMap(cleanedMap);
+            // ★ ディスク上に存在しないファイルを除去（ローカル削除対策）
+            const existingMap = await cleanMissingImageFiles(cleanedMap, charName);
+            populateFormFromImageMap(existingMap);
+            // ★ extensionSettings も同期
+            //    （loadSavedData が後から走るため、旧データで上書きされるのを防ぐ）
+            try { saveData({ silent: true }); } catch (e) { /* ignore */ }
         } else {
             // ★ 空の image_display_extension が既に保存されている場合は
             //    「新規作成」ではなく「空データ（確認済み）」とログを分ける
@@ -3127,6 +3227,40 @@
             },
             isOpen: function () {
                 return !!(stjModalEl && stjModalEl.style.display === 'block');
+            },
+            // ★ 手動で存在しないファイルを除去（デバッグ・復旧用）
+            cleanMissingFiles: async function (targetCharName) {
+                const charName = targetCharName
+                    || document.getElementById('stj_char_name_display')?.textContent
+                    || '';
+                if (!charName) return { ok: false, message: 'no charName' };
+                try {
+                    const ctx = getSTContext();
+                    let char = null;
+                    if (ctx?.characters?.[ctx?.characterId]?.name === charName) {
+                        char = ctx.characters[ctx.characterId];
+                    }
+                    if (!char && ctx?.character?.name === charName) char = ctx.character;
+                    if (!char && Array.isArray(ctx?.characters)) {
+                        char = ctx.characters.find(c => c?.name === charName);
+                    }
+                    const ext = char?.data?.extensions?.image_display_extension;
+                    if (!ext || typeof ext !== 'object') {
+                        return { ok: false, message: 'no data' };
+                    }
+                    const before = Object.keys(ext).length;
+                    const cleaned = await cleanMissingImageFiles(ext, charName);
+                    const after = Object.keys(cleaned).length;
+                    return {
+                        ok: true,
+                        charName,
+                        before,
+                        after,
+                        removed: before - after,
+                    };
+                } catch (e) {
+                    return { ok: false, error: String(e) };
+                }
             },
         };
 
