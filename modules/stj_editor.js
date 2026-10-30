@@ -746,9 +746,17 @@
     function cleanForeignImageEntries(imageMap, charName) {
         if (!imageMap || typeof imageMap !== 'object' || !charName) return imageMap;
 
+        // ★ 既にクリーンアップ済みのキャラは、ユーザーが明示的に追加した
+        //    別キャラの画像（ドラッグ&ドロップ等）を尊重するため、
+        //    クリーンアップをスキップする。
+        //    STコアの再取得による汚染は CharStore のバックアップ注入で防がれている。
+        if (isMigrationDoneForChar(charName)) {
+            return imageMap;
+        }
+
         // ★ フラグは「per-item ログ抑制」のためだけに使う。
         //   データが壊れている場合はフラグ済みでも毎回クリーンアップする
-        const alreadyMigrated = isMigrationDoneForChar(charName);
+        const alreadyMigrated = false;
 
         let removed = 0;
         const cleaned = {};
