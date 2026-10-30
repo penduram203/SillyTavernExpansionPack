@@ -1167,6 +1167,39 @@ function getCurrentCharacterName() {
         }
 
         /* ============================================================
+           ★ ギャラリーサムネイル: キーワードラベル（中央下端）
+           ============================================================ */
+        .gic-keyword-label {
+            position: absolute !important;
+            bottom: 3px !important;
+            left: 50% !important;
+            transform: translateX(-50%) !important;
+            max-width: calc(100% - 6px) !important;
+            font-size: 12px !important;
+            font-weight: bold !important;
+            color: #ffffff !important;
+            text-align: center !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            pointer-events: none !important;
+            z-index: 15 !important;
+            user-select: none !important;
+            -webkit-user-select: none !important;
+            -webkit-text-stroke: 1.5px #000000 !important;
+            paint-order: stroke fill !important;
+            text-shadow:
+                -1px -1px 0 #000,
+                 1px -1px 0 #000,
+                -1px  1px 0 #000,
+                 1px  1px 0 #000,
+                 0 0 3px rgba(0, 0, 0, 0.8) !important;
+            box-sizing: border-box !important;
+            line-height: 1.2 !important;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif !important;
+        }
+
+        /* ============================================================
            ★ ギャラリーサムネイル: 正方形
            ============================================================ */
         #gallery .nGY2GThumbnail,
@@ -2860,12 +2893,75 @@ async function syncVideoBadgeForThumb(thumb) {
     }
 }
 
+// ============================================================
+// ★ サムネイルに「マッピングされたキーワード」を表示
+//    image_display_extension の逆引き（ファイル名 → キーワード）で判定
+// ============================================================
+function buildKeywordReverseMap() {
+    const map = new Map();
+    try {
+        const ctx = getContext();
+        const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
+        const ext = char?.data?.extensions?.image_display_extension;
+        if (ext && typeof ext === 'object') {
+            for (const [kw, val] of Object.entries(ext)) {
+                if (kw === 'default' || kw === 'thumbnail') continue;
+                const arr = Array.isArray(val) ? val : [val];
+                for (const p of arr) {
+                    if (typeof p !== 'string') continue;
+                    let fn = p.split('/').pop().split('?')[0].split('#')[0];
+                    try { fn = decodeURIComponent(fn); } catch (e) { /* ignore */ }
+                    if (!map.has(fn)) {
+                        map.set(fn, kw);
+                    }
+                }
+            }
+        }
+    } catch (e) { /* ignore */ }
+    return map;
+}
+
+function syncKeywordLabelForThumb(thumb, reverseMap) {
+    if (!thumb || !reverseMap) return;
+
+    const title = (thumb.getAttribute('title') || '').trim();
+    let keyword = null;
+    if (title) {
+        const orig = resolveOriginalFileName(title) || title;
+        keyword = reverseMap.get(orig) || reverseMap.get(title);
+    }
+
+    const existing = thumb.querySelector(':scope > .gic-keyword-label');
+
+    if (!keyword) {
+        if (existing) existing.remove();
+        return;
+    }
+
+    // 既に同じ内容なら何もしない（300ms 間隔の再描画でちらつかない）
+    if (existing && existing.textContent === keyword) return;
+    if (existing) existing.remove();
+
+    const cs = window.getComputedStyle(thumb);
+    if (cs.position === 'static') {
+        thumb.style.setProperty('position', 'relative', 'important');
+    }
+
+    const label = document.createElement('div');
+    label.className = 'gic-keyword-label';
+    label.textContent = keyword;
+    label.title = keyword;
+    thumb.appendChild(label);
+}
+
 function scanAndSyncVideoBadges() {
     const gallery = document.getElementById('gallery');
     if (!gallery) return;
     const selector = '.nGY2GThumbnail, .nGY2GThumbnail_l1, .nGY2Item';
+    const reverseMap = buildKeywordReverseMap();
     gallery.querySelectorAll(selector).forEach(thumb => {
         syncVideoBadgeForThumb(thumb).catch(() => {});
+        syncKeywordLabelForThumb(thumb, reverseMap);
     });
 }
 
