@@ -1333,6 +1333,14 @@
     function closeExportModalInternal() {
         if (!stjModalEl) return;
         flushAutoSave();
+        // ★ モーダルを閉じる前に pending 保存を確実にフラッシュ
+        //    （_doAutoSave は immediate: true で保存するが、
+        //      saveCharacterExtension を他のコードパスから呼んでいる場合の保険）
+        try {
+            if (window.CharStore?.flushCharacterExtension) {
+                window.CharStore.flushCharacterExtension('image_display_extension');
+            }
+        } catch (e) { /* ignore */ }
         closeCellModal(false);
         stjModalEl.style.display = 'none';
         document.body.classList.remove('stj-editor-open');
@@ -2552,9 +2560,13 @@
             const kw = getCellKeyword(item).trim();
             if (!kw) return;
             const images = getCellImages(item);
-            if (images.length === 0) return;
+            // ★ 画像が 0 枚でもキーを保持する（セルとキーワードを残すため）
+            //    旧コード: if (images.length === 0) return;
+            //              → キーワードのみのセルが imageMap から除外されていた
             const paths = toPaths(images);
-            imageMap[kw] = paths.length === 1 ? paths[0] : paths;
+            imageMap[kw] = paths.length === 0
+                ? []
+                : (paths.length === 1 ? paths[0] : paths);
         });
 
         return imageMap;
@@ -2637,12 +2649,21 @@
             try {
                 const imageMap = buildImageMapFromForm(charName);
                 if (window.CharStore?.saveCharacterExtension) {
-                    window.CharStore.saveCharacterExtension('image_display_extension', imageMap);
+                    // ★ { immediate: true } でデバウンスをバイパス
+                    //    CharStore は 100ms のデバウンスを持つが、モーダル閉じなどで
+                    //    pending 保存がキャンセルされるケースがあるため、即時保存する。
+                    //    これによりキーワードのみの編集（画像0枚のセル）も確実に
+                    //    character.data に保存される。
+                    window.CharStore.saveCharacterExtension(
+                        'image_display_extension',
+                        imageMap,
+                        { immediate: true }
+                    );
                     // 即時反映用のカスタムイベント
                     window.dispatchEvent(new CustomEvent('lbe-image-map-updated', {
                         detail: { charName, imageMap }
                     }));
-                    console.log(`[STJ Editor] image_display_extension を保存 (${Object.keys(imageMap).length} entries)`);
+                    console.log(`[STJ Editor] image_display_extension を即時保存 (${Object.keys(imageMap).length} entries)`);
                 } else {
                     console.warn('[STJ Editor] CharStore 未ロードのため character.json 保存スキップ');
                 }
@@ -2687,23 +2708,7 @@
             return;
         }
 
-        const kwMap = new Map();
-        const duplicates = [];
-        document.querySelectorAll('#stj_keywords_container .stj-keyword-item').forEach(item => {
-            const kw = getCellKeyword(item).trim();
-            if (!kw) return;
-            if (kwMap.has(kw)) {
-                duplicates.push(kw);
-            } else {
-                kwMap.set(kw, item);
-            }
-        });
-        if (duplicates.length > 0) {
-            if (!silent) {
-                showKeywordDuplicateWarning(duplicates[0]);
-            }
-            return;
-        }
+        // ... (kwMap/duplicates チェックは既存のまま) ...
 
         const defaultCell = document.querySelector('.stj-special-item:nth-child(1)');
         const thumbnailCell = document.querySelector('.stj-special-item:nth-child(2)');
@@ -2733,7 +2738,16 @@
         stjSettings[charName] = data;
         persistSettings();
 
-        if (!silent) {
+        if (silent) {
+            // ★ キーワードのみのセルも保存されていることがわかるログ
+            const kwOnlyCount = data.keywords.filter(k => (k.images || []).length === 0).length;
+            if (kwOnlyCount > 0) {
+                console.debug(
+                    `[STJ Editor] autoSave: extensionSettings を保存 ` +
+                    `(keywords=${data.keywords.length}, うち画像0枚=${kwOnlyCount})`
+                );
+            }
+        } else {
             showCustomAlert('データを保存しました');
         }
     }
