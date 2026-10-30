@@ -1027,6 +1027,7 @@ function getCurrentCharacterName() {
             min-width: 180px !important;
         }
 
+/* 変更後（margin の左だけ 22px に変更） */
         .gic-bulk-delete-button {
             flex: 0 0 auto !important;
             display: inline-flex !important;
@@ -1034,7 +1035,7 @@ function getCurrentCharacterName() {
             justify-content: center !important;
             height: 28px !important;
             padding: 0 8px !important;
-            margin: 0 2px !important;
+            margin: 0 2px 0 22px !important;
             font-size: 12px !important;
             font-weight: bold !important;
             color: #ffffff !important;
