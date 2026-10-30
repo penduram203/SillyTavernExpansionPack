@@ -5520,7 +5520,7 @@ function updateBulkDeleteButton() {
         btn.disabled = false;
         btn.textContent = text;
         // ★ 幅固定を再保証（DOM 再構築時に style が消えるケース対策）
-        btn.style.setProperty('min-width', '120px', 'important');
+        btn.style.setProperty('min-width', '100px', 'important');
         btn.style.setProperty('box-sizing', 'border-box', 'important');
         btn.style.setProperty('text-align', 'center', 'important');
     }
@@ -5551,7 +5551,7 @@ function createBulkDeleteButton() {
     btn.title = '一括選択モードの開始／終了';
     // ★ 幅を固定して、テキスト変化（一括選択 ⇄ 選択終了 (N)）で
     //    header の flex レイアウトが変わり後続ボタンがずれるのを防ぐ
-    btn.style.setProperty('min-width', '120px', 'important');
+    btn.style.setProperty('min-width', '100px', 'important');
     btn.style.setProperty('box-sizing', 'border-box', 'important');
     btn.style.setProperty('text-align', 'center', 'important');
     btn.addEventListener('click', (e) => {
@@ -6129,7 +6129,7 @@ function restructureGalleryHeader() {
         el.style.setProperty('pointer-events', 'auto', 'important');
         // ★ 一括選択ボタンの幅固定を保証（restructure で style が消えるのを防ぐ）
         if (el.id === 'gic-bulk-delete-button') {
-            el.style.setProperty('min-width', '120px', 'important');
+            el.style.setProperty('min-width', '100px', 'important');
             el.style.setProperty('box-sizing', 'border-box', 'important');
             el.style.setProperty('text-align', 'center', 'important');
         }
