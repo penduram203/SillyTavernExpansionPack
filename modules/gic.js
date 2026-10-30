@@ -4333,27 +4333,7 @@ function createPromptOverlay(panel) {
     `;
     overlay.appendChild(keywordText);
 
-    const promptPanel = document.createElement('div');
-    promptPanel.className = PROMPT_PANEL_CLASS;
-    promptPanel.style.cssText = `
-        background: rgba(0, 0, 0, 0.88);
-        color: #ffffff;
-        padding: 10px 12px;
-        border-radius: 4px;
-        font-size: 12px;
-        font-family: monospace;
-        white-space: pre-wrap;
-        word-break: break-word;
-        overflow-wrap: anywhere;
-        border: 1px solid #555;
-        box-sizing: border-box;
-        line-height: 1.4;
-        max-height: calc(100vh - 120px);
-        overflow-y: auto;
-        width: 100%;
-    `;
-    overlay.appendChild(promptPanel);
-
+    // ★ コピーボタン（プロンプトパネルより上に表示）
     const copyBtn = document.createElement('button');
     copyBtn.type = 'button';
     copyBtn.className = PROMPT_COPY_BTN_CLASS;
@@ -4384,6 +4364,28 @@ function createPromptOverlay(panel) {
         }
     });
     overlay.appendChild(copyBtn);
+
+    // ★ プロンプトパネル（コピーボタンの下に表示）
+    const promptPanel = document.createElement('div');
+    promptPanel.className = PROMPT_PANEL_CLASS;
+    promptPanel.style.cssText = `
+        background: rgba(0, 0, 0, 0.88);
+        color: #ffffff;
+        padding: 10px 12px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-family: monospace;
+        white-space: pre-wrap;
+        word-break: break-word;
+        overflow-wrap: anywhere;
+        border: 1px solid #555;
+        box-sizing: border-box;
+        line-height: 1.4;
+        max-height: calc(100vh - 120px);
+        overflow-y: auto;
+        width: 100%;
+    `;
+    overlay.appendChild(promptPanel);
 
     panel.appendChild(overlay);
     return overlay;
