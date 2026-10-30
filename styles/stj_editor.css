@@ -396,6 +396,54 @@
 
 /* ===== 挿入位置インジケーター（セル前後への挿入モード） ===== */
 
+/* ===== ドラッグモードバッジ（カーソル追従） ===== */
+.stj-drag-mode-badge {
+    position: fixed;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+    z-index: 100001;
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: bold;
+    font-family: inherit;
+    color: #ffffff;
+    white-space: nowrap;
+    user-select: none;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+    border: 2px solid #ffffff;
+    transition: background-color 0.1s ease, color 0.1s ease;
+    display: none;
+}
+
+.stj-drag-mode-badge[data-mode="swap"] {
+    background: #e53e3e;
+    color: #ffffff;
+}
+
+.stj-drag-mode-badge[data-mode="insert"] {
+    background: #ffd54f;
+    color: #1a202c;
+    border-color: #1a202c;
+}
+
+/* 場所交代対象セルをさらに目立たせる */
+.stj-keyword-item.stj-drag-over {
+    outline: 4px solid #ff2d2d;
+    outline-offset: -4px;
+    box-shadow:
+        0 0 0 2px rgba(255, 45, 45, 0.4),
+        0 0 24px rgba(255, 45, 45, 0.9);
+    border-radius: 8px;
+    animation: stj-swap-pulse 0.8s ease-in-out infinite;
+}
+
+@keyframes stj-swap-pulse {
+    0%, 100% { box-shadow: 0 0 0 2px rgba(255, 45, 45, 0.4), 0 0 24px rgba(255, 45, 45, 0.9); }
+    50%      { box-shadow: 0 0 0 2px rgba(255, 45, 45, 0.2), 0 0 36px rgba(255, 45, 45, 1.0); }
+}
+
 /* ★ インジケーターバー本体: 幅を太く・「＋」記号・強い発光 */
 .stj-keyword-item.stj-insert-before::after,
 .stj-keyword-item.stj-insert-after::after {
