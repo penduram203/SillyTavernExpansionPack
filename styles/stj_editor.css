@@ -394,6 +394,36 @@
   border-style: solid;
 }
 
+/* ===== 挿入位置インジケーター（セル前後への挿入モード） ===== */
+.stj-keyword-item.stj-insert-before::after,
+.stj-keyword-item.stj-insert-after::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 12px;
+    background: #ffd54f;
+    z-index: 25;
+    pointer-events: none;
+    box-shadow: inset 0 0 10px rgba(255, 255, 255, 0.7);
+    animation: stj-insert-pulse 1s ease-in-out infinite;
+}
+
+.stj-keyword-item.stj-insert-before::after {
+    left: 0;
+    border-radius: 0 3px 3px 0;
+}
+
+.stj-keyword-item.stj-insert-after::after {
+    right: 0;
+    border-radius: 3px 0 0 3px;
+}
+
+@keyframes stj-insert-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.55; }
+}
+
 /* ===== ギャラリーからのドロップターゲット ===== */
 .stj-keyword-item.stj-drop-target,
 .stj-special-item.stj-drop-target {
