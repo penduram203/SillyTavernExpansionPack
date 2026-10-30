@@ -1403,10 +1403,13 @@
     function cleanForeignImageEntries(imageMap, charName) {
         if (!imageMap || typeof imageMap !== 'object' || !charName) return imageMap;
 
-        // ★ フラグは「per-item ログ抑制」のためだけに使う。
-        //   データが壊れている場合はフラグ済みでも毎回クリーンアップする
-        //   （STコアが古いデータを再取得して上書きするケースがあるため）
-        const alreadyMigrated = isMigrationDoneForChar(charName);
+        // ★ 既にクリーンアップ済みのキャラは、ユーザーが明示的に追加した
+        //    別キャラの画像を尊重するため、クリーンアップをスキップする。
+        if (isMigrationDoneForChar(charName)) {
+            return imageMap;
+        }
+
+        const alreadyMigrated = false;
 
         let removed = 0;
         const cleaned = {};
