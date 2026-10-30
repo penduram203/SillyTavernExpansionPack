@@ -1236,14 +1236,12 @@
         const delCancelBtn = document.getElementById('stj_delete_cancel');
         const delExecBtn = document.getElementById('stj_delete_execute');
         const cancelBtn = document.getElementById('stj_cancel_export');
-        const exportBtn = document.getElementById('stj_export_json');
 
         if (addBtn) addBtn.style.display = 'none';
         if (bulkBtn) bulkBtn.style.display = 'none';
         if (delCancelBtn) delCancelBtn.style.display = '';
         if (delExecBtn) delExecBtn.style.display = '';
         if (cancelBtn) cancelBtn.disabled = true;
-        if (exportBtn) exportBtn.disabled = true;
         document.querySelectorAll('.stj-keyword-item .stj-delete-row').forEach(btn => btn.disabled = true);
     }
 
@@ -1261,14 +1259,12 @@
         const delCancelBtn = document.getElementById('stj_delete_cancel');
         const delExecBtn = document.getElementById('stj_delete_execute');
         const cancelBtn = document.getElementById('stj_cancel_export');
-        const exportBtn = document.getElementById('stj_export_json');
 
         if (addBtn) addBtn.style.display = '';
         if (bulkBtn) bulkBtn.style.display = '';
         if (delCancelBtn) delCancelBtn.style.display = 'none';
         if (delExecBtn) delExecBtn.style.display = 'none';
         if (cancelBtn) cancelBtn.disabled = false;
-        if (exportBtn) exportBtn.disabled = false;
         document.querySelectorAll('.stj-keyword-item .stj-delete-row').forEach(btn => btn.disabled = false);
     }
 
@@ -2669,32 +2665,6 @@
         return imageMap;
     }
 
-    function exportJSON() {
-        const nameEl = document.getElementById('stj_char_name_display');
-        const charName = nameEl ? nameEl.textContent : '';
-        if (!charName) { alert('キャラクター名が設定されていません'); return; }
-
-        const imageMap = buildImageMapFromForm(charName);
-        const exportData = { image_display_extension: imageMap };
-
-        try {
-            const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `${charName}_ext.json`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            showCustomAlert('JSONファイルを出力しました');
-            console.log(`✅ ${charName}_ext.json を出力しました`, exportData);
-        } catch (e) {
-            console.error('[STJ Editor] JSON出力に失敗しました:', e);
-            alert('JSON出力に失敗しました。詳細はコンソールを確認してください。');
-        }
-    }
-
     function showCustomAlert(message) {
         const existingAlert = document.getElementById('stj_custom_alert');
         if (existingAlert) existingAlert.remove();
@@ -3107,7 +3077,6 @@
                 <div class="stj-button-group-main">
                     <button id="stj_cancel_export">終了</button>
                     <button id="stj_export_json">JSON出力</button>
-                    <button id="stj_add_keyword">セル追加</button>
                     <button id="stj_bulk_delete">一括削除</button>
                     <button id="stj_delete_cancel" style="display:none;">戻る</button>
                     <button id="stj_delete_execute" style="display:none;">削除実行</button>
@@ -3179,13 +3148,6 @@
             e.stopPropagation();
             if (isBulkDeleteMode || isDialogActive) return;
             closeExportModal();
-        });
-
-        const exportBtn = document.getElementById('stj_export_json');
-        if (exportBtn) exportBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (isBulkDeleteMode || isDialogActive) return;
-            exportJSON();
         });
 
         modal.querySelectorAll('.stj-special-item').forEach(item => {
