@@ -51,6 +51,12 @@
     // ===== オートセーブ用 =====
     let _autoSaveTimer = null;
 
+    // ===== エディタ初期化中フラグ =====
+    //   openExportModal の読み込み完了までは true。
+    //   この間の空フォーム autosave はスキップする（実データ保護）。
+    //   読み込み完了後は false になり、全セル削除後の空フォームも保存される。
+    let _editorLoading = false;
+
     // ============================================================
     // ★ 別キャラ画像エントリの「一度きり」マイグレーション管理
     //   image-display.js と同じフラグを共有する。
@@ -668,7 +674,7 @@
             return false;
         }
     }
-    
+
     async function detectImageExtension(charName, fileNameWithExt) {
         if (!charName || !fileNameWithExt) return null;
         const path = fileNameWithExt.startsWith('user/images/')
@@ -715,6 +721,7 @@
     //   フラグはログ抑制専用。データが壊れている場合は
     //   フラグ済みでも毎回クリーンアップする
     //   (STコアが古いデータを再取得して上書きするケースがあるため)。
+    //   ★ 空配列になったキーも保持する(セルとキーワードを残すため)。
     // ============================================================
     function getKnownCharacterNames() {
         try {
@@ -813,6 +820,7 @@
     //    キーワードとファイル名のマッピングだけが残ってしまう。
     //    ここで実ファイルの存在を fetch HEAD で確認し、
     //    無い場合はマッピングを除去する。
+    //    ★ 空配列になったキーも保持する(セルとキーワードを残すため)。
     // ============================================================
     async function cleanMissingImageFiles(imageMap, charName) {
         if (!imageMap || typeof imageMap !== 'object' || !charName) return imageMap;
@@ -833,6 +841,9 @@
         if (fileNames.size === 0) return imageMap;
 
         // 2. 並列で実ファイル存在チェック (ブラウザキャッシュ無効)
+        //    ★ checkMediaExists ではなく checkFileExistsOnServer を使う:
+        //      checkMediaExists は new Image() の onload で判定するため、
+        //      ブラウザキャッシュに残っている画像を「存在する」と誤判定する。
         const existMap = new Map();
         await Promise.all([...fileNames].map(async (fn) => {
             const exists = await checkFileExistsOnServer(charName, fn);
@@ -1315,18 +1326,32 @@
         const nameEl = document.getElementById('stj_char_name_display');
         if (nameEl) nameEl.textContent = charName;
 
+        // ★ エディタ初期化中フラグを立てる
+        _editorLoading = true;
+
         // ★ 前回編集した別キャラのセル内容が残らないよう、必ず先にフォームをリセット
-        //    (新規キャラでデータが無い場合、旧キャラのセルが残ったままになり
-        //     autoSave で新キャラ側に誤保存されるのを防ぐ)
         resetFormToEmpty();
 
         (async () => {
             try {
-                await loadExistingJSONData(charName);
-                loadSavedData(charName);
+                const hasCharData = await loadExistingJSONData(charName);
+                // ★ character.data に image_display_extension キーが存在すれば
+                //    （空 {} でも）character.data を権威ソースとして扱い、
+                //    loadSavedData をスキップする。
+                //    これにより、全セル削除後に extensionSettings の古いデータで
+                //    セルが復元されるのを防ぐ。
+                if (!hasCharData) {
+                    loadSavedData(charName);
+                } else {
+                    console.log('[STJ Editor] character.data を権威ソースとして使用（extensionSettings フォールバック無効）');
+                }
                 setupPreviewListeners();
                 runLiveTest();
-            } catch (err) { console.error('[STJ Editor] モーダル表示エラー:', err); }
+            } catch (err) {
+                console.error('[STJ Editor] モーダル表示エラー:', err);
+            } finally {
+                _editorLoading = false;
+            }
         })();
     }
 
@@ -2186,10 +2211,49 @@
         autoSave({ immediate: true });
     }
 
+    // ============================================================
+    // ★ extensionSettings のレガシーデータ → image_display_extension 形式に変換
+    //    character.data が空で extensionSettings にのみデータがある場合、
+    //    この関数で変換して character.data へ移行する。
+    // ============================================================
+    function buildImageMapFromLegacySavedData(data, charName) {
+        const imageMap = {};
+        const toPaths = (names) => (names || []).map(name => {
+            const cleaned = extractFileNameFromPath(name);
+            const resolved = resolveThumbToOriginal(cleaned);
+            return `user/images/${charName}/${resolved}`;
+        });
+
+        if (Array.isArray(data.defaultImages) && data.defaultImages.length > 0) {
+            const paths = toPaths(data.defaultImages);
+            imageMap.default = paths.length === 1 ? paths[0] : paths;
+        }
+        if (Array.isArray(data.thumbnailImages) && data.thumbnailImages.length > 0) {
+            const paths = toPaths(data.thumbnailImages);
+            imageMap.thumbnail = paths.length === 1 ? paths[0] : paths;
+        }
+        if (Array.isArray(data.keywords)) {
+            data.keywords.forEach(kw => {
+                if (!kw.keyword) return;
+                const paths = toPaths(kw.images || []);
+                imageMap[kw.keyword] = paths.length === 0
+                    ? []
+                    : (paths.length === 1 ? paths[0] : paths);
+            });
+        }
+        return imageMap;
+    }
+
+    // ============================================================
+    // ★ loadExistingJSONData の戻り値 hasCharData:
+    //    character.data.extensions.image_display_extension キーが
+    //    存在する場合(空 {} でも) true。この場合 loadSavedData をスキップする。
+    // ============================================================
     async function loadExistingJSONData(charName) {
-        if (!charName) { console.warn('[STJ Editor] charName 空'); return; }
+        if (!charName) { console.warn('[STJ Editor] charName 空'); return false; }
 
         let imageMap = null;
+        let hasCharData = false;
 
         // ── ① ctx.characters[characterId] → ctx.character の順（一次情報源）──
         try {
@@ -2198,60 +2262,79 @@
             const charFromList = context?.characters?.[context?.characterId];
             let ext = charFromList?.data?.extensions?.image_display_extension;
 
-            if (!ext || typeof ext !== 'object' || Object.keys(ext).length === 0) {
+            if (ext === undefined) {
                 ext = context?.character?.data?.extensions?.image_display_extension;
             }
 
-            if (ext && typeof ext === 'object' && Object.keys(ext).length > 0) {
-                imageMap = ext;
-                console.log(`[STJ Editor] ✅ image_display_extension を読込 (${Object.keys(ext).length} entries)`);
+            // ★ character.data.extensions.image_display_extension が undefined でなければ
+            //    （空 {} でも）character.data を権威ソースとして扱う
+            if (ext !== undefined && typeof ext === 'object') {
+                hasCharData = true;
+                if (Object.keys(ext).length > 0) {
+                    imageMap = ext;
+                    console.log(`[STJ Editor] ✅ image_display_extension を読込 (${Object.keys(ext).length} entries)`);
+                } else {
+                    console.log(`[STJ Editor] image_display_extension は空 ({}) → 空フォーム維持`);
+                }
             }
         } catch (e) { /* ignore */ }
 
-        // ── ② 移行フォールバック: _ext.json ──
-        if (!imageMap) {
-            // ★ character.data に image_display_extension キーが既に存在すれば
-            //    （たとえ空 {} でも）新システム使用中とみなし、_ext.json をスキップ
-            let hasExtKeyInCharData = false;
+        // ── ② 移行フォールバック: _ext.json（character.data にキーが無い時のみ）──
+        if (!imageMap && !hasCharData) {
             try {
-                const ctx = getSTContext();
-                const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
-                if (char?.name === charName) {
-                    hasExtKeyInCharData = char?.data?.extensions?.image_display_extension !== undefined;
-                }
-            } catch (e) { /* ignore */ }
-
-            if (!hasExtKeyInCharData) {
-                try {
-                    const jsonPath = `user/images/${charName}/${charName}_ext.json`;
-                    const resp = await fetch(jsonPath);
-                    if (resp.ok) {
-                        const data = await resp.json();
-                        const legacy = findImageMapInData(data);
-                        if (legacy && Object.keys(legacy).length > 0) {
-                            imageMap = legacy;
-                            console.log(`[STJ Editor] 🔄 _ext.json から読込。character.json へ移行`);
-                            try {
-                                window.CharStore?.saveCharacterExtension?.(
-                                    'image_display_extension', legacy, { immediate: true }
-                                );
-                            } catch (e) { /* ignore */ }
-                        } else {
-                            // 空の _ext.json → 「確認済み・データなし」として空データ保存
+                const jsonPath = `user/images/${charName}/${charName}_ext.json`;
+                const resp = await fetch(jsonPath);
+                if (resp.ok) {
+                    const data = await resp.json();
+                    const legacy = findImageMapInData(data);
+                    if (legacy && Object.keys(legacy).length > 0) {
+                        imageMap = legacy;
+                        console.log(`[STJ Editor] 🔄 _ext.json から読込。character.json へ移行`);
+                        try {
                             window.CharStore?.saveCharacterExtension?.(
-                                'image_display_extension', {}, { immediate: true }
+                                'image_display_extension', legacy, { immediate: true }
                             );
-                        }
-                    } else if (resp.status === 404) {
-                        // _ext.json なし → 「確認済み・データなし」として空データ保存
+                        } catch (e) { /* ignore */ }
+                    } else {
+                        // 空の _ext.json → 「確認済み・データなし」として空データ保存
                         window.CharStore?.saveCharacterExtension?.(
                             'image_display_extension', {}, { immediate: true }
                         );
                     }
-                } catch (e) { /* ignore */ }
-            }
+                } else if (resp.status === 404) {
+                    // ★ character.data にも _ext.json にもデータが無い
+                    //    → extensionSettings にレガシーデータがあれば character.data へ移行
+                    try {
+                        const stjSettings = getExtensionSettings();
+                        const legacyData = stjSettings[charName];
+                        const hasLegacyData = legacyData && (
+                            (Array.isArray(legacyData.keywords) && legacyData.keywords.length > 0) ||
+                            (Array.isArray(legacyData.defaultImages) && legacyData.defaultImages.length > 0) ||
+                            (Array.isArray(legacyData.thumbnailImages) && legacyData.thumbnailImages.length > 0)
+                        );
+                        if (hasLegacyData) {
+                            const migrated = buildImageMapFromLegacySavedData(legacyData, charName);
+                            window.CharStore?.saveCharacterExtension?.(
+                                'image_display_extension', migrated, { immediate: true }
+                            );
+                            imageMap = migrated;
+                            console.log('[STJ Editor] 🔄 extensionSettings から character.data へ移行しました');
+                        } else {
+                            // 本当にデータなし → 空 {} を保存して「確認済み」とする
+                            window.CharStore?.saveCharacterExtension?.(
+                                'image_display_extension', {}, { immediate: true }
+                            );
+                        }
+                    } catch (e) {
+                        window.CharStore?.saveCharacterExtension?.(
+                            'image_display_extension', {}, { immediate: true }
+                        );
+                    }
+                }
+            } catch (e) { /* ignore */ }
         }
 
+        // ── ③ クリーニング + フォーム反映 ──
         if (imageMap) {
             // ★ 別キャラの画像エントリを先に除外（過去のバグの残留データ対策）
             const cleanedMap = cleanForeignImageEntries(imageMap, charName);
@@ -2279,6 +2362,8 @@
                 console.log(`[STJ Editor] image_display_extension が見つかりません（新規作成）`);
             }
         }
+
+        return hasCharData;
     }
 
     function populateFormFromImageMap(imageMap) {
@@ -2708,7 +2793,23 @@
             return;
         }
 
-        // ... (kwMap/duplicates チェックは既存のまま) ...
+        const kwMap = new Map();
+        const duplicates = [];
+        document.querySelectorAll('#stj_keywords_container .stj-keyword-item').forEach(item => {
+            const kw = getCellKeyword(item).trim();
+            if (!kw) return;
+            if (kwMap.has(kw)) {
+                duplicates.push(kw);
+            } else {
+                kwMap.set(kw, item);
+            }
+        });
+        if (duplicates.length > 0) {
+            if (!silent) {
+                showKeywordDuplicateWarning(duplicates[0]);
+            }
+            return;
+        }
 
         const defaultCell = document.querySelector('.stj-special-item:nth-child(1)');
         const thumbnailCell = document.querySelector('.stj-special-item:nth-child(2)');
@@ -2725,12 +2826,16 @@
             if (kw || images.length > 0) data.keywords.push({ keyword: kw, images });
         });
 
-        // ★ 空のデータで既存設定を上書きしない（オートセーブ時の保護）
+        // ★ 空フォーム保護: エディタ初期化中のみスキップ
+        //    セル全削除後の空フォームは「ユーザーの意図した削除」なので保存する。
+        //    （以前は無条件スキップで、全削除が extensionSettings に反映されず
+        //      再起動後に loadSavedData が古いセルを復元するバグがあった）
         if (silent &&
             data.keywords.length === 0 &&
             data.defaultImages.length === 0 &&
-            data.thumbnailImages.length === 0) {
-            console.debug('[STJ Editor] autoSave: フォームが空のため保存をスキップ（既存データ保護）');
+            data.thumbnailImages.length === 0 &&
+            _editorLoading) {
+            console.debug('[STJ Editor] autoSave: エディタ初期化中の空フォームのため保存をスキップ');
             return;
         }
 
@@ -3097,6 +3202,7 @@
     // ★ ギャラリーからの画像削除通知(gic-image-deleted)を購読し、
     //    ・character.data.extensions.image_display_extension から該当ファイルを除去
     //    ・JSON 編集画面が開いていれば、全セルからも除去して autoSave
+    //    ★ 空配列になったキーも保持する(セルとキーワードを残すため)。
     // ============================================================
     function setupImageDeletedListener() {
         if (window.__stjImageDeletedListenerInstalled) return;
