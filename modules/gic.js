@@ -6095,8 +6095,8 @@ function restructureGalleryHeader() {
     const trashBtn    = gallery.querySelector('.right_menu_button[title="Delete mode"]');
     const recycleBtn  = gallery.querySelector('.right_menu_button[title="Restore gallery folder"]');
 
-    // ★ 並び順: フォルダ入力 → チェック → 一括選択 → ゴミ箱 → 復元
-    const elements = [folderInput, checkBtn, bulkBtn, trashBtn, recycleBtn].filter(Boolean);
+    // ★ 並び順: フォルダ入力 → チェック → 復元 → 一括選択 → ゴミ箱
+    const elements = [folderInput, checkBtn, recycleBtn, bulkBtn, trashBtn].filter(Boolean);
     if (elements.length === 0) return;
 
     let alreadyInPlace = elements.length <= dragTitle.children.length;
