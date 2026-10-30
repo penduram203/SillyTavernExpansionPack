@@ -4291,6 +4291,48 @@ function createPromptOverlay(panel) {
         align-items: flex-start;
     `;
 
+    // ★ キーワード表示用ラベル（プロンプトをコピーボタンと同外観・機能なし）
+    const keywordBtn = document.createElement('div');
+    keywordBtn.className = 'gic-keyword-label-btn';
+    keywordBtn.textContent = 'キーワード';
+    keywordBtn.style.cssText = `
+        align-self: flex-start;
+        padding: 6px 12px;
+        background: #444444;
+        color: #ffffff;
+        border: 1px solid #666666;
+        border-radius: 4px;
+        font-size: 12px;
+        font-family: inherit;
+        pointer-events: none;
+        user-select: none;
+        display: none;
+    `;
+    overlay.appendChild(keywordBtn);
+
+    // ★ キーワード本文（20px・白文字・黒背景 + 黒枠）
+    const keywordText = document.createElement('div');
+    keywordText.className = 'gic-keyword-text';
+    keywordText.style.cssText = `
+        align-self: flex-start;
+        padding: 6px 12px;
+        background: #000000;
+        color: #ffffff;
+        border: 2px solid #000000;
+        border-radius: 4px;
+        font-size: 20px;
+        font-weight: bold;
+        font-family: inherit;
+        pointer-events: none;
+        user-select: none;
+        max-width: 100%;
+        word-break: break-word;
+        line-height: 1.3;
+        box-sizing: border-box;
+        display: none;
+    `;
+    overlay.appendChild(keywordText);
+
     const promptPanel = document.createElement('div');
     promptPanel.className = PROMPT_PANEL_CLASS;
     promptPanel.style.cssText = `
@@ -4352,6 +4394,50 @@ function removePromptOverlay(panel) {
     panel.querySelectorAll('.' + PROMPT_OVERLAY_CLASS).forEach(el => el.remove());
 }
 
+function getKeywordForImage(charName, fileName) {
+    if (!charName || !fileName) return null;
+    try {
+        const ctx = getContext();
+        let char = null;
+        if (ctx?.characters?.[ctx?.characterId]?.name === charName) {
+            char = ctx.characters[ctx.characterId];
+        }
+        if (!char && ctx?.character?.name === charName) {
+            char = ctx.character;
+        }
+        if (!char && Array.isArray(ctx?.characters)) {
+            char = ctx.characters.find(c => c?.name === charName);
+        }
+        if (!char) return null;
+
+        const ext = char?.data?.extensions?.image_display_extension;
+        if (!ext || typeof ext !== 'object') return null;
+
+        // 元ファイル名 + サムネイル名のバリアントを照合対象にする
+        const targets = new Set([fileName]);
+        const baseMatch = fileName.match(/^(.+)\.(png|jpe?g|gif|webp|avif|bmp)$/i);
+        if (baseMatch) {
+            targets.add(`${baseMatch[1]}_img_thum.png`);
+        }
+        const videoMatch = fileName.match(/^(.+)\.(mp4|webm)$/i);
+        if (videoMatch) {
+            targets.add(`${videoMatch[1]}_${videoMatch[2].toLowerCase()}_thum.png`);
+        }
+
+        for (const [kw, val] of Object.entries(ext)) {
+            if (kw === 'default' || kw === 'thumbnail') continue;
+            const arr = Array.isArray(val) ? val : [val];
+            for (const p of arr) {
+                if (typeof p !== 'string') continue;
+                let fn = p.split('/').pop().split('?')[0].split('#')[0];
+                try { fn = decodeURIComponent(fn); } catch (e) { /* ignore */ }
+                if (targets.has(fn)) return kw;
+            }
+        }
+    } catch (e) { /* ignore */ }
+    return null;
+}
+
 function updatePromptOverlay(panel) {
     if (!panel) return;
 
@@ -4373,6 +4459,21 @@ function updatePromptOverlay(panel) {
     const promptPanel = overlay.querySelector('.' + PROMPT_PANEL_CLASS);
     if (promptPanel && promptPanel.textContent !== prompt) {
         promptPanel.textContent = prompt;
+    }
+
+    // ★ キーワード表示制御（マッピングがある場合のみ表示）
+    const keyword = getKeywordForImage(charName, fileName);
+    const keywordBtn = overlay.querySelector('.gic-keyword-label-btn');
+    const keywordText = overlay.querySelector('.gic-keyword-text');
+    if (keyword) {
+        if (keywordBtn) keywordBtn.style.display = '';
+        if (keywordText) {
+            keywordText.style.display = '';
+            if (keywordText.textContent !== keyword) keywordText.textContent = keyword;
+        }
+    } else {
+        if (keywordBtn) keywordBtn.style.display = 'none';
+        if (keywordText) keywordText.style.display = 'none';
     }
 }
 
