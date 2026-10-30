@@ -1179,6 +1179,65 @@
         return { type: 'insert', reference: nearest, position: insertBefore ? 'before' : 'after' };
     }
 
+    // ============================================================
+    // ★ ドラッグモードバッジ（カーソル追従表示）
+    //    「⇄ 場所交代」 / 「⬇ 隙間挿入」
+    // ============================================================
+    function ensureDragModeBadge() {
+        let badge = document.getElementById('stj-drag-mode-badge');
+        if (!badge) {
+            badge = document.createElement('div');
+            badge.id = 'stj-drag-mode-badge';
+            badge.className = 'stj-drag-mode-badge';
+            badge.style.display = 'none';
+            document.body.appendChild(badge);
+        }
+        return badge;
+    }
+
+    function positionDragModeBadge(x, y) {
+        const badge = document.getElementById('stj-drag-mode-badge');
+        if (!badge || badge.style.display === 'none') return;
+        const offsetX = 18;
+        const offsetY = -44;
+        let left = x + offsetX;
+        let top = y + offsetY;
+        const rect = badge.getBoundingClientRect();
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        if (left + rect.width > vw - 4) left = x - offsetX - rect.width;
+        if (top < 4) top = y + 22;
+        if (top + rect.height > vh - 4) top = vh - 4 - rect.height;
+        if (left < 4) left = 4;
+        badge.style.left = Math.round(left) + 'px';
+        badge.style.top = Math.round(top) + 'px';
+    }
+
+    function updateDragModeBadge(zone, x, y) {
+        const badge = ensureDragModeBadge();
+        if (!zone) {
+            badge.style.display = 'none';
+            return;
+        }
+        let text, mode;
+        if (zone.type === 'swap') {
+            text = '⇄ 場所交代';
+            mode = 'swap';
+        } else {
+            text = '⬇ 隙間挿入';
+            mode = 'insert';
+        }
+        if (badge.textContent !== text) badge.textContent = text;
+        badge.dataset.mode = mode;
+        badge.style.display = 'block';
+        positionDragModeBadge(x, y);
+    }
+
+    function removeDragModeBadge() {
+        const badge = document.getElementById('stj-drag-mode-badge');
+        if (badge) badge.style.display = 'none';
+    }
+    
     function updateDragTarget(s, x, y) {
         const zone = findDropZone(s, x, y);
 
@@ -1197,7 +1256,10 @@
 
         s.insertZone = null;
 
-        if (!zone) return;
+        if (!zone) {
+            updateDragModeBadge(null, x, y);
+            return;
+        }
 
         if (zone.type === 'swap') {
             s.currentTarget = zone.cell;
@@ -1207,6 +1269,8 @@
             s.insertReference = zone.reference;
             zone.reference.classList.add(zone.position === 'before' ? 'stj-insert-before' : 'stj-insert-after');
         }
+
+        updateDragModeBadge(zone, x, y);
     }
 
     function createDragGhost(sourceItem, cursorX, cursorY) {
@@ -1283,6 +1347,7 @@
             }
             if (!s.isDragging) return;
             moveDragGhost(s.ghostState, e.clientX, e.clientY);
+            positionDragModeBadge(e.clientX, e.clientY);
             updateDragTarget(s, e.clientX, e.clientY);
             updateAutoScroll(s.scrollContainer, e.clientY);
         });
@@ -1292,6 +1357,7 @@
             const s = pointerDragState;
             pointerDragState = null;
             stopAutoScroll();
+            removeDragModeBadge();
             if (stjModalEl) stjModalEl.classList.remove('stj-drag-active');
             if (s.sourceItem) s.sourceItem.classList.remove('stj-dragging');
             if (s.currentTarget) s.currentTarget.classList.remove('stj-drag-over');
@@ -1334,6 +1400,7 @@
             const s = pointerDragState;
             pointerDragState = null;
             stopAutoScroll();
+            removeDragModeBadge();
             if (stjModalEl) stjModalEl.classList.remove('stj-drag-active');
             if (s.sourceItem) s.sourceItem.classList.remove('stj-dragging');
             if (s.currentTarget) s.currentTarget.classList.remove('stj-drag-over');
