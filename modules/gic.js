@@ -1175,7 +1175,7 @@ function getCurrentCharacterName() {
             left: 50% !important;
             transform: translateX(-50%) !important;
             max-width: calc(100% - 6px) !important;
-            font-size: 12px !important;
+            font-size: 16px !important;
             font-weight: bold !important;
             color: #ffffff !important;
             text-align: center !important;
