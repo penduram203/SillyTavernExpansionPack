@@ -1035,7 +1035,7 @@ function getCurrentCharacterName() {
             justify-content: center !important;
             height: 28px !important;
             padding: 0 8px !important;
-            margin: 0 2px 0 8px !important;
+            margin: 0 !important;
             font-size: 12px !important;
             font-weight: bold !important;
             color: #ffffff !important;
