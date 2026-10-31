@@ -1353,9 +1353,11 @@ function getCurrentCharacterName() {
             pointer-events: none !important;
         }
 
-        body.gic-bulk-delete-mode #gallery .dragTitle > [title="Delete mode"],
-        body.gic-bulk-delete-mode #gallery .dragTitle > .fa-trash,
-        body.gic-bulk-delete-mode #gallery .dragTitle > [class*="fa-trash"] {
+        body.gic-bulk-delete-mode #gic-header-right-group [title="Delete mode"],
+        body.gic-bulk-delete-mode #gic-header-right-group .fa-trash,
+        body.gic-bulk-delete-mode #gic-header-right-group [class*="fa-trash"],
+        body.gic-bulk-delete-mode #gallery .dragTitle [title="Delete mode"],
+        body.gic-bulk-delete-mode #gallery .dragTitle [class*="fa-trash"] {
             visibility: visible !important;
             pointer-events: auto !important;
         }
@@ -6186,8 +6188,13 @@ function restructureGalleryHeader() {
         trashBtn.style.setProperty('z-index', '200', 'important');
         trashBtn.style.setProperty('margin', '0', 'important');
         trashBtn.style.setProperty('flex', '0 0 auto', 'important');
-        trashBtn.style.setProperty('display', 'inline-flex', 'important');
-        trashBtn.style.setProperty('vertical-align', 'middle', 'important');
+        // ★ 一括選択モード中は visibility/opacity を強制的に可視化
+        //    （親 .dragTitle の visibility: hidden を inline !important で打ち消す）
+        if (_bulkDeleteMode) {
+            trashBtn.style.setProperty('visibility', 'visible', 'important');
+            trashBtn.style.setProperty('opacity', '1', 'important');
+            trashBtn.style.setProperty('pointer-events', 'auto', 'important');
+        }
     }
 
     // 空の flex-container を削除（flexContainer は残す）
