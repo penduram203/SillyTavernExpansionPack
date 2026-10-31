@@ -5950,7 +5950,7 @@ function setNativeTrashButtonVisible(visible) {
             btn.style.removeProperty('opacity');
             btn.style.setProperty('pointer-events', 'auto', 'important');
             // ★ 右に 20px ずらす（表示・非表示どちらでも常時適用して位置を安定させる）
-            btn.style.setProperty('margin-left', '20px', 'important');
+            btn.style.setProperty('margin-left', '0px', 'important');
         } else {
             // ★ visibility:hidden でレイアウトスペースを保持しつつ非表示・クリック不可にする
             //   （display:none だと header の flex レイアウトが変わり、
@@ -5960,7 +5960,7 @@ function setNativeTrashButtonVisible(visible) {
             btn.style.setProperty('opacity', '0', 'important');
             btn.style.setProperty('pointer-events', 'none', 'important');
             // ★ レイアウトスペース維持のため margin-left は残す
-            btn.style.setProperty('margin-left', '20px', 'important');
+            btn.style.setProperty('margin-left', '0px', 'important');
         }
     });
 }
@@ -6098,35 +6098,39 @@ function restructureGalleryHeader() {
     const trashBtn    = gallery.querySelector('.right_menu_button[title="Delete mode"]');
     const recycleBtn  = gallery.querySelector('.right_menu_button[title="Restore gallery folder"]');
 
-    // ★ 一括選択ボタンと🗑ボタンを .flex-container.alignItemsCenter の真下に配置
-    //    対象 flex-container: folder input を含むものを優先、無ければ dragTitle 直下の最初のもの
+    // flex-container の特定
     let flexContainer = folderInput?.closest('.flex-container.alignItemsCenter') || null;
     if (!flexContainer) {
         flexContainer = dragTitle.querySelector(':scope > .flex-container.alignItemsCenter');
     }
 
+    // ★ dragTitle を flex コンテナ化して右寄せ
+    //    DOM順: [flexContainer, bulkBtn, trashBtn]
+    //    → 右寄せで [flexContainer][bulkBtn][trashBtn] が右端に並ぶ
+    //    → trashBtn は bulkBtn の右隣、bulkBtn は右端に配置される
+    dragTitle.style.setProperty('display', 'flex', 'important');
+    dragTitle.style.setProperty('flex-direction', 'row', 'important');
+    dragTitle.style.setProperty('justify-content', 'flex-end', 'important');
+    dragTitle.style.setProperty('align-items', 'center', 'important');
+    dragTitle.style.setProperty('gap', '6px', 'important');
+
+    // 配置: flexContainer → bulkBtn → trashBtn（DOM順）
     if (flexContainer && flexContainer.parentNode) {
         const parent = flexContainer.parentNode;
-
-        // 指定ノードの「直後の兄弟」に target を配置する（既にそうなら no-op）
         const placeAfter = (refNode, target) => {
             if (!refNode || !target) return;
             if (target.previousElementSibling === refNode) return;
             parent.insertBefore(target, refNode.nextElementSibling);
         };
-
-        // flexContainer → bulkBtn → trashBtn の順に並べる
         placeAfter(flexContainer, bulkBtn);
         placeAfter(bulkBtn || flexContainer, trashBtn);
     } else {
-        // flexContainer が見つからない場合のフォールバック: dragTitle の末尾
         if (bulkBtn && !dragTitle.contains(bulkBtn)) dragTitle.appendChild(bulkBtn);
         if (trashBtn && !dragTitle.contains(trashBtn)) dragTitle.appendChild(trashBtn);
     }
 
-    // ★ 非表示にするヘッダー要素（フォルダ入力・チェック・復元）
-    const HIDDEN_HEADER_ELEMENTS = [folderInput, checkBtn, recycleBtn];
-    HIDDEN_HEADER_ELEMENTS.forEach(el => {
+    // 非表示にするヘッダー要素
+    [folderInput, checkBtn, recycleBtn].forEach(el => {
         if (!el) return;
         el.style.setProperty('display', 'none', 'important');
         el.style.setProperty('pointer-events', 'none', 'important');
@@ -6136,7 +6140,7 @@ function restructureGalleryHeader() {
         el.setAttribute('draggable', 'false');
     });
 
-    // bulkBtn のスタイル
+    // bulkBtn のスタイル（margin-left を削除して gap に任せる）
     if (bulkBtn) {
         bulkBtn.style.setProperty('position', 'relative', 'important');
         bulkBtn.style.setProperty('z-index', '200', 'important');
@@ -6144,21 +6148,21 @@ function restructureGalleryHeader() {
         bulkBtn.style.setProperty('min-width', '100px', 'important');
         bulkBtn.style.setProperty('box-sizing', 'border-box', 'important');
         bulkBtn.style.setProperty('text-align', 'center', 'important');
-        bulkBtn.style.setProperty('margin-left', '8px', 'important');
+        bulkBtn.style.setProperty('margin-left', '0', 'important');
+        bulkBtn.style.setProperty('margin-right', '0', 'important');
     }
 
-    // trashBtn のスタイル
+    // trashBtn のスタイル（margin-left を削除、visibility は触らない）
     if (trashBtn) {
         trashBtn.style.setProperty('position', 'relative', 'important');
         trashBtn.style.setProperty('z-index', '200', 'important');
-        trashBtn.style.setProperty('pointer-events', 'auto', 'important');
-        trashBtn.style.setProperty('margin-left', '20px', 'important');
+        trashBtn.style.setProperty('margin-left', '0', 'important');
+        trashBtn.style.setProperty('margin-right', '0', 'important');
     }
 
-    // 空の flex-container を削除
-    //   ★ 非表示にした要素（folderInput 等）は DOM 上は残るため、
-    //     その flex-container は空にならず削除されない。
+    // 空の flex-container を削除（flexContainer は残す）
     gallery.querySelectorAll('.flex-container.alignItemsCenter').forEach(c => {
+        if (c === flexContainer) return;
         if (c.children.length === 0 && !c.textContent.trim()) {
             c.remove();
         }
