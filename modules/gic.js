@@ -6148,7 +6148,6 @@ function restructureGalleryHeader() {
         bulkBtn.style.setProperty('min-width', '100px', 'important');
         bulkBtn.style.setProperty('box-sizing', 'border-box', 'important');
         bulkBtn.style.setProperty('text-align', 'center', 'important');
-        bulkBtn.style.setProperty('margin-left', '0', 'important');
         bulkBtn.style.setProperty('margin-right', '0', 'important');
     }
 
@@ -6156,7 +6155,6 @@ function restructureGalleryHeader() {
     if (trashBtn) {
         trashBtn.style.setProperty('position', 'relative', 'important');
         trashBtn.style.setProperty('z-index', '200', 'important');
-        trashBtn.style.setProperty('margin-left', '0', 'important');
         trashBtn.style.setProperty('margin-right', '0', 'important');
     }
 
