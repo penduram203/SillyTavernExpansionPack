@@ -1,0 +1,53 @@
+/* choice_click.css */
+/* ロアブック選択肢（.lbe-choice-item）のクリック可能化と視覚効果 */
+
+.lbe-choice-item {
+    cursor: pointer;
+    border-radius: 4px;
+    padding: 4px 8px;
+    margin: 2px 0;
+    transition:
+        background-color 0.15s ease,
+        box-shadow 0.15s ease,
+        transform 0.1s ease;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+/* マウスホバー: 枠線 + 背景色変化 + わずかに右へ */
+.lbe-choice-item:hover {
+    background-color: rgba(100, 181, 246, 0.18);
+    box-shadow: 0 0 0 2px #64b5f6 inset;
+    transform: translateX(2px);
+}
+
+/* キーボードフォーカス */
+.lbe-choice-item:focus-visible {
+    outline: 2px solid #64b5f6;
+    outline-offset: 1px;
+}
+
+/* 押下中 */
+.lbe-choice-item:active {
+    background-color: rgba(100, 181, 246, 0.35);
+    transform: translateX(2px) scale(0.985);
+}
+
+/* クリック直後のフィードバック */
+.lbe-choice-item.choice-click-flash {
+    animation: choice-click-flash 0.5s ease;
+}
+
+.lbe-choice-item.choice-click-flash[data-choice-click-mode="sending"] {
+    background-color: rgba(100, 181, 246, 0.45);
+}
+
+.lbe-choice-item.choice-click-flash[data-choice-click-mode="input-only"] {
+    background-color: rgba(251, 191, 36, 0.35);
+    box-shadow: 0 0 0 2px #fbbf24 inset;
+}
+
+@keyframes choice-click-flash {
+    0%   { background-color: rgba(100, 181, 246, 0.55); }
+    100% { background-color: transparent; }
+}
