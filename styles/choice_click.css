@@ -2,52 +2,108 @@
 /* ロアブック選択肢（.lbe-choice-item）のクリック可能化と視覚効果 */
 
 .lbe-choice-item {
+    position: relative;
     cursor: pointer;
-    border-radius: 4px;
-    padding: 4px 8px;
-    margin: 2px 0;
+    border-radius: 6px;
+    padding: 6px 10px 6px 14px;
+    margin: 4px 0;
+    background-color: rgba(255, 255, 255, 0.04);
+    border: 2px solid transparent;
     transition:
-        background-color 0.15s ease,
-        box-shadow 0.15s ease,
-        transform 0.1s ease;
+        background-color 0.12s ease,
+        border-color 0.12s ease,
+        box-shadow 0.12s ease,
+        transform 0.1s ease,
+        color 0.12s ease;
     user-select: none;
     -webkit-user-select: none;
+    font-weight: 600;
 }
 
-/* マウスホバー: 枠線 + 背景色変化 + わずかに右へ */
+/* 左端のアクセントバー（通常時は非表示、ホバーで出現） */
+.lbe-choice-item::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 0;
+    background-color: #00e5ff;
+    border-radius: 6px 0 0 6px;
+    transition: width 0.12s ease;
+    pointer-events: none;
+}
+
+/* マウスホバー: 太い枠 + 濃い背景 + 白文字 + 左バー + 影 + わずかに拡大 */
 .lbe-choice-item:hover {
-    background-color: rgba(100, 181, 246, 0.18);
-    box-shadow: 0 0 0 2px #64b5f6 inset;
-    transform: translateX(2px);
+    background-color: #0d47a1;
+    border: 2px solid #00e5ff;
+    box-shadow:
+        0 0 0 2px rgba(0, 229, 255, 0.4),
+        0 4px 12px rgba(0, 229, 255, 0.55);
+    color: #ffffff;
+    transform: translateX(2px) scale(1.01);
+}
+
+.lbe-choice-item:hover::before {
+    width: 6px;
 }
 
 /* キーボードフォーカス */
 .lbe-choice-item:focus-visible {
-    outline: 2px solid #64b5f6;
-    outline-offset: 1px;
+    outline: 3px solid #00e5ff;
+    outline-offset: 2px;
 }
 
 /* 押下中 */
 .lbe-choice-item:active {
-    background-color: rgba(100, 181, 246, 0.35);
-    transform: translateX(2px) scale(0.985);
+    background-color: #1565c0;
+    border-color: #ffffff;
+    box-shadow:
+        0 0 0 2px rgba(255, 255, 255, 0.6),
+        0 2px 6px rgba(0, 0, 0, 0.6);
+    transform: translateX(2px) scale(0.97);
 }
 
 /* クリック直後のフィードバック */
 .lbe-choice-item.choice-click-flash {
-    animation: choice-click-flash 0.5s ease;
+    animation: choice-click-flash 0.6s ease;
 }
 
+/* 送信モード: 強い青緑の発光 */
 .lbe-choice-item.choice-click-flash[data-choice-click-mode="sending"] {
-    background-color: rgba(100, 181, 246, 0.45);
+    background-color: #0097a7;
+    border-color: #00e5ff;
+    box-shadow:
+        0 0 0 3px #00e5ff,
+        0 0 20px rgba(0, 229, 255, 0.9);
+    color: #ffffff;
 }
 
+/* 入力のみモード: 強い黄の発光 */
 .lbe-choice-item.choice-click-flash[data-choice-click-mode="input-only"] {
-    background-color: rgba(251, 191, 36, 0.35);
-    box-shadow: 0 0 0 2px #fbbf24 inset;
+    background-color: #b45309;
+    border-color: #fbbf24;
+    box-shadow:
+        0 0 0 3px #fbbf24,
+        0 0 20px rgba(251, 191, 36, 0.9);
+    color: #ffffff;
 }
 
 @keyframes choice-click-flash {
-    0%   { background-color: rgba(100, 181, 246, 0.55); }
-    100% { background-color: transparent; }
+    0% {
+        background-color: #00e5ff;
+        color: #000000;
+        transform: translateX(2px) scale(1.05);
+    }
+    40% {
+        background-color: #0097a7;
+        color: #ffffff;
+        transform: translateX(2px) scale(1.02);
+    }
+    100% {
+        background-color: rgba(255, 255, 255, 0.04);
+        color: inherit;
+        transform: translateX(0) scale(1);
+    }
 }
