@@ -161,15 +161,15 @@
         const accentS = Math.min(Math.max(hsl.s, 75), 100);
         const hue = hsl.h;
 
-        // 暗い背景（L=22%） / 明るい枠（L=65%）
-        const bg        = hslCss(hue, baseS, 22);
+        // 背景 L=32%（以前は22%） / 明るい枠 L=65%
+        const bg        = hslCss(hue, baseS, 32);
         const border    = hslCss(hue, accentS, 65);
         const bar       = border;
         const glowSoft  = hslCss(hue, accentS, 65, 0.55);
         const glowRing  = hslCss(hue, accentS, 65, 0.40);
-        const activeBg  = hslCss(hue, baseS, 15);
-        const sendingBg = hslCss(hue, baseS, 32);
-        const sendingFl = hslCss(hue, baseS, 45);
+        const activeBg  = hslCss(hue, baseS, 24);   // 押下時: ホバーより少し暗く
+        const sendingBg = hslCss(hue, baseS, 40);   // 送信40%地点
+        const sendingFl = hslCss(hue, baseS, 52);   // 送信0%地点
 
         const root = document.documentElement.style;
         root.setProperty('--choice-hover-bg', bg);
