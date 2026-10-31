@@ -7679,7 +7679,7 @@ function bootstrapGIC() {
     //    このフラグが立っている間は、ユーザー明示オープンでなくても
     //    強制クローズを抑止する（自前の refreshGalleryAfterBulkDelete 用）
     let _pendingReopenAt = 0;
-    const PENDING_REOPEN_GRACE_MS = 8000;
+    const PENDING_REOPEN_GRACE_MS = 15000;
 
     // warmup 中かどうか（この間はユーザー意図なしとみなす）
     const isWarmupRunning = () => (typeof warmupState !== 'undefined' && warmupState === 'running');
@@ -7714,7 +7714,32 @@ function bootstrapGIC() {
             }
         }, true);
     });
-
+    
+    // ============================================================
+    // ★ ギャラリー内部の「フォルダ変更」「復元」「削除モード」など、
+    //    STがギャラリーを閉じて開き直す操作を検知して、
+    //    その再オープンを「ユーザー意図」かつ「プログラム的再オープン」として扱う。
+    // ============================================================
+    const GALLERY_REFRESH_TRIGGERS = [
+        '.right_menu_button[title="Change gallery folder"]',
+        '.right_menu_button[title="Restore gallery folder"]',
+        '.right_menu_button[title="Delete mode"]',
+        '.gallery-folder-input',
+    ];
+    ['pointerdown', 'click'].forEach(t => {
+        document.addEventListener(t, (e) => {
+            if (isWarmupRunning()) return;
+            for (const sel of GALLERY_REFRESH_TRIGGERS) {
+                if (e.target?.closest?.(sel)) {
+                    _lastUserOpenTime = Date.now();
+                    _userExplicitlyOpened = true;
+                    _pendingReopenAt = Date.now();
+                    return;
+                }
+            }
+        }, true);
+    });
+    
     // ★ 外部（triggerAction / warmUpGallery 中断時）からユーザー意図を明示マークするフック
     window.__gicMarkUserOpened = () => {
         _lastUserOpenTime = Date.now();
@@ -7786,8 +7811,12 @@ function bootstrapGIC() {
     setInterval(() => {
         if (isWarmupRunning()) return;
         if (!isGalleryOpen()) {
-            // ★ ギャラリーが閉じられたらユーザー意図フラグをリセット
-            //   pending reopen は TTL 管理なのでここでは触らない
+            // ★ pending reopen 中、または直近のユーザー操作から猶予期間内は
+            //    _userExplicitlyOpened をリセットしない。
+            //    DOM 再構築の一瞬の false や、フォルダ変更中の close→open で
+            //    フラグが落ちて再オープン直後に閉じられるのを防ぐ。
+            if (isPendingReopen()) return;
+            if (Date.now() - _lastUserOpenTime < USER_GRACE_MS) return;
             _userExplicitlyOpened = false;
             return;
         }
