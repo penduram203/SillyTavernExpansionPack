@@ -5610,7 +5610,9 @@ function placeBulkDeleteButton(controls) {
     if (btn.parentElement) { updateBulkDeleteButton(); return; }
 
     // ★ チェックボタン(Change gallery folder)の直後に挿入
-    if (checkIcon && checkIcon.parentElement) {
+    //    ※ 非表示の場合はアンカーとして使わない（可視要素の直後に置く）
+    if (checkIcon && checkIcon.parentElement &&
+        checkIcon.style.display !== 'none') {
         if (folderInput) folderInput.classList.add('gic-bulk-shortened-input');
         checkIcon.insertAdjacentElement('afterend', btn);
         console.log('[GIC-Bulk] 一括選択ボタンをチェックボタンの直後に挿入');
@@ -6147,8 +6149,21 @@ function restructureGalleryHeader() {
             c.remove();
         }
     });
+    // ★ 非表示にするヘッダー要素（フォルダ入力・チェック・復元）
+    const HIDDEN_HEADER_ELEMENTS = new Set([folderInput, checkBtn, recycleBtn]);
 
     elements.forEach(el => {
+        if (HIDDEN_HEADER_ELEMENTS.has(el)) {
+            // ★ display:none で非表示＆クリック不可にする
+            //    （STが再生成するたびに restructureGalleryHeader が走るので毎回適用される）
+            el.style.setProperty('display', 'none', 'important');
+            el.style.setProperty('pointer-events', 'none', 'important');
+            el.style.setProperty('visibility', 'hidden', 'important');
+            el.setAttribute('tabindex', '-1');
+            el.setAttribute('aria-hidden', 'true');
+            el.setAttribute('draggable', 'false');
+            return;
+        }
         el.style.setProperty('position', 'relative', 'important');
         el.style.setProperty('z-index', '200', 'important');
         el.style.setProperty('pointer-events', 'auto', 'important');
