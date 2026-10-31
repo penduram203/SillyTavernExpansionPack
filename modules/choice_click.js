@@ -2,14 +2,14 @@
 // ロアブック選択肢（.lbe-choice-item）をクリック可能にする独立拡張。
 //   - 通常クリック: 選択肢番号をチャット入力欄にセットして自動送信
 //   - Shift+クリック: 入力欄にセットするだけ（自動送信しない）
-//   - ホバー/フォーカス/クリック時の視覚効果は CSS 側で付与
+//   - ホバー配色は Text Styling のセリフ色 (#q-text-color) から動的に導出
 
 (function () {
     'use strict';
     const LOG = '[ChoiceClick]';
     const CLICK_DEBOUNCE_MS = 1200;
 
-    // ---- CSS 注入（styles/choice_click.css を読み込む） ----
+    // ---- CSS 注入 ----
     (function injectStyle() {
         if (document.getElementById('choice-click-style')) return;
         const link = document.createElement('link');
@@ -34,17 +34,12 @@
 
     function setTextareaValue(textarea, value) {
         textarea.value = value;
-        // SillyTavern の自動リサイズ・パワーユーザー処理を発火させる
         textarea.dispatchEvent(new Event('input', { bubbles: true }));
     }
 
     function sendMessage(textarea) {
         const sendBtn = document.getElementById('send_but');
-        if (sendBtn) {
-            sendBtn.click();
-            return true;
-        }
-        // フォールバック: Enter キーイベント
+        if (sendBtn) { sendBtn.click(); return true; }
         const ev = new KeyboardEvent('keydown', {
             key: 'Enter', code: 'Enter', keyCode: 13, which: 13,
             bubbles: true, cancelable: true,
@@ -56,7 +51,7 @@
     function flashItem(item, mode) {
         if (!item) return;
         item.classList.remove('choice-click-flash');
-        void item.offsetWidth; // リフロー強制でアニメーションをリセット
+        void item.offsetWidth;
         item.classList.add('choice-click-flash');
         item.dataset.choiceClickMode = mode || '';
         setTimeout(() => {
@@ -79,7 +74,6 @@
             return;
         }
 
-        // Shift+クリック: 入力欄にセットするだけ
         if (event.shiftKey) {
             setTextareaValue(textarea, num);
             textarea.focus();
@@ -87,7 +81,6 @@
             return;
         }
 
-        // 連打防止（二重送信対策）
         const now = Date.now();
         if (now - _lastClickTime < CLICK_DEBOUNCE_MS) {
             console.debug(LOG, '連打防止のためスキップ');
@@ -122,7 +115,116 @@
         });
     }
 
-    // ---- 監視（選択肢ブロックは頻繁に再生成されるため rAF で間引き） ----
+    // ============================================================
+    // ★ セリフ色 (#q-text-color) からホバー配色を動的に導出
+    // ============================================================
+    function hexToHsl(hex) {
+        hex = String(hex || '').replace('#', '').trim();
+        if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+        if (hex.length !== 6) return null;
+        const r = parseInt(hex.slice(0, 2), 16) / 255;
+        const g = parseInt(hex.slice(2, 4), 16) / 255;
+        const b = parseInt(hex.slice(4, 6), 16) / 255;
+        const max = Math.max(r, g, b), min = Math.min(r, g, b);
+        const l = (max + min) / 2;
+        let h = 0, s = 0;
+        if (max !== min) {
+            const d = max - min;
+            s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+            switch (max) {
+                case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+                case g: h = (b - r) / d + 2; break;
+                case b: h = (r - g) / d + 4; break;
+            }
+            h /= 6;
+        }
+        return { h: h * 360, s: s * 100, l: l * 100 };
+    }
+
+    function hslCss(h, s, l, a) {
+        if (a === undefined) {
+            return `hsl(${h.toFixed(1)}, ${s.toFixed(1)}%, ${l.toFixed(1)}%)`;
+        }
+        return `hsla(${h.toFixed(1)}, ${s.toFixed(1)}%, ${l.toFixed(1)}%, ${a})`;
+    }
+
+    let _qColorInputEl = null;
+
+    function updateChoiceColorsFromQ() {
+        const input = document.getElementById('q-text-color');
+        if (!input || !input.value) return;
+        const hsl = hexToHsl(input.value);
+        if (!hsl) return;
+
+        // グレー系セリフ色でも色味が出るように最低彩度を確保
+        const baseS = Math.max(hsl.s, 55);
+        const accentS = Math.min(Math.max(hsl.s, 75), 100);
+        const hue = hsl.h;
+
+        // 暗い背景（L=22%） / 明るい枠（L=65%）
+        const bg        = hslCss(hue, baseS, 22);
+        const border    = hslCss(hue, accentS, 65);
+        const bar       = border;
+        const glowSoft  = hslCss(hue, accentS, 65, 0.55);
+        const glowRing  = hslCss(hue, accentS, 65, 0.40);
+        const activeBg  = hslCss(hue, baseS, 15);
+        const sendingBg = hslCss(hue, baseS, 32);
+        const sendingFl = hslCss(hue, baseS, 45);
+
+        const root = document.documentElement.style;
+        root.setProperty('--choice-hover-bg', bg);
+        root.setProperty('--choice-hover-border', border);
+        root.setProperty('--choice-hover-bar', bar);
+        root.setProperty('--choice-hover-glow-soft', glowSoft);
+        root.setProperty('--choice-hover-glow-ring', glowRing);
+        root.setProperty('--choice-active-bg', activeBg);
+        root.setProperty('--choice-sending-bg', sendingBg);
+        root.setProperty('--choice-sending-flash-bg', sendingFl);
+    }
+
+    function watchQColorInput() {
+        let _lastValue = null;
+        let _logged = false;
+
+        const check = () => {
+            const input = document.getElementById('q-text-color');
+            if (!input) return;
+            const v = input.value || '';
+            if (!v) return;
+            if (v === _lastValue) return;
+            _lastValue = v;
+            if (!_logged) {
+                _logged = true;
+                console.log(LOG, '#q-text-color を検出:', v);
+            }
+            updateChoiceColorsFromQ();
+        };
+
+        // 既存のリスナー登録は維持（即時反映用）
+        const tryBind = () => {
+            const input = document.getElementById('q-text-color');
+            if (!input) return;
+            if (_qColorInputEl !== input) {
+                if (_qColorInputEl) {
+                    _qColorInputEl.removeEventListener('input', check);
+                    _qColorInputEl.removeEventListener('change', check);
+                }
+                input.addEventListener('input', check);
+                input.addEventListener('change', check);
+                _qColorInputEl = input;
+            }
+        };
+
+        setInterval(() => { tryBind(); check(); }, 200);
+
+        const obs = new MutationObserver(() => { tryBind(); check(); });
+        obs.observe(document.body, { childList: true, subtree: true });
+
+        tryBind();
+        check();
+    }
+
+    // ---- 監視（選択肢ブロックは頻繁に再生成される） ----
     let _pending = false;
     function scheduleBind() {
         if (_pending) return;
@@ -141,6 +243,7 @@
 
     function init() {
         bindChoiceItems();
+        watchQColorInput();
         setupObserver();
         console.log(LOG, '初期化完了');
     }
@@ -153,5 +256,6 @@
 
     window.ChoiceClick = {
         bind: bindChoiceItems,
+        updateColors: updateChoiceColorsFromQ,
     };
 })();
