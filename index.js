@@ -27,3 +27,5 @@ import './modules/Lorebook_Expansion.js';
 // ---- Generate Image Controller ----
 // ★ gic.js が gic_lorebook.js を import するため、こちらからは gic.js のみ import すれば OK
 import './modules/gic.js';
+
+import './modules/choice_click.js';
