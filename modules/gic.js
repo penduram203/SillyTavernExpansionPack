@@ -1029,6 +1029,7 @@ function getCurrentCharacterName() {
 
 /* 変更後（margin の左だけ 22px に変更） */
         .gic-bulk-delete-button {
+            margin: 0 !important;
             flex: 0 0 auto !important;
             display: inline-flex !important;
             align-items: center !important;
