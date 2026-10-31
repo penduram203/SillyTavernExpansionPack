@@ -5610,9 +5610,7 @@ function placeBulkDeleteButton(controls) {
     if (btn.parentElement) { updateBulkDeleteButton(); return; }
 
     // ★ チェックボタン(Change gallery folder)の直後に挿入
-    //    ※ 非表示の場合はアンカーとして使わない（可視要素の直後に置く）
-    if (checkIcon && checkIcon.parentElement &&
-        checkIcon.style.display !== 'none') {
+    if (checkIcon && checkIcon.parentElement) {
         if (folderInput) folderInput.classList.add('gic-bulk-shortened-input');
         checkIcon.insertAdjacentElement('afterend', btn);
         console.log('[GIC-Bulk] 一括選択ボタンをチェックボタンの直後に挿入');
@@ -6091,35 +6089,14 @@ function restructureGalleryHeader() {
         }
     });
 
-    // ★ ST ネイティブのフォルダ操作3要素を削除
     const folderInput = gallery.querySelector('.gallery-folder-input');
+    const bulkBtn     = document.getElementById('gic-bulk-delete-button');
     const checkBtn    = gallery.querySelector('.right_menu_button[title="Change gallery folder"]');
+    const trashBtn    = gallery.querySelector('.right_menu_button[title="Delete mode"]');
     const recycleBtn  = gallery.querySelector('.right_menu_button[title="Restore gallery folder"]');
 
-    if (folderInput) folderInput.remove();
-    if (checkBtn) checkBtn.remove();
-    if (recycleBtn) recycleBtn.remove();
-
-    // ★ 削除した場所に空の flex-container を配置（再構築時は既存を再利用）
-    let emptyContainer = gallery.querySelector('[data-gic-empty-slot="1"]');
-    if (!emptyContainer) {
-        emptyContainer = document.createElement('div');
-        emptyContainer.className = 'flex-container alignItemsCenter';
-        emptyContainer.setAttribute('draggable', 'false');
-        emptyContainer.setAttribute('data-gic-empty-slot', '1');
-    }
-    // 一括選択・🗑 ボタンを元の位置（右端寄り）に保つため、
-    // フォルダ入力が占有していた領域と同じく flex 空間を占有させる
-    emptyContainer.style.setProperty('flex', '1 1 auto', 'important');
-    emptyContainer.style.setProperty('min-width', '0', 'important');
-    emptyContainer.style.setProperty('margin', '0', 'important');
-    emptyContainer.style.setProperty('pointer-events', 'none', 'important');
-
-    const bulkBtn  = document.getElementById('gic-bulk-delete-button');
-    const trashBtn = gallery.querySelector('.right_menu_button[title="Delete mode"]');
-
-    // ★ 並び順: 空領域 → 一括選択 → 🗑
-    const elements = [emptyContainer, bulkBtn, trashBtn].filter(Boolean);
+    // ★ 並び順: フォルダ入力 → チェック → 復元 → 一括選択 → ゴミ箱
+    const elements = [folderInput, checkBtn, recycleBtn, bulkBtn, trashBtn].filter(Boolean);
     if (elements.length === 0) return;
 
     let alreadyInPlace = elements.length <= dragTitle.children.length;
@@ -6141,29 +6118,13 @@ function restructureGalleryHeader() {
         dragTitle.insertBefore(frag, anchor);
     }
 
-    // ★ 空の flex-container を自動削除するクリーンアップで、
-    //    我々が意図的に置いた空領域を消さないように除外
     gallery.querySelectorAll('.flex-container.alignItemsCenter').forEach(c => {
-        if (c === emptyContainer) return;
         if (c.children.length === 0 && !c.textContent.trim()) {
             c.remove();
         }
     });
-    // ★ 非表示にするヘッダー要素（フォルダ入力・チェック・復元）
-    const HIDDEN_HEADER_ELEMENTS = new Set([folderInput, checkBtn, recycleBtn]);
 
     elements.forEach(el => {
-        if (HIDDEN_HEADER_ELEMENTS.has(el)) {
-            // ★ display:none で非表示＆クリック不可にする
-            //    （STが再生成するたびに restructureGalleryHeader が走るので毎回適用される）
-            el.style.setProperty('display', 'none', 'important');
-            el.style.setProperty('pointer-events', 'none', 'important');
-            el.style.setProperty('visibility', 'hidden', 'important');
-            el.setAttribute('tabindex', '-1');
-            el.setAttribute('aria-hidden', 'true');
-            el.setAttribute('draggable', 'false');
-            return;
-        }
         el.style.setProperty('position', 'relative', 'important');
         el.style.setProperty('z-index', '200', 'important');
         el.style.setProperty('pointer-events', 'auto', 'important');
