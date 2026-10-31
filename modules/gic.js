@@ -6125,7 +6125,7 @@ function restructureGalleryHeader() {
     rightGroup.style.setProperty('flex', '0 0 auto', 'important');
     rightGroup.style.setProperty('width', 'fit-content', 'important');
     rightGroup.style.setProperty('margin-left', 'auto', 'important');
-    rightGroup.style.setProperty('margin-right', '10px', 'important');
+    rightGroup.style.setProperty('margin-right', '50px', 'important');
     rightGroup.style.setProperty('box-sizing', 'border-box', 'important');
 
     // 要素を右寄せグループへ移動（順序: flexContainer → bulkBtn → trashBtn）
@@ -6135,6 +6135,15 @@ function restructureGalleryHeader() {
         }
     });
 
+    // ★ 🗑ボタンを一括選択ボタンの直後に強制配置
+    //    STが再生成・別の場所へ挿入した場合でも、必ず bulkBtn の右隣にする
+    if (bulkBtn && trashBtn) {
+        if (trashBtn.previousElementSibling !== bulkBtn) {
+            rightGroup.insertBefore(trashBtn, bulkBtn.nextSibling);
+            console.log('[GIC] 🗑ボタンを一括選択ボタンの右隣に再配置');
+        }
+    }
+    
     // flexContainer を幅0に縮小（子要素は既に非表示）
     if (flexContainer) {
         flexContainer.style.setProperty('flex', '0 0 auto', 'important');
@@ -6167,6 +6176,8 @@ function restructureGalleryHeader() {
         bulkBtn.style.setProperty('text-align', 'center', 'important');
         bulkBtn.style.setProperty('margin', '0', 'important');
         bulkBtn.style.setProperty('flex', '0 0 auto', 'important');
+        bulkBtn.style.setProperty('display', 'inline-flex', 'important');
+        bulkBtn.style.setProperty('vertical-align', 'middle', 'important');
     }
 
     // trashBtn のスタイル
@@ -6175,6 +6186,8 @@ function restructureGalleryHeader() {
         trashBtn.style.setProperty('z-index', '200', 'important');
         trashBtn.style.setProperty('margin', '0', 'important');
         trashBtn.style.setProperty('flex', '0 0 auto', 'important');
+        trashBtn.style.setProperty('display', 'inline-flex', 'important');
+        trashBtn.style.setProperty('vertical-align', 'middle', 'important');
     }
 
     // 空の flex-container を削除（flexContainer は残す）
