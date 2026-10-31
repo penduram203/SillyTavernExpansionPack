@@ -5949,18 +5949,15 @@ function setNativeTrashButtonVisible(visible) {
             btn.style.removeProperty('visibility');
             btn.style.removeProperty('opacity');
             btn.style.setProperty('pointer-events', 'auto', 'important');
-            // ★ 右に 20px ずらす（表示・非表示どちらでも常時適用して位置を安定させる）
-            btn.style.setProperty('margin-left', '0px', 'important');
+            // ★ rightGroup の gap に任せるため margin は 0
+            btn.style.setProperty('margin', '0', 'important');
         } else {
-            // ★ visibility:hidden でレイアウトスペースを保持しつつ非表示・クリック不可にする
-            //   （display:none だと header の flex レイアウトが変わり、
-            //    一括選択ボタンの位置がずれてしまう）
+            // ★ visibility:hidden でレイアウトスペースを保持
             btn.style.removeProperty('display');
             btn.style.setProperty('visibility', 'hidden', 'important');
             btn.style.setProperty('opacity', '0', 'important');
             btn.style.setProperty('pointer-events', 'none', 'important');
-            // ★ レイアウトスペース維持のため margin-left は残す
-            btn.style.setProperty('margin-left', '0px', 'important');
+            btn.style.setProperty('margin', '0', 'important');
         }
     });
 }
@@ -6098,35 +6095,54 @@ function restructureGalleryHeader() {
     const trashBtn    = gallery.querySelector('.right_menu_button[title="Delete mode"]');
     const recycleBtn  = gallery.querySelector('.right_menu_button[title="Restore gallery folder"]');
 
-    // flex-container の特定
     let flexContainer = folderInput?.closest('.flex-container.alignItemsCenter') || null;
     if (!flexContainer) {
         flexContainer = dragTitle.querySelector(':scope > .flex-container.alignItemsCenter');
     }
 
-    // ★ dragTitle を flex コンテナ化して右寄せ
-    //    DOM順: [flexContainer, bulkBtn, trashBtn]
-    //    → 右寄せで [flexContainer][bulkBtn][trashBtn] が右端に並ぶ
-    //    → trashBtn は bulkBtn の右隣、bulkBtn は右端に配置される
+    // ★ dragTitle を flex に（rightGroup の margin-left:auto を効かせるため）
     dragTitle.style.setProperty('display', 'flex', 'important');
     dragTitle.style.setProperty('flex-direction', 'row', 'important');
-    dragTitle.style.setProperty('justify-content', 'flex-end', 'important');
+    dragTitle.style.setProperty('flex-wrap', 'nowrap', 'important');
     dragTitle.style.setProperty('align-items', 'center', 'important');
-    dragTitle.style.setProperty('gap', '6px', 'important');
+    dragTitle.style.setProperty('width', '100%', 'important');
+    dragTitle.style.setProperty('box-sizing', 'border-box', 'important');
 
-    // 配置: flexContainer → bulkBtn → trashBtn（DOM順）
-    if (flexContainer && flexContainer.parentNode) {
-        const parent = flexContainer.parentNode;
-        const placeAfter = (refNode, target) => {
-            if (!refNode || !target) return;
-            if (target.previousElementSibling === refNode) return;
-            parent.insertBefore(target, refNode.nextElementSibling);
-        };
-        placeAfter(flexContainer, bulkBtn);
-        placeAfter(bulkBtn || flexContainer, trashBtn);
-    } else {
-        if (bulkBtn && !dragTitle.contains(bulkBtn)) dragTitle.appendChild(bulkBtn);
-        if (trashBtn && !dragTitle.contains(trashBtn)) dragTitle.appendChild(trashBtn);
+    // ★ 右寄せグループ: [flexContainer(不可視), bulkBtn, trashBtn]
+    let rightGroup = dragTitle.querySelector(':scope > #gic-header-right-group');
+    if (!rightGroup) {
+        rightGroup = document.createElement('div');
+        rightGroup.id = 'gic-header-right-group';
+        dragTitle.appendChild(rightGroup);
+    }
+    rightGroup.style.setProperty('display', 'flex', 'important');
+    rightGroup.style.setProperty('flex-direction', 'row', 'important');
+    rightGroup.style.setProperty('flex-wrap', 'nowrap', 'important');
+    rightGroup.style.setProperty('align-items', 'center', 'important');
+    rightGroup.style.setProperty('justify-content', 'flex-end', 'important');
+    rightGroup.style.setProperty('gap', '6px', 'important');
+    rightGroup.style.setProperty('flex', '0 0 auto', 'important');
+    rightGroup.style.setProperty('width', 'fit-content', 'important');
+    rightGroup.style.setProperty('margin-left', 'auto', 'important');
+    rightGroup.style.setProperty('margin-right', '10px', 'important');
+    rightGroup.style.setProperty('box-sizing', 'border-box', 'important');
+
+    // 要素を右寄せグループへ移動（順序: flexContainer → bulkBtn → trashBtn）
+    [flexContainer, bulkBtn, trashBtn].forEach(el => {
+        if (el && el.parentNode !== rightGroup) {
+            rightGroup.appendChild(el);
+        }
+    });
+
+    // flexContainer を幅0に縮小（子要素は既に非表示）
+    if (flexContainer) {
+        flexContainer.style.setProperty('flex', '0 0 auto', 'important');
+        flexContainer.style.setProperty('width', '0', 'important');
+        flexContainer.style.setProperty('min-width', '0', 'important');
+        flexContainer.style.setProperty('max-width', '0', 'important');
+        flexContainer.style.setProperty('margin', '0', 'important');
+        flexContainer.style.setProperty('padding', '0', 'important');
+        flexContainer.style.setProperty('overflow', 'hidden', 'important');
     }
 
     // 非表示にするヘッダー要素
@@ -6140,7 +6156,7 @@ function restructureGalleryHeader() {
         el.setAttribute('draggable', 'false');
     });
 
-    // bulkBtn のスタイル（margin-left を削除して gap に任せる）
+    // bulkBtn のスタイル
     if (bulkBtn) {
         bulkBtn.style.setProperty('position', 'relative', 'important');
         bulkBtn.style.setProperty('z-index', '200', 'important');
@@ -6148,14 +6164,16 @@ function restructureGalleryHeader() {
         bulkBtn.style.setProperty('min-width', '100px', 'important');
         bulkBtn.style.setProperty('box-sizing', 'border-box', 'important');
         bulkBtn.style.setProperty('text-align', 'center', 'important');
-        bulkBtn.style.setProperty('margin-right', '0', 'important');
+        bulkBtn.style.setProperty('margin', '0', 'important');
+        bulkBtn.style.setProperty('flex', '0 0 auto', 'important');
     }
 
-    // trashBtn のスタイル（margin-left を削除、visibility は触らない）
+    // trashBtn のスタイル
     if (trashBtn) {
         trashBtn.style.setProperty('position', 'relative', 'important');
         trashBtn.style.setProperty('z-index', '200', 'important');
-        trashBtn.style.setProperty('margin-right', '0', 'important');
+        trashBtn.style.setProperty('margin', '0', 'important');
+        trashBtn.style.setProperty('flex', '0 0 auto', 'important');
     }
 
     // 空の flex-container を削除（flexContainer は残す）
