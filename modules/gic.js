@@ -729,41 +729,21 @@ async function validatePersistedState() {
     }
 
     if (!lastGeneratedImageUrl) {
-        console.log('[GIC] override状態（URL未指定）を確認しました');
-        // ★ Image Display へ状態を同期（起動時の不整合を解消）
-        if (window.ImageDisplayExtension?.setOverrideImage && !window.ImageDisplayExtension.isOverride()) {
-            try {
-                await window.ImageDisplayExtension.setOverrideImage('');
-                console.log('[GIC] override状態を Image Display と同期（URLなし）');
-            } catch (e) { /* ignore */ }
-        }
+        // ★ URL未指定時の ImageDisplay 自動同期も行わない
+        console.log('[GIC] override状態（URL未指定）を確認しました（状態維持）');
         return;
     }
 
     const exists = await checkImageExists(lastGeneratedImageUrl);
     if (!exists) {
-        console.warn(`[GIC] 永続化された画像URLが存在しません。状態をリセットします: ${lastGeneratedImageUrl}`);
+        // ★ isOverrideLocal は変更しない（ユーザーが明示的にボタンを押した時のみ切替）
+        console.warn(`[GIC] 永続化された画像URLが存在しません（状態は維持）: ${lastGeneratedImageUrl}`);
         lastGeneratedImageUrl = null;
-        isOverrideLocal = false;
-        setButtonLabel(LABEL_NORMAL);
-        if (window.ImageDisplayExtension?.clearOverrideImage) {
-            try { window.ImageDisplayExtension.clearOverrideImage(); } catch (e) { /* ignore */ }
-        }
         savePersistedState();
     } else {
         console.log(`[GIC] 永続化された画像URLの存在を確認: ${lastGeneratedImageUrl}`);
-
-        // ★ Image Display 側の状態と同期（起動直後の不整合を解消）
-        //   GIC 側は isOverrideLocal=true でも、Image Display 側が false のままだと
-        //   gic_lorebook.js の processChoice が /sd をスキップしてしまう。
-        if (window.ImageDisplayExtension?.setOverrideImage && !window.ImageDisplayExtension.isOverride()) {
-            try {
-                await window.ImageDisplayExtension.setOverrideImage(lastGeneratedImageUrl);
-                console.log(`[GIC] override状態を Image Display と同期: ${lastGeneratedImageUrl}`);
-            } catch (e) {
-                console.warn('[GIC] Image Display との同期に失敗:', e);
-            }
-        }
+        // ★ ImageDisplay との自動同期もしない
+        //    （起動時に勝手にモードが切り替わるのを防ぐ）
     }
 }
 
@@ -1786,20 +1766,10 @@ async function scanForGeneratedImages() {
     } else {
         // ── 既処理メッセージの追跡 ──
         //   URL は記録するが、override 状態の自動復元は行わない。
-        //   （ユーザーが明示的に事前設定モードを選んだ直後に、過去の
-        //     is_system=true メッセージから勝手に override に戻すバグの原因
-        //     だったため、前回の修正で削除済み）
         lastGeneratedImageUrl = url;
 
-        if (!isOverrideLocal) {
-            // Image Display 側と同期（外部から setOverrideImage された場合）
-            const ideIsOverride = window.ImageDisplayExtension?.isOverride?.();
-            if (ideIsOverride) {
-                isOverrideLocal = true;
-                setButtonLabel(LABEL_OVERRIDE);
-                savePersistedState();
-            }
-        }
+        // ★ Image Display 側の状態を参照して isOverrideLocal を自動変更しない。
+        //    （キャラ切替やチャット変更で勝手にモードが切り替わるのを防ぐ）
     }
 
     // ── 最新より古い生成画像メッセージも処理済みとしてマーク ──
@@ -5811,21 +5781,32 @@ async function executeBulkDelete() {
 
     if (lastGeneratedImageUrl) {
         const targetNormalized = (() => {
-            try { return decodeURIComponent(lastGeneratedImageUrl); } catch (e) { return lastGeneratedImageUrl; }
+            try { return decodeURIComponent(lastGeneratedImageUrl).split('?')[0].split('#')[0]; }
+            catch (e) { return lastGeneratedImageUrl.split('?')[0].split('#')[0]; }
         })();
+        let shouldClear = false;
         for (const p of paths) {
             const pNormalized = (() => {
-                try { return decodeURIComponent(p); } catch (e) { return p; }
+                try { return decodeURIComponent(p).split('?')[0].split('#')[0]; }
+                catch (e) { return p.split('?')[0].split('#')[0]; }
             })();
-            if (targetNormalized.includes(pNormalized) || pNormalized.includes(targetNormalized)) {
-                lastGeneratedImageUrl = null;
-                if (isOverrideLocal) { isOverrideLocal = false; setButtonLabel(LABEL_NORMAL); }
-                savePersistedState();
-                if (window.ImageDisplayExtension?.clearOverrideImage) {
-                    try { window.ImageDisplayExtension.clearOverrideImage(); } catch (e) { /* ignore */ }
-                }
+            // ★ 完全一致のみ（部分一致だと無関係な画像削除で誤ってモードが切り替わる）
+            if (targetNormalized === pNormalized) {
+                shouldClear = true;
                 break;
             }
+        }
+        if (shouldClear) {
+            lastGeneratedImageUrl = null;
+            if (isOverrideLocal) {
+                isOverrideLocal = false;
+                setButtonLabel(LABEL_NORMAL);
+            }
+            savePersistedState();
+            if (window.ImageDisplayExtension?.clearOverrideImage) {
+                try { window.ImageDisplayExtension.clearOverrideImage(); } catch (e) { /* ignore */ }
+            }
+            console.log('[GIC] 削除対象が現在表示中の背景画像と一致 → 事前設定モードに切替');
         }
     }
 
@@ -6857,26 +6838,24 @@ function installGalleryCloseInterceptor() {
 function closeGalleryProgrammatically() {
     hideGalleryAttachmentsImmediately('closeGalleryProgrammatically');
 
+    // ★ Escape キーは送信しない。
+    //    ST本体は Escape で開いているドロワーをすべて閉じるため、
+    //    ロアブックやキャラ管理など他のドロワーまで巻き込んで閉じてしまう。
+    //    代わりにギャラリー専用の閉じるボタンをクリックする。
     let closed = false;
     try {
-        const esc = new KeyboardEvent('keydown', {
-            key: 'Escape', code: 'Escape', keyCode: 27, which: 27,
-            bubbles: true, cancelable: true,
-        });
-        document.dispatchEvent(esc);
+        const g = document.getElementById('gallery');
+        if (g) {
+            const btn = g.querySelector(':scope > .dragClose')
+                     || g.querySelector(':scope > .panelControlBar .dragClose');
+            if (btn) {
+                btn.click();
+                closed = true;
+            }
+        }
         clearGalleryOpenInFlight();
-        closed = true;
     } catch (e) { /* ignore */ }
 
-    if (closed) {
-        setTimeout(() => {
-            if (!isGalleryOpen()) return;
-            const g = document.getElementById('gallery');
-            if (!g) return;
-            const btn = g.querySelector(':scope > .dragClose') || g.querySelector(':scope > .panelControlBar .dragClose');
-            if (btn) { try { btn.click(); } catch (e) { /* ignore */ } }
-        }, 100);
-    }
     return closed;
 }
 
