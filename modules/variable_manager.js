@@ -228,17 +228,18 @@
         if (!select) return;
 
         const label = select.closest('label') || select.parentElement;
-        if (!label || !label.parentElement) return;
+        if (!label) return;
 
         const container = document.createElement('div');
         container.className = UI_SETTINGS_CLASS;
 
+        // UI設定（太字）
         const uiLabel = document.createElement('span');
         uiLabel.className = 'variable-manager-ui-label';
         uiLabel.textContent = 'UI設定';
         container.appendChild(uiLabel);
 
-        // 開始ボタン
+        // 開始ボタン（チェックボックス）
         const startWrap = document.createElement('label');
         startWrap.className = 'variable-manager-checkbox-wrap';
         startWrap.title = 'ゲーム開始ボタンを表示（キャラ毎に保存）';
@@ -265,7 +266,7 @@
         });
         container.appendChild(startWrap);
 
-        // 場所
+        // 場所（チェックボックス）
         const placeWrap = document.createElement('label');
         placeWrap.className = 'variable-manager-checkbox-wrap';
         placeWrap.title = '変数ウインドウを表示（キャラ毎に保存）';
@@ -289,14 +290,21 @@
         });
         container.appendChild(placeWrap);
 
-        label.insertAdjacentElement('afterend', container);
+        // ★ select の直後（label の内側）に挿入
+        select.insertAdjacentElement('afterend', container);
+
+        // ★ label を flex コンテナ化して <select> と横並びにする
+        label.style.setProperty('display', 'flex', 'important');
+        label.style.setProperty('align-items', 'center', 'important');
+        label.style.setProperty('gap', '6px', 'important');
+        label.style.setProperty('flex-wrap', 'nowrap', 'important');
+        label.style.setProperty('min-width', '0', 'important');
     }
 
     function ensureUISettings() {
         const select = document.getElementById('char-management-dropdown');
         if (select) {
-            const label = select.closest('label') || select.parentElement;
-            const next = label?.nextElementSibling;
+            const next = select.nextElementSibling;
             const isProper = next && next.classList && next.classList.contains(UI_SETTINGS_CLASS);
             if (!isProper) {
                 document.querySelectorAll('.' + UI_SETTINGS_CLASS).forEach(el => el.remove());
