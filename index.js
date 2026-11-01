@@ -31,3 +31,5 @@ import './modules/gic.js';
 import './modules/choice_click.js';
 
 import './modules/variable_manager.js';
+
+import './modules/worldbook_auto_select.js';
