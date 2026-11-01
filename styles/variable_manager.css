@@ -115,3 +115,13 @@
     opacity: 0.5;
     cursor: not-allowed;
 }
+
+/* ============================================================
+ * ★ キャラクター管理ドロップダウンの幅を 10% に固定
+ *    （ST本体の .drawer-content select { width: 100% } を上書き）
+ * ============================================================ */
+#char-management-dropdown {
+    width: 10% !important;
+    min-width: 0 !important;
+    font-size: calc(var(--mainFontSize) * 0.95);
+}
