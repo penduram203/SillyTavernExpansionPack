@@ -72,26 +72,32 @@
     width: 100%;
     max-width: 100%;
     box-sizing: border-box;
+    flex-wrap: nowrap;
 }
 
-.lbe-variable-type {
-    width: 90px;
-    flex: 0 0 auto;
+/* ★ select は ST本体の .drawer-content select { width: 100% } に勝つため
+      親クラスを前置して詳細度を上げ、!important で確実に固定する */
+.lbe-variable-row .lbe-variable-type {
+    width: 90px !important;
+    min-width: 90px !important;
+    max-width: 90px !important;
+    flex: 0 0 90px !important;
     box-sizing: border-box;
     font-family: inherit;
+    font-size: calc(var(--mainFontSize) * 0.95);
 }
 
 .lbe-variable-name {
     flex: 1 1 0;
     min-width: 0;
-    width: 100%;
+    width: auto;
     box-sizing: border-box;
 }
 
 .lbe-variable-value {
     flex: 2 1 0;
     min-width: 0;
-    width: 100%;
+    width: auto;
     box-sizing: border-box;
     font-family: monospace;
 }
@@ -119,73 +125,6 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-}
-
-.lbe-choice-row {
-    display: flex;
-    gap: 6px;
-    align-items: center;
-    width: 100%;
-    max-width: 100%;
-    box-sizing: border-box;
-}
-
-.lbe-choice-num {
-    width: 64px;
-    flex: 0 0 auto;
-    text-align: center;
-    font-family: monospace;
-    box-sizing: border-box;
-}
-
-.lbe-choice-text {
-    flex: 1 1 auto;
-    min-width: 0;
-    width: 100%;
-    box-sizing: border-box;
-}
-
-.lbe-choice-del {
-    flex: 0 0 auto;
-    padding: 2px 8px;
-    font-size: 0.85em;
-}
-
-.lbe-choice-add {
-    align-self: flex-start;
-    flex: 0 0 auto;
-    width: auto;
-    max-width: 100%;
-    margin-top: 4px;
-    font-size: 0.85em;
-    white-space: nowrap;
-    writing-mode: horizontal-tb;
-    text-orientation: mixed;
-    word-break: keep-all;
-    line-height: 1.4;
-    height: auto;
-    box-sizing: border-box;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.lbe-choices-block {
-    margin-top: 12px;
-    padding-top: 8px;
-    border-top: 1px dashed rgba(200, 200, 200, 0.4);
-}
-
-.lbe-choices-list {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
-.lbe-choice-item {
-    font-weight: bold;
-    padding: 2px 0;
-    line-height: 1.5;
 }
 
 /* ============================================================
