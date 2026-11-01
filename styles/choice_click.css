@@ -107,3 +107,59 @@
         transform: translateX(0) scale(1);
     }
 }
+
+/* ============================================================
+   ★ 最初のメッセージ「ゲーム開始」を選択肢ボタン化
+   ============================================================ */
+.mes .mes_text.game-start-choice {
+    display: inline-block !important;
+    cursor: pointer;
+    padding: 14px 32px !important;
+    margin: 8px 0 !important;
+    background-color: rgba(255, 255, 255, 0.06);
+    border: 2px solid var(--choice-hover-border, #00e5ff);
+    border-radius: 8px;
+    font-weight: 700 !important;
+    font-size: 1.1em !important;
+    color: #ffffff !important;
+    transition:
+        background-color 0.12s ease,
+        border-color 0.12s ease,
+        box-shadow 0.12s ease,
+        transform 0.1s ease;
+    user-select: none;
+    -webkit-user-select: none;
+    text-align: center;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    letter-spacing: 0.05em;
+}
+
+/* 内部の <p> のデフォルト余白を打ち消す */
+.mes .mes_text.game-start-choice p {
+    margin: 0 !important;
+    padding: 0 !important;
+    display: inline !important;
+}
+
+.mes .mes_text.game-start-choice:hover {
+    background-color: var(--choice-hover-bg, #0d47a1);
+    border-color: var(--choice-hover-border, #00e5ff);
+    box-shadow:
+        0 0 0 2px var(--choice-hover-glow-ring, rgba(0, 229, 255, 0.4)),
+        0 4px 16px var(--choice-hover-glow-soft, rgba(0, 229, 255, 0.55));
+    transform: translateY(-1px) scale(1.02);
+}
+
+.mes .mes_text.game-start-choice:active {
+    background-color: var(--choice-active-bg, #1565c0);
+    transform: translateY(0) scale(0.98);
+}
+
+.mes .mes_text.game-start-choice:focus-visible {
+    outline: 3px solid var(--choice-hover-border, #00e5ff);
+    outline-offset: 2px;
+}
+
+.mes .mes_text.game-start-choice.choice-click-flash {
+    animation: choice-click-flash 0.6s ease;
+}
