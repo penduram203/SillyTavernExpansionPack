@@ -40,6 +40,9 @@
     line-height: 1.4;
 }
 
+/* ============================================================
+ * 選択肢エディタ
+ * ============================================================ */
 .lbe-choices-editor {
     display: flex;
     flex-direction: column;
@@ -50,10 +53,84 @@
     align-items: stretch;
 }
 
+.lbe-choice-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    flex-wrap: nowrap;
+}
+
+.lbe-choice-num {
+    width: 64px;
+    flex: 0 0 auto;
+    text-align: center;
+    font-family: monospace;
+    box-sizing: border-box;
+}
+
+.lbe-choice-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.lbe-choice-del {
+    flex: 0 0 auto;
+    padding: 2px 8px;
+    font-size: 0.85em;
+}
+
+/* ★ ST本体の .menu_button に詳細度で負けないよう !important を多用 */
+.lbe-choice-add {
+    align-self: flex-start !important;
+    flex: 0 0 auto !important;
+    width: auto !important;
+    min-width: max-content !important;
+    max-width: 100%;
+    margin-top: 4px;
+    font-size: 0.85em;
+    writing-mode: horizontal-tb !important;
+    text-orientation: mixed !important;
+    white-space: nowrap !important;
+    word-break: keep-all !important;
+    line-height: 1.4;
+    height: auto !important;
+    box-sizing: border-box;
+    display: inline-flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: center !important;
+    text-align: center;
+}
+
+/* ============================================================
+ * 選択肢表示ブロック（チャット末尾）
+ * ============================================================ */
+.lbe-choices-block {
+    margin-top: 12px;
+    padding-top: 8px;
+    border-top: 1px dashed rgba(200, 200, 200, 0.4);
+}
+
+.lbe-choices-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.lbe-choice-item {
+    font-weight: bold;
+    padding: 2px 0;
+    line-height: 1.5;
+}
+
 /* ============================================================
  * 変数エディタ
  * ============================================================ */
-
 .lbe-variables-editor {
     display: flex;
     flex-direction: column;
@@ -75,7 +152,7 @@
     flex-wrap: nowrap;
 }
 
-/* ★ select は ST本体の .drawer-content select { width: 100% } に勝つため
+/* ★ ST本体の .drawer-content select { width: 100% } に勝つため
       親クラスを前置して詳細度を上げ、!important で確実に固定する */
 .lbe-variable-row .lbe-variable-type {
     width: 90px !important;
@@ -108,23 +185,27 @@
     font-size: 0.85em;
 }
 
+/* ★ 選択肢追加ボタンと同じ縦書き問題対策 */
 .lbe-variable-add {
-    align-self: flex-start;
-    flex: 0 0 auto;
-    width: auto;
+    align-self: flex-start !important;
+    flex: 0 0 auto !important;
+    width: auto !important;
+    min-width: max-content !important;
     max-width: 100%;
     margin-top: 4px;
     font-size: 0.85em;
-    white-space: nowrap;
-    writing-mode: horizontal-tb;
-    text-orientation: mixed;
-    word-break: keep-all;
+    writing-mode: horizontal-tb !important;
+    text-orientation: mixed !important;
+    white-space: nowrap !important;
+    word-break: keep-all !important;
     line-height: 1.4;
-    height: auto;
+    height: auto !important;
     box-sizing: border-box;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    display: inline-flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: center !important;
+    text-align: center;
 }
 
 /* ============================================================
@@ -191,17 +272,4 @@
 /* 折りたたみ時: マークされた要素を非表示 */
 .world_entry_edit.lbe-extras-collapsed .lbe-collapsible {
     display: none !important;
-}
-
-/* ============================================================
- * select 要素の幅を本体デフォルトの 100% から 10% に変更
- * （変数種別ドロップダウンが横幅を占有しすぎるのを防ぐ）
- * ============================================================ */
-/* 変更後（.lbe-variable-type のみに適用） */
-.lbe-variable-type {
-    width: 90px;
-    flex: 0 0 auto;
-    box-sizing: border-box;
-    font-family: inherit;
-    font-size: calc(var(--mainFontSize) * 0.95);
 }
