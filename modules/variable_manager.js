@@ -2,9 +2,8 @@
 // 画面左上にロアブックの「現在のエントリ」の変数を表示する。
 //   - 現在のエントリ = 最後のユーザーメッセージの番号に対応するロアブックエントリ
 //   - ユーザーメッセージが未送信の場合は「000」をフォールバック
-//   - 変数は LorebookExpansion の per-world ストアから取得
-//   - キャラクター管理メニューに「UI設定 / 場所 / チェックボックス」を追加し、
-//     キャラ毎の表示/非表示を切り替える（設定は extensionSettings に永続化）
+//   - キャラクター管理メニューに「UI設定 / 開始ボタン / 場所」を追加し、
+//     キャラ毎の表示/非表示・開始ボタン有無を切り替える（extensionSettings に永続化）
 
 (function () {
     'use strict';
@@ -17,15 +16,16 @@
 
     // ★ UI設定用
     const UI_SETTINGS_CLASS = 'variable-manager-ui-settings';
-    const CHECKBOX_ID = 'variable-manager-visible-checkbox';
+    const VISIBLE_CHECKBOX_ID = 'variable-manager-visible-checkbox';
+    const START_CHECKBOX_ID = 'variable-manager-start-checkbox';
     const EXT_SETTINGS_KEY = 'variable_manager';
+    const EVENT_START_CHANGED = 'variable-manager-start-changed';
 
     let _lastRenderKey = '';
     let _renderInFlight = false;
     let _initialized = false;
     let _uiObsPending = false;
 
-    // ---- CSS 注入 ----
     (function injectStyle() {
         if (document.getElementById(STYLE_ID)) return;
         const link = document.createElement('link');
@@ -39,7 +39,6 @@
         document.head.appendChild(link);
     })();
 
-    // ---- LorebookExpansion の準備待ち ----
     function waitForLBE(maxWaitMs = 10000) {
         return new Promise(resolve => {
             const start = Date.now();
@@ -67,7 +66,6 @@
         return null;
     }
 
-    // ---- 現在のロアブック名 ----
     function getWorldName() {
         if (window.LorebookExpansion?.getCurrentWorldName) {
             try {
@@ -82,7 +80,6 @@
         } catch (e) { return null; }
     }
 
-    // ---- 現在の選択肢番号（最後の有効な数字を持つユーザーメッセージ） ----
     function getLastChoiceNumber() {
         const ctx = getSTContext();
         if (!ctx?.chat) return FALLBACK_CHOICE;
@@ -106,7 +103,6 @@
         return FALLBACK_CHOICE;
     }
 
-    // ---- 現在のエントリの変数を取得 ----
     async function getCurrentVariables() {
         const worldName = getWorldName();
         if (!worldName) return { ok: false, reason: 'no-world' };
@@ -117,15 +113,11 @@
         let entries = null;
         try {
             entries = await window.LorebookExpansion.loadWorldInfoEntriesByName(worldName);
-        } catch (e) {
-            return { ok: false, reason: 'load-error' };
-        }
+        } catch (e) { return { ok: false, reason: 'load-error' }; }
         if (!entries) return { ok: false, reason: 'no-entries' };
 
         let entry = null;
-        try {
-            entry = window.LorebookExpansion.findEntryByChoice?.(entries, choiceNum);
-        } catch (e) { /* ignore */ }
+        try { entry = window.LorebookExpansion.findEntryByChoice?.(entries, choiceNum); } catch (e) { /* ignore */ }
         if (!entry) return { ok: false, reason: 'no-entry', choiceNum, worldName };
 
         const uid = entry.uid ?? null;
@@ -140,16 +132,13 @@
         const entryKey = String(entryKeyRaw).trim();
 
         return {
-            ok: true,
-            worldName,
-            choiceNum,
-            entryKey,
+            ok: true, worldName, choiceNum, entryKey,
             variables: Array.isArray(data?.variables) ? data.variables : []
         };
     }
 
     // ============================================================
-    // ★ UI設定（場所チェックボックス）
+    // ★ UI設定
     // ============================================================
     function getCurrentCharName() {
         try {
@@ -159,60 +148,84 @@
         } catch (e) { return null; }
     }
 
-    function getVisibleByCharMap() {
+    function _ensureExtSettings() {
         try {
             const ctx = getSTContext();
-            if (!ctx?.extensionSettings) return {};
+            if (!ctx?.extensionSettings) return null;
             if (!ctx.extensionSettings[EXT_SETTINGS_KEY]) {
                 ctx.extensionSettings[EXT_SETTINGS_KEY] = {};
             }
-            const s = ctx.extensionSettings[EXT_SETTINGS_KEY];
-            if (!s.visibleByChar || typeof s.visibleByChar !== 'object') {
-                s.visibleByChar = {};
-            }
-            return s.visibleByChar;
-        } catch (e) { return {}; }
+            return ctx.extensionSettings[EXT_SETTINGS_KEY];
+        } catch (e) { return null; }
+    }
+
+    function getVisibleByCharMap() {
+        const s = _ensureExtSettings();
+        if (!s) return {};
+        if (!s.visibleByChar || typeof s.visibleByChar !== 'object') s.visibleByChar = {};
+        return s.visibleByChar;
     }
 
     function saveVisibleByCharMap(map) {
+        const s = _ensureExtSettings();
+        if (!s) return;
+        s.visibleByChar = map;
         try {
             const ctx = getSTContext();
-            if (!ctx?.extensionSettings) return;
-            if (!ctx.extensionSettings[EXT_SETTINGS_KEY]) {
-                ctx.extensionSettings[EXT_SETTINGS_KEY] = {};
-            }
-            ctx.extensionSettings[EXT_SETTINGS_KEY].visibleByChar = map;
-            if (typeof ctx.saveSettingsDebounced === 'function') {
-                ctx.saveSettingsDebounced();
-            }
-        } catch (e) {
-            console.warn(LOG, 'save visible map failed:', e);
-        }
+            if (typeof ctx?.saveSettingsDebounced === 'function') ctx.saveSettingsDebounced();
+        } catch (e) { console.warn(LOG, 'save visible map failed:', e); }
+    }
+
+    function getStartButtonMap() {
+        const s = _ensureExtSettings();
+        if (!s) return {};
+        if (!s.startButtonByChar || typeof s.startButtonByChar !== 'object') s.startButtonByChar = {};
+        return s.startButtonByChar;
+    }
+
+    function saveStartButtonMap(map) {
+        const s = _ensureExtSettings();
+        if (!s) return;
+        s.startButtonByChar = map;
+        try {
+            const ctx = getSTContext();
+            if (typeof ctx?.saveSettingsDebounced === 'function') ctx.saveSettingsDebounced();
+        } catch (e) { console.warn(LOG, 'save start button map failed:', e); }
     }
 
     function isVisibleForChar(charName) {
         if (!charName) return false;
-        const map = getVisibleByCharMap();
-        return map[charName] === true;
+        return getVisibleByCharMap()[charName] === true;
+    }
+
+    function isStartButtonEnabledForChar(charName) {
+        if (!charName) return false;
+        return getStartButtonMap()[charName] === true;
     }
 
     function applyPanelVisibility() {
         const panel = document.getElementById(PANEL_ID);
         const charName = getCurrentCharName();
         const visible = isVisibleForChar(charName);
+        const startEnabled = isStartButtonEnabledForChar(charName);
 
         if (panel) {
             panel.classList.toggle('variable-manager-disabled', !visible);
         }
-        const cb = document.getElementById(CHECKBOX_ID);
-        if (cb) {
-            cb.checked = visible;
-            cb.disabled = !charName;
+        const visCb = document.getElementById(VISIBLE_CHECKBOX_ID);
+        if (visCb) {
+            visCb.checked = visible;
+            visCb.disabled = !charName;
+        }
+        const startCb = document.getElementById(START_CHECKBOX_ID);
+        if (startCb) {
+            startCb.checked = startEnabled;
+            startCb.disabled = !charName;
         }
     }
 
     function createUISettings() {
-        if (document.getElementById(CHECKBOX_ID)) return;
+        if (document.getElementById(VISIBLE_CHECKBOX_ID)) return;
 
         const select = document.getElementById('char-management-dropdown');
         if (!select) return;
@@ -223,31 +236,62 @@
         const container = document.createElement('div');
         container.className = UI_SETTINGS_CLASS;
 
+        // UI設定（太字）
         const uiLabel = document.createElement('span');
         uiLabel.className = 'variable-manager-ui-label';
         uiLabel.textContent = 'UI設定';
         container.appendChild(uiLabel);
 
-        const placeLabel = document.createElement('span');
-        placeLabel.className = 'variable-manager-place-label';
-        placeLabel.textContent = '場所';
-        container.appendChild(placeLabel);
+        // 開始ボタン（チェックボックス）
+        const startWrap = document.createElement('label');
+        startWrap.className = 'variable-manager-checkbox-wrap';
+        startWrap.title = 'ゲーム開始ボタンを表示（キャラ毎に保存）';
+        const startCb = document.createElement('input');
+        startCb.type = 'checkbox';
+        startCb.id = START_CHECKBOX_ID;
+        startCb.className = 'variable-manager-visible-checkbox';
+        startWrap.appendChild(startCb);
+        const startText = document.createElement('span');
+        startText.className = 'variable-manager-checkbox-text';
+        startText.textContent = '開始ボタン';
+        startWrap.appendChild(startText);
+        startCb.addEventListener('change', () => {
+            const charName = getCurrentCharName();
+            if (!charName) return;
+            const map = getStartButtonMap();
+            map[charName] = startCb.checked === true;
+            saveStartButtonMap(map);
+            try {
+                window.dispatchEvent(new CustomEvent(EVENT_START_CHANGED, {
+                    detail: { charName, enabled: startCb.checked === true }
+                }));
+            } catch (e) { /* ignore */ }
+        });
+        container.appendChild(startWrap);
 
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.id = CHECKBOX_ID;
-        cb.className = 'variable-manager-visible-checkbox';
-        cb.title = '変数ウインドウを表示（キャラ毎に保存）';
-        cb.addEventListener('change', () => {
+        // 場所（チェックボックス）
+        const placeWrap = document.createElement('label');
+        placeWrap.className = 'variable-manager-checkbox-wrap';
+        placeWrap.title = '変数ウインドウを表示（キャラ毎に保存）';
+        const visCb = document.createElement('input');
+        visCb.type = 'checkbox';
+        visCb.id = VISIBLE_CHECKBOX_ID;
+        visCb.className = 'variable-manager-visible-checkbox';
+        placeWrap.appendChild(visCb);
+        const placeText = document.createElement('span');
+        placeText.className = 'variable-manager-checkbox-text';
+        placeText.textContent = '場所';
+        placeWrap.appendChild(placeText);
+        visCb.addEventListener('change', () => {
             const charName = getCurrentCharName();
             if (!charName) return;
             const map = getVisibleByCharMap();
-            map[charName] = cb.checked === true;
+            map[charName] = visCb.checked === true;
             saveVisibleByCharMap(map);
             applyPanelVisibility();
             render();
         });
-        container.appendChild(cb);
+        container.appendChild(placeWrap);
 
         label.insertAdjacentElement('afterend', container);
     }
@@ -386,7 +430,6 @@
 
         const charName = getCurrentCharName();
         if (!isVisibleForChar(charName)) {
-            // 非表示の場合はデータ取得をスキップ（パネルは CSS で非表示）
             _lastRenderKey = '';
             return;
         }
@@ -405,11 +448,8 @@
         }
     }
 
-    function scheduleRender() {
-        setTimeout(render, 150);
-    }
+    function scheduleRender() { setTimeout(render, 150); }
 
-    // ---- イベント登録 ----
     function setupEventListeners() {
         try {
             const ctx = getSTContext();
@@ -417,39 +457,24 @@
                 const et = ctx.eventTypes;
                 const es = ctx.eventSource;
                 const events = [
-                    'CHAT_CHANGED',
-                    'CHARACTER_SELECTED',
-                    'CHARACTER_MESSAGE_RENDERED',
-                    'USER_MESSAGE_RENDERED',
-                    'MESSAGE_EDITED',
-                    'MESSAGE_DELETED',
-                    'MESSAGE_SWIPED',
-                    'CHAT_LOADED',
-                    'GENERATION_ENDED',
-                    'CHARACTER_PAGE_LOADED',
+                    'CHAT_CHANGED', 'CHARACTER_SELECTED',
+                    'CHARACTER_MESSAGE_RENDERED', 'USER_MESSAGE_RENDERED',
+                    'MESSAGE_EDITED', 'MESSAGE_DELETED', 'MESSAGE_SWIPED',
+                    'CHAT_LOADED', 'GENERATION_ENDED', 'CHARACTER_PAGE_LOADED',
                 ];
                 for (const name of events) {
-                    if (et[name] && typeof es.on === 'function') {
-                        es.on(et[name], scheduleRender);
-                    }
+                    if (et[name] && typeof es.on === 'function') es.on(et[name], scheduleRender);
                 }
             }
-        } catch (e) {
-            console.warn(LOG, 'event listener setup failed:', e);
-        }
+        } catch (e) { console.warn(LOG, 'event listener setup failed:', e); }
     }
 
-    // ---- 初期化 ----
     async function init() {
         if (_initialized) return;
         _initialized = true;
 
         const ready = await waitForLBE();
-        if (!ready) {
-            _initialized = false;
-            setTimeout(init, 1000);
-            return;
-        }
+        if (!ready) { _initialized = false; setTimeout(init, 1000); return; }
 
         ensurePanel();
         ensureUISettings();
@@ -458,7 +483,6 @@
         await render();
 
         setInterval(render, POLL_INTERVAL_MS);
-
         console.log(LOG, '初期化完了');
     }
 
@@ -468,11 +492,11 @@
         init();
     }
 
-    // ---- 公開 API（デバッグ用） ----
     window.VariableManager = {
         refresh: render,
         getCurrentVariables,
         isVisibleForChar,
+        isStartButtonEnabledForChar,
         setVisibleForChar: (charName, visible) => {
             if (!charName) return false;
             const map = getVisibleByCharMap();
@@ -482,11 +506,25 @@
             render();
             return true;
         },
+        setStartButtonForChar: (charName, enabled) => {
+            if (!charName) return false;
+            const map = getStartButtonMap();
+            map[charName] = !!enabled;
+            saveStartButtonMap(map);
+            applyPanelVisibility();
+            try {
+                window.dispatchEvent(new CustomEvent(EVENT_START_CHANGED, {
+                    detail: { charName, enabled: !!enabled }
+                }));
+            } catch (e) { /* ignore */ }
+            return true;
+        },
         _debug: () => ({
             worldName: getWorldName(),
             choiceNum: getLastChoiceNumber(),
             currentChar: getCurrentCharName(),
             visibleMap: getVisibleByCharMap(),
+            startButtonMap: getStartButtonMap(),
         }),
     };
 })();
