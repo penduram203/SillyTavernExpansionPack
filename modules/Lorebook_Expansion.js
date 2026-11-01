@@ -26,6 +26,11 @@
 //   - 旧 character.data からの一括移行 (lexStorageMigratedV1 フラグ)
 //   - getDataFor/setDataFor は per-world ストアを一次情報源とする
 //   - init() / CHARACTER_PAGE_LOADED で移行を試行
+//
+// ★ スクロールリセット問題修正:
+//   - setupObserver の監視対象を body 全体 → #world_popup に限定
+//   - scheduleInjection にスクロール直後スキップを追加
+//   - injectExpansionSections のスクロール位置保存・復元を強化
 
 import {
     extension_settings,
@@ -937,14 +942,33 @@ async function injectExpansionSections() {
         return;
     }
 
-    // ★ スクロール位置を保存（DOM変更によるリセットを防ぐ保険）
+    // ★ スクロール位置を広範囲に保存（#world_popup とその祖先すべて）
+    //    ST本体の clearEntryList によるリセットを確実に打ち消す
     const scrollSnapshots = [];
     try {
-        document.querySelectorAll('#world_popup *').forEach(el => {
+        const seen = new Set();
+        const collect = (el) => {
+            if (!el || seen.has(el)) return;
+            seen.add(el);
             if (el.scrollTop > 0 && el.scrollHeight > el.clientHeight + 1) {
-                scrollSnapshots.push({ el, scrollTop: el.scrollTop });
+                scrollSnapshots.push({ el, scrollTop: el.scrollTop, scrollLeft: el.scrollLeft });
             }
-        });
+        };
+
+        // #world_popup 内のすべての要素
+        const popup = document.getElementById('world_popup');
+        if (popup) {
+            popup.querySelectorAll('*').forEach(collect);
+            collect(popup);
+            // 祖先も辿る
+            let p = popup.parentElement;
+            while (p && p !== document.body) {
+                collect(p);
+                p = p.parentElement;
+            }
+        }
+        // ドキュメント全体
+        if (document.scrollingElement) collect(document.scrollingElement);
     } catch (e) { /* ignore */ }
 
     let injected = 0;
@@ -1012,12 +1036,18 @@ async function injectExpansionSections() {
         );
     }
 
-    // ★ スクロール位置を復元
-    scrollSnapshots.forEach(({ el, scrollTop }) => {
-        if (el.scrollTop !== scrollTop) {
-            el.scrollTop = scrollTop;
-        }
-    });
+    // ★ スクロール位置を復元（requestAnimationFrame で 1フレーム後にも再適用）
+    const restore = () => {
+        scrollSnapshots.forEach(({ el, scrollTop, scrollLeft }) => {
+            try {
+                if (el.scrollTop !== scrollTop) el.scrollTop = scrollTop;
+                if (el.scrollLeft !== scrollLeft) el.scrollLeft = scrollLeft;
+            } catch (e) { /* ignore */ }
+        });
+    };
+    restore();
+    requestAnimationFrame(restore);
+    requestAnimationFrame(() => requestAnimationFrame(restore));
 }
 
 // ============================================================
@@ -1026,23 +1056,64 @@ async function injectExpansionSections() {
 let _observer = null;
 let _injectTimer = null;
 let _pollTimer = null;
+let _lastWorldPopupScrollAt = 0;
+
+// ★ スクロール中は注入をスキップするためのリスナー（1回だけ設置）
+(function installWorldPopupScrollTracker() {
+    if (window.__lbeScrollTrackerInstalled) return;
+    window.__lbeScrollTrackerInstalled = true;
+    document.addEventListener('scroll', (e) => {
+        const t = e.target;
+        if (t && t.closest && t.closest('#world_popup')) {
+            _lastWorldPopupScrollAt = Date.now();
+            // スクロール中は debounce をリセット（注入を遅らせる）
+            if (_injectTimer) {
+                clearTimeout(_injectTimer);
+                _injectTimer = null;
+            }
+        }
+    }, true);
+})();
 
 function scheduleInjection() {
+    // ★ スクロール直後（400ms以内）は注入をスキップして再スケジュール
+    //    スクロール操作とDOM変更が競合してスクロール位置がリセットされるのを防ぐ
+    if (Date.now() - _lastWorldPopupScrollAt < 400) {
+        if (_injectTimer) clearTimeout(_injectTimer);
+        _injectTimer = setTimeout(() => {
+            _injectTimer = null;
+            scheduleInjection();
+        }, 400);
+        return;
+    }
+
     if (_injectTimer) clearTimeout(_injectTimer);
     _injectTimer = setTimeout(() => {
+        _injectTimer = null;
         injectExpansionSections().catch(e => console.warn(LOG, e));
-    }, 200);
+    }, 500);  // 200ms → 500ms に延長
 }
 
 function setupObserver() {
     if (_observer) _observer.disconnect();
+
+    // ★ 監視対象を #world_popup 内に限定する。
+    //    body 全体を監視すると、STの再描画やGICのギャラリー生成など
+    //    WIドロワーと無関係なDOM変更でも反応してしまい、
+    //    スクロール位置がリセットされる原因になる。
+    const target = document.getElementById('world_popup');
+    if (!target) {
+        // #world_popup が出現したら監視を開始
+        setTimeout(setupObserver, 500);
+        return;
+    }
 
     _observer = new MutationObserver(() => {
         if (!document.getElementById('world_popup')) return;
         scheduleInjection();
     });
 
-    _observer.observe(document.body, {
+    _observer.observe(target, {
         childList: true,
         subtree: true,
     });
@@ -1054,7 +1125,7 @@ function setupObserver() {
         }
     }, 1500);
 
-    console.log(LOG, 'DOM 監視を開始しました');
+    console.log(LOG, 'DOM 監視を開始しました（#world_popup 限定）');
 }
 
 // ============================================================
