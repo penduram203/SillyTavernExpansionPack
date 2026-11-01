@@ -14,6 +14,10 @@
 //     (extension_settings.lorebook_expansion.data[worldName][charKey])
 //     に変更。キャラとロアブックが別でも正しくプロンプトを取得できる。
 //   - character.data の旧データはフォールバックとして参照
+//
+// ★ 画像生成ステータス通知:
+//   - /sd 実行前後に gic-image-generation-started / gic-image-generation-ended
+//     カスタムイベントを発火し、status_indicator.js が「画像生成中…」を表示する
 
 import { eventSource, event_types, getRequestHeaders } from '../../../../../script.js';
 import { getContext } from '../../../../extensions.js';
@@ -194,7 +198,6 @@ function getLexImgPrompt(worldName, uid, entry) {
             if (charLex[storageKey] && typeof charLex[storageKey] === 'object') {
                 rec = charLex[storageKey];
             } else if (charLex[charKey] && typeof charLex[charKey] === 'object') {
-                // 旧形式キーは現在キャラ本来のロアブック時のみ
                 const charName = typeof char?.name === 'string' ? char.name : '';
                 const associatedWorld =
                     (typeof char?.data?.extensions?.world === 'string' && char.data.extensions.world) ||
@@ -219,7 +222,6 @@ function getLexImgPrompt(worldName, uid, entry) {
         console.warn('[GIC-Lore] character.data 読み込み失敗:', e);
     }
 
-    // ── ③ 最終フォールバック: entry.prompt / entry.content の [GIC_IMG:] タグ ──
     return getFallbackPromptFromEntry(entry);
 }
 
@@ -315,9 +317,6 @@ async function loadWorldInfoEntries(worldName) {
 
 // ============================================================
 // ★ エントリの「タイトル」を抽出（ファイル名に使う）
-//   - comment があれば優先（例: "002"）
-//   - 無ければ最初の key
-//   - ファイル名に使えない文字は '_' に置換
 // ============================================================
 function extractEntryKey(entry) {
     if (!entry) return '';
@@ -677,7 +676,27 @@ async function processChoice(force = false) {
             console.log(`[GIC-Lore] 生成コンテキスト設定: entryKey="${_pendingGenerationContext.entryKey}"`);
         }
 
-        await executeSd(prompt);
+        // ★ 画像生成開始を通知（status_indicator.js が「画像生成中…」を表示）
+        try {
+            window.dispatchEvent(new CustomEvent('gic-image-generation-started', {
+                detail: {
+                    entryKey: _pendingGenerationContext.entryKey,
+                    worldName,
+                    prompt,
+                },
+            }));
+        } catch (e) { /* ignore */ }
+
+        try {
+            await executeSd(prompt);
+        } finally {
+            // ★ 画像生成終了を通知（成功・失敗にかかわらず必ず発火）
+            try {
+                window.dispatchEvent(new CustomEvent('gic-image-generation-ended', {
+                    detail: { entryKey: _pendingGenerationContext?.entryKey },
+                }));
+            } catch (e) { /* ignore */ }
+        }
     } catch (e) {
         console.error('[GIC-Lore] processChoice エラー:', e);
     } finally {
