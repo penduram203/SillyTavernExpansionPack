@@ -3,6 +3,8 @@
 //   - 現在のエントリ = 最後のユーザーメッセージの番号に対応するロアブックエントリ
 //   - ユーザーメッセージが未送信の場合は「000」をフォールバック
 //   - 変数は LorebookExpansion の per-world ストアから取得
+//   - キャラクター管理メニューに「UI設定 / 場所 / チェックボックス」を追加し、
+//     キャラ毎の表示/非表示を切り替える（設定は extensionSettings に永続化）
 
 (function () {
     'use strict';
@@ -13,9 +15,15 @@
     const STORAGE_KEY_COLLAPSED = 'variable_manager_collapsed';
     const POLL_INTERVAL_MS = 1500;
 
+    // ★ UI設定用
+    const UI_SETTINGS_CLASS = 'variable-manager-ui-settings';
+    const CHECKBOX_ID = 'variable-manager-visible-checkbox';
+    const EXT_SETTINGS_KEY = 'variable_manager';
+
     let _lastRenderKey = '';
     let _renderInFlight = false;
     let _initialized = false;
+    let _uiObsPending = false;
 
     // ---- CSS 注入 ----
     (function injectStyle() {
@@ -140,6 +148,136 @@
         };
     }
 
+    // ============================================================
+    // ★ UI設定（場所チェックボックス）
+    // ============================================================
+    function getCurrentCharName() {
+        try {
+            const ctx = getSTContext();
+            const char = ctx?.characters?.[ctx?.characterId];
+            return char?.name || null;
+        } catch (e) { return null; }
+    }
+
+    function getVisibleByCharMap() {
+        try {
+            const ctx = getSTContext();
+            if (!ctx?.extensionSettings) return {};
+            if (!ctx.extensionSettings[EXT_SETTINGS_KEY]) {
+                ctx.extensionSettings[EXT_SETTINGS_KEY] = {};
+            }
+            const s = ctx.extensionSettings[EXT_SETTINGS_KEY];
+            if (!s.visibleByChar || typeof s.visibleByChar !== 'object') {
+                s.visibleByChar = {};
+            }
+            return s.visibleByChar;
+        } catch (e) { return {}; }
+    }
+
+    function saveVisibleByCharMap(map) {
+        try {
+            const ctx = getSTContext();
+            if (!ctx?.extensionSettings) return;
+            if (!ctx.extensionSettings[EXT_SETTINGS_KEY]) {
+                ctx.extensionSettings[EXT_SETTINGS_KEY] = {};
+            }
+            ctx.extensionSettings[EXT_SETTINGS_KEY].visibleByChar = map;
+            if (typeof ctx.saveSettingsDebounced === 'function') {
+                ctx.saveSettingsDebounced();
+            }
+        } catch (e) {
+            console.warn(LOG, 'save visible map failed:', e);
+        }
+    }
+
+    function isVisibleForChar(charName) {
+        if (!charName) return false;
+        const map = getVisibleByCharMap();
+        return map[charName] === true;
+    }
+
+    function applyPanelVisibility() {
+        const panel = document.getElementById(PANEL_ID);
+        const charName = getCurrentCharName();
+        const visible = isVisibleForChar(charName);
+
+        if (panel) {
+            panel.classList.toggle('variable-manager-disabled', !visible);
+        }
+        const cb = document.getElementById(CHECKBOX_ID);
+        if (cb) {
+            cb.checked = visible;
+            cb.disabled = !charName;
+        }
+    }
+
+    function createUISettings() {
+        if (document.getElementById(CHECKBOX_ID)) return;
+
+        const select = document.getElementById('char-management-dropdown');
+        if (!select) return;
+
+        const label = select.closest('label') || select.parentElement;
+        if (!label || !label.parentElement) return;
+
+        const container = document.createElement('div');
+        container.className = UI_SETTINGS_CLASS;
+
+        const uiLabel = document.createElement('span');
+        uiLabel.className = 'variable-manager-ui-label';
+        uiLabel.textContent = 'UI設定';
+        container.appendChild(uiLabel);
+
+        const placeLabel = document.createElement('span');
+        placeLabel.className = 'variable-manager-place-label';
+        placeLabel.textContent = '場所';
+        container.appendChild(placeLabel);
+
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.id = CHECKBOX_ID;
+        cb.className = 'variable-manager-visible-checkbox';
+        cb.title = '変数ウインドウを表示（キャラ毎に保存）';
+        cb.addEventListener('change', () => {
+            const charName = getCurrentCharName();
+            if (!charName) return;
+            const map = getVisibleByCharMap();
+            map[charName] = cb.checked === true;
+            saveVisibleByCharMap(map);
+            applyPanelVisibility();
+            render();
+        });
+        container.appendChild(cb);
+
+        label.insertAdjacentElement('afterend', container);
+    }
+
+    function ensureUISettings() {
+        const select = document.getElementById('char-management-dropdown');
+        if (select) {
+            const label = select.closest('label') || select.parentElement;
+            const next = label?.nextElementSibling;
+            const isProper = next && next.classList && next.classList.contains(UI_SETTINGS_CLASS);
+            if (!isProper) {
+                document.querySelectorAll('.' + UI_SETTINGS_CLASS).forEach(el => el.remove());
+                createUISettings();
+            }
+        }
+        applyPanelVisibility();
+    }
+
+    function setupUISettingsObserver() {
+        const obs = new MutationObserver(() => {
+            if (_uiObsPending) return;
+            _uiObsPending = true;
+            requestAnimationFrame(() => {
+                _uiObsPending = false;
+                ensureUISettings();
+            });
+        });
+        obs.observe(document.body, { childList: true, subtree: true });
+    }
+
     // ---- パネル生成 ----
     function ensurePanel() {
         let panel = document.getElementById(PANEL_ID);
@@ -147,7 +285,7 @@
 
         panel = document.createElement('div');
         panel.id = PANEL_ID;
-        panel.className = 'variable-manager-panel';
+        panel.className = 'variable-manager-panel variable-manager-disabled';
 
         const header = document.createElement('div');
         header.className = 'variable-manager-header';
@@ -244,10 +382,20 @@
     }
 
     async function render() {
+        ensureUISettings();
+
+        const charName = getCurrentCharName();
+        if (!isVisibleForChar(charName)) {
+            // 非表示の場合はデータ取得をスキップ（パネルは CSS で非表示）
+            _lastRenderKey = '';
+            return;
+        }
+
         if (_renderInFlight) return;
         _renderInFlight = true;
         try {
             const panel = ensurePanel();
+            applyPanelVisibility();
             const result = await getCurrentVariables();
             renderPanel(panel, result);
         } catch (e) {
@@ -278,6 +426,7 @@
                     'MESSAGE_SWIPED',
                     'CHAT_LOADED',
                     'GENERATION_ENDED',
+                    'CHARACTER_PAGE_LOADED',
                 ];
                 for (const name of events) {
                     if (et[name] && typeof es.on === 'function') {
@@ -303,7 +452,9 @@
         }
 
         ensurePanel();
+        ensureUISettings();
         setupEventListeners();
+        setupUISettingsObserver();
         await render();
 
         setInterval(render, POLL_INTERVAL_MS);
@@ -321,9 +472,21 @@
     window.VariableManager = {
         refresh: render,
         getCurrentVariables,
+        isVisibleForChar,
+        setVisibleForChar: (charName, visible) => {
+            if (!charName) return false;
+            const map = getVisibleByCharMap();
+            map[charName] = !!visible;
+            saveVisibleByCharMap(map);
+            applyPanelVisibility();
+            render();
+            return true;
+        },
         _debug: () => ({
             worldName: getWorldName(),
             choiceNum: getLastChoiceNumber(),
+            currentChar: getCurrentCharName(),
+            visibleMap: getVisibleByCharMap(),
         }),
     };
 })();
