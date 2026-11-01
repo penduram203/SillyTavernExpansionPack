@@ -5,8 +5,8 @@
  * ============================================================ */
 #variable-manager-panel {
     position: fixed;
-    top: 50px;
-    left: 12px;
+    top: 20px;
+    left: 20px;
     z-index: 15000;
     pointer-events: none;
     user-select: none;
@@ -25,10 +25,10 @@
 }
 
 .variable-manager-value-text {
-    font-size: 30px;
+    font-size: 40px;
     font-weight: bold;
     color: #ffffff;
-    -webkit-text-stroke: 1.5px #000000;
+    -webkit-text-stroke: 15px #000000;
     paint-order: stroke fill;
     text-shadow:
         -1px -1px 0 #000,
