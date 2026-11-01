@@ -135,7 +135,9 @@ function getLexStore() {
 }
 
 function normalizeLexData(raw) {
-    if (!raw || typeof raw !== 'object') return { img_prompt: '', choices: [] };
+    if (!raw || typeof raw !== 'object') {
+        return { img_prompt: '', choices: [], variables: [] };
+    }
     return {
         img_prompt: typeof raw.img_prompt === 'string' ? raw.img_prompt : '',
         choices: Array.isArray(raw.choices)
@@ -144,6 +146,15 @@ function normalizeLexData(raw) {
                   .map(c => ({
                       num: typeof c.num === 'string' ? c.num : String(c.num ?? ''),
                       text: typeof c.text === 'string' ? c.text : '',
+                  }))
+            : [],
+        variables: Array.isArray(raw.variables)
+            ? raw.variables
+                  .filter(v => v && typeof v === 'object')
+                  .map(v => ({
+                      type: v.type === 'number' ? 'number' : 'string',
+                      name: typeof v.name === 'string' ? v.name : '',
+                      value: typeof v.value === 'string' ? v.value : String(v.value ?? ''),
                   }))
             : [],
     };
@@ -286,11 +297,11 @@ function getCharacterLexData() {
 
 function getDataFor(worldName, uid, entry) {
     if (!worldName || uid === null || uid === undefined) {
-        return { img_prompt: '', choices: [] };
+        return { img_prompt: '', choices: [], variables: [] };
     }
 
     const charKey = getCharKey(entry, uid);
-    if (!charKey) return { img_prompt: '', choices: [] };
+    if (!charKey) return { img_prompt: '', choices: [], variables: [] };
 
     const store = getWorldLexStore(worldName);
     const rec = store[charKey];
@@ -326,7 +337,7 @@ function getDataFor(worldName, uid, entry) {
         console.warn(LOG, 'character.data からの移行に失敗:', e);
     }
 
-    return { img_prompt: '', choices: [] };
+    return { img_prompt: '', choices: [], variables: [] };
 }
 
 function setDataFor(worldName, uid, entry, data) {
@@ -349,9 +360,9 @@ function setDataFor(worldName, uid, entry, data) {
 // レガシー API 互換 (entry 単体で扱う)
 // ============================================================
 function getExpansionData(entry) {
-    if (!entry || typeof entry !== 'object') return { img_prompt: '', choices: [] };
+    if (!entry || typeof entry !== 'object') return { img_prompt: '', choices: [], variables: [] };
     const ext = entry.extensions?.[MODULE_NAME];
-    if (!ext || typeof ext !== 'object') return { img_prompt: '', choices: [] };
+    if (!ext || typeof ext !== 'object') return { img_prompt: '', choices: [], variables: [] };
     return normalizeLexData(ext);
 }
 
@@ -672,6 +683,117 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         onChange(data);
     });
     section.appendChild(imgTextarea);
+
+    // ============================================================
+    // ★ 変数セクション（新規）
+    // ============================================================
+    const updateValuePlaceholder = (input, type) => {
+        if (!input) return;
+        if (type === 'number') {
+            input.placeholder = '例: 594, 122224, +60, -599';
+            input.title = '絶対値 または 増減値（+60 / -599 など）';
+        } else {
+            input.placeholder = '例: テキスト';
+            input.title = '任意の文字列';
+        }
+    };
+
+    const varsLabel = document.createElement('label');
+    varsLabel.className = 'lbe-label';
+    varsLabel.textContent = 'variables (変数)';
+    section.appendChild(varsLabel);
+
+    const varsContainer = document.createElement('div');
+    varsContainer.className = 'lbe-variables-editor';
+    section.appendChild(varsContainer);
+
+    const renderVariables = () => {
+        varsContainer.innerHTML = '';
+
+        const variables = Array.isArray(data.variables) ? data.variables : [];
+
+        variables.forEach((v, idx) => {
+            const row = document.createElement('div');
+            row.className = 'lbe-variable-row';
+
+            // ── 種別ドロップダウン ──
+            const typeSelect = document.createElement('select');
+            typeSelect.className = 'lbe-variable-type text_pole';
+            typeSelect.title = '変数の型';
+
+            const optNumber = document.createElement('option');
+            optNumber.value = 'number';
+            optNumber.textContent = '数値';
+            const optString = document.createElement('option');
+            optString.value = 'string';
+            optString.textContent = '文字列';
+            typeSelect.appendChild(optNumber);
+            typeSelect.appendChild(optString);
+            typeSelect.value = v.type === 'number' ? 'number' : 'string';
+            row.appendChild(typeSelect);
+
+            // ── 名前入力 ──
+            const nameInput = document.createElement('input');
+            nameInput.type = 'text';
+            nameInput.className = 'lbe-variable-name text_pole';
+            nameInput.placeholder = '変数名';
+            nameInput.value = v.name || '';
+            nameInput.addEventListener('input', () => {
+                v.name = nameInput.value;
+                onChange(data);
+            });
+            row.appendChild(nameInput);
+
+            // ── 値入力 ──
+            const valueInput = document.createElement('input');
+            valueInput.type = 'text';
+            valueInput.className = 'lbe-variable-value text_pole';
+            valueInput.value = v.value || '';
+            updateValuePlaceholder(valueInput, v.type);
+            valueInput.addEventListener('input', () => {
+                v.value = valueInput.value;
+                onChange(data);
+            });
+            row.appendChild(valueInput);
+
+            // ── 種別変更時の挙動 ──
+            typeSelect.addEventListener('change', () => {
+                v.type = typeSelect.value === 'number' ? 'number' : 'string';
+                updateValuePlaceholder(valueInput, v.type);
+                onChange(data);
+            });
+
+            // ── 削除ボタン ──
+            const delBtn = document.createElement('button');
+            delBtn.type = 'button';
+            delBtn.className = 'lbe-variable-del menu_button';
+            delBtn.textContent = '✕';
+            delBtn.title = 'この変数を削除';
+            delBtn.addEventListener('click', () => {
+                data.variables.splice(idx, 1);
+                renderVariables();
+                onChange(data);
+            });
+            row.appendChild(delBtn);
+
+            varsContainer.appendChild(row);
+        });
+
+        // ── 追加ボタン ──
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'lbe-variable-add menu_button';
+        addBtn.textContent = '＋ 変数を追加';
+        addBtn.addEventListener('click', () => {
+            if (!Array.isArray(data.variables)) data.variables = [];
+            data.variables.push({ type: 'string', name: '', value: '' });
+            renderVariables();
+            onChange(data);
+        });
+        varsContainer.appendChild(addBtn);
+    };
+
+    renderVariables();
 
     const choicesLabel = document.createElement('label');
     choicesLabel.className = 'lbe-label';
