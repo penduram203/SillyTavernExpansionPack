@@ -79,7 +79,7 @@
 
     function getLastChoiceNumber() {
         const ctx = getSTContext();
-        if (!ctx?.chat) return FALLBACK_CHOICE;
+        if (!ctx?.chat) return null;
 
         for (let i = ctx.chat.length - 1; i >= 0; i--) {
             const m = ctx.chat[i];
@@ -97,7 +97,7 @@
             }
             if (num) return num;
         }
-        return FALLBACK_CHOICE;
+        return null;  // ★ '000' → null に変更
     }
 
     async function getCurrentVariables() {
@@ -105,7 +105,10 @@
         if (!worldName) return { ok: false, reason: 'no-world' };
 
         const choiceNum = getLastChoiceNumber();
-        if (!choiceNum) return { ok: false, reason: 'no-choice' };
+        if (!choiceNum) {
+            // ★ ユーザーがまだ何も選択していない
+            return { ok: false, reason: 'no-choice' };
+        }
 
         let entries = null;
         try {
@@ -330,15 +333,35 @@
     function renderPanel(panel, result) {
         if (!panel) return;
 
-        if (!result.ok || !Array.isArray(result.variables) || result.variables.length === 0) {
+        if (!result.ok) {
+            // ★ 何も選択していない → 「場所」プレースホルダを表示
+            if (result.reason === 'no-choice') {
+                if (_lastRenderKey !== '__placeholder__') {
+                    _lastRenderKey = '__placeholder__';
+                    panel.innerHTML = '';
+                    const line = document.createElement('div');
+                    line.className = 'variable-manager-value-text';
+                    line.textContent = '場所';
+                    panel.appendChild(line);
+                }
+                return;
+            }
+            // その他のエラー（no-world 等）は空表示
             if (_lastRenderKey !== '') {
-                panel.innerHTML = '';
                 _lastRenderKey = '';
+                panel.innerHTML = '';
             }
             return;
         }
 
-        // 空値はスキップして表示対象の値だけ抽出
+        if (!Array.isArray(result.variables) || result.variables.length === 0) {
+            if (_lastRenderKey !== '') {
+                _lastRenderKey = '';
+                panel.innerHTML = '';
+            }
+            return;
+        }
+
         const values = [];
         for (const v of result.variables) {
             if (v.value === '' || v.value === null || v.value === undefined) continue;
@@ -347,8 +370,8 @@
 
         if (values.length === 0) {
             if (_lastRenderKey !== '') {
-                panel.innerHTML = '';
                 _lastRenderKey = '';
+                panel.innerHTML = '';
             }
             return;
         }
