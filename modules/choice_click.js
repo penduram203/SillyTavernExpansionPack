@@ -3,11 +3,15 @@
 //   - 通常クリック: 選択肢番号をチャット入力欄にセットして自動送信
 //   - Shift+クリック: 入力欄にセットするだけ（自動送信しない）
 //   - ホバー配色は Text Styling のセリフ色 (#q-text-color) から動的に導出
+//   - 最初のメッセージが「ゲーム開始」ならクリック可能なボタン化して
+//     クリックで "000" を自動送信する
 
 (function () {
     'use strict';
     const LOG = '[ChoiceClick]';
     const CLICK_DEBOUNCE_MS = 1200;
+    const GAME_START_TEXT = 'ゲーム開始';
+    const GAME_START_NUMBER = '000';
 
     // ---- CSS 注入 ----
     (function injectStyle() {
@@ -116,6 +120,81 @@
     }
 
     // ============================================================
+    // ★ 最初のメッセージ「ゲーム開始」をクリック可能なボタン化
+    // ============================================================
+    function bindGameStartHandler(mesTextEl) {
+        if (mesTextEl.dataset.gameStartHandlerInstalled === '1') return;
+        mesTextEl.dataset.gameStartHandlerInstalled = '1';
+
+        const handler = (e) => {
+            if (e) { e.preventDefault(); e.stopPropagation(); }
+
+            // 毎回再検証: テキストが変わっていたら反応しない
+            if (mesTextEl.dataset.gameStartBound !== '1') return;
+            const text = (mesTextEl.textContent || '').trim();
+            if (text !== GAME_START_TEXT) return;
+
+            const now = Date.now();
+            if (now - _lastClickTime < CLICK_DEBOUNCE_MS) {
+                console.debug(LOG, '連打防止のためスキップ');
+                return;
+            }
+            _lastClickTime = now;
+
+            const textarea = document.getElementById('send_textarea');
+            if (!textarea) {
+                console.warn(LOG, '#send_textarea が見つかりません');
+                return;
+            }
+            setTextareaValue(textarea, GAME_START_NUMBER);
+            flashItem(mesTextEl, 'sending');
+            sendMessage(textarea);
+        };
+
+        mesTextEl.addEventListener('click', handler);
+        mesTextEl.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                handler(e);
+            }
+        });
+    }
+
+    function setupFirstMessageAsChoice() {
+        const mesEl = document.querySelector('.mes[mesid="0"]');
+        if (!mesEl) return;
+        const isUser = mesEl.getAttribute('is_user') === 'true';
+        if (isUser) return;
+
+        const mesTextEl = mesEl.querySelector('.mes_text');
+        if (!mesTextEl) return;
+
+        const raw = (mesTextEl.textContent || '').trim();
+        const matches = (raw === GAME_START_TEXT);
+
+        if (!matches) {
+            // マッチしなくなったら解除
+            if (mesTextEl.dataset.gameStartBound === '1') {
+                mesTextEl.dataset.gameStartBound = '';
+                mesTextEl.classList.remove('game-start-choice');
+                mesTextEl.removeAttribute('role');
+                mesTextEl.removeAttribute('tabindex');
+                mesTextEl.removeAttribute('title');
+            }
+            return;
+        }
+
+        if (mesTextEl.dataset.gameStartBound === '1') return;
+
+        mesTextEl.dataset.gameStartBound = '1';
+        mesTextEl.classList.add('game-start-choice');
+        mesTextEl.setAttribute('role', 'button');
+        mesTextEl.setAttribute('tabindex', '0');
+        mesTextEl.setAttribute('title', `クリックで「${GAME_START_NUMBER}」を送信`);
+        bindGameStartHandler(mesTextEl);
+    }
+
+    // ============================================================
     // ★ セリフ色 (#q-text-color) からホバー配色を動的に導出
     // ============================================================
     function hexToHsl(hex) {
@@ -161,7 +240,7 @@
         const accentS = Math.min(Math.max(hsl.s, 75), 100);
         const hue = hsl.h;
 
-        // 背景 L=42%（以前は32%） / 明るい枠 L=65%
+        // 背景 L=42% / 明るい枠 L=65%
         const bg        = hslCss(hue, baseS, 42);
         const border    = hslCss(hue, accentS, 65);
         const bar       = border;
@@ -200,7 +279,6 @@
             updateChoiceColorsFromQ();
         };
 
-        // 既存のリスナー登録は維持（即時反映用）
         const tryBind = () => {
             const input = document.getElementById('q-text-color');
             if (!input) return;
@@ -224,14 +302,17 @@
         check();
     }
 
-    // ---- 監視（選択肢ブロックは頻繁に再生成される） ----
+    // ---- 監視 ----
     let _pending = false;
     function scheduleBind() {
         if (_pending) return;
         _pending = true;
         requestAnimationFrame(() => {
             _pending = false;
-            try { bindChoiceItems(); } catch (e) { console.warn(LOG, e); }
+            try {
+                bindChoiceItems();
+                setupFirstMessageAsChoice();
+            } catch (e) { console.warn(LOG, e); }
         });
     }
 
@@ -243,6 +324,7 @@
 
     function init() {
         bindChoiceItems();
+        setupFirstMessageAsChoice();
         watchQColorInput();
         setupObserver();
         console.log(LOG, '初期化完了');
@@ -257,5 +339,6 @@
     window.ChoiceClick = {
         bind: bindChoiceItems,
         updateColors: updateChoiceColorsFromQ,
+        setupGameStart: setupFirstMessageAsChoice,
     };
 })();
