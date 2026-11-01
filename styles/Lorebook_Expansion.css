@@ -50,6 +50,77 @@
     align-items: stretch;
 }
 
+/* ============================================================
+ * 変数エディタ
+ * ============================================================ */
+
+.lbe-variables-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    align-items: stretch;
+    margin-bottom: 6px;
+}
+
+.lbe-variable-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.lbe-variable-type {
+    width: 90px;
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    font-family: inherit;
+}
+
+.lbe-variable-name {
+    flex: 1 1 0;
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.lbe-variable-value {
+    flex: 2 1 0;
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
+    font-family: monospace;
+}
+
+.lbe-variable-del {
+    flex: 0 0 auto;
+    padding: 2px 8px;
+    font-size: 0.85em;
+}
+
+.lbe-variable-add {
+    align-self: flex-start;
+    flex: 0 0 auto;
+    width: auto;
+    max-width: 100%;
+    margin-top: 4px;
+    font-size: 0.85em;
+    white-space: nowrap;
+    writing-mode: horizontal-tb;
+    text-orientation: mixed;
+    word-break: keep-all;
+    line-height: 1.4;
+    height: auto;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
 .lbe-choice-row {
     display: flex;
     gap: 6px;
