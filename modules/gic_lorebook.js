@@ -18,6 +18,11 @@
 // ★ 画像生成ステータス通知:
 //   - /sd 実行前後に gic-image-generation-started / gic-image-generation-ended
 //     カスタムイベントを発火し、status_indicator.js が「画像生成中…」を表示する
+//
+// ★ v4 修正（Phase 6）:
+//   - Negative_prompt（ネガティブプロンプト）に対応
+//   - per-world ストアの negative_prompt → /sd の negative_prompt 引数として渡す
+//   - LorebookExpansion.getDataFor 経由での取得を最優先、直接参照をフォールバック
 
 import { eventSource, event_types, getRequestHeaders } from '../../../../../script.js';
 import { getContext } from '../../../../extensions.js';
@@ -161,7 +166,6 @@ function getEntryCharKey(entry, uid) {
 // ★ Phase 5: LEX データから img_prompt を取得
 //   一次: extension_settings.lorebook_expansion.data[worldName][charKey]
 //   二次: character.data.extensions.lorebook_expansion
-//         (旧データ・デバッグ用フォールバック)
 // ============================================================
 function getLexImgPrompt(worldName, uid, entry) {
     const charKey = getEntryCharKey(entry, uid);
@@ -257,6 +261,42 @@ function extractPromptFromEntry(entry, worldName) {
     }
 
     return null;
+}
+
+// ============================================================
+// ★ ネガティブプロンプトの取得（v4 追加）
+//    per-world ストア → character.data の順で参照
+// ============================================================
+function getLexNegativePrompt(worldName, uid, entry) {
+    if (!worldName || uid === null || uid === undefined) return null;
+
+    // ① LorebookExpansion.getDataFor 経由（推奨）
+    if (window.LorebookExpansion?.getDataFor) {
+        try {
+            const data = window.LorebookExpansion.getDataFor(worldName, uid, entry);
+            if (data && typeof data.negative_prompt === 'string' && data.negative_prompt.trim()) {
+                return cleanPrompt(data.negative_prompt);
+            }
+        } catch (e) { /* ignore */ }
+    }
+
+    // ② extensionSettings を直接参照（フォールバック）
+    try {
+        const ctx = getContext();
+        const charKey = getEntryCharKey(entry, uid);
+        if (!charKey) return null;
+        const rec = ctx?.extensionSettings?.lorebook_expansion?.data?.[worldName]?.[charKey];
+        if (rec && typeof rec.negative_prompt === 'string' && rec.negative_prompt.trim()) {
+            return cleanPrompt(rec.negative_prompt);
+        }
+    } catch (e) { /* ignore */ }
+
+    return null;
+}
+
+function extractNegativePromptFromEntry(entry, worldName) {
+    if (!entry) return null;
+    return getLexNegativePrompt(worldName, entry.uid, entry);
 }
 
 // ===== キャラに紐付くロアブック名 =====
@@ -499,12 +539,24 @@ async function loadSlashModules() {
 }
 
 // ===== /sd 実行 =====
-async function executeSd(prompt) {
+async function executeSd(prompt, negativePrompt = null) {
     const rawPrompt = cleanPrompt(prompt).replace(/[\r\n]+/g, ' ');
     const escaped = rawPrompt.replace(/"/g, '\\"');
-    const cmd = settings.quiet
-        ? `/sd quiet=true "${escaped}"`
-        : `/sd "${escaped}"`;
+
+    const hasNeg = negativePrompt && negativePrompt.trim();
+    const cleanNeg = hasNeg ? cleanPrompt(negativePrompt).replace(/[\r\n]+/g, ' ') : '';
+    const escapedNeg = hasNeg ? cleanNeg.replace(/"/g, '\\"') : '';
+
+    let cmd;
+    if (hasNeg) {
+        cmd = settings.quiet
+            ? `/sd quiet=true negative_prompt="${escapedNeg}" "${escaped}"`
+            : `/sd negative_prompt="${escapedNeg}" "${escaped}"`;
+    } else {
+        cmd = settings.quiet
+            ? `/sd quiet=true "${escaped}"`
+            : `/sd "${escaped}"`;
+    }
 
     console.log(`[GIC-Lore] /sd 実行試行: ${cmd.slice(0, 120)}${cmd.length > 120 ? '...' : ''}`);
 
@@ -533,7 +585,9 @@ async function executeSd(prompt) {
         const { parser } = await loadSlashModules();
         const sdCmd = parser?.commands?.['sd'];
         if (sdCmd && typeof sdCmd.callback === 'function') {
-            const namedArgs = settings.quiet ? { quiet: 'true' } : {};
+            const namedArgs = {};
+            if (settings.quiet) namedArgs.quiet = 'true';
+            if (hasNeg) namedArgs.negative_prompt = cleanNeg;
             const unnamedArgs = rawPrompt;
             try {
                 await sdCmd.callback(namedArgs, unnamedArgs, true);
@@ -664,12 +718,19 @@ async function processChoice(force = false) {
             return;
         }
 
+        // ★ ネガティブプロンプトを取得（v4 追加）
+        const negativePrompt = extractNegativePromptFromEntry(entry, worldName);
+        if (settings.verbose && negativePrompt) {
+            console.log(`[GIC-Lore] ネガティブプロンプト: ${negativePrompt.slice(0, 80)}${negativePrompt.length > 80 ? '...' : ''}`);
+        }
+
         // ★ 生成コンテキストを保存（ファイル名リネーム用）
         _pendingGenerationContext = {
             entryKey: extractEntryKey(entry),
             uid: entry.uid,
             worldName,
             prompt,
+            negativePrompt,
             triggeredAt: Date.now(),
         };
         if (settings.verbose) {
@@ -683,12 +744,13 @@ async function processChoice(force = false) {
                     entryKey: _pendingGenerationContext.entryKey,
                     worldName,
                     prompt,
+                    negativePrompt,
                 },
             }));
         } catch (e) { /* ignore */ }
 
         try {
-            await executeSd(prompt);
+            await executeSd(prompt, negativePrompt);
         } finally {
             // ★ 画像生成終了を通知（成功・失敗にかかわらず必ず発火）
             try {
@@ -738,7 +800,8 @@ async function registerSlashCommand() {
                     console.log('5) 一致エントリ:', found ? `uid=${found.uid}` : 'なし');
                     if (found) {
                         console.log('6) 抽出プロンプト:', extractPromptFromEntry(found, wn));
-                        console.log('6b) entryKey (ファイル名用):', extractEntryKey(found));
+                        console.log('6b) ネガティブプロンプト:', extractNegativePromptFromEntry(found, wn));
+                        console.log('6c) entryKey (ファイル名用):', extractEntryKey(found));
                     }
                 }
                 try {
@@ -885,6 +948,8 @@ window.GicLorebook = {
     extractPromptFromEntry,
     extractEntryKey,
     getLexImgPrompt,
+    getLexNegativePrompt,                  // ★ v4 追加
+    extractNegativePromptFromEntry,        // ★ v4 追加
     loadWorldInfoEntries,
     findEntryByChoice,
     getEntryKeys,
