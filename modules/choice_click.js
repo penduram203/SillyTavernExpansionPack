@@ -133,22 +133,24 @@
         } catch (e) { return false; }
     }
 
-    function setupFirstMessageAsChoice() {
-        const mesEl = document.querySelector('.mes[mesid="0"]');
-        if (!mesEl) return;
-        const isUser = mesEl.getAttribute('is_user') === 'true';
-        if (isUser) return;
+    // ============================================================
+    // ★ 開始ボタンチェックボックス連動でゲーム開始ボタンを追加
+    //    ・first_mes の内容には依存しない
+    //    ・mes_text が無い場合はメッセージ内にフォールバックを作成
+    //    ・mesid=0 自体が無い場合は #chat 直下に専用コンテナを作成
+    // ============================================================
+    function isStartButtonEnabledForCurrentChar() {
+        try {
+            const ctx = window.SillyTavern?.getContext?.();
+            const char = ctx?.characters?.[ctx?.characterId];
+            const charName = char?.name;
+            if (!charName) return false;
+            const map = ctx?.extensionSettings?.variable_manager?.startButtonByChar || {};
+            return map[charName] === true;
+        } catch (e) { return false; }
+    }
 
-        const mesTextEl = mesEl.querySelector('.mes_text');
-        if (!mesTextEl) return;
-
-        // 既存のゲーム開始ボタンを削除
-        mesTextEl.querySelectorAll(':scope > .game-start-choice').forEach(el => el.remove());
-
-        if (!isStartButtonEnabledForCurrentChar()) {
-            return;
-        }
-
+    function createGameStartButton() {
         const btn = document.createElement('div');
         btn.className = 'game-start-choice';
         btn.textContent = 'ゲーム開始';
@@ -180,7 +182,91 @@
             }
         });
 
-        mesTextEl.appendChild(btn);
+        return btn;
+    }
+
+    function removeGameStartButtons() {
+        document.querySelectorAll('.game-start-choice').forEach(el => el.remove());
+        const c = document.getElementById('game-start-button-container');
+        if (c) c.remove();
+        document.querySelectorAll('.gic-game-start-fallback').forEach(el => el.remove());
+    }
+
+    function setupFirstMessageAsChoice() {
+        const enabled = isStartButtonEnabledForCurrentChar();
+
+        // 無効時: すべて削除
+        if (!enabled) {
+            removeGameStartButtons();
+            return;
+        }
+
+        const mesEl = document.querySelector('.mes[mesid="0"]');
+        const isUser = mesEl?.getAttribute('is_user') === 'true';
+        const mesTextEl = (mesEl && !isUser) ? mesEl.querySelector('.mes_text') : null;
+        const existingContainer = document.getElementById('game-start-button-container');
+
+        // ── ① mes_text が存在する → その末尾に配置 ──
+        if (mesTextEl) {
+            if (existingContainer) existingContainer.remove();
+            // 他の位置のボタン/フォールバックを除去
+            document.querySelectorAll('.game-start-choice').forEach(el => {
+                if (el.parentNode !== mesTextEl) el.remove();
+            });
+            document.querySelectorAll('.gic-game-start-fallback').forEach(el => el.remove());
+
+            if (mesTextEl.querySelectorAll(':scope > .game-start-choice').length === 0) {
+                mesTextEl.appendChild(createGameStartButton());
+            }
+            return;
+        }
+
+        // ── ② mesid=0 はあるが mes_text が無い → フォールバックを作成 ──
+        if (mesEl && !isUser) {
+            if (existingContainer) existingContainer.remove();
+
+            let fallback = mesEl.querySelector('.gic-game-start-fallback');
+            if (!fallback) {
+                fallback = document.createElement('div');
+                fallback.className = 'mes_text gic-game-start-fallback';
+                const contentEl = mesEl.querySelector('.mes_block') || mesEl;
+                contentEl.appendChild(fallback);
+            }
+
+            // 他の位置のボタン/フォールバックを除去
+            document.querySelectorAll('.game-start-choice').forEach(el => {
+                if (el.parentNode !== fallback) el.remove();
+            });
+            document.querySelectorAll('.gic-game-start-fallback').forEach(el => {
+                if (el !== fallback) el.remove();
+            });
+
+            if (fallback.querySelectorAll(':scope > .game-start-choice').length === 0) {
+                fallback.appendChild(createGameStartButton());
+            }
+            return;
+        }
+
+        // ── ③ mesid=0 自体が無い → #chat 直下にコンテナを作成 ──
+        document.querySelectorAll('.mes .game-start-choice').forEach(el => el.remove());
+        document.querySelectorAll('.gic-game-start-fallback').forEach(el => el.remove());
+
+        if (existingContainer) return; // 既に #chat 直下に存在
+
+        const chatEl = document.getElementById('chat');
+        if (!chatEl) return;
+
+        const container = document.createElement('div');
+        container.id = 'game-start-button-container';
+        container.className = 'game-start-button-container';
+        container.appendChild(createGameStartButton());
+
+        const firstMes = chatEl.querySelector('.mes');
+        if (firstMes && firstMes.parentNode === chatEl) {
+            chatEl.insertBefore(container, firstMes);
+        } else {
+            chatEl.appendChild(container);
+        }
     }
 
     // ============================================================
