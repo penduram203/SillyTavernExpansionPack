@@ -258,7 +258,11 @@
  * select 要素の幅を本体デフォルトの 100% から 10% に変更
  * （変数種別ドロップダウンが横幅を占有しすぎるのを防ぐ）
  * ============================================================ */
-.drawer-content select {
-    width: 10%;
+/* 変更後（.lbe-variable-type のみに適用） */
+.lbe-variable-type {
+    width: 90px;
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    font-family: inherit;
     font-size: calc(var(--mainFontSize) * 0.95);
 }
