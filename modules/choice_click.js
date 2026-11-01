@@ -10,7 +10,6 @@
     'use strict';
     const LOG = '[ChoiceClick]';
     const CLICK_DEBOUNCE_MS = 1200;
-    const GAME_START_TEXT = 'ゲーム開始';
     const GAME_START_NUMBER = '000';
 
     // ---- CSS 注入 ----
@@ -120,44 +119,18 @@
     }
 
     // ============================================================
-    // ★ 最初のメッセージ「ゲーム開始」をクリック可能なボタン化
+    // ★ 開始ボタンチェックボックス連動で first message 末尾にゲーム開始ボタンを追加
+    //    （first_mes の内容には依存しない）
     // ============================================================
-    function bindGameStartHandler(mesTextEl) {
-        if (mesTextEl.dataset.gameStartHandlerInstalled === '1') return;
-        mesTextEl.dataset.gameStartHandlerInstalled = '1';
-
-        const handler = (e) => {
-            if (e) { e.preventDefault(); e.stopPropagation(); }
-
-            // 毎回再検証: テキストが変わっていたら反応しない
-            if (mesTextEl.dataset.gameStartBound !== '1') return;
-            const text = (mesTextEl.textContent || '').trim();
-            if (text !== GAME_START_TEXT) return;
-
-            const now = Date.now();
-            if (now - _lastClickTime < CLICK_DEBOUNCE_MS) {
-                console.debug(LOG, '連打防止のためスキップ');
-                return;
-            }
-            _lastClickTime = now;
-
-            const textarea = document.getElementById('send_textarea');
-            if (!textarea) {
-                console.warn(LOG, '#send_textarea が見つかりません');
-                return;
-            }
-            setTextareaValue(textarea, GAME_START_NUMBER);
-            flashItem(mesTextEl, 'sending');
-            sendMessage(textarea);
-        };
-
-        mesTextEl.addEventListener('click', handler);
-        mesTextEl.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                handler(e);
-            }
-        });
+    function isStartButtonEnabledForCurrentChar() {
+        try {
+            const ctx = window.SillyTavern?.getContext?.();
+            const char = ctx?.characters?.[ctx?.characterId];
+            const charName = char?.name;
+            if (!charName) return false;
+            const map = ctx?.extensionSettings?.variable_manager?.startButtonByChar || {};
+            return map[charName] === true;
+        } catch (e) { return false; }
     }
 
     function setupFirstMessageAsChoice() {
@@ -169,29 +142,45 @@
         const mesTextEl = mesEl.querySelector('.mes_text');
         if (!mesTextEl) return;
 
-        const raw = (mesTextEl.textContent || '').trim();
-        const matches = (raw === GAME_START_TEXT);
+        // 既存のゲーム開始ボタンを削除
+        mesTextEl.querySelectorAll(':scope > .game-start-choice').forEach(el => el.remove());
 
-        if (!matches) {
-            // マッチしなくなったら解除
-            if (mesTextEl.dataset.gameStartBound === '1') {
-                mesTextEl.dataset.gameStartBound = '';
-                mesTextEl.classList.remove('game-start-choice');
-                mesTextEl.removeAttribute('role');
-                mesTextEl.removeAttribute('tabindex');
-                mesTextEl.removeAttribute('title');
-            }
+        if (!isStartButtonEnabledForCurrentChar()) {
             return;
         }
 
-        if (mesTextEl.dataset.gameStartBound === '1') return;
+        const btn = document.createElement('div');
+        btn.className = 'game-start-choice';
+        btn.textContent = 'ゲーム開始';
+        btn.setAttribute('role', 'button');
+        btn.setAttribute('tabindex', '0');
+        btn.setAttribute('title', `クリックで「${GAME_START_NUMBER}」を送信`);
 
-        mesTextEl.dataset.gameStartBound = '1';
-        mesTextEl.classList.add('game-start-choice');
-        mesTextEl.setAttribute('role', 'button');
-        mesTextEl.setAttribute('tabindex', '0');
-        mesTextEl.setAttribute('title', `クリックで「${GAME_START_NUMBER}」を送信`);
-        bindGameStartHandler(mesTextEl);
+        const handler = (e) => {
+            if (e) { e.preventDefault(); e.stopPropagation(); }
+            const now = Date.now();
+            if (now - _lastClickTime < CLICK_DEBOUNCE_MS) return;
+            _lastClickTime = now;
+
+            const textarea = document.getElementById('send_textarea');
+            if (!textarea) {
+                console.warn(LOG, '#send_textarea が見つかりません');
+                return;
+            }
+            setTextareaValue(textarea, GAME_START_NUMBER);
+            flashItem(btn, 'sending');
+            sendMessage(textarea);
+        };
+
+        btn.addEventListener('click', handler);
+        btn.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                handler(e);
+            }
+        });
+
+        mesTextEl.appendChild(btn);
     }
 
     // ============================================================
@@ -326,6 +315,9 @@
         bindChoiceItems();
         setupFirstMessageAsChoice();
         watchQColorInput();
+        window.addEventListener('variable-manager-start-changed', () => {
+            setTimeout(setupFirstMessageAsChoice, 50);
+        });
         setupObserver();
         console.log(LOG, '初期化完了');
     }
