@@ -900,15 +900,52 @@ async function injectExpansionSections() {
         return;
     }
 
+    // ★ 早期リターン: 注入済みで何もする必要がない場合は、
+    //    非同期処理(async)もDOM操作も一切走らせない。
+    //    これによりスクロールドラッグ中のマイクロタスク干渉を防ぎ、
+    //    スクロールバー位置がリセットされる問題を解消する。
+    const entryEls = document.querySelectorAll(
+        '#world_popup .world_entry[uid], .world_entry[uid]'
+    );
+
+    let needsWork = false;
+    for (const entryEl of entryEls) {
+        const uid = String(entryEl.getAttribute('uid'));
+        const contentTextarea = entryEl.querySelector('textarea[name="content"]');
+        if (!contentTextarea) continue;  // 折りたたまれている
+
+        const existing = entryEl.querySelector('.' + UI_SECTION_CLASS);
+        if (!existing || existing.getAttribute(ATTR_UID) !== uid) {
+            needsWork = true;
+            break;
+        }
+        const edit = entryEl.querySelector('.world_entry_edit');
+        if (edit && !edit.querySelector(':scope > ' + TOGGLE_BTN_CLASS)) {
+            needsWork = true;
+            break;
+        }
+    }
+
+    if (!needsWork) {
+        // ★ DOM変更不要 → スクロール位置に影響を与えないよう即座にreturn
+        return;
+    }
+
     const entries = await loadWorldInfoEntriesByName(worldName);
     if (!entries) {
         debugLog(`inject: world "${worldName}" のエントリ取得失敗（リトライ後）`);
         return;
     }
 
-    const entryEls = document.querySelectorAll(
-        '#world_popup .world_entry[uid], .world_entry[uid]'
-    );
+    // ★ スクロール位置を保存（DOM変更によるリセットを防ぐ保険）
+    const scrollSnapshots = [];
+    try {
+        document.querySelectorAll('#world_popup *').forEach(el => {
+            if (el.scrollTop > 0 && el.scrollHeight > el.clientHeight + 1) {
+                scrollSnapshots.push({ el, scrollTop: el.scrollTop });
+            }
+        });
+    } catch (e) { /* ignore */ }
 
     let injected = 0;
     let skippedNoEntry = 0;
@@ -974,6 +1011,13 @@ async function injectExpansionSections() {
             `未展開=${skippedCollapsed}, entryなし=${skippedNoEntry}, 注入済=${skippedAlready}`
         );
     }
+
+    // ★ スクロール位置を復元
+    scrollSnapshots.forEach(({ el, scrollTop }) => {
+        if (el.scrollTop !== scrollTop) {
+            el.scrollTop = scrollTop;
+        }
+    });
 }
 
 // ============================================================
