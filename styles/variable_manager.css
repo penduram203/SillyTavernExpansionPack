@@ -46,19 +46,23 @@
 
 /* ============================================================
  * ★ UI設定（UI設定 / 開始ボタン / 場所）
+ *    flex コンテナ内で他要素を押し潰さないよう、
+ *    縮小可能・内部折り返し可能に設定
  * ============================================================ */
 .variable-manager-ui-settings {
     display: inline-flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 12px;
-    margin-left: 12px;
+    gap: 6px;
+    margin-left: 6px;
     padding: 0;
-    font-size: 18px;
+    font-size: 16px;
     color: var(--SmartThemeBodyColor, #ccc);
-    white-space: nowrap;
-    flex-shrink: 0;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
     vertical-align: middle;
-    height: 100%;
     line-height: 1.2;
     font-family: inherit;
     user-select: none;
@@ -69,6 +73,9 @@
     font-weight: bold;
     opacity: 1;
     letter-spacing: 0.3px;
+    white-space: nowrap;
+    flex: 0 1 auto;
+    min-width: 0;
 }
 
 .variable-manager-checkbox-wrap {
@@ -79,19 +86,24 @@
     user-select: none;
     -webkit-user-select: none;
     margin: 0;
+    white-space: nowrap;
+    flex: 0 1 auto;
+    min-width: 0;
 }
 
 .variable-manager-checkbox-text {
     opacity: 0.95;
+    white-space: nowrap;
 }
 
 .variable-manager-visible-checkbox {
     cursor: pointer;
     margin: 0;
-    width: 18px;
-    height: 18px;
+    width: 16px;
+    height: 16px;
     vertical-align: middle;
     accent-color: #64b5f6;
+    flex: 0 0 auto;
 }
 
 .variable-manager-visible-checkbox:disabled {
