@@ -1,8 +1,11 @@
 // Lorebook_Expansion.js
 //
-// ロアブックの各エントリに Img_prompt / choices の2フィールドを追加する拡張。
-//   - Img_prompt : 画像生成プロンプト (gic_lorebook.js が読み取る)
-//   - choices    : 応答末尾に自動表示される選択肢群 (番号 + 文言)
+// ロアブックの各エントリに Img_prompt / Negative_prompt / variables / choices を
+// 追加する拡張。
+//   - Img_prompt      : 画像生成プロンプト (gic_lorebook.js が読み取る)
+//   - Negative_prompt : ネガティブプロンプト (gic_lorebook.js が読み取る)
+//   - variables       : 変数管理 (variable_manager.js が読み取る)
+//   - choices         : 応答末尾に自動表示される選択肢群 (番号 + 文言)
 //
 // ★ データ保存先 (Phase 5 改修):
 //   一次: extension_settings.lorebook_expansion.data[worldName][charKey]
@@ -36,6 +39,11 @@
 //       ・ユーザー操作中のスクロール位置を継続記録
 //       ・STがリセットしたら毎フレーム強制復元（_lbeScrollEnforceLoop）
 //       ・DOM一括削除を検知したら段階的復元（_lbeScheduleRestore）
+//
+// ★ v4 修正 (Phase 6):
+//   - Negative_prompt フィールドを追加（img_prompt 直後に2行のテキストエリア）
+//   - contentHeightRatio の既定値を 0.6 → 0.45 に変更（現在の5行 → 4行相当）
+//   - v3 設定の contentHeightRatio=0.6 は v4 移行時に自動で 0.45 に更新
 
 import {
     extension_settings,
@@ -50,7 +58,7 @@ import {
 
 const MODULE_NAME = 'lorebook_expansion';
 const LOG = '[LBE]';
-const SETTINGS_VERSION = 3;
+const SETTINGS_VERSION = 4;
 
 const DEFAULT_SETTINGS = {
     version: SETTINGS_VERSION,
@@ -58,7 +66,7 @@ const DEFAULT_SETTINGS = {
     autoAppendChoices: true,
     debug: false,
     extrasCollapsedByDefault: true,
-    contentHeightRatio: 0.6,
+    contentHeightRatio: 0.45,
     lexStorageMigratedV1: false,
 };
 
@@ -79,7 +87,15 @@ function loadSettings() {
     const stored = extension_settings[MODULE_NAME];
 
     if (!stored.version || stored.version < SETTINGS_VERSION) {
+        const oldVersion = stored.version ?? 0;
         console.log(`${LOG} 設定を v${SETTINGS_VERSION} に移行します（旧version=${stored.version ?? 'なし'}）`);
+
+        // ★ v3 → v4: contentHeightRatio の既定値を 0.6 → 0.45 に変更
+        if (oldVersion < 4 && stored.contentHeightRatio === 0.6) {
+            stored.contentHeightRatio = 0.45;
+            console.log(`${LOG} contentHeightRatio を 0.6 → 0.45 に更新`);
+        }
+
         stored.version = SETTINGS_VERSION;
         if (typeof stored.extrasCollapsedByDefault !== 'boolean') {
             stored.extrasCollapsedByDefault = true;
@@ -136,10 +152,11 @@ function getLexStore() {
 
 function normalizeLexData(raw) {
     if (!raw || typeof raw !== 'object') {
-        return { img_prompt: '', choices: [], variables: [] };
+        return { img_prompt: '', negative_prompt: '', choices: [], variables: [] };
     }
     return {
         img_prompt: typeof raw.img_prompt === 'string' ? raw.img_prompt : '',
+        negative_prompt: typeof raw.negative_prompt === 'string' ? raw.negative_prompt : '',
         choices: Array.isArray(raw.choices)
             ? raw.choices
                   .filter(c => c && typeof c === 'object')
@@ -297,11 +314,11 @@ function getCharacterLexData() {
 
 function getDataFor(worldName, uid, entry) {
     if (!worldName || uid === null || uid === undefined) {
-        return { img_prompt: '', choices: [], variables: [] };
+        return { img_prompt: '', negative_prompt: '', choices: [], variables: [] };
     }
 
     const charKey = getCharKey(entry, uid);
-    if (!charKey) return { img_prompt: '', choices: [], variables: [] };
+    if (!charKey) return { img_prompt: '', negative_prompt: '', choices: [], variables: [] };
 
     const store = getWorldLexStore(worldName);
     const rec = store[charKey];
@@ -337,7 +354,7 @@ function getDataFor(worldName, uid, entry) {
         console.warn(LOG, 'character.data からの移行に失敗:', e);
     }
 
-    return { img_prompt: '', choices: [], variables: [] };
+    return { img_prompt: '', negative_prompt: '', choices: [], variables: [] };
 }
 
 function setDataFor(worldName, uid, entry, data) {
@@ -356,13 +373,14 @@ function setDataFor(worldName, uid, entry, data) {
     debugLog(`per-world store に保存: ${worldName}::${charKey}`);
 }
 
-// ============================================================
-// レガシー API 互換 (entry 単体で扱う)
-// ============================================================
 function getExpansionData(entry) {
-    if (!entry || typeof entry !== 'object') return { img_prompt: '', choices: [], variables: [] };
+    if (!entry || typeof entry !== 'object') {
+        return { img_prompt: '', negative_prompt: '', choices: [], variables: [] };
+    }
     const ext = entry.extensions?.[MODULE_NAME];
-    if (!ext || typeof ext !== 'object') return { img_prompt: '', choices: [], variables: [] };
+    if (!ext || typeof ext !== 'object') {
+        return { img_prompt: '', negative_prompt: '', choices: [], variables: [] };
+    }
     return normalizeLexData(ext);
 }
 
@@ -668,6 +686,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
     section.className = UI_SECTION_CLASS;
     section.setAttribute(ATTR_UID, String(uid));
 
+    // ── Img_prompt ──
     const imgLabel = document.createElement('label');
     imgLabel.className = 'lbe-label';
     imgLabel.textContent = 'Img_prompt (画像生成プロンプト)';
@@ -684,9 +703,24 @@ function buildExpansionSection(uid, worldName, data, onChange) {
     });
     section.appendChild(imgTextarea);
 
-    // ============================================================
-    // ★ 変数セクション（新規）
-    // ============================================================
+    // ── Negative_prompt（新規） ──
+    const negLabel = document.createElement('label');
+    negLabel.className = 'lbe-label';
+    negLabel.textContent = 'Negative_prompt (ネガティブプロンプト)';
+    section.appendChild(negLabel);
+
+    const negTextarea = document.createElement('textarea');
+    negTextarea.className = 'lbe-negative-prompt text_pole';
+    negTextarea.rows = 2;
+    negTextarea.placeholder = '例: bad hands, extra fingers, lowres, ugly, blurry, watermark';
+    negTextarea.value = data.negative_prompt || '';
+    negTextarea.addEventListener('input', () => {
+        data.negative_prompt = negTextarea.value;
+        onChange(data);
+    });
+    section.appendChild(negTextarea);
+
+    // ── variables セクション ──
     const updateValuePlaceholder = (input, type) => {
         if (!input) return;
         if (type === 'number') {
@@ -716,7 +750,6 @@ function buildExpansionSection(uid, worldName, data, onChange) {
             const row = document.createElement('div');
             row.className = 'lbe-variable-row';
 
-            // ── 種別ドロップダウン ──
             const typeSelect = document.createElement('select');
             typeSelect.className = 'lbe-variable-type text_pole';
             typeSelect.title = '変数の型';
@@ -732,7 +765,6 @@ function buildExpansionSection(uid, worldName, data, onChange) {
             typeSelect.value = v.type === 'number' ? 'number' : 'string';
             row.appendChild(typeSelect);
 
-            // ── 名前入力 ──
             const nameInput = document.createElement('input');
             nameInput.type = 'text';
             nameInput.className = 'lbe-variable-name text_pole';
@@ -744,7 +776,6 @@ function buildExpansionSection(uid, worldName, data, onChange) {
             });
             row.appendChild(nameInput);
 
-            // ── 値入力 ──
             const valueInput = document.createElement('input');
             valueInput.type = 'text';
             valueInput.className = 'lbe-variable-value text_pole';
@@ -756,14 +787,12 @@ function buildExpansionSection(uid, worldName, data, onChange) {
             });
             row.appendChild(valueInput);
 
-            // ── 種別変更時の挙動 ──
             typeSelect.addEventListener('change', () => {
                 v.type = typeSelect.value === 'number' ? 'number' : 'string';
                 updateValuePlaceholder(valueInput, v.type);
                 onChange(data);
             });
 
-            // ── 削除ボタン ──
             const delBtn = document.createElement('button');
             delBtn.type = 'button';
             delBtn.className = 'lbe-variable-del menu_button';
@@ -779,7 +808,6 @@ function buildExpansionSection(uid, worldName, data, onChange) {
             varsContainer.appendChild(row);
         });
 
-        // ── 追加ボタン ──
         const addBtn = document.createElement('button');
         addBtn.type = 'button';
         addBtn.className = 'lbe-variable-add menu_button';
@@ -795,6 +823,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
 
     renderVariables();
 
+    // ── choices セクション ──
     const choicesLabel = document.createElement('label');
     choicesLabel.className = 'lbe-label';
     choicesLabel.textContent = 'choices (選択肢)';
@@ -907,7 +936,7 @@ function shrinkContentTextarea(entryEl) {
     const originalRows = parseInt(ta.dataset.lbeOriginalRows || '8', 10);
     const ratio = (typeof settings.contentHeightRatio === 'number' && settings.contentHeightRatio > 0)
         ? settings.contentHeightRatio
-        : 0.6;
+        : 0.45;
     const newRows = Math.max(2, Math.round(originalRows * ratio));
 
     if (parseInt(ta.getAttribute('rows') || '0', 10) !== newRows) {
@@ -1025,6 +1054,11 @@ async function injectExpansionSections() {
             needsWork = true;
             break;
         }
+        // ★ negative_prompt 欄の存在チェック
+        if (!entryEl.querySelector('.lbe-negative-prompt')) {
+            needsWork = true;
+            break;
+        }
     }
 
     if (!needsWork) {
@@ -1095,7 +1129,8 @@ async function injectExpansionSections() {
         }
 
         const existing = entryEl.querySelector('.' + UI_SECTION_CLASS);
-        if (existing && existing.getAttribute(ATTR_UID) === uid) {
+        if (existing && existing.getAttribute(ATTR_UID) === uid
+            && entryEl.querySelector('.lbe-negative-prompt')) {
             skippedAlready++;
             return;
         }
@@ -1213,12 +1248,10 @@ function _lbeScheduleRestore() {
     setTimeout(_lbeRestoreScroll, 500);
 }
 
-// ★ スクロール位置を継続記録し、注入を保留
 (function installWorldPopupScrollTracker() {
     if (window.__lbeScrollTrackerInstalled) return;
     window.__lbeScrollTrackerInstalled = true;
 
-    // ユーザー入力のトラッカー（ST再構築による「無操作リセット」と区別するため）
     const trackUser = (e) => {
         const t = e.target;
         if (t && t.closest && t.closest('#world_popup')) {
@@ -1230,15 +1263,11 @@ function _lbeScheduleRestore() {
     document.addEventListener('wheel', trackUser, { capture: true, passive: true });
     document.addEventListener('keydown', trackUser, true);
 
-    // スクロールトラッカー
     document.addEventListener('scroll', (e) => {
         const t = e.target;
         if (!t || !t.closest || !t.closest('#world_popup')) return;
         _lastWorldPopupScrollAt = Date.now();
         const recentInput = (Date.now() - _lbeLastUserInputAt) < 100;
-        // ★ ユーザー入力中、または下方向へのスクロールのみ位置を更新
-        //    ST の clearEntryList による「scrollTop が 0 に戻る」変化は無視する
-        //    → 無視した結果、記録済みの位置が保持され、_lbeRestoreScroll で復元できる
         if (recentInput || t.scrollTop > _lbeLastScrollTop) {
             _lbeLastScrollTop = t.scrollTop;
             _lbeLastScrollLeft = t.scrollLeft;
@@ -1280,8 +1309,6 @@ function setupObserver() {
     _observer = new MutationObserver((mutations) => {
         if (!document.getElementById('world_popup')) return;
 
-        // ★ STがWIリストを再構築した場合、保存済みスクロール位置を復元
-        //    bulk removal (多くの子要素が一度に削除) を検知したら即座に復元
         if (_lbeLastScrollTop > 0) {
             let bulkRemoval = false;
             for (const m of mutations) {
