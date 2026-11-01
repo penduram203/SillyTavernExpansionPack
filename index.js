@@ -29,3 +29,5 @@ import './modules/Lorebook_Expansion.js';
 import './modules/gic.js';
 
 import './modules/choice_click.js';
+
+import './modules/variable_manager.js';
