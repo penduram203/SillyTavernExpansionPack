@@ -324,10 +324,27 @@
     }
 
     function detectCharacterNameFromDOM() {
+        // ★ 1. SillyTavern の context から取得（最も信頼できる）
+        try {
+            const ctx = getSTContext();
+            const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
+            if (char?.name) return char.name;
+        } catch (e) { /* ignore */ }
+
+        // 2. #character_name_holder から
         const nameHolder = document.querySelector('#character_name_holder');
-        if (nameHolder && nameHolder.textContent) return nameHolder.textContent.trim();
+        if (nameHolder) {
+            const t = (nameHolder.textContent || '').trim();
+            if (t) return t;
+        }
+
+        // 3. .mes[mesid="0"] の ch_name 属性から
         const greetingMessage = document.querySelector('.mes[mesid="0"][is_user="false"]');
-        if (greetingMessage && greetingMessage.getAttribute('ch_name')) return greetingMessage.getAttribute('ch_name');
+        if (greetingMessage) {
+            const t = (greetingMessage.getAttribute('ch_name') || '').trim();
+            if (t) return t;
+        }
+
         return null;
     }
 
@@ -1522,14 +1539,28 @@
 
         (async () => {
             try {
-                const hasCharData = await loadExistingJSONData(charName);
-                // ★ character.data に image_display_extension キーが存在すれば
-                //    （空 {} でも）character.data を権威ソースとして扱い、
-                //    loadSavedData をスキップする。
-                //    これにより、全セル削除後に extensionSettings の古いデータで
-                //    セルが復元されるのを防ぐ。
+                // ★ charName が空なら、最大 2 秒間リトライして取得する
+                //    （新規チャット直後は greeting が未レンダリングの場合がある）
+                let effectiveCharName = charName;
+                if (!effectiveCharName) {
+                    for (let i = 0; i < 10; i++) {
+                        await new Promise(r => setTimeout(r, 200));
+                        effectiveCharName = detectCharacterNameFromDOM() || '';
+                        if (effectiveCharName) {
+                            if (nameEl) nameEl.textContent = effectiveCharName;
+                            console.log(`[STJ Editor] charName を遅延取得: ${effectiveCharName}`);
+                            break;
+                        }
+                    }
+                }
+
+                if (!effectiveCharName) {
+                    console.warn('[STJ Editor] charName を取得できませんでした（フォームは空のまま）');
+                }
+
+                const hasCharData = await loadExistingJSONData(effectiveCharName);
                 if (!hasCharData) {
-                    loadSavedData(charName);
+                    loadSavedData(effectiveCharName);
                 } else {
                     console.log('[STJ Editor] character.data を権威ソースとして使用（extensionSettings フォールバック無効）');
                 }
