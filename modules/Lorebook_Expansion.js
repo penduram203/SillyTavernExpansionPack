@@ -27,10 +27,15 @@
 //   - getDataFor/setDataFor は per-world ストアを一次情報源とする
 //   - init() / CHARACTER_PAGE_LOADED で移行を試行
 //
-// ★ スクロールリセット問題修正:
+// ★ スクロールリセット問題修正 (v2):
 //   - setupObserver の監視対象を body 全体 → #world_popup に限定
 //   - scheduleInjection にスクロール直後スキップを追加
 //   - injectExpansionSections のスクロール位置保存・復元を強化
+//   - ST本体の clearEntryList による独立リセットに対抗するため、
+//     「永続スクロールトラッカー」を追加:
+//       ・ユーザー操作中のスクロール位置を継続記録
+//       ・STがリセットしたら毎フレーム強制復元（_lbeScrollEnforceLoop）
+//       ・DOM一括削除を検知したら段階的復元（_lbeScheduleRestore）
 
 import {
     extension_settings,
@@ -162,10 +167,6 @@ function saveLexStore() {
 // ============================================================
 // ★ Phase 5: ストレージキー関連ヘルパー
 // ============================================================
-/**
- * エントリの安定キーを決定する。
- *   priority: entry.comment → entry.keys[0]/key[0] → String(uid)
- */
 function getCharKey(entry, uid) {
     if (entry && typeof entry.comment === 'string' && entry.comment.trim()) {
         return entry.comment.trim();
@@ -177,18 +178,11 @@ function getCharKey(entry, uid) {
     return String(uid);
 }
 
-/**
- * 複合ストレージキーを生成する。
- *   worldName + SEP + charKey
- */
 function getStorageKey(worldName, charKey) {
     if (!worldName || charKey === null || charKey === undefined) return null;
     return `${worldName}${STORAGE_KEY_SEPARATOR}${charKey}`;
 }
 
-/**
- * 現在選択中キャラの名前と「本来のロアブック名」を返す。
- */
 function getCurrentCharacterInfo() {
     try {
         const ctx = getContext();
@@ -208,8 +202,6 @@ function getCurrentCharacterInfo() {
 
 // ============================================================
 // ★ Phase 5: character.data → per-world store の一括移行
-//   起動時に一度だけ実行。新形式キーは該当 world へ、
-//   旧形式キーはキャラ本来のロアブックへ割り当てる。
 // ============================================================
 function migrateCharacterLexDataToWorldStore() {
     if (settings.lexStorageMigratedV1 === true) return;
@@ -219,7 +211,7 @@ function migrateCharacterLexDataToWorldStore() {
         const chars = ctx?.characters || [];
         if (chars.length === 0) {
             debugLog('移行スキップ: キャラクター未ロード');
-            return; // フラグは立てず、CHARACTER_PAGE_LOADED での再試行を許容
+            return;
         }
 
         const store = getLexStore();
@@ -281,9 +273,6 @@ function migrateCharacterLexDataToWorldStore() {
     }
 }
 
-// ============================================================
-// ★ Phase 5: character.data 読み込み (移行フォールバック専用)
-// ============================================================
 function getCharacterLexData() {
     try {
         const ctx = getContext();
@@ -295,9 +284,6 @@ function getCharacterLexData() {
     }
 }
 
-// ============================================================
-// ★ Phase 5: getDataFor — per-world ストアを一次情報源とする
-// ============================================================
 function getDataFor(worldName, uid, entry) {
     if (!worldName || uid === null || uid === undefined) {
         return { img_prompt: '', choices: [] };
@@ -306,16 +292,12 @@ function getDataFor(worldName, uid, entry) {
     const charKey = getCharKey(entry, uid);
     if (!charKey) return { img_prompt: '', choices: [] };
 
-    // ── ① Primary: per-world store ──
     const store = getWorldLexStore(worldName);
     const rec = store[charKey];
     if (rec && typeof rec === 'object') {
         return normalizeLexData(rec);
     }
 
-    // ── ② character.data に残っている旧データの遅延移行 ──
-    //   ・新形式キー(worldName\x1fcharKey): 対応する world のエントリとして移行
-    //   ・旧形式キー(charKeyのみ): 現在キャラ本来のロアブックの場合のみ移行
     try {
         const charLex = getCharacterLexData();
         const storageKey = getStorageKey(worldName, charKey);
@@ -347,9 +329,6 @@ function getDataFor(worldName, uid, entry) {
     return { img_prompt: '', choices: [] };
 }
 
-// ============================================================
-// ★ Phase 5: setDataFor — per-world ストアへ保存
-// ============================================================
 function setDataFor(worldName, uid, entry, data) {
     if (!worldName || uid === null || uid === undefined) return;
 
@@ -634,7 +613,6 @@ function triggerWorldInfoSave() {
         const mod = await getWorldInfoModule();
 
         try {
-            // ★ world_info[worldName] が未ロードなら /api/worldinfo/get で復元してから保存
             if (mod && (!mod.world_info || !mod.world_info[worldName])) {
                 debugLog(`world_info["${worldName}"] 未ロード → 復元を試行`);
                 try {
@@ -905,10 +883,6 @@ async function injectExpansionSections() {
         return;
     }
 
-    // ★ 早期リターン: 注入済みで何もする必要がない場合は、
-    //    非同期処理(async)もDOM操作も一切走らせない。
-    //    これによりスクロールドラッグ中のマイクロタスク干渉を防ぎ、
-    //    スクロールバー位置がリセットされる問題を解消する。
     const entryEls = document.querySelectorAll(
         '#world_popup .world_entry[uid], .world_entry[uid]'
     );
@@ -917,7 +891,7 @@ async function injectExpansionSections() {
     for (const entryEl of entryEls) {
         const uid = String(entryEl.getAttribute('uid'));
         const contentTextarea = entryEl.querySelector('textarea[name="content"]');
-        if (!contentTextarea) continue;  // 折りたたまれている
+        if (!contentTextarea) continue;
 
         const existing = entryEl.querySelector('.' + UI_SECTION_CLASS);
         if (!existing || existing.getAttribute(ATTR_UID) !== uid) {
@@ -932,7 +906,6 @@ async function injectExpansionSections() {
     }
 
     if (!needsWork) {
-        // ★ DOM変更不要 → スクロール位置に影響を与えないよう即座にreturn
         return;
     }
 
@@ -942,8 +915,6 @@ async function injectExpansionSections() {
         return;
     }
 
-    // ★ スクロール位置を広範囲に保存（#world_popup とその祖先すべて）
-    //    ST本体の clearEntryList によるリセットを確実に打ち消す
     const scrollSnapshots = [];
     try {
         const seen = new Set();
@@ -955,19 +926,16 @@ async function injectExpansionSections() {
             }
         };
 
-        // #world_popup 内のすべての要素
         const popup = document.getElementById('world_popup');
         if (popup) {
             popup.querySelectorAll('*').forEach(collect);
             collect(popup);
-            // 祖先も辿る
             let p = popup.parentElement;
             while (p && p !== document.body) {
                 collect(p);
                 p = p.parentElement;
             }
         }
-        // ドキュメント全体
         if (document.scrollingElement) collect(document.scrollingElement);
     } catch (e) { /* ignore */ }
 
@@ -1036,7 +1004,6 @@ async function injectExpansionSections() {
         );
     }
 
-    // ★ スクロール位置を復元（requestAnimationFrame で 1フレーム後にも再適用）
     const restore = () => {
         scrollSnapshots.forEach(({ el, scrollTop, scrollLeft }) => {
             try {
@@ -1058,26 +1025,111 @@ let _injectTimer = null;
 let _pollTimer = null;
 let _lastWorldPopupScrollAt = 0;
 
-// ★ スクロール中は注入をスキップするためのリスナー（1回だけ設置）
+// ★ 永続スクロールトラッカー（ST再構築対策）
+let _lbeLastScrollTop = 0;
+let _lbeLastScrollLeft = 0;
+let _lbeLastUserInputAt = 0;
+let _lbeScrollEnforceUntil = 0;
+let _lbeScrollEnforceRunning = false;
+let _lbeRestoreScheduled = false;
+
+function _lbeFindScrollable() {
+    const popup = document.getElementById('world_popup');
+    if (!popup) return null;
+    const candidates = [popup, ...popup.querySelectorAll('*')];
+    for (const el of candidates) {
+        if (el.scrollHeight > el.clientHeight + 2 && el.clientHeight > 0) {
+            return el;
+        }
+    }
+    return null;
+}
+
+function _lbeRestoreScroll() {
+    if (_lbeLastScrollTop <= 0) return false;
+    const el = _lbeFindScrollable();
+    if (!el) return false;
+    if (Math.abs(el.scrollTop - _lbeLastScrollTop) <= 0.5) return false;
+    el.scrollTop = _lbeLastScrollTop;
+    if (Math.abs(el.scrollLeft - _lbeLastScrollLeft) > 0.5) {
+        el.scrollLeft = _lbeLastScrollLeft;
+    }
+    return true;
+}
+
+function _lbeScrollEnforceLoop() {
+    if (Date.now() > _lbeScrollEnforceUntil) {
+        _lbeScrollEnforceRunning = false;
+        return;
+    }
+    _lbeRestoreScroll();
+    requestAnimationFrame(_lbeScrollEnforceLoop);
+}
+
+function _lbeStartScrollEnforcement(durationMs = 1500) {
+    _lbeScrollEnforceUntil = Math.max(_lbeScrollEnforceUntil, Date.now() + durationMs);
+    if (!_lbeScrollEnforceRunning) {
+        _lbeScrollEnforceRunning = true;
+        requestAnimationFrame(_lbeScrollEnforceLoop);
+    }
+}
+
+function _lbeScheduleRestore() {
+    if (_lbeRestoreScheduled) return;
+    _lbeRestoreScheduled = true;
+    _lbeRestoreScroll();
+    requestAnimationFrame(() => {
+        _lbeRestoreScroll();
+        requestAnimationFrame(() => {
+            _lbeRestoreScroll();
+            _lbeRestoreScheduled = false;
+        });
+    });
+    setTimeout(_lbeRestoreScroll, 30);
+    setTimeout(_lbeRestoreScroll, 100);
+    setTimeout(_lbeRestoreScroll, 250);
+    setTimeout(_lbeRestoreScroll, 500);
+}
+
+// ★ スクロール位置を継続記録し、注入を保留
 (function installWorldPopupScrollTracker() {
     if (window.__lbeScrollTrackerInstalled) return;
     window.__lbeScrollTrackerInstalled = true;
-    document.addEventListener('scroll', (e) => {
+
+    // ユーザー入力のトラッカー（ST再構築による「無操作リセット」と区別するため）
+    const trackUser = (e) => {
         const t = e.target;
         if (t && t.closest && t.closest('#world_popup')) {
-            _lastWorldPopupScrollAt = Date.now();
-            // スクロール中は debounce をリセット（注入を遅らせる）
-            if (_injectTimer) {
-                clearTimeout(_injectTimer);
-                _injectTimer = null;
-            }
+            _lbeLastUserInputAt = Date.now();
+        }
+    };
+    document.addEventListener('pointerdown', trackUser, true);
+    document.addEventListener('pointermove', trackUser, true);
+    document.addEventListener('wheel', trackUser, { capture: true, passive: true });
+    document.addEventListener('keydown', trackUser, true);
+
+    // スクロールトラッカー
+    document.addEventListener('scroll', (e) => {
+        const t = e.target;
+        if (!t || !t.closest || !t.closest('#world_popup')) return;
+        _lastWorldPopupScrollAt = Date.now();
+        const recentInput = (Date.now() - _lbeLastUserInputAt) < 100;
+        // ★ ユーザー入力中、または下方向へのスクロールのみ位置を更新
+        //    ST の clearEntryList による「scrollTop が 0 に戻る」変化は無視する
+        //    → 無視した結果、記録済みの位置が保持され、_lbeRestoreScroll で復元できる
+        if (recentInput || t.scrollTop > _lbeLastScrollTop) {
+            _lbeLastScrollTop = t.scrollTop;
+            _lbeLastScrollLeft = t.scrollLeft;
+        }
+        _lbeStartScrollEnforcement(1500);
+        if (_injectTimer) {
+            clearTimeout(_injectTimer);
+            _injectTimer = null;
         }
     }, true);
 })();
 
 function scheduleInjection() {
-    // ★ スクロール直後（400ms以内）は注入をスキップして再スケジュール
-    //    スクロール操作とDOM変更が競合してスクロール位置がリセットされるのを防ぐ
     if (Date.now() - _lastWorldPopupScrollAt < 400) {
         if (_injectTimer) clearTimeout(_injectTimer);
         _injectTimer = setTimeout(() => {
@@ -1091,25 +1143,36 @@ function scheduleInjection() {
     _injectTimer = setTimeout(() => {
         _injectTimer = null;
         injectExpansionSections().catch(e => console.warn(LOG, e));
-    }, 500);  // 200ms → 500ms に延長
+    }, 500);
 }
 
 function setupObserver() {
     if (_observer) _observer.disconnect();
 
-    // ★ 監視対象を #world_popup 内に限定する。
-    //    body 全体を監視すると、STの再描画やGICのギャラリー生成など
-    //    WIドロワーと無関係なDOM変更でも反応してしまい、
-    //    スクロール位置がリセットされる原因になる。
     const target = document.getElementById('world_popup');
     if (!target) {
-        // #world_popup が出現したら監視を開始
         setTimeout(setupObserver, 500);
         return;
     }
 
-    _observer = new MutationObserver(() => {
+    _observer = new MutationObserver((mutations) => {
         if (!document.getElementById('world_popup')) return;
+
+        // ★ STがWIリストを再構築した場合、保存済みスクロール位置を復元
+        //    bulk removal (多くの子要素が一度に削除) を検知したら即座に復元
+        if (_lbeLastScrollTop > 0) {
+            let bulkRemoval = false;
+            for (const m of mutations) {
+                if (m.type === 'childList' && m.removedNodes.length > 3) {
+                    bulkRemoval = true;
+                    break;
+                }
+            }
+            if (bulkRemoval || Date.now() < _lbeScrollEnforceUntil) {
+                _lbeScheduleRestore();
+            }
+        }
+
         scheduleInjection();
     });
 
@@ -1125,7 +1188,7 @@ function setupObserver() {
         }
     }, 1500);
 
-    console.log(LOG, 'DOM 監視を開始しました（#world_popup 限定）');
+    console.log(LOG, 'DOM 監視を開始しました（#world_popup 限定 + スクロール保護強化）');
 }
 
 // ============================================================
@@ -1161,7 +1224,6 @@ function registerEventListeners() {
     if (event_types.MESSAGE_DELETED) {
         eventSource.on(event_types.MESSAGE_DELETED, onMessageUpdatedOrDeleted);
     }
-    // ★ Phase 5: キャラクター一覧ロード時に移行を再試行
     if (event_types.CHARACTER_PAGE_LOADED) {
         eventSource.on(event_types.CHARACTER_PAGE_LOADED, () => {
             migrateCharacterLexDataToWorldStore();
@@ -1173,10 +1235,8 @@ async function init() {
     console.log(LOG, 'Lorebook Expansion 初期化開始');
     loadSettings();
 
-    // ★ Phase 5: character.data → per-world store の一括移行
     migrateCharacterLexDataToWorldStore();
 
-    // ★ Phase 2: 起動時に現在キャラの character.data 状態をログ出力
     try {
         const ctx = getContext();
         const char = ctx?.characters?.[ctx?.characterId];
@@ -1219,21 +1279,6 @@ function bootstrap() {
 
 // ============================================================
 // ★ ST起動時のWIドロワー自動オープン問題への対策（強化版）
-//
-//   ST本体は起動時、キャラクターに紐付くロアブックがあると
-//   RossAscends-mods.js 経由で WI ドロワー（#WorldInfo）を
-//   自動で開く。これが「起動直後からロアブック設定ウインドウが
-//   開いた状態になっている」問題の原因。
-//
-//   ST本体の実装揺れに対応するため、以下の3段構えで防御する:
-//     (A) MutationObserver で #WorldInfo の class/style 変更を監視し、
-//         openDrawer が付いた瞬間に同期強制クローズ
-//     (B) click / mousedown / pointerdown をキャプチャフェーズで捕捉し、
-//         WIドロワーのトグルへの操作を抑止
-//     (C) 100ms 間隔の安全網で強制クローズを繰り返す
-//
-//   ブロックは APP_READY + 1500ms で解除する。
-//   ユーザーの意図的なクリックは以降 通常通り動作する。
 // ============================================================
 (function setupWIDrawerAutoOpenBlocker() {
     let blocking = true;
@@ -1275,9 +1320,6 @@ function bootstrap() {
         return changed;
     }
 
-    // ==========================================================
-    // (A) MutationObserver
-    // ==========================================================
     const observedEls = new WeakSet();
 
     function attachObserverTo(el) {
@@ -1305,9 +1347,6 @@ function bootstrap() {
     attachAll();
     const attachWatcher = setInterval(attachAll, 300);
 
-    // ==========================================================
-    // (B) click / mousedown / pointerdown キャプチャフェーズブロック
-    // ==========================================================
     ['click', 'mousedown', 'pointerdown'].forEach(evtType => {
         document.addEventListener(evtType, (e) => {
             if (!blocking) return;
@@ -1325,17 +1364,11 @@ function bootstrap() {
         }, true);
     });
 
-    // ==========================================================
-    // (C) 100ms 間隔の安全網
-    // ==========================================================
     const safetyWatcher = setInterval(() => {
         if (!blocking) return;
         forceCloseWIDrawer('safety-net');
     }, 100);
 
-    // ==========================================================
-    // ブロック解除
-    // ==========================================================
     function releaseBlocking() {
         if (released) return;
         released = true;
@@ -1377,7 +1410,6 @@ window.LorebookExpansion = {
     getData: getExpansionData,
     setData: setExpansionData,
 
-    // ★ Phase 2 追加: character.data 側のダンプ
     dumpCharacterLex: () => {
         try {
             const ctx = getContext();
@@ -1387,14 +1419,12 @@ window.LorebookExpansion = {
         } catch (e) { return {}; }
     },
 
-    // ★ Phase 5 追加: per-world ストア全体のダンプ
     dumpWorldLex: () => {
         try {
             return JSON.parse(JSON.stringify(getLexStore()));
         } catch (e) { return {}; }
     },
 
-    // ★ Phase 5 追加: 移行フラグを手動でリセット（再移行用）
     resetMigration: () => {
         settings.lexStorageMigratedV1 = false;
         saveSettings();
@@ -1402,7 +1432,6 @@ window.LorebookExpansion = {
         return true;
     },
 
-    // ★ Phase 2 追加: charKey 決定ロジックを外部から確認できるように
     getCharKey,
     getStorageKey,
 
@@ -1517,6 +1546,23 @@ window.LorebookExpansion = {
             saveSettings();
             console.log(LOG, `設定を v${SETTINGS_VERSION} に移行しました`);
         }
+    },
+
+    // ★ スクロールトラッカー制御用（デバッグ・復旧用）
+    _lbeDebugScrollState: () => ({
+        lastScrollTop: _lbeLastScrollTop,
+        lastScrollLeft: _lbeLastScrollLeft,
+        enforceUntil: _lbeScrollEnforceUntil,
+        enforceRunning: _lbeScrollEnforceRunning,
+        lastUserInputAt: _lbeLastUserInputAt,
+        lastScrollAt: _lastWorldPopupScrollAt,
+    }),
+    _lbeForceRestoreScroll: () => _lbeRestoreScroll(),
+    _lbeResetScrollTracker: () => {
+        _lbeLastScrollTop = 0;
+        _lbeLastScrollLeft = 0;
+        _lbeScrollEnforceUntil = 0;
+        console.log(`${LOG} スクロールトラッカーをリセットしました`);
     },
 
     MODULE_NAME,
