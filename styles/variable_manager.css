@@ -151,3 +151,53 @@
     padding: 4px 0;
     font-size: 11px;
 }
+
+/* ============================================================
+ * ★ UI設定（場所チェックボックス）
+ * ============================================================ */
+
+#variable-manager-panel.variable-manager-disabled {
+    display: none !important;
+}
+
+.variable-manager-ui-settings {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 8px;
+    padding: 0;
+    font-size: 12px;
+    color: var(--SmartThemeBodyColor, #ccc);
+    white-space: nowrap;
+    flex-shrink: 0;
+    vertical-align: middle;
+    height: 100%;
+    line-height: 1;
+    font-family: inherit;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.variable-manager-ui-label {
+    opacity: 0.7;
+    letter-spacing: 0.3px;
+}
+
+.variable-manager-place-label {
+    opacity: 0.9;
+    margin-left: 4px;
+}
+
+.variable-manager-visible-checkbox {
+    cursor: pointer;
+    margin: 0 0 0 2px;
+    width: 16px;
+    height: 16px;
+    vertical-align: middle;
+    accent-color: #64b5f6;
+}
+
+.variable-manager-visible-checkbox:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
