@@ -1,7 +1,7 @@
 // variable_manager.js
-// 画面左上にロアブックの「現在のエントリ」の変数を表示する。
+// 画面左上にロアブックの「現在のエントリ」の変数の値を表示する。
 //   - 現在のエントリ = 最後のユーザーメッセージの番号に対応するロアブックエントリ
-//   - ユーザーメッセージが未送信の場合は「000」をフォールバック
+//   - 変数値のみを文字列として表示（ヘッダー・折りたたみ・枠なし）
 //   - キャラクター管理メニューに「UI設定 / 開始ボタン / 場所」を追加し、
 //     キャラ毎の表示/非表示・開始ボタン有無を切り替える（extensionSettings に永続化）
 
@@ -11,10 +11,8 @@
     const PANEL_ID = 'variable-manager-panel';
     const STYLE_ID = 'variable-manager-style';
     const FALLBACK_CHOICE = '000';
-    const STORAGE_KEY_COLLAPSED = 'variable_manager_collapsed';
     const POLL_INTERVAL_MS = 1500;
 
-    // ★ UI設定用
     const UI_SETTINGS_CLASS = 'variable-manager-ui-settings';
     const VISIBLE_CHECKBOX_ID = 'variable-manager-visible-checkbox';
     const START_CHECKBOX_ID = 'variable-manager-start-checkbox';
@@ -47,7 +45,6 @@
                     window.LorebookExpansion?.loadWorldInfoEntriesByName) {
                     resolve(true);
                 } else if (Date.now() - start > maxWaitMs) {
-                    console.warn(LOG, 'LorebookExpansion が利用可能になりませんでした');
                     resolve(false);
                 } else {
                     setTimeout(check, 200);
@@ -128,17 +125,14 @@
             data = window.LorebookExpansion.getDataFor(worldName, uid, entry);
         } catch (e) { return { ok: false, reason: 'data-error' }; }
 
-        const entryKeyRaw = entry.comment || (entry.keys?.[0] || entry.key?.[0]) || String(uid);
-        const entryKey = String(entryKeyRaw).trim();
-
         return {
-            ok: true, worldName, choiceNum, entryKey,
+            ok: true,
             variables: Array.isArray(data?.variables) ? data.variables : []
         };
     }
 
     // ============================================================
-    // ★ UI設定
+    // UI設定
     // ============================================================
     function getCurrentCharName() {
         try {
@@ -173,7 +167,7 @@
         try {
             const ctx = getSTContext();
             if (typeof ctx?.saveSettingsDebounced === 'function') ctx.saveSettingsDebounced();
-        } catch (e) { console.warn(LOG, 'save visible map failed:', e); }
+        } catch (e) { /* ignore */ }
     }
 
     function getStartButtonMap() {
@@ -190,7 +184,7 @@
         try {
             const ctx = getSTContext();
             if (typeof ctx?.saveSettingsDebounced === 'function') ctx.saveSettingsDebounced();
-        } catch (e) { console.warn(LOG, 'save start button map failed:', e); }
+        } catch (e) { /* ignore */ }
     }
 
     function isVisibleForChar(charName) {
@@ -236,13 +230,12 @@
         const container = document.createElement('div');
         container.className = UI_SETTINGS_CLASS;
 
-        // UI設定（太字）
         const uiLabel = document.createElement('span');
         uiLabel.className = 'variable-manager-ui-label';
         uiLabel.textContent = 'UI設定';
         container.appendChild(uiLabel);
 
-        // 開始ボタン（チェックボックス）
+        // 開始ボタン
         const startWrap = document.createElement('label');
         startWrap.className = 'variable-manager-checkbox-wrap';
         startWrap.title = 'ゲーム開始ボタンを表示（キャラ毎に保存）';
@@ -269,7 +262,7 @@
         });
         container.appendChild(startWrap);
 
-        // 場所（チェックボックス）
+        // 場所
         const placeWrap = document.createElement('label');
         placeWrap.className = 'variable-manager-checkbox-wrap';
         placeWrap.title = '変数ウインドウを表示（キャラ毎に保存）';
@@ -322,7 +315,7 @@
         obs.observe(document.body, { childList: true, subtree: true });
     }
 
-    // ---- パネル生成 ----
+    // ---- パネル（変数値のみのシンプルなテキスト表示） ----
     function ensurePanel() {
         let panel = document.getElementById(PANEL_ID);
         if (panel) return panel;
@@ -330,98 +323,46 @@
         panel = document.createElement('div');
         panel.id = PANEL_ID;
         panel.className = 'variable-manager-panel variable-manager-disabled';
-
-        const header = document.createElement('div');
-        header.className = 'variable-manager-header';
-
-        const title = document.createElement('span');
-        title.className = 'variable-manager-title';
-        title.textContent = '変数';
-        header.appendChild(title);
-
-        const toggleBtn = document.createElement('button');
-        toggleBtn.type = 'button';
-        toggleBtn.className = 'variable-manager-toggle';
-        toggleBtn.textContent = '−';
-        toggleBtn.title = '表示/非表示';
-        toggleBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            panel.classList.toggle('collapsed');
-            const isCollapsed = panel.classList.contains('collapsed');
-            toggleBtn.textContent = isCollapsed ? '+' : '−';
-            try { localStorage.setItem(STORAGE_KEY_COLLAPSED, isCollapsed ? '1' : '0'); } catch (err) { /* ignore */ }
-        });
-        header.appendChild(toggleBtn);
-
-        panel.appendChild(header);
-
-        const body = document.createElement('div');
-        body.className = 'variable-manager-body';
-        panel.appendChild(body);
-
         document.body.appendChild(panel);
-
-        try {
-            if (localStorage.getItem(STORAGE_KEY_COLLAPSED) === '1') {
-                panel.classList.add('collapsed');
-                toggleBtn.textContent = '+';
-            }
-        } catch (e) { /* ignore */ }
-
         return panel;
     }
 
     function renderPanel(panel, result) {
-        const title = panel.querySelector('.variable-manager-title');
-        const body = panel.querySelector('.variable-manager-body');
-        if (!title || !body) return;
+        if (!panel) return;
 
-        if (!result.ok) {
-            if (result.reason === 'no-world') {
-                title.textContent = '変数 (ロアブックなし)';
-            } else if (result.reason === 'no-entry') {
-                title.textContent = `${result.choiceNum || '?'} (エントリなし)`;
-            } else {
-                title.textContent = '変数';
+        if (!result.ok || !Array.isArray(result.variables) || result.variables.length === 0) {
+            if (_lastRenderKey !== '') {
+                panel.innerHTML = '';
+                _lastRenderKey = '';
             }
-            title.title = '';
-            body.innerHTML = '<div class="variable-manager-empty">—</div>';
-            _lastRenderKey = '';
             return;
         }
 
-        title.textContent = result.entryKey || '変数';
-        title.title = `${result.entryKey} (${result.choiceNum}) — ${result.worldName}`;
+        // 空値はスキップして表示対象の値だけ抽出
+        const values = [];
+        for (const v of result.variables) {
+            if (v.value === '' || v.value === null || v.value === undefined) continue;
+            values.push(String(v.value));
+        }
 
-        if (result.variables.length === 0) {
-            body.innerHTML = '<div class="variable-manager-empty">変数なし</div>';
-            _lastRenderKey = '';
+        if (values.length === 0) {
+            if (_lastRenderKey !== '') {
+                panel.innerHTML = '';
+                _lastRenderKey = '';
+            }
             return;
         }
 
-        const key = result.entryKey + '|' + JSON.stringify(result.variables);
+        const key = JSON.stringify(values);
         if (key === _lastRenderKey) return;
         _lastRenderKey = key;
 
-        body.innerHTML = '';
-        for (const v of result.variables) {
-            const row = document.createElement('div');
-            row.className = 'variable-manager-row';
-
-            const nameEl = document.createElement('span');
-            nameEl.className = 'variable-manager-name';
-            nameEl.textContent = v.name || '(無名)';
-            row.appendChild(nameEl);
-
-            const valueEl = document.createElement('span');
-            valueEl.className = 'variable-manager-value';
-            valueEl.dataset.type = v.type === 'number' ? 'number' : 'string';
-            const isEmpty = (v.value === '' || v.value === null || v.value === undefined);
-            valueEl.textContent = isEmpty ? '(空)' : String(v.value);
-            if (isEmpty) valueEl.classList.add('empty');
-            row.appendChild(valueEl);
-
-            body.appendChild(row);
+        panel.innerHTML = '';
+        for (const val of values) {
+            const line = document.createElement('div');
+            line.className = 'variable-manager-value-text';
+            line.textContent = val;
+            panel.appendChild(line);
         }
     }
 
@@ -466,7 +407,7 @@
                     if (et[name] && typeof es.on === 'function') es.on(et[name], scheduleRender);
                 }
             }
-        } catch (e) { console.warn(LOG, 'event listener setup failed:', e); }
+        } catch (e) { /* ignore */ }
     }
 
     async function init() {
