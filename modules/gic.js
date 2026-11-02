@@ -269,6 +269,49 @@ function getImagePrompt(charName, fileName) {
 }
 
 // ============================================================
+// ★ ネガティブプロンプト保管庫
+// ============================================================
+const NEGATIVE_PROMPT_STORE_KEY = 'gic_negative_prompt_store_v1';
+let _negPromptStore = null;
+
+function loadNegPromptStore() {
+    if (_negPromptStore !== null) return _negPromptStore;
+    try {
+        const raw = localStorage.getItem(NEGATIVE_PROMPT_STORE_KEY);
+        _negPromptStore = raw ? JSON.parse(raw) : {};
+        if (typeof _negPromptStore !== 'object' || _negPromptStore === null) {
+            _negPromptStore = {};
+        }
+    } catch (e) {
+        _negPromptStore = {};
+    }
+    return _negPromptStore;
+}
+
+function saveNegPromptStore() {
+    if (!_negPromptStore) return;
+    try {
+        localStorage.setItem(NEGATIVE_PROMPT_STORE_KEY, JSON.stringify(_negPromptStore));
+    } catch (e) {
+        console.warn('[GIC] negative prompt store save failed:', e);
+    }
+}
+
+function setImageNegativePrompt(charName, fileName, prompt) {
+    if (!charName || !fileName) return;
+    if (typeof prompt !== 'string' || !prompt.trim()) return;
+    const store = loadNegPromptStore();
+    store[`${charName}:${fileName}`] = prompt;
+    saveNegPromptStore();
+}
+
+function getImageNegativePrompt(charName, fileName) {
+    if (!charName || !fileName) return null;
+    const store = loadNegPromptStore();
+    return store[`${charName}:${fileName}`] || null;
+}
+
+// ============================================================
 // ★ /api/images/list で「元画像 → サムネイル」置換
 //    - _img_thum.png 自体はリストから除外（2倍表示防止）
 //    - 動画サムネイル (_thum.png) は置換対象外（二重サムネ防止）
@@ -1577,6 +1620,10 @@ async function maybeRenameGeneratedImage(message, originalUrl) {
     if (ctx?.prompt && ctx?.entryKey) {
         setImagePrompt(charFolder, oldFileName, ctx.prompt);
     }
+    // ★ ネガティブプロンプトも同様に元ファイル名で保存
+    if (ctx?.negativePrompt && ctx?.entryKey) {
+        setImageNegativePrompt(charFolder, oldFileName, ctx.negativePrompt);
+    }
 
     if (!ctx || !ctx.entryKey) return null;
     if (Date.now() - (ctx.triggeredAt || 0) > 60000) return null;
@@ -1678,6 +1725,11 @@ async function maybeRenameGeneratedImage(message, originalUrl) {
     if (ctx.prompt) {
         setImagePrompt(charFolder, newFileName, ctx.prompt);
         console.log(`[GIC] 📝 プロンプト保存: ${charFolder}/${newFileName}`);
+    }
+    // ★ リネーム後のファイル名でもネガティブプロンプトを保存
+    if (ctx.negativePrompt) {
+        setImageNegativePrompt(charFolder, newFileName, ctx.negativePrompt);
+        console.log(`[GIC] 📝 ネガティブプロンプト保存: ${charFolder}/${newFileName}`);
     }
 
     // ---- コンテキストをクリア ----
@@ -4265,7 +4317,7 @@ function createPromptOverlay(panel) {
         align-items: flex-start;
     `;
 
-    // ★ キーワード表示用ラベル（プロンプトをコピーボタンと同外観・機能なし）
+    // ── キーワードラベル（機能なし） ──
     const keywordBtn = document.createElement('div');
     keywordBtn.className = 'gic-keyword-label-btn';
     keywordBtn.textContent = 'キーワード';
@@ -4284,7 +4336,7 @@ function createPromptOverlay(panel) {
     `;
     overlay.appendChild(keywordBtn);
 
-    // ★ キーワード本文（20px・白文字・黒背景 + 黒枠）
+    // ── キーワード本文 ──
     const keywordText = document.createElement('div');
     keywordText.className = 'gic-keyword-text';
     keywordText.style.cssText = `
@@ -4307,41 +4359,80 @@ function createPromptOverlay(panel) {
     `;
     overlay.appendChild(keywordText);
 
-    // ★ コピーボタン（プロンプトパネルより上に表示）
-    const copyBtn = document.createElement('button');
-    copyBtn.type = 'button';
-    copyBtn.className = PROMPT_COPY_BTN_CLASS;
-    copyBtn.textContent = 'プロンプトをコピー';
-    copyBtn.style.cssText = `
-        align-self: flex-start;
-        padding: 6px 12px;
-        background: #444;
-        color: #ffffff;
-        border: 1px solid #666;
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 12px;
-        font-family: inherit;
+    // ── コピーボタン群（3つを1行に） ──
+    const copyRow = document.createElement('div');
+    copyRow.className = 'gic-copy-row';
+    copyRow.style.cssText = `
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: flex-start;
         pointer-events: auto;
+        align-self: flex-start;
     `;
-    copyBtn.addEventListener('mouseenter', () => { copyBtn.style.background = '#666'; });
-    copyBtn.addEventListener('mouseleave', () => { copyBtn.style.background = '#444'; });
-    copyBtn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        const text = promptPanel.textContent || '';
-        const ok = await copyPromptToClipboard(text);
-        if (ok) {
-            showCopyToast('クリップボードにプロンプトをコピーしました');
-        } else {
-            showCopyToast('コピーに失敗しました');
-        }
-    });
-    overlay.appendChild(copyBtn);
 
-    // ★ プロンプトパネル（コピーボタンの下に表示）
+    const makeButton = (text, className) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = className;
+        btn.textContent = text;
+        btn.style.cssText = `
+            padding: 6px 12px;
+            background: #444;
+            color: #ffffff;
+            border: 1px solid #666;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-family: inherit;
+            pointer-events: auto;
+        `;
+        btn.addEventListener('mouseenter', () => { btn.style.background = '#666'; });
+        btn.addEventListener('mouseleave', () => { btn.style.background = '#444'; });
+        return btn;
+    };
+
+    // プロンプトをコピー
+    const copyBtn = makeButton('プロンプトをコピー', 'gic-prompt-copy');
+    copyBtn.addEventListener('click', async (e) => {
+        e.stopPropagation(); e.preventDefault();
+        const p = overlay.querySelector('.gic-prompt-panel');
+        const text = p ? (p.textContent || '') : '';
+        const ok = await copyPromptToClipboard(text);
+        showCopyToast(ok ? 'プロンプトをコピーしました' : 'コピーに失敗しました');
+    });
+    copyRow.appendChild(copyBtn);
+
+    // ネガティブをコピー
+    const copyNegBtn = makeButton('ネガティブをコピー', 'gic-negative-prompt-copy');
+    copyNegBtn.addEventListener('click', async (e) => {
+        e.stopPropagation(); e.preventDefault();
+        const p = overlay.querySelector('.gic-negative-prompt-panel');
+        const text = p ? (p.textContent || '') : '';
+        const ok = await copyPromptToClipboard(text);
+        showCopyToast(ok ? 'ネガティブプロンプトをコピーしました' : 'コピーに失敗しました');
+    });
+    copyRow.appendChild(copyNegBtn);
+
+    // 両方コピー（positive\n\nnegative）
+    const copyBothBtn = makeButton('両方コピー', 'gic-both-prompt-copy');
+    copyBothBtn.addEventListener('click', async (e) => {
+        e.stopPropagation(); e.preventDefault();
+        const p = overlay.querySelector('.gic-prompt-panel');
+        const n = overlay.querySelector('.gic-negative-prompt-panel');
+        const posText = (p && p.style.display !== 'none') ? (p.textContent || '') : '';
+        const negText = (n && n.style.display !== 'none') ? (n.textContent || '') : '';
+        const combined = [posText, negText].filter(Boolean).join('\n\n');
+        const ok = await copyPromptToClipboard(combined);
+        showCopyToast(ok ? 'プロンプトとネガティブをコピーしました' : 'コピーに失敗しました');
+    });
+    copyRow.appendChild(copyBothBtn);
+
+    overlay.appendChild(copyRow);
+
+    // ── ポジティブプロンプトパネル ──
     const promptPanel = document.createElement('div');
-    promptPanel.className = PROMPT_PANEL_CLASS;
+    promptPanel.className = 'gic-prompt-panel';
     promptPanel.style.cssText = `
         background: rgba(0, 0, 0, 0.88);
         color: #ffffff;
@@ -4360,6 +4451,28 @@ function createPromptOverlay(panel) {
         width: 100%;
     `;
     overlay.appendChild(promptPanel);
+
+    // ── ネガティブプロンプトパネル ──
+    const negPanel = document.createElement('div');
+    negPanel.className = 'gic-negative-prompt-panel';
+    negPanel.style.cssText = `
+        background: rgba(40, 0, 0, 0.88);
+        color: #ffcccc;
+        padding: 10px 12px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-family: monospace;
+        white-space: pre-wrap;
+        word-break: break-word;
+        overflow-wrap: anywhere;
+        border: 1px solid #884444;
+        box-sizing: border-box;
+        line-height: 1.4;
+        max-height: calc(100vh - 120px);
+        overflow-y: auto;
+        width: 100%;
+    `;
+    overlay.appendChild(negPanel);
 
     panel.appendChild(overlay);
     return overlay;
@@ -4424,20 +4537,50 @@ function updatePromptOverlay(panel) {
     const fileName = img.dataset?.gicOrigFile;
     if (!charName || !fileName) { removePromptOverlay(panel); return; }
 
-    const prompt = getImagePrompt(charName, fileName);
-    if (!prompt) { removePromptOverlay(panel); return; }
+    const prompt = getImagePrompt(charName, fileName) || '';
+    const negativePrompt = getImageNegativePrompt(charName, fileName) || '';
+
+    // どちらも無ければ何も表示しない
+    if (!prompt && !negativePrompt) { removePromptOverlay(panel); return; }
 
     let overlay = panel.querySelector('.' + PROMPT_OVERLAY_CLASS);
     if (!overlay) {
         overlay = createPromptOverlay(panel);
     }
 
-    const promptPanel = overlay.querySelector('.' + PROMPT_PANEL_CLASS);
-    if (promptPanel && promptPanel.textContent !== prompt) {
-        promptPanel.textContent = prompt;
+    // ── ポジティブパネル ──
+    const promptPanel = overlay.querySelector('.gic-prompt-panel');
+    if (promptPanel) {
+        if (prompt) {
+            promptPanel.style.display = '';
+            if (promptPanel.textContent !== prompt) promptPanel.textContent = prompt;
+        } else {
+            promptPanel.style.display = 'none';
+        }
     }
 
-    // ★ キーワード表示制御（マッピングがある場合のみ表示）
+    // ── ネガティブパネル ──
+    const negPanel = overlay.querySelector('.gic-negative-prompt-panel');
+    if (negPanel) {
+        if (negativePrompt) {
+            negPanel.style.display = '';
+            if (negPanel.textContent !== negativePrompt) negPanel.textContent = negativePrompt;
+        } else {
+            negPanel.style.display = 'none';
+        }
+    }
+
+    // ── コピーボタンの表示制御 ──
+    const copyBtn = overlay.querySelector('.gic-prompt-copy');
+    if (copyBtn) copyBtn.style.display = prompt ? '' : 'none';
+
+    const copyNegBtn = overlay.querySelector('.gic-negative-prompt-copy');
+    if (copyNegBtn) copyNegBtn.style.display = negativePrompt ? '' : 'none';
+
+    const copyBothBtn = overlay.querySelector('.gic-both-prompt-copy');
+    if (copyBothBtn) copyBothBtn.style.display = (prompt || negativePrompt) ? '' : 'none';
+
+    // ── キーワード表示制御（既存） ──
     const keyword = getKeywordForImage(charName, fileName);
     const keywordBtn = overlay.querySelector('.gic-keyword-label-btn');
     const keywordText = overlay.querySelector('.gic-keyword-text');
