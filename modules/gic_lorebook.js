@@ -545,68 +545,95 @@ async function executeSd(prompt, negativePrompt = null) {
 
     const hasNeg = negativePrompt && negativePrompt.trim();
     const cleanNeg = hasNeg ? cleanPrompt(negativePrompt).replace(/[\r\n]+/g, ' ') : '';
-    const escapedNeg = hasNeg ? cleanNeg.replace(/"/g, '\\"') : '';
 
-    let cmd;
+    // ★ SillyTavern の SD 拡張は negative_prompt を「名前付き引数」では受け付けない。
+    //    代わりに extensionSettings.sd.negative_prompt を直接読み取って
+    //    ComfyUI ワークフローの {{negative_prompt}} に流し込む仕様。
+    //    → 生成直前に一時的に設定を差し替え、生成完了後に元に戻す。
+    let ctx = null;
+    let originalNegPrompt = null;
+    let settingsModified = false;
+
     if (hasNeg) {
-        cmd = settings.quiet
-            ? `/sd quiet=true negative_prompt="${escapedNeg}" "${escaped}"`
-            : `/sd negative_prompt="${escapedNeg}" "${escaped}"`;
-    } else {
-        cmd = settings.quiet
-            ? `/sd quiet=true "${escaped}"`
-            : `/sd "${escaped}"`;
+        try {
+            ctx = getContext();
+            const sdSettings = ctx?.extensionSettings?.sd;
+            if (sdSettings && typeof sdSettings.negative_prompt === 'string') {
+                originalNegPrompt = sdSettings.negative_prompt;
+                sdSettings.negative_prompt = cleanNeg;
+                settingsModified = true;
+                console.log(`[GIC-Lore] 🔧 SDネガティブプロンプトを一時設定: "${cleanNeg.slice(0, 100)}${cleanNeg.length > 100 ? '...' : ''}"`);
+            } else {
+                console.warn('[GIC-Lore] SD設定に negative_prompt が見つかりません（SD拡張未初期化の可能性）');
+            }
+        } catch (e) {
+            console.warn('[GIC-Lore] SDネガティブプロンプト設定エラー:', e);
+        }
     }
+
+    // ★ コマンドは quiet のみ（negative_prompt は設定経由で渡る）
+    const cmd = settings.quiet
+        ? `/sd quiet=true "${escaped}"`
+        : `/sd "${escaped}"`;
 
     console.log(`[GIC-Lore] /sd 実行試行: ${cmd.slice(0, 120)}${cmd.length > 120 ? '...' : ''}`);
 
     try {
-        const mod = await import('../../../../../script.js');
-        if (typeof mod.executeSlashCommandsWithOptions === 'function') {
-            await mod.executeSlashCommandsWithOptions(cmd);
-            console.log('[GIC-Lore] ✅ 方式1 成功');
-            return true;
-        }
-    } catch (e) {
-        console.warn('[GIC-Lore] 方式1 失敗:', e?.message || e);
-    }
-
-    try {
-        if (typeof window.executeSlashCommandsWithOptions === 'function') {
-            await window.executeSlashCommandsWithOptions(cmd);
-            console.log('[GIC-Lore] ✅ 方式2 成功');
-            return true;
-        }
-    } catch (e) {
-        console.warn('[GIC-Lore] 方式2 失敗:', e?.message || e);
-    }
-
-    try {
-        const { parser } = await loadSlashModules();
-        const sdCmd = parser?.commands?.['sd'];
-        if (sdCmd && typeof sdCmd.callback === 'function') {
-            const namedArgs = {};
-            if (settings.quiet) namedArgs.quiet = 'true';
-            if (hasNeg) namedArgs.negative_prompt = cleanNeg;
-            const unnamedArgs = rawPrompt;
-            try {
-                await sdCmd.callback(namedArgs, unnamedArgs, true);
-            } catch (e1) {
-                try {
-                    await sdCmd.callback(unnamedArgs, namedArgs);
-                } catch (e2) {
-                    await sdCmd.callback({ _scope: null, _abortController: null }, unnamedArgs, true);
-                }
+        // 方式1: script.js 経由
+        try {
+            const mod = await import('../../../../../script.js');
+            if (typeof mod.executeSlashCommandsWithOptions === 'function') {
+                await mod.executeSlashCommandsWithOptions(cmd);
+                console.log('[GIC-Lore] ✅ 方式1 成功');
+                return true;
             }
-            console.log('[GIC-Lore] ✅ 方式3 成功');
-            return true;
+        } catch (e) {
+            console.warn('[GIC-Lore] 方式1 失敗:', e?.message || e);
         }
-    } catch (e) {
-        console.warn('[GIC-Lore] 方式3 失敗:', e?.message || e);
-    }
 
-    console.error('[GIC-Lore] ❌ /sd を実行する全ての方式が失敗しました');
-    return false;
+        // 方式2: window 経由
+        try {
+            if (typeof window.executeSlashCommandsWithOptions === 'function') {
+                await window.executeSlashCommandsWithOptions(cmd);
+                console.log('[GIC-Lore] ✅ 方式2 成功');
+                return true;
+            }
+        } catch (e) {
+            console.warn('[GIC-Lore] 方式2 失敗:', e?.message || e);
+        }
+
+        // 方式3: SlashCommandParser 直叩き
+        try {
+            const { parser } = await loadSlashModules();
+            const sdCmd = parser?.commands?.['sd'];
+            if (sdCmd && typeof sdCmd.callback === 'function') {
+                const namedArgs = settings.quiet ? { quiet: 'true' } : {};
+                const unnamedArgs = rawPrompt;
+                try {
+                    await sdCmd.callback(namedArgs, unnamedArgs, true);
+                } catch (e1) {
+                    try {
+                        await sdCmd.callback(unnamedArgs, namedArgs);
+                    } catch (e2) {
+                        await sdCmd.callback({ _scope: null, _abortController: null }, unnamedArgs, true);
+                    }
+                }
+                console.log('[GIC-Lore] ✅ 方式3 成功');
+                return true;
+            }
+        } catch (e) {
+            console.warn('[GIC-Lore] 方式3 失敗:', e?.message || e);
+        }
+
+        console.error('[GIC-Lore] ❌ /sd を実行する全ての方式が失敗しました');
+        return false;
+    } finally {
+        // ★ SD設定のネガティブプロンプトを元に戻す
+        if (settingsModified && ctx?.extensionSettings?.sd) {
+            ctx.extensionSettings.sd.negative_prompt = originalNegPrompt;
+            console.log(`[GIC-Lore] 🔧 SDネガティブプロンプトを復元: "${(originalNegPrompt || '').slice(0, 100)}${(originalNegPrompt || '').length > 100 ? '...' : ''}"`);
+        }
+    }
 }
 
 // ===== メイン処理 =====
