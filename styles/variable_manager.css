@@ -54,14 +54,14 @@
     top: 100px;
 }
 
-/* HPバー: 敵キャラの名前から 50px 下（= 場所から 150px） */
+/* HPバー: 敵キャラの名前から 50px 下 + 10px = 場所から 160px */
 .variable-hp-bar-wrap {
     position: absolute;
     left: 0;
-    top: 150px;
-    width: 220px;
+    top: 160px;
+    width: 330px;              /* ★ 220px → 330px（1.5倍） */
     height: 26px;
-    border: 2px solid #000000;
+    border: 4px solid #000000; /* ★ 2px → 4px（太く） */
     border-radius: 4px;
     background: rgba(0, 0, 0, 0.55);
     box-sizing: border-box;
@@ -77,6 +77,33 @@
     background: linear-gradient(90deg, #00c800 0%, #3fdd3f 100%);
     box-shadow: inset 0 0 6px rgba(255, 255, 255, 0.35);
     transition: width 0.3s ease-out;
+}
+
+/* ★ 現在HPの数値表示（バー右端に重ねる） */
+.variable-hp-text {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    font-size: 16px;
+    font-weight: bold;
+    color: #ffffff;
+    -webkit-text-stroke: 3px #000000;
+    paint-order: stroke fill;
+    text-shadow:
+        -1px -1px 0 #000,
+         1px -1px 0 #000,
+        -1px  1px 0 #000,
+         1px  1px 0 #000,
+         0 0 4px rgba(0, 0, 0, 0.9);
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+    line-height: 1;
+    z-index: 2;
 }
 
 /* ============================================================
