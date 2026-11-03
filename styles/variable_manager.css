@@ -197,3 +197,47 @@
     min-width: 0 !important;
     font-size: calc(var(--mainFontSize) * 0.95);
 }
+
+/* ============================================================
+ * ★ バトル開始ボタン（AIメッセージ末尾）
+ * ============================================================ */
+.variable-battle-start-btn {
+    display: inline-block;
+    margin: 12px 0 8px 0;
+    padding: 14px 32px;
+    background: #8b0000;
+    color: #ffffff;
+    border: 3px solid #ff4040;
+    border-radius: 8px;
+    font-size: 20px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-family: inherit;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+    letter-spacing: 0.05em;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.variable-battle-start-btn:hover {
+    background: #ff0000;
+    transform: scale(1.05);
+    box-shadow: 0 4px 16px rgba(255, 64, 64, 0.6);
+}
+
+.variable-battle-start-btn:active {
+    transform: scale(0.98);
+}
+
+/* ============================================================
+ * ★ バトル中はチャット・入力欄・ヘッダーを非表示
+ *    （chat_window_onoff.js の chat-window-is-hidden とは独立）
+ * ============================================================ */
+body.variable-battle-active #chat,
+body.variable-battle-active #form_sheld,
+body.variable-battle-active #sheldheader {
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
