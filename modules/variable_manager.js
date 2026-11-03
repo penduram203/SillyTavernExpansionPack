@@ -2,15 +2,15 @@
 // 画面左上にロアブックの「現在のエントリ」の変数の値を表示する。
 //   - 現在のエントリ = 最後のユーザーメッセージの番号に対応するロアブックエントリ
 //   - 変数値のみを文字列として表示（ヘッダー・折りたたみ・枠なし）
-//   - キャラクター管理メニューに「UI設定 / 開始ボタン / 場所」を追加し、
-//     キャラ毎の表示/非表示・開始ボタン有無を切り替える（extensionSettings に永続化）
+//   - 「場所」は常に表示、敵キャラの名前/HPはバトル開始後のみ表示
+//   - 「バトルモード」が 1 の時、AIメッセージ末尾に「バトル開始」ボタンを表示
+//   - キャラクター管理メニューに「UI設定 / 開始ボタン / 場所」を追加
 
 (function () {
     'use strict';
     const LOG = '[VarManager]';
     const PANEL_ID = 'variable-manager-panel';
     const STYLE_ID = 'variable-manager-style';
-    const FALLBACK_CHOICE = '000';
     const POLL_INTERVAL_MS = 1500;
 
     const UI_SETTINGS_CLASS = 'variable-manager-ui-settings';
@@ -18,11 +18,16 @@
     const START_CHECKBOX_ID = 'variable-manager-start-checkbox';
     const EXT_SETTINGS_KEY = 'variable_manager';
     const EVENT_START_CHANGED = 'variable-manager-start-changed';
+    const BATTLE_START_BTN_CLASS = 'variable-battle-start-btn';
 
     let _lastRenderKey = '';
     let _renderInFlight = false;
     let _initialized = false;
     let _uiObsPending = false;
+
+    // ★ バトル状態
+    let _battleActive = false;
+    let _battlePrevChatHidden = null;
 
     (function injectStyle() {
         if (document.getElementById(STYLE_ID)) return;
@@ -97,7 +102,7 @@
             }
             if (num) return num;
         }
-        return null;  // ★ '000' → null に変更
+        return null;
     }
 
     async function getCurrentVariables() {
@@ -105,10 +110,7 @@
         if (!worldName) return { ok: false, reason: 'no-world' };
 
         const choiceNum = getLastChoiceNumber();
-        if (!choiceNum) {
-            // ★ ユーザーがまだ何も選択していない
-            return { ok: false, reason: 'no-choice' };
-        }
+        if (!choiceNum) return { ok: false, reason: 'no-choice' };
 
         let entries = null;
         try {
@@ -239,7 +241,7 @@
         uiLabel.textContent = 'UI設定';
         container.appendChild(uiLabel);
 
-        // 開始ボタン（チェックボックス）
+        // 開始ボタン
         const startWrap = document.createElement('label');
         startWrap.className = 'variable-manager-checkbox-wrap';
         startWrap.title = 'ゲーム開始ボタンを表示（キャラ毎に保存）';
@@ -266,7 +268,7 @@
         });
         container.appendChild(startWrap);
 
-        // 場所（チェックボックス）
+        // 場所
         const placeWrap = document.createElement('label');
         placeWrap.className = 'variable-manager-checkbox-wrap';
         placeWrap.title = '変数ウインドウを表示（キャラ毎に保存）';
@@ -326,7 +328,7 @@
         obs.observe(document.body, { childList: true, subtree: true });
     }
 
-    // ---- パネル（変数値のみのシンプルなテキスト表示） ----
+    // ---- パネル ----
     function ensurePanel() {
         let panel = document.getElementById(PANEL_ID);
         if (panel) return panel;
@@ -338,10 +340,86 @@
         return panel;
     }
 
-    function renderPanel(panel, result) {
-        if (!panel) return;
+    // ============================================================
+    // ★ バトルモード制御
+    // ============================================================
+    function getLastAiMessageIndex() {
+        const ctx = getSTContext();
+        if (!ctx?.chat || ctx.chat.length === 0) return -1;
+        for (let i = ctx.chat.length - 1; i >= 0; i--) {
+            const m = ctx.chat[i];
+            if (m.is_system) continue;
+            if (!m.is_user) return i;
+        }
+        return -1;
+    }
 
-        // 変数名 → 変数オブジェクト のマップ
+    function removeBattleStartButton() {
+        document.querySelectorAll('.' + BATTLE_START_BTN_CLASS).forEach(el => el.remove());
+    }
+
+    function addBattleStartButton() {
+        const lastAiIdx = getLastAiMessageIndex();
+        if (lastAiIdx < 0) {
+            removeBattleStartButton();
+            return;
+        }
+
+        const mesEl = document.querySelector(`.mes[mesid="${lastAiIdx}"]`);
+        if (!mesEl) {
+            removeBattleStartButton();
+            return;
+        }
+
+        const mesTextEl = mesEl.querySelector('.mes_text');
+        if (!mesTextEl) {
+            removeBattleStartButton();
+            return;
+        }
+
+        // 既に正しい位置に存在すれば何もしない
+        if (mesTextEl.querySelector(':scope > .' + BATTLE_START_BTN_CLASS)) return;
+
+        // 他の位置のボタンを除去
+        document.querySelectorAll('.' + BATTLE_START_BTN_CLASS).forEach(el => el.remove());
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = BATTLE_START_BTN_CLASS;
+        btn.textContent = 'バトル開始';
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            startBattle();
+        });
+
+        mesTextEl.appendChild(btn);
+    }
+
+    function startBattle() {
+        if (_battleActive) return;
+        _battleActive = true;
+        _battlePrevChatHidden = document.body.classList.contains('variable-battle-active');
+        document.body.classList.add('variable-battle-active');
+        removeBattleStartButton();
+        _lastRenderKey = '';
+        console.log(LOG, '⚔️ バトル開始');
+        render();
+    }
+
+    function endBattle() {
+        if (!_battleActive) return;
+        _battleActive = false;
+        if (!_battlePrevChatHidden) {
+            document.body.classList.remove('variable-battle-active');
+        }
+        _battlePrevChatHidden = null;
+        removeBattleStartButton();
+        _lastRenderKey = '';
+        console.log(LOG, '⚔️ バトル終了');
+    }
+
+    function updateBattleUI(result) {
         const varMap = {};
         if (result.ok && Array.isArray(result.variables)) {
             for (const v of result.variables) {
@@ -351,32 +429,56 @@
             }
         }
 
-        // バトルモード判定
         const battleModeRaw = varMap['バトルモード']?.value;
         const battleMode = String(battleModeRaw ?? '').trim() === '1';
 
-        // 表示計画を構築
-        const plan = {};
+        if (!battleMode) {
+            if (_battleActive) endBattle();
+            removeBattleStartButton();
+            return;
+        }
+
+        if (_battleActive) {
+            removeBattleStartButton();
+        } else {
+            addBattleStartButton();
+        }
+    }
+
+    // ============================================================
+    // レンダリング
+    // ============================================================
+    function renderPanel(panel, result) {
+        if (!panel) return;
+
+        const varMap = {};
+        if (result.ok && Array.isArray(result.variables)) {
+            for (const v of result.variables) {
+                if (v && typeof v.name === 'string' && v.name) {
+                    varMap[v.name] = v;
+                }
+            }
+        }
 
         // ── 場所（常に表示） ──
         const locVal = varMap['場所']?.value;
-        if (locVal !== undefined && locVal !== null && String(locVal).trim()) {
-            plan.location = String(locVal);
-        } else {
-            plan.location = '場所';   // プレースホルダ
-        }
+        const locationText = (locVal !== undefined && locVal !== null && String(locVal).trim())
+            ? String(locVal)
+            : '場所';
 
-        // ── バトルモード時のみ、敵キャラ情報 ──
-        if (battleMode) {
+        // ── 敵キャラ情報（バトル中のみ） ──
+        let enemyName = null;
+        let hp = null;
+        if (_battleActive) {
             const enemyNameVal = varMap['敵キャラの名前']?.value;
             if (enemyNameVal !== undefined && enemyNameVal !== null && String(enemyNameVal).trim()) {
-                plan.enemyName = String(enemyNameVal);
+                enemyName = String(enemyNameVal);
             }
 
             const curHP = parseFloat(varMap['敵キャラの現在HP']?.value);
             const maxHP = parseFloat(varMap['敵キャラの最大HP']?.value);
             if (isFinite(curHP) && isFinite(maxHP) && maxHP > 0) {
-                plan.hp = {
+                hp = {
                     cur: curHP,
                     max: maxHP,
                     ratio: Math.max(0, Math.min(1, curHP / maxHP)),
@@ -384,44 +486,43 @@
             }
         }
 
-        // 前回と同一内容なら再描画スキップ
-        const signature = JSON.stringify(plan);
+        const signature = JSON.stringify({ locationText, enemyName, hp });
         if (signature === _lastRenderKey) return;
         _lastRenderKey = signature;
 
-        // 再構築
         panel.innerHTML = '';
 
         // ── 場所 ──
         const locEl = document.createElement('div');
         locEl.className = 'variable-manager-value-text variable-location';
-        locEl.textContent = plan.location;
+        locEl.textContent = locationText;
         panel.appendChild(locEl);
 
-        // ── 敵キャラの名前（バトルモード時のみ） ──
-        if (plan.enemyName !== undefined) {
+        // ── 敵キャラの名前 ──
+        if (enemyName) {
             const nameEl = document.createElement('div');
             nameEl.className = 'variable-manager-value-text variable-enemy-name';
-            nameEl.textContent = plan.enemyName;
+            nameEl.textContent = enemyName;
             panel.appendChild(nameEl);
         }
 
-        // ── HPバー（バトルモード時のみ） ──
-        if (plan.hp) {
+        // ── HPバー + 数値 ──
+        if (hp) {
+            // HPバー（枠 + 緑塗り）
             const wrap = document.createElement('div');
             wrap.className = 'variable-hp-bar-wrap';
 
             const bar = document.createElement('div');
             bar.className = 'variable-hp-bar';
-            bar.style.width = `${plan.hp.ratio * 100}%`;
+            bar.style.width = `${hp.ratio * 100}%`;
             wrap.appendChild(bar);
 
             panel.appendChild(wrap);
 
-            // ★ HP数値はバーの上に重ねる（バー右端に右寄せ配置）
+            // HP数値（バー右端に重ねる）
             const hpText = document.createElement('div');
             hpText.className = 'variable-hp-text';
-            hpText.textContent = String(Math.round(plan.hp.cur));
+            hpText.textContent = String(Math.round(hp.cur));
             panel.appendChild(hpText);
         }
     }
@@ -431,6 +532,9 @@
 
         const charName = getCurrentCharName();
         if (!isVisibleForChar(charName)) {
+            // パネル非表示: バトル状態も解除
+            if (_battleActive) endBattle();
+            removeBattleStartButton();
             _lastRenderKey = '';
             return;
         }
@@ -441,6 +545,7 @@
             const panel = ensurePanel();
             applyPanelVisibility();
             const result = await getCurrentVariables();
+            updateBattleUI(result);
             renderPanel(panel, result);
         } catch (e) {
             console.warn(LOG, 'render error:', e);
@@ -457,14 +562,24 @@
             if (ctx?.eventSource && ctx?.eventTypes) {
                 const et = ctx.eventTypes;
                 const es = ctx.eventSource;
+
+                const resetOnChange = () => {
+                    if (_battleActive) endBattle();
+                    scheduleRender();
+                };
+
                 const events = [
-                    'CHAT_CHANGED', 'CHARACTER_SELECTED',
                     'CHARACTER_MESSAGE_RENDERED', 'USER_MESSAGE_RENDERED',
                     'MESSAGE_EDITED', 'MESSAGE_DELETED', 'MESSAGE_SWIPED',
-                    'CHAT_LOADED', 'GENERATION_ENDED', 'CHARACTER_PAGE_LOADED',
+                    'CHAT_LOADED', 'GENERATION_ENDED',
                 ];
                 for (const name of events) {
                     if (et[name] && typeof es.on === 'function') es.on(et[name], scheduleRender);
+                }
+
+                const resetEvents = ['CHAT_CHANGED', 'CHARACTER_SELECTED', 'CHARACTER_PAGE_LOADED'];
+                for (const name of resetEvents) {
+                    if (et[name] && typeof es.on === 'function') es.on(et[name], resetOnChange);
                 }
             }
         } catch (e) { /* ignore */ }
@@ -498,6 +613,9 @@
         getCurrentVariables,
         isVisibleForChar,
         isStartButtonEnabledForChar,
+        isBattleActive: () => _battleActive,
+        startBattle,
+        endBattle,
         setVisibleForChar: (charName, visible) => {
             if (!charName) return false;
             const map = getVisibleByCharMap();
@@ -526,6 +644,7 @@
             currentChar: getCurrentCharName(),
             visibleMap: getVisibleByCharMap(),
             startButtonMap: getStartButtonMap(),
+            battleActive: _battleActive,
         }),
     };
 })();
