@@ -408,12 +408,6 @@
 
         // ── HPバー（バトルモード時のみ） ──
         if (plan.hp) {
-            // ★ HP数値はバーとは独立してパネル直下に配置（枠の外側・バーの左）
-            const hpText = document.createElement('div');
-            hpText.className = 'variable-hp-text';
-            hpText.textContent = String(Math.round(plan.hp.cur));
-            panel.appendChild(hpText);
-
             const wrap = document.createElement('div');
             wrap.className = 'variable-hp-bar-wrap';
 
@@ -423,6 +417,12 @@
             wrap.appendChild(bar);
 
             panel.appendChild(wrap);
+
+            // ★ HP数値はバーの上に重ねる（バー右端に右寄せ配置）
+            const hpText = document.createElement('div');
+            hpText.className = 'variable-hp-text';
+            hpText.textContent = String(Math.round(plan.hp.cur));
+            panel.appendChild(hpText);
         }
     }
 
