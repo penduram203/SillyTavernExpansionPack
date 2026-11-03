@@ -341,59 +341,82 @@
     function renderPanel(panel, result) {
         if (!panel) return;
 
-        if (!result.ok) {
-            // ★ 何も選択していない → 「場所」プレースホルダを表示
-            if (result.reason === 'no-choice') {
-                if (_lastRenderKey !== '__placeholder__') {
-                    _lastRenderKey = '__placeholder__';
-                    panel.innerHTML = '';
-                    const line = document.createElement('div');
-                    line.className = 'variable-manager-value-text';
-                    line.textContent = '場所';
-                    panel.appendChild(line);
+        // 変数名 → 変数オブジェクト のマップ
+        const varMap = {};
+        if (result.ok && Array.isArray(result.variables)) {
+            for (const v of result.variables) {
+                if (v && typeof v.name === 'string' && v.name) {
+                    varMap[v.name] = v;
                 }
-                return;
             }
-            // その他のエラー（no-world 等）は空表示
-            if (_lastRenderKey !== '') {
-                _lastRenderKey = '';
-                panel.innerHTML = '';
-            }
-            return;
         }
 
-        if (!Array.isArray(result.variables) || result.variables.length === 0) {
-            if (_lastRenderKey !== '') {
-                _lastRenderKey = '';
-                panel.innerHTML = '';
+        // バトルモード判定
+        const battleModeRaw = varMap['バトルモード']?.value;
+        const battleMode = String(battleModeRaw ?? '').trim() === '1';
+
+        // 表示計画を構築
+        const plan = {};
+
+        // ── 場所（常に表示） ──
+        const locVal = varMap['場所']?.value;
+        if (locVal !== undefined && locVal !== null && String(locVal).trim()) {
+            plan.location = String(locVal);
+        } else {
+            plan.location = '場所';   // プレースホルダ
+        }
+
+        // ── バトルモード時のみ、敵キャラ情報 ──
+        if (battleMode) {
+            const enemyNameVal = varMap['敵キャラの名前']?.value;
+            if (enemyNameVal !== undefined && enemyNameVal !== null && String(enemyNameVal).trim()) {
+                plan.enemyName = String(enemyNameVal);
             }
-            return;
-        }
 
-        const values = [];
-        for (const v of result.variables) {
-            if (v.value === '' || v.value === null || v.value === undefined) continue;
-            values.push(String(v.value));
-        }
-
-        if (values.length === 0) {
-            if (_lastRenderKey !== '') {
-                _lastRenderKey = '';
-                panel.innerHTML = '';
+            const curHP = parseFloat(varMap['敵キャラの現在HP']?.value);
+            const maxHP = parseFloat(varMap['敵キャラの最大HP']?.value);
+            if (isFinite(curHP) && isFinite(maxHP) && maxHP > 0) {
+                plan.hp = {
+                    cur: curHP,
+                    max: maxHP,
+                    ratio: Math.max(0, Math.min(1, curHP / maxHP)),
+                };
             }
-            return;
         }
 
-        const key = JSON.stringify(values);
-        if (key === _lastRenderKey) return;
-        _lastRenderKey = key;
+        // 前回と同一内容なら再描画スキップ
+        const signature = JSON.stringify(plan);
+        if (signature === _lastRenderKey) return;
+        _lastRenderKey = signature;
 
+        // 再構築
         panel.innerHTML = '';
-        for (const val of values) {
-            const line = document.createElement('div');
-            line.className = 'variable-manager-value-text';
-            line.textContent = val;
-            panel.appendChild(line);
+
+        // ── 場所 ──
+        const locEl = document.createElement('div');
+        locEl.className = 'variable-manager-value-text variable-location';
+        locEl.textContent = plan.location;
+        panel.appendChild(locEl);
+
+        // ── 敵キャラの名前（バトルモード時のみ） ──
+        if (plan.enemyName !== undefined) {
+            const nameEl = document.createElement('div');
+            nameEl.className = 'variable-manager-value-text variable-enemy-name';
+            nameEl.textContent = plan.enemyName;
+            panel.appendChild(nameEl);
+        }
+
+        // ── HPバー（バトルモード時のみ） ──
+        if (plan.hp) {
+            const wrap = document.createElement('div');
+            wrap.className = 'variable-hp-bar-wrap';
+
+            const bar = document.createElement('div');
+            bar.className = 'variable-hp-bar';
+            bar.style.width = `${plan.hp.ratio * 100}%`;
+            wrap.appendChild(bar);
+
+            panel.appendChild(wrap);
         }
     }
 
