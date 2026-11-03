@@ -15,9 +15,7 @@
     font-weight: bold;
     line-height: 1.25;
     text-align: left;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
+    /* 子要素は絶対配置のため幅・高さは不要（位置決めは各子要素で行う） */
 }
 
 #variable-manager-panel.variable-manager-disabled {
@@ -25,6 +23,8 @@
 }
 
 .variable-manager-value-text {
+    position: absolute;
+    left: 0;
     font-size: 40px;
     font-weight: bold;
     color: #ffffff;
@@ -42,6 +42,41 @@
          0 0 4px rgba(0, 0, 0, 0.85);
     letter-spacing: 0.5px;
     white-space: pre;
+}
+
+/* 場所: パネル基準の最上段 */
+.variable-location {
+    top: 0;
+}
+
+/* 敵キャラの名前: 場所から 100px 下 */
+.variable-enemy-name {
+    top: 100px;
+}
+
+/* HPバー: 敵キャラの名前から 50px 下（= 場所から 150px） */
+.variable-hp-bar-wrap {
+    position: absolute;
+    left: 0;
+    top: 150px;
+    width: 220px;
+    height: 26px;
+    border: 2px solid #000000;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.55);
+    box-sizing: border-box;
+    overflow: hidden;
+    box-shadow:
+        0 0 0 2px rgba(255, 255, 255, 0.15),
+        0 2px 8px rgba(0, 0, 0, 0.7);
+}
+
+.variable-hp-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #00c800 0%, #3fdd3f 100%);
+    box-shadow: inset 0 0 6px rgba(255, 255, 255, 0.35);
+    transition: width 0.3s ease-out;
 }
 
 /* ============================================================
