@@ -83,37 +83,37 @@
 /* ★ 現在HPの数値（バー右端に重ねる） */
 .variable-hp-text {
     position: absolute;
-    left: 0;                   /* バーと同じ左端 */
-    top: 160px;                /* バーと同じ top */
-    width: 330px;              /* バーと同じ幅 */
+    left: 0;
+    top: 160px;
+    width: 330px;
     height: 26px;
     display: flex;
     align-items: center;
-    justify-content: flex-end; /* ★ 右寄せ */
-    padding-right: 8px;
+    justify-content: flex-end;
+    padding-right: 18px;
     box-sizing: border-box;
-    font-size: 30px;
+    font-size: 40px;
     font-weight: bold;
     color: #ffffff;
-    -webkit-text-stroke: 6px #000000;
+    -webkit-text-stroke: 10px #000000;   /* ★ 6px → 10px（太く） */
     paint-order: stroke fill;
     text-shadow:
-        -2px -2px 0 #000,
-         2px -2px 0 #000,
-        -2px  2px 0 #000,
-         2px  2px 0 #000,
-        -3px  0   0 #000,
-         3px  0   0 #000,
-         0   -3px 0 #000,
-         0    3px 0 #000,
-         0 0 8px rgba(0, 0, 0, 0.9);
+      -3px -3px 0 #000,
+       3px -3px 0 #000,
+      -3px  3px 0 #000,
+       3px  3px 0 #000,
+      -4px  0   0 #000,
+       4px  0   0 #000,
+       0   -4px 0 #000,
+       0    4px 0 #000,
+       0 0 10px rgba(0, 0, 0, 0.95);
     pointer-events: none;
     user-select: none;
     -webkit-user-select: none;
     line-height: 1;
-    z-index: 2;                /* ★ バーより前面 */
+    z-index: 2;
     white-space: nowrap;
-    overflow: visible;         /* はみ出し許容 */
+    overflow: visible;
 }
 
 /* ============================================================
