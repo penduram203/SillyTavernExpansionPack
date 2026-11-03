@@ -416,6 +416,12 @@
             bar.style.width = `${plan.hp.ratio * 100}%`;
             wrap.appendChild(bar);
 
+            // ★ 右端に現在HPを数字で表示
+            const hpText = document.createElement('div');
+            hpText.className = 'variable-hp-text';
+            hpText.textContent = String(Math.round(plan.hp.cur));
+            wrap.appendChild(hpText);
+
             panel.appendChild(wrap);
         }
     }
