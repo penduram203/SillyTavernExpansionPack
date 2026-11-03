@@ -55,13 +55,14 @@
 }
 
 /* HPバー: 敵キャラの名前から 50px 下 + 10px = 場所から 160px */
+/* ★ HP数値を左に配置するため、バーは右へシフト */
 .variable-hp-bar-wrap {
     position: absolute;
-    left: 0;
+    left: 100px;               /* ★ 0px → 100px（数値表示のスペース確保） */
     top: 160px;
-    width: 330px;              /* ★ 220px → 330px（1.5倍） */
+    width: 330px;
     height: 26px;
-    border: 4px solid #000000; /* ★ 2px → 4px（太く） */
+    border: 6px solid #000000; /* ★ 4px → 6px（さらに太く） */
     border-radius: 4px;
     background: rgba(0, 0, 0, 0.55);
     box-sizing: border-box;
@@ -79,31 +80,39 @@
     transition: width 0.3s ease-out;
 }
 
-/* ★ 現在HPの数値表示（バー右端に重ねる） */
+/* ★ 現在HPの数値（バーの左外側に独立配置） */
 .variable-hp-text {
     position: absolute;
-    top: 0;
-    bottom: 0;
-    right: 6px;
+    left: 0;                    /* パネル左端に揃える */
+    top: 160px;
+    width: 90px;                /* バー手前のスペース */
+    height: 26px;
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    font-size: 16px;
+    padding-right: 8px;         /* バーとの余白 */
+    font-size: 30px;            /* ★ 16px → 30px */
     font-weight: bold;
     color: #ffffff;
-    -webkit-text-stroke: 3px #000000;
+    -webkit-text-stroke: 6px #000000;   /* ★ 3px → 6px（縁取り太く） */
     paint-order: stroke fill;
     text-shadow:
-        -1px -1px 0 #000,
-         1px -1px 0 #000,
-        -1px  1px 0 #000,
-         1px  1px 0 #000,
-         0 0 4px rgba(0, 0, 0, 0.9);
+        -2px -2px 0 #000,
+         2px -2px 0 #000,
+        -2px  2px 0 #000,
+         2px  2px 0 #000,
+        -3px  0   0 #000,
+         3px  0   0 #000,
+         0   -3px 0 #000,
+         0    3px 0 #000,
+         0 0 8px rgba(0, 0, 0, 0.9);
     pointer-events: none;
     user-select: none;
     -webkit-user-select: none;
     line-height: 1;
     z-index: 2;
+    white-space: nowrap;
+    overflow: visible;          /* はみ出し許容 */
 }
 
 /* ============================================================
