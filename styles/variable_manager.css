@@ -58,7 +58,7 @@
 /* 敵キャラの名前: 場所変数の下（左上） */
 .variable-enemy-name {
   position: fixed !important;
-  top: 75px;                 /* ★ 155px → 75px（-80px） */
+  top: 20px;
   left: 20px;
   right: auto !important;
   font-size: 30px !important;
@@ -69,7 +69,7 @@
 /* HPバー: 敵キャラの名前の下（左上） */
 .variable-hp-bar-wrap {
     position: fixed !important;
-    top: 100px;              /* ★ 180px → 100px（-80px） */
+    top: 45px;
     left: 20px;
     right: auto !important;
     width: 330px;
@@ -96,7 +96,7 @@
 /* 現在HP数値: HPバー右端に重ねる（左上） */
 .variable-hp-text {
   position: fixed !important;
-  top: 80px;                 /* ★ 160px → 80px（-80px） */
+  top: 25px;
   left: 20px;
   right: auto !important;
   width: 330px;
