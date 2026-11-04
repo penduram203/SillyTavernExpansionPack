@@ -54,12 +54,13 @@
 
 /* 敵キャラの名前: 場所変数の下（左上） */
 .variable-enemy-name {
-    position: fixed !important;
-    top: 130px;                /* ★ 120px → 130px（+10px） */
-    left: 20px;
-    right: auto !important;
-    font-size: 30px !important;   /* ★ 40px → 30px */
-    -webkit-text-stroke: 10px #000000 !important;  /* 30px に合わせて縁を調整 */
+  position: fixed !important;
+  top: 155px;
+  left: 20px;
+  right: auto !important;
+  font-size: 30px !important;
+  -webkit-text-stroke: 10px #000000 !important;
+  z-index: 10;
 }
 
 /* HPバー: 敵キャラの名前の下（左上） */
@@ -91,39 +92,30 @@
 
 /* 現在HP数値: HPバー右端に重ねる（左上） */
 .variable-hp-text {
-    position: fixed !important;
-    top: 180px;            /* ★ HPバーと同じ位置 */
-    left: 20px;            /* ★ 画面左端に揃える */
-    right: auto !important;
-    width: 330px;
-    height: 26px;
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    padding-right: 18px;
-    box-sizing: border-box;
-    font-size: 40px;
-    font-weight: bold;
-    color: #ffffff;
-    -webkit-text-stroke: 10px #000000;
-    paint-order: stroke fill;
-    text-shadow:
-        -3px -3px 0 #000,
-         3px -3px 0 #000,
-        -3px  3px 0 #000,
-         3px  3px 0 #000,
-        -4px  0   0 #000,
-         4px  0   0 #000,
-         0   -4px 0 #000,
-         0    4px 0 #000,
-         0 0 10px rgba(0, 0, 0, 0.95);
-    pointer-events: none;
-    user-select: none;
-    -webkit-user-select: none;
-    line-height: 1;
-    z-index: 2;
-    white-space: nowrap;
-    overflow: visible;
+  position: fixed !important;
+  top: 160px;
+  left: 20px;
+  right: auto !important;
+  width: 330px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 18px;
+  box-sizing: border-box;
+  font-size: 40px;
+  font-weight: bold;
+  color: #ffffff;
+  -webkit-text-stroke: 10px #000000;
+  paint-order: stroke fill;
+  text-shadow: -3px -3px 0 #000, 3px -3px 0 #000, -3px 3px 0 #000, 3px 3px 0 #000, -4px 0 0 #000, 4px 0 0 #000, 0 -4px 0 #000, 0 4px 0 #000, 0 0 10px rgba(0, 0, 0, 0.95);
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  line-height: 1;
+  z-index: 2;
+  white-space: nowrap;
+  overflow: visible;
 }
 
 /* ============================================================
