@@ -52,20 +52,20 @@
  * ★ 敵キャラ情報（画面右上に固定）
  * ============================================================ */
 
-/* 敵キャラの名前: 画面右上 */
+/* 敵キャラの名前: 場所変数の下（左上） */
 .variable-enemy-name {
     position: fixed !important;
-    top: 20px;
-    right: 20px;
-    left: auto !important;
+    top: 120px;            /* ★ 場所（viewport top:20px + 高さ~50px）の下 */
+    left: 20px;            /* ★ 画面左端に揃える */
+    right: auto !important;
 }
 
-/* HPバー: 敵キャラの名前から 100px 下（画面右上） */
+/* HPバー: 敵キャラの名前の下（左上） */
 .variable-hp-bar-wrap {
     position: fixed !important;
-    top: 120px;
-    right: 20px;
-    left: auto !important;
+    top: 180px;            /* ★ 敵名の下（120px + 高さ~50px + 余白） */
+    left: 20px;            /* ★ 画面左端に揃える */
+    right: auto !important;
     width: 330px;
     height: 26px;
     border: 6px solid #000000;
@@ -87,12 +87,12 @@
     transition: width 0.3s ease-out;
 }
 
-/* 現在HP数値: HPバー右端に重ねる（画面右上） */
+/* 現在HP数値: HPバー右端に重ねる（左上） */
 .variable-hp-text {
     position: fixed !important;
-    top: 120px;
-    right: 20px;
-    left: auto !important;
+    top: 180px;            /* ★ HPバーと同じ位置 */
+    left: 20px;            /* ★ 画面左端に揃える */
+    right: auto !important;
     width: 330px;
     height: 26px;
     display: flex;
