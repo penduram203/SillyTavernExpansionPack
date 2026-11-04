@@ -34,10 +34,11 @@
          0   -3px 0 #000,
          0    3px 0 #000,
          0 0 8px rgba(0, 0, 0, 0.9);
-    margin-bottom: 6px;
+    margin-top: 12px;                /* ★ margin-bottom: 6px → margin-top: 12px */
+    margin-bottom: 0;
     letter-spacing: 0.5px;
     white-space: pre;
-    transform: translateY(-100px);  /* ★ 上方向に100px */
+    transform: translateY(-100px);   /* HPコンテナと同じシフト */
 }
 
 /* ── HPバーと数値の共通コンテナ ── */
