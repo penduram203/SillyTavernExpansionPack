@@ -1,0 +1,109 @@
+/* user_status.css */
+
+/* ============================================================
+ * ★ ユーザーステータス表示（画面左下）
+ * ============================================================ */
+#user-status-panel {
+    position: fixed;
+    left: 20px;
+    bottom: 20px;
+    z-index: 50;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    font-weight: bold;
+    line-height: 1.25;
+    text-align: left;
+}
+
+/* ── 名前 ── */
+.user-status-name {
+    font-size: 30px;
+    font-weight: bold;
+    color: #ffffff;
+    -webkit-text-stroke: 8px #000000;
+    paint-order: stroke fill;
+    text-shadow:
+        -2px -2px 0 #000,
+         2px -2px 0 #000,
+        -2px  2px 0 #000,
+         2px  2px 0 #000,
+        -3px  0   0 #000,
+         3px  0   0 #000,
+         0   -3px 0 #000,
+         0    3px 0 #000,
+         0 0 8px rgba(0, 0, 0, 0.9);
+    margin-bottom: 6px;
+    letter-spacing: 0.5px;
+    white-space: pre;
+}
+
+/* ── HPバーと数値の共通コンテナ ── */
+.user-status-hp-container {
+    position: relative;
+    width: 330px;
+    height: 26px;
+}
+
+/* ── HPバー枠 + 緑塗り ── */
+.user-status-hp-bar-wrap {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 330px;
+    height: 26px;
+    border: 6px solid #000000;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.55);
+    box-sizing: border-box;
+    overflow: hidden;
+    box-shadow:
+        0 0 0 2px rgba(255, 255, 255, 0.15),
+        0 2px 8px rgba(0, 0, 0, 0.7);
+    z-index: 1;
+}
+
+.user-status-hp-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #00c800 0%, #3fdd3f 100%);
+    box-shadow: inset 0 0 6px rgba(255, 255, 255, 0.35);
+    transition: width 0.3s ease-out;
+}
+
+/* ── 現在HP数値（バー右端に重ねる） ── */
+.user-status-hp-text {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 330px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding-right: 18px;
+    box-sizing: border-box;
+    font-size: 40px;
+    font-weight: bold;
+    color: #ffffff;
+    -webkit-text-stroke: 10px #000000;
+    paint-order: stroke fill;
+    text-shadow:
+        -3px -3px 0 #000,
+         3px -3px 0 #000,
+        -3px  3px 0 #000,
+         3px  3px 0 #000,
+        -4px  0   0 #000,
+         4px  0   0 #000,
+         0   -4px 0 #000,
+         0    4px 0 #000,
+         0 0 10px rgba(0, 0, 0, 0.95);
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+    line-height: 1;
+    z-index: 2;
+    white-space: nowrap;
+    overflow: visible;
+}
