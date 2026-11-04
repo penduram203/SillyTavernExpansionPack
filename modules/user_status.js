@@ -4,6 +4,7 @@
 //   - デフォルト: 最大HP=500, 現在HP=500
 //   - 名前は #user_avatar_block の .ch_name から取得（ペルソナ名）
 //   - 表示形式は variable_manager.js の敵HPバーと同形式
+//   - バトルモード変数が 1 の時のみ表示
 
 (function () {
     'use strict';
@@ -87,6 +88,30 @@
         render();
     }
 
+    // ============================================================
+    // ★ バトルモード判定（VariableManager 経由）
+    // ============================================================
+    async function waitForVariableManager(maxWaitMs = 10000) {
+        const start = Date.now();
+        while (Date.now() - start < maxWaitMs) {
+            if (window.VariableManager?.getCurrentVariables) return true;
+            await new Promise(r => setTimeout(r, 200));
+        }
+        return false;
+    }
+
+    async function isBattleModeActive() {
+        try {
+            if (window.VariableManager?.getCurrentVariables) {
+                const result = await window.VariableManager.getCurrentVariables();
+                if (!result.ok) return false;
+                const v = (result.variables || []).find(x => x.name === 'バトルモード');
+                return String(v?.value ?? '').trim() === '1';
+            }
+        } catch (e) { /* ignore */ }
+        return false;
+    }
+
     function getUserName() {
         // ペルソナ管理画面の .ch_name を参照（selected を優先）
         const el = document.querySelector('#user_avatar_block .avatar-container.selected .ch_name')
@@ -111,8 +136,18 @@
         return panel;
     }
 
-    function render() {
+    async function render() {
+        const active = await isBattleModeActive();
         const panel = ensurePanel();
+
+        // ★ バトルモード ≠ 1 の時は非表示
+        if (!active) {
+            panel.style.display = 'none';
+            _lastRenderKey = '';
+            return;
+        }
+        panel.style.display = '';
+
         const status = getUserStatus();
         const userName = getUserName();
 
@@ -143,7 +178,6 @@
         hpBar.className = 'user-status-hp-bar';
         hpBar.style.width = `${ratio * 100}%`;
         hpWrap.appendChild(hpBar);
-
         hpContainer.appendChild(hpWrap);
 
         const hpText = document.createElement('div');
@@ -154,9 +188,14 @@
         panel.appendChild(hpContainer);
     }
 
-    function init() {
+    async function init() {
         ensurePanel();
-        render();
+        // パネルは初期状態で非表示
+        const panel = document.getElementById(PANEL_ID);
+        if (panel) panel.style.display = 'none';
+
+        await waitForVariableManager();
+        await render();
         setInterval(render, POLL_INTERVAL_MS);
         console.log(LOG, '初期化完了');
     }
@@ -198,5 +237,6 @@
         },
         refresh: render,
         getUserName,
+        isBattleModeActive,
     };
 })();
