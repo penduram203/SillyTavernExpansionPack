@@ -1,0 +1,202 @@
+// user_status.js
+// ユーザー（ペルソナ）のステータス（最大HP / 現在HP）を管理し、
+// 画面左下に緑色のHPバーとして表示する。
+//   - デフォルト: 最大HP=500, 現在HP=500
+//   - 名前は #user_avatar_block の .ch_name から取得（ペルソナ名）
+//   - 表示形式は variable_manager.js の敵HPバーと同形式
+
+(function () {
+    'use strict';
+    const LOG = '[UserStatus]';
+    const MODULE_NAME = 'user_status';
+    const PANEL_ID = 'user-status-panel';
+    const STYLE_ID = 'user-status-style';
+    const POLL_INTERVAL_MS = 1000;
+
+    const DEFAULT_MAX_HP = 500;
+    const DEFAULT_CUR_HP = 500;
+
+    let _lastRenderKey = '';
+
+    (function injectStyle() {
+        if (document.getElementById(STYLE_ID)) return;
+        const link = document.createElement('link');
+        link.id = STYLE_ID;
+        link.rel = 'stylesheet';
+        try {
+            link.href = new URL('../styles/user_status.css', import.meta.url).href;
+        } catch (e) {
+            link.href = 'styles/user_status.css';
+        }
+        document.head.appendChild(link);
+    })();
+
+    function getSTContext() {
+        try {
+            if (window.SillyTavern && typeof window.SillyTavern.getContext === 'function') {
+                return window.SillyTavern.getContext();
+            }
+        } catch (e) { /* ignore */ }
+        return null;
+    }
+
+    function _ensureSettings() {
+        try {
+            const ctx = getSTContext();
+            if (!ctx?.extensionSettings) return null;
+            if (!ctx.extensionSettings[MODULE_NAME]) {
+                ctx.extensionSettings[MODULE_NAME] = {};
+            }
+            return ctx.extensionSettings[MODULE_NAME];
+        } catch (e) { return null; }
+    }
+
+    function getUserStatus() {
+        const s = _ensureSettings();
+        if (!s) return { maxHP: DEFAULT_MAX_HP, curHP: DEFAULT_CUR_HP };
+
+        if (typeof s.maxHP !== 'number' || !isFinite(s.maxHP) || s.maxHP <= 0) {
+            s.maxHP = DEFAULT_MAX_HP;
+        }
+        if (typeof s.curHP !== 'number' || !isFinite(s.curHP) || s.curHP < 0) {
+            s.curHP = DEFAULT_CUR_HP;
+        }
+        s.curHP = Math.max(0, Math.min(s.maxHP, s.curHP));
+        return { maxHP: s.maxHP, curHP: s.curHP };
+    }
+
+    function setUserStatus(patch) {
+        const s = _ensureSettings();
+        if (!s) return;
+
+        if (typeof patch.maxHP === 'number' && isFinite(patch.maxHP) && patch.maxHP > 0) {
+            s.maxHP = patch.maxHP;
+        }
+        if (typeof patch.curHP === 'number' && isFinite(patch.curHP)) {
+            s.curHP = patch.curHP;
+        }
+        const cur = getUserStatus();
+        s.curHP = Math.max(0, Math.min(cur.maxHP, s.curHP));
+
+        try {
+            const ctx = getSTContext();
+            if (typeof ctx?.saveSettingsDebounced === 'function') ctx.saveSettingsDebounced();
+        } catch (e) { /* ignore */ }
+
+        _lastRenderKey = '';
+        render();
+    }
+
+    function getUserName() {
+        // ペルソナ管理画面の .ch_name を参照（selected を優先）
+        const el = document.querySelector('#user_avatar_block .avatar-container.selected .ch_name')
+                || document.querySelector('#user_avatar_block .ch_name');
+        if (el) {
+            const t = (el.textContent || '').trim();
+            if (t) return t;
+        }
+        try {
+            const ctx = getSTContext();
+            return ctx?.name1 || ctx?.user_name || 'User';
+        } catch (e) { return 'User'; }
+    }
+
+    function ensurePanel() {
+        let panel = document.getElementById(PANEL_ID);
+        if (panel) return panel;
+        panel = document.createElement('div');
+        panel.id = PANEL_ID;
+        panel.className = 'user-status-panel';
+        document.body.appendChild(panel);
+        return panel;
+    }
+
+    function render() {
+        const panel = ensurePanel();
+        const status = getUserStatus();
+        const userName = getUserName();
+
+        const ratio = status.maxHP > 0
+            ? Math.max(0, Math.min(1, status.curHP / status.maxHP))
+            : 0;
+
+        const signature = `${userName}|${status.curHP}|${status.maxHP}|${ratio.toFixed(4)}`;
+        if (signature === _lastRenderKey) return;
+        _lastRenderKey = signature;
+
+        panel.innerHTML = '';
+
+        // ── 名前 ──
+        const nameEl = document.createElement('div');
+        nameEl.className = 'user-status-name';
+        nameEl.textContent = userName;
+        panel.appendChild(nameEl);
+
+        // ── HPバー + 数値 ──
+        const hpContainer = document.createElement('div');
+        hpContainer.className = 'user-status-hp-container';
+
+        const hpWrap = document.createElement('div');
+        hpWrap.className = 'user-status-hp-bar-wrap';
+
+        const hpBar = document.createElement('div');
+        hpBar.className = 'user-status-hp-bar';
+        hpBar.style.width = `${ratio * 100}%`;
+        hpWrap.appendChild(hpBar);
+
+        hpContainer.appendChild(hpWrap);
+
+        const hpText = document.createElement('div');
+        hpText.className = 'user-status-hp-text';
+        hpText.textContent = String(Math.round(status.curHP));
+        hpContainer.appendChild(hpText);
+
+        panel.appendChild(hpContainer);
+    }
+
+    function init() {
+        ensurePanel();
+        render();
+        setInterval(render, POLL_INTERVAL_MS);
+        console.log(LOG, '初期化完了');
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+
+    window.UserStatus = {
+        getStatus: getUserStatus,
+        setStatus: setUserStatus,
+        setMaxHP: (v) => setUserStatus({ maxHP: v }),
+        setCurrentHP: (v) => setUserStatus({ curHP: v }),
+        damage: (v) => {
+            const s = getUserStatus();
+            setUserStatus({ curHP: s.curHP - Math.max(0, Number(v) || 0) });
+        },
+        heal: (v) => {
+            const s = getUserStatus();
+            setUserStatus({ curHP: s.curHP + Math.max(0, Number(v) || 0) });
+        },
+        fullHeal: () => {
+            const s = getUserStatus();
+            setUserStatus({ curHP: s.maxHP });
+        },
+        reset: () => {
+            const s = _ensureSettings();
+            if (!s) return;
+            s.maxHP = DEFAULT_MAX_HP;
+            s.curHP = DEFAULT_CUR_HP;
+            try {
+                const ctx = getSTContext();
+                if (typeof ctx?.saveSettingsDebounced === 'function') ctx.saveSettingsDebounced();
+            } catch (e) { /* ignore */ }
+            _lastRenderKey = '';
+            render();
+        },
+        refresh: render,
+        getUserName,
+    };
+})();
