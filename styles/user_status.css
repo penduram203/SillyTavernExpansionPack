@@ -37,7 +37,7 @@
     margin-bottom: 6px;
     letter-spacing: 0.5px;
     white-space: pre;
-    transform: translateY(-150px);  /* ★ 上方向に150px */
+    transform: translateY(-100px);  /* ★ 上方向に100px */
 }
 
 /* ── HPバーと数値の共通コンテナ ── */
