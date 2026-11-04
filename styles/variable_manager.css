@@ -294,3 +294,73 @@ body.variable-battle-active #sheldheader {
 .variable-command-btn:active {
     transform: scale(0.98);
 }
+
+/* ============================================================
+ * ★ バトル中は画面左下の各種ボタンを非表示・クリック不能
+ * ============================================================ */
+body.variable-battle-active #gic-open-gallery-button,
+body.variable-battle-active #gic-release-override-button,
+body.variable-battle-active #text-mode-button,
+body.variable-battle-active #restore-panel-button,
+body.variable-battle-active #center-button,
+body.variable-battle-active #manual-settings-button,
+body.variable-battle-active #right-half-button,
+body.variable-battle-active #window-control-buttons,
+body.variable-battle-active #image-control-container,
+body.variable-battle-active #custom-button,
+body.variable-battle-active #maximize-button,
+body.variable-battle-active #half-maximize-button {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+
+/* ============================================================
+ * ★ バトルコマンド: ホバー時は該当色、クリック時はさらに明るい色
+ * ============================================================ */
+
+/* 攻撃: 赤 */
+.variable-command-btn.variable-command-attack:hover {
+    background: rgba(180, 20, 20, 0.95) !important;
+    border-color: #ff8888 !important;
+}
+.variable-command-btn.variable-command-attack:active {
+    background: #ff4444 !important;
+    border-color: #ffdddd !important;
+    box-shadow: 0 0 16px rgba(255, 80, 80, 0.9) !important;
+}
+
+/* 防御: 青 */
+.variable-command-btn.variable-command-defense:hover {
+    background: rgba(20, 60, 180, 0.95) !important;
+    border-color: #88bbff !important;
+}
+.variable-command-btn.variable-command-defense:active {
+    background: #4488ff !important;
+    border-color: #ddeeff !important;
+    box-shadow: 0 0 16px rgba(80, 140, 255, 0.9) !important;
+}
+
+/* 道具: 緑 */
+.variable-command-btn.variable-command-item:hover {
+    background: rgba(20, 140, 40, 0.95) !important;
+    border-color: #88ff88 !important;
+}
+.variable-command-btn.variable-command-item:active {
+    background: #44dd44 !important;
+    border-color: #ddffdd !important;
+    box-shadow: 0 0 16px rgba(80, 220, 80, 0.9) !important;
+}
+
+/* 逃走: 黄色 */
+.variable-command-btn.variable-command-escape:hover {
+    background: rgba(200, 170, 20, 0.95) !important;
+    border-color: #fff088 !important;
+}
+.variable-command-btn.variable-command-escape:active {
+    background: #ffdd44 !important;
+    border-color: #ffffdd !important;
+    box-shadow: 0 0 16px rgba(255, 220, 80, 0.9) !important;
+    color: #000000 !important;
+}
