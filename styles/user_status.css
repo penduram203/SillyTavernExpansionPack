@@ -19,26 +19,17 @@
 
 /* ── 名前 ── */
 .user-status-name {
-    font-size: 30px;
-    font-weight: bold;
-    color: #ffffff;
-    -webkit-text-stroke: 8px #000000;
-    paint-order: stroke fill;
-    text-shadow:
-        -2px -2px 0 #000,
-         2px -2px 0 #000,
-        -2px  2px 0 #000,
-         2px  2px 0 #000,
-        -3px  0   0 #000,
-         3px  0   0 #000,
-         0   -3px 0 #000,
-         0    3px 0 #000,
-         0 0 8px rgba(0, 0, 0, 0.9);
-    margin-top: 12px;                /* ★ margin-bottom: 6px → margin-top: 12px */
-    margin-bottom: 0;
-    letter-spacing: 0.5px;
-    white-space: pre;
-    transform: translateY(-100px);   /* HPコンテナと同じシフト */
+  font-size: 30px;
+  font-weight: bold;
+  color: #ffffff;
+  -webkit-text-stroke: 8px #000000;
+  paint-order: stroke fill;
+  text-shadow: -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000, -3px 0 0 #000, 3px 0 0 #000, 0 -3px 0 #000, 0 3px 0 #000, 0 0 8px rgba(0, 0, 0, 0.9);
+  margin-top: -15px;
+  margin-bottom: 0;
+  letter-spacing: 0.5px;
+  white-space: pre;
+  transform: translateY(-100px);
 }
 
 /* ── HPバーと数値の共通コンテナ ── */
@@ -77,36 +68,28 @@
 
 /* ── 現在HP数値（バー右端に重ねる） ── */
 .user-status-hp-text {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 330px;
-    height: 26px;
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    padding-right: 18px;
-    box-sizing: border-box;
-    font-size: 40px;
-    font-weight: bold;
-    color: #ffffff;
-    -webkit-text-stroke: 10px #000000;
-    paint-order: stroke fill;
-    text-shadow:
-        -3px -3px 0 #000,
-         3px -3px 0 #000,
-        -3px  3px 0 #000,
-         3px  3px 0 #000,
-        -4px  0   0 #000,
-         4px  0   0 #000,
-         0   -4px 0 #000,
-         0    4px 0 #000,
-         0 0 10px rgba(0, 0, 0, 0.95);
-    pointer-events: none;
-    user-select: none;
-    -webkit-user-select: none;
-    line-height: 1;
-    z-index: 2;
-    white-space: nowrap;
-    overflow: visible;
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 330px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 18px;
+  box-sizing: border-box;
+  font-size: 40px;
+  font-weight: bold;
+  color: #ffffff;
+  -webkit-text-stroke: 10px #000000;
+  paint-order: stroke fill;
+  text-shadow: -3px -3px 0 #000, 3px -3px 0 #000, -3px 3px 0 #000, 3px 3px 0 #000, -4px 0 0 #000, 4px 0 0 #000, 0 -4px 0 #000, 0 4px 0 #000, 0 0 10px rgba(0, 0, 0, 0.95);
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  line-height: 1;
+  z-index: 2;
+  white-space: nowrap;
+  overflow: visible;
+  margin-top: 18px;
 }
