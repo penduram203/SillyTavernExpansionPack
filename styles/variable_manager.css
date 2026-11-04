@@ -43,9 +43,12 @@
     white-space: pre;
 }
 
-/* 場所: パネル基準の最上段（左上） */
+/* 場所: 画面右上 */
 .variable-location {
-    top: 0;
+    position: fixed !important;
+    top: 20px;
+    right: 20px;
+    left: auto !important;
 }
 
 /* ============================================================
@@ -55,7 +58,7 @@
 /* 敵キャラの名前: 場所変数の下（左上） */
 .variable-enemy-name {
   position: fixed !important;
-  top: 155px;
+  top: 75px;                 /* ★ 155px → 75px（-80px） */
   left: 20px;
   right: auto !important;
   font-size: 30px !important;
@@ -66,8 +69,8 @@
 /* HPバー: 敵キャラの名前の下（左上） */
 .variable-hp-bar-wrap {
     position: fixed !important;
-    top: 180px;            /* ★ 敵名の下（120px + 高さ~50px + 余白） */
-    left: 20px;            /* ★ 画面左端に揃える */
+    top: 100px;              /* ★ 180px → 100px（-80px） */
+    left: 20px;
     right: auto !important;
     width: 330px;
     height: 26px;
@@ -93,7 +96,7 @@
 /* 現在HP数値: HPバー右端に重ねる（左上） */
 .variable-hp-text {
   position: fixed !important;
-  top: 160px;
+  top: 80px;                 /* ★ 160px → 80px（-80px） */
   left: 20px;
   right: auto !important;
   width: 330px;
