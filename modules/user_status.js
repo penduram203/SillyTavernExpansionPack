@@ -161,13 +161,7 @@
 
         panel.innerHTML = '';
 
-        // ── 名前 ──
-        const nameEl = document.createElement('div');
-        nameEl.className = 'user-status-name';
-        nameEl.textContent = userName;
-        panel.appendChild(nameEl);
-
-        // ── HPバー + 数値 ──
+        // ── HPバー + 数値（先に追加） ──
         const hpContainer = document.createElement('div');
         hpContainer.className = 'user-status-hp-container';
 
@@ -186,6 +180,12 @@
         hpContainer.appendChild(hpText);
 
         panel.appendChild(hpContainer);
+
+        // ── 名前（HPバーの下） ──
+        const nameEl = document.createElement('div');
+        nameEl.className = 'user-status-name';
+        nameEl.textContent = userName;
+        panel.appendChild(nameEl);
     }
 
     async function init() {
