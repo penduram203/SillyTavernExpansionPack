@@ -6,7 +6,7 @@
 #user-status-panel {
     position: fixed;
     left: 20px;
-    bottom: 20px;
+    bottom: -80px;
     z-index: 50;
     pointer-events: none;
     user-select: none;
