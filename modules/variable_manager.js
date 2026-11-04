@@ -461,12 +461,17 @@
         container.className = 'variable-battle-commands';
         container.style.display = 'none';
 
-        const labels = ['攻撃', '防御', '道具', '逃走'];
-        for (const label of labels) {
+        const buttons = [
+            { label: '攻撃', color: 'attack' },
+            { label: '防御', color: 'defense' },
+            { label: '道具', color: 'item' },
+            { label: '逃走', color: 'escape' },
+        ];
+        for (const b of buttons) {
             const btn = document.createElement('button');
             btn.type = 'button';
-            btn.className = 'variable-command-btn';
-            btn.textContent = label;
+            btn.className = `variable-command-btn variable-command-${b.color}`;
+            btn.textContent = b.label;
             // プレースホルダー: クリックしても何もしない
             container.appendChild(btn);
         }
