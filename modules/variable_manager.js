@@ -461,7 +461,7 @@
         container.className = 'variable-battle-commands';
         container.style.display = 'none';
 
-        const labels = ['攻撃', '防御', 'アイテム', '逃走'];
+        const labels = ['攻撃', '防御', '道具', '逃走'];
         for (const label of labels) {
             const btn = document.createElement('button');
             btn.type = 'button';
