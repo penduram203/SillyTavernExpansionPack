@@ -228,6 +228,35 @@ function getCurrentCharacterInfo() {
     }
 }
 
+/**
+ * ★ キャラクターに関連付けられたロアブック名を返す（キャラ関連ワールド）
+ *   UI要素ではなく character.data を参照するため、キャラ切替直後でも正確。
+ */
+function getCharacterWorldInfoName() {
+    try {
+        const ctx = getContext();
+        const char = ctx?.characters?.[ctx?.characterId];
+        if (!char) return null;
+        const fromExt = char.data?.extensions?.world;
+        if (fromExt && typeof fromExt === 'string' && fromExt.trim()) return fromExt.trim();
+        const fromData = char.data?.world;
+        if (fromData && typeof fromData === 'string' && fromData.trim()) return fromData.trim();
+        return null;
+    } catch (e) {
+        return null;
+    }
+}
+
+/**
+ * ★ 選択肢表示用のワールド名決定
+ *   キャラ関連ワールドを最優先（UI要素の stale 状態を回避）
+ */
+function getChoicesWorldName() {
+    const charWorld = getCharacterWorldInfoName();
+    if (charWorld) return charWorld;
+    return getCurrentWorldName();
+}
+
 // ============================================================
 // ★ Phase 5: character.data → per-world store の一括移行
 // ============================================================
@@ -580,6 +609,10 @@ async function appendChoicesToLastAiMessage() {
     const ctx = getContext();
     if (!ctx?.chat || ctx.chat.length === 0) return;
 
+    // ★ 非同期処理中のキャラ切替を検出するため、開始時のキャラIDを記録
+    const startCharId = ctx?.characterId;
+    const startCharName = ctx?.characters?.[ctx?.characterId]?.name || null;
+
     let lastAiIdx = -1;
     for (let i = ctx.chat.length - 1; i >= 0; i--) {
         const m = ctx.chat[i];
@@ -599,19 +632,40 @@ async function appendChoicesToLastAiMessage() {
     const choiceNum = extractChoiceNumber(ctx.chat[lastUserIdx].mes || '');
     if (!choiceNum) return;
 
-    const worldName = getCurrentWorldName();
+    // ★ キャラ関連ワールドを最優先（UIの stale 状態を回避）
+    const worldName = getChoicesWorldName();
     if (!worldName) return;
 
     const entries = await loadWorldInfoEntriesByName(worldName);
     if (!entries) return;
 
+    // ★ 非同期処理後にキャラが切り替わっていないか確認
+    const ctxAfter = getContext();
+    if (ctxAfter?.characterId !== startCharId) {
+        debugLog(
+            `キャラが切り替わったため選択肢表示をスキップ ` +
+            `(start="${startCharName}", current="${ctxAfter?.characters?.[ctxAfter?.characterId]?.name || '?'}")`
+        );
+        return;
+    }
+
     const entry = findEntryByChoice(entries, choiceNum);
     if (!entry) return;
 
+    // ★ エントリが実際に期待するワールドのものか防御的チェック
+    const entryWorld = typeof entry.world === 'string' ? entry.world : '';
+    if (entryWorld && entryWorld !== worldName) {
+        debugLog(
+            `エントリのワールド不一致を検出: expected="${worldName}", actual="${entryWorld}" ` +
+            `（別キャラのロアブック混入を防止）`
+        );
+        return;
+    }
+
     const uid = entry.uid ?? null;
-    const data = uid !== null && uid !== undefined
-        ? getDataFor(worldName, uid, entry)
-        : getExpansionData(entry);
+    if (uid === null || uid === undefined) return;
+
+    const data = getDataFor(worldName, uid, entry);
     if (!data.choices || data.choices.length === 0) return;
 
     renderChoicesBlock(lastAiIdx, data.choices);
@@ -1350,6 +1404,8 @@ function onCharacterMessageRendered() {
 }
 
 function onChatChanged() {
+    // ★ 即座に古い選択肢ブロックを削除（キャラ切替時に旧キャラの選択肢が残らないように）
+    removeAllChoicesBlocks();
     setTimeout(() => {
         refreshAllChoicesBlocks();
     }, 400);
@@ -1372,6 +1428,15 @@ function registerEventListeners() {
     }
     if (event_types.MESSAGE_DELETED) {
         eventSource.on(event_types.MESSAGE_DELETED, onMessageUpdatedOrDeleted);
+    }
+    // ★ キャラクター選択時にも即座に旧選択肢を削除
+    if (event_types.CHARACTER_SELECTED) {
+        eventSource.on(event_types.CHARACTER_SELECTED, () => {
+            removeAllChoicesBlocks();
+            setTimeout(() => {
+                refreshAllChoicesBlocks();
+            }, 500);
+        });
     }
     if (event_types.CHARACTER_PAGE_LOADED) {
         eventSource.on(event_types.CHARACTER_PAGE_LOADED, () => {
@@ -1713,7 +1778,9 @@ window.LorebookExpansion = {
         _lbeScrollEnforceUntil = 0;
         console.log(`${LOG} スクロールトラッカーをリセットしました`);
     },
-
+    getCharacterWorldInfoName,
+    getChoicesWorldName,
+    
     MODULE_NAME,
 };
 console.log(LOG, 'window.LorebookExpansion に API を公開しました');
