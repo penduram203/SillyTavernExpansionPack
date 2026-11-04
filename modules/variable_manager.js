@@ -4,6 +4,7 @@
 //   - 変数値のみを文字列として表示（ヘッダー・折りたたみ・枠なし）
 //   - 「場所」は常に表示、敵キャラの名前/HPはバトル開始後のみ表示
 //   - 「バトルモード」が 1 の時、AIメッセージ末尾に「バトル開始」ボタンを表示
+//   - バトル中は画面左端・高さ中央に「攻撃/防御/アイテム/逃走」ボタンを配置
 //   - キャラクター管理メニューに「UI設定 / 開始ボタン / 場所」を追加
 
 (function () {
@@ -19,6 +20,7 @@
     const EXT_SETTINGS_KEY = 'variable_manager';
     const EVENT_START_CHANGED = 'variable-manager-start-changed';
     const BATTLE_START_BTN_CLASS = 'variable-battle-start-btn';
+    const BATTLE_COMMANDS_ID = 'variable-battle-commands';
 
     let _lastRenderKey = '';
     let _renderInFlight = false;
@@ -404,6 +406,7 @@
         removeBattleStartButton();
         _lastRenderKey = '';
         console.log(LOG, '⚔️ バトル開始');
+        applyBattleCommandsVisibility();
         render();
     }
 
@@ -417,6 +420,7 @@
         removeBattleStartButton();
         _lastRenderKey = '';
         console.log(LOG, '⚔️ バトル終了');
+        applyBattleCommandsVisibility();
     }
 
     function updateBattleUI(result) {
@@ -443,6 +447,40 @@
         } else {
             addBattleStartButton();
         }
+    }
+
+    // ============================================================
+    // ★ バトルコマンド（攻撃/防御/アイテム/逃走）— プレースホルダー
+    // ============================================================
+    function ensureBattleCommands() {
+        let container = document.getElementById(BATTLE_COMMANDS_ID);
+        if (container) return container;
+
+        container = document.createElement('div');
+        container.id = BATTLE_COMMANDS_ID;
+        container.className = 'variable-battle-commands';
+        container.style.display = 'none';
+
+        const labels = ['攻撃', '防御', 'アイテム', '逃走'];
+        for (const label of labels) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'variable-command-btn';
+            btn.textContent = label;
+            // プレースホルダー: クリックしても何もしない
+            container.appendChild(btn);
+        }
+
+        document.body.appendChild(container);
+        return container;
+    }
+
+    function applyBattleCommandsVisibility() {
+        const container = document.getElementById(BATTLE_COMMANDS_ID);
+        if (!container) return;
+        const charName = getCurrentCharName();
+        const shouldShow = isVisibleForChar(charName) && _battleActive;
+        container.style.display = shouldShow ? '' : 'none';
     }
 
     // ============================================================
@@ -529,6 +567,8 @@
 
     async function render() {
         ensureUISettings();
+        ensureBattleCommands();
+        applyBattleCommandsVisibility();
 
         const charName = getCurrentCharName();
         if (!isVisibleForChar(charName)) {
@@ -593,6 +633,7 @@
         if (!ready) { _initialized = false; setTimeout(init, 1000); return; }
 
         ensurePanel();
+        ensureBattleCommands();
         ensureUISettings();
         setupEventListeners();
         setupUISettingsObserver();
