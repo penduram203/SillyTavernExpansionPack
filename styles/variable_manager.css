@@ -55,9 +55,11 @@
 /* 敵キャラの名前: 場所変数の下（左上） */
 .variable-enemy-name {
     position: fixed !important;
-    top: 120px;            /* ★ 場所（viewport top:20px + 高さ~50px）の下 */
-    left: 20px;            /* ★ 画面左端に揃える */
+    top: 130px;                /* ★ 120px → 130px（+10px） */
+    left: 20px;
     right: auto !important;
+    font-size: 30px !important;   /* ★ 40px → 30px */
+    -webkit-text-stroke: 10px #000000 !important;  /* 30px に合わせて縁を調整 */
 }
 
 /* HPバー: 敵キャラの名前の下（左上） */
