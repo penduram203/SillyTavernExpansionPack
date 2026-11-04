@@ -37,6 +37,7 @@
     margin-bottom: 6px;
     letter-spacing: 0.5px;
     white-space: pre;
+    transform: translateY(-150px);  /* ★ 上方向に150px */
 }
 
 /* ── HPバーと数値の共通コンテナ ── */
@@ -44,6 +45,7 @@
     position: relative;
     width: 330px;
     height: 26px;
+    transform: translateY(-100px);  /* ★ 上方向に100px */
 }
 
 /* ── HPバー枠 + 緑塗り ── */
