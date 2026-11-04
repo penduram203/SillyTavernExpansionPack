@@ -1,7 +1,7 @@
 /* variable_manager.css */
 
 /* ============================================================
- * ★ 変数値の表示（左上・テキストのみ）
+ * ★ 変数値の表示（左上）
  * ============================================================ */
 #variable-manager-panel {
     position: fixed;
@@ -15,7 +15,6 @@
     font-weight: bold;
     line-height: 1.25;
     text-align: left;
-    /* 子要素は絶対配置のため幅・高さは不要（位置決めは各子要素で行う） */
 }
 
 #variable-manager-panel.variable-manager-disabled {
@@ -44,21 +43,29 @@
     white-space: pre;
 }
 
-/* 場所: パネル基準の最上段 */
+/* 場所: パネル基準の最上段（左上） */
 .variable-location {
     top: 0;
 }
 
-/* 敵キャラの名前: 場所から 100px 下 */
+/* ============================================================
+ * ★ 敵キャラ情報（画面右上に固定）
+ * ============================================================ */
+
+/* 敵キャラの名前: 画面右上 */
 .variable-enemy-name {
-    top: 100px;
+    position: fixed !important;
+    top: 20px;
+    right: 20px;
+    left: auto !important;
 }
 
-/* HPバー: 敵キャラの名前から 50px 下 + 10px = 場所から 160px */
+/* HPバー: 敵キャラの名前から 100px 下（画面右上） */
 .variable-hp-bar-wrap {
-    position: absolute;
-    left: 0;                   /* ★ 100px → 0px（バーを左端に戻す） */
-    top: 160px;
+    position: fixed !important;
+    top: 120px;
+    right: 20px;
+    left: auto !important;
     width: 330px;
     height: 26px;
     border: 6px solid #000000;
@@ -80,11 +87,12 @@
     transition: width 0.3s ease-out;
 }
 
-/* ★ 現在HPの数値（バー右端に重ねる） */
+/* 現在HP数値: HPバー右端に重ねる（画面右上） */
 .variable-hp-text {
-    position: absolute;
-    left: 0;
-    top: 160px;
+    position: fixed !important;
+    top: 120px;
+    right: 20px;
+    left: auto !important;
     width: 330px;
     height: 26px;
     display: flex;
@@ -95,18 +103,18 @@
     font-size: 40px;
     font-weight: bold;
     color: #ffffff;
-    -webkit-text-stroke: 10px #000000;   /* ★ 6px → 10px（太く） */
+    -webkit-text-stroke: 10px #000000;
     paint-order: stroke fill;
     text-shadow:
-      -3px -3px 0 #000,
-       3px -3px 0 #000,
-      -3px  3px 0 #000,
-       3px  3px 0 #000,
-      -4px  0   0 #000,
-       4px  0   0 #000,
-       0   -4px 0 #000,
-       0    4px 0 #000,
-       0 0 10px rgba(0, 0, 0, 0.95);
+        -3px -3px 0 #000,
+         3px -3px 0 #000,
+        -3px  3px 0 #000,
+         3px  3px 0 #000,
+        -4px  0   0 #000,
+         4px  0   0 #000,
+         0   -4px 0 #000,
+         0    4px 0 #000,
+         0 0 10px rgba(0, 0, 0, 0.95);
     pointer-events: none;
     user-select: none;
     -webkit-user-select: none;
@@ -117,14 +125,14 @@
 }
 
 /* ============================================================
- * ★ UI設定（label 内で <select> の隣に横並び）
+ * ★ UI設定（UI設定 / 開始ボタン / 場所）
  * ============================================================ */
 .variable-manager-ui-settings {
     display: flex;
     flex-wrap: nowrap;
     align-items: center;
     gap: 16px;
-    margin: 0 0 0 4px;
+    margin: 0 0 0 8px;
     padding: 0;
     font-size: 14px;
     color: var(--SmartThemeBodyColor, #ccc);
@@ -142,10 +150,11 @@
     font-weight: bold;
     font-size: 20px;
     opacity: 1;
-    letter-spacing: 0.3px;
+    letter-spacing: 0.5px;
     white-space: nowrap;
     flex: 0 1 auto;
     min-width: 0;
+    line-height: 1.2;
 }
 
 .variable-manager-checkbox-wrap {
@@ -186,16 +195,6 @@
 .variable-manager-checkbox-wrap:has(.variable-manager-visible-checkbox:disabled) {
     opacity: 0.5;
     cursor: not-allowed;
-}
-
-/* ============================================================
- * ★ キャラクター管理ドロップダウンの幅を 10% に固定
- *    （ST本体の .drawer-content select { width: 100% } を上書き）
- * ============================================================ */
-#char-management-dropdown {
-    width: 10% !important;
-    min-width: 0 !important;
-    font-size: calc(var(--mainFontSize) * 0.95);
 }
 
 /* ============================================================
@@ -243,8 +242,29 @@ body.variable-battle-active #sheldheader {
 }
 
 /* ============================================================
- * ★ バトルコマンド（攻撃/防御/アイテム/逃走）
- *   画面左端・高さ中央、2×2グリッド
+ * ★ バトル中は画面左下の各種ボタンを非表示・クリック不能
+ * ============================================================ */
+body.variable-battle-active #gic-open-gallery-button,
+body.variable-battle-active #gic-release-override-button,
+body.variable-battle-active #text-mode-button,
+body.variable-battle-active #restore-panel-button,
+body.variable-battle-active #center-button,
+body.variable-battle-active #manual-settings-button,
+body.variable-battle-active #right-half-button,
+body.variable-battle-active #window-control-buttons,
+body.variable-battle-active #image-control-container,
+body.variable-battle-active #custom-button,
+body.variable-battle-active #maximize-button,
+body.variable-battle-active #half-maximize-button {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+
+/* ============================================================
+ * ★ バトルコマンド（攻撃/防御/道具/逃走）
+ *   画面左端・高さ中央、縦1列
  * ============================================================ */
 #variable-battle-commands {
     position: fixed;
@@ -293,27 +313,6 @@ body.variable-battle-active #sheldheader {
 
 .variable-command-btn:active {
     transform: scale(0.98);
-}
-
-/* ============================================================
- * ★ バトル中は画面左下の各種ボタンを非表示・クリック不能
- * ============================================================ */
-body.variable-battle-active #gic-open-gallery-button,
-body.variable-battle-active #gic-release-override-button,
-body.variable-battle-active #text-mode-button,
-body.variable-battle-active #restore-panel-button,
-body.variable-battle-active #center-button,
-body.variable-battle-active #manual-settings-button,
-body.variable-battle-active #right-half-button,
-body.variable-battle-active #window-control-buttons,
-body.variable-battle-active #image-control-container,
-body.variable-battle-active #custom-button,
-body.variable-battle-active #maximize-button,
-body.variable-battle-active #half-maximize-button {
-    display: none !important;
-    visibility: hidden !important;
-    opacity: 0 !important;
-    pointer-events: none !important;
 }
 
 /* ============================================================
