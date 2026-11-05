@@ -10,12 +10,16 @@
 // ★ 変数の役割分担:
 //   - バトル開始 : 選択肢末尾の「バトル開始」ボタンを表示するかどうか（常に1で維持）
 //   - バトルモード : 実際のバトル進行状態（1=バトル中, 0=非バトル）
-//   → 逃走時はバトル開始を触らずバトルモードのみ0にする。
-//     これにより逃走後もバトル開始ボタンは選択肢末尾に表示され続ける。
 //
 // ★ バトルモード遷移:
 //   バトル開始ボタン押下 → バトルモード=1
 //   敵HP≤0 / 逃走      → バトルモード=0 → 敵HPを最大値に全回復
+//
+// ★ 敵の自動攻撃:
+//   プレイヤーの行動（攻撃/防御）で enemy_turn=1 になると、
+//   600ms後に敵キャラが自動攻撃する。
+//   敵ダメージ = max(1, enemy_attack - player_defense)
+//   プレイヤーHP≤0 → バトルモード=0, バトル終了, エントリ999を自動送信
 
 (function () {
     'use strict';
@@ -32,7 +36,9 @@
     const BATTLE_START_BTN_CLASS = 'variable-battle-start-btn';
     const BATTLE_COMMANDS_ID = 'variable-battle-commands';
 
-    // ★ バトルステート初期値
+    const ENEMY_ATTACK_DELAY_MS = 600;
+    const ENTRY_999_DELAY_MS = 800;
+
     const BATTLE_DEFAULTS = {
         active: false,
         player_turn: 0,
@@ -53,6 +59,7 @@
     let _battlePrevChatHidden = null;
     let _lastBattleMode = false;
     let _startBattleInProgress = false;
+    let _enemyAttackInProgress = false;
 
     (function injectStyle() {
         if (document.getElementById(STYLE_ID)) return;
@@ -215,7 +222,6 @@
         }
     }
 
-    // ★ 敵HPを最大値に全回復
     async function restoreEnemyHPFull() {
         try {
             const result = await getCurrentVariables();
@@ -357,7 +363,6 @@
         uiLabel.textContent = 'UI設定';
         container.appendChild(uiLabel);
 
-        // 開始ボタン
         const startWrap = document.createElement('label');
         startWrap.className = 'variable-manager-checkbox-wrap';
         startWrap.title = 'ゲーム開始ボタンを表示（キャラ毎に保存）';
@@ -384,7 +389,6 @@
         });
         container.appendChild(startWrap);
 
-        // 場所
         const placeWrap = document.createElement('label');
         placeWrap.className = 'variable-manager-checkbox-wrap';
         placeWrap.title = '変数ウインドウを表示（キャラ毎に保存）';
@@ -442,7 +446,6 @@
         obs.observe(document.body, { childList: true, subtree: true });
     }
 
-    // ---- パネル ----
     function ensurePanel() {
         let panel = document.getElementById(PANEL_ID);
         if (panel) return panel;
@@ -514,7 +517,6 @@
         _battleActive = true;
 
         try {
-            // ★ バトルモード変数=1（バトル開始変数は触らない）
             await setBattleModeVar(1);
         } catch (e) {
             console.warn(LOG, 'startBattle: setBattleModeVar error', e);
@@ -574,7 +576,6 @@
             }
         }
 
-        // ★ 取得失敗時は前回の状態を維持（ボタンが消えないように）
         if (!result.ok) {
             console.debug(LOG, `updateBattleUI: result not ok (${result.reason}) → 前回状態を維持`);
             if (_lastBattleMode && !_battleActive) {
@@ -583,12 +584,10 @@
             return;
         }
 
-        // ★ ボタン表示は「バトル開始」変数で制御
         const battleStartRaw = varMap['バトル開始']?.value;
         const battleStart = String(battleStartRaw ?? '').trim() === '1';
         _lastBattleMode = battleStart;
 
-        // ★ バトル進行状態は「バトルモード」変数で制御
         const battleModeRaw = varMap['バトルモード']?.value;
         const battleMode = String(battleModeRaw ?? '').trim() === '1';
 
@@ -613,6 +612,102 @@
     }
 
     // ============================================================
+    // ★ 敵の自動攻撃
+    // ============================================================
+    async function enemyAutoAttack() {
+        if (_enemyAttackInProgress) return;
+        if (!_battleActive) return;
+
+        const bs = getBattleState();
+        if (bs.enemy_turn !== 1) return;
+
+        _enemyAttackInProgress = true;
+
+        try {
+            // UI更新を待つ（プレイヤー行動の結果をユーザーが認識できるように）
+            await new Promise(r => setTimeout(r, ENEMY_ATTACK_DELAY_MS));
+
+            if (!_battleActive) return;
+            const bsNow = getBattleState();
+            if (bsNow.enemy_turn !== 1) return;
+
+            const enemyAtk = Number(bsNow.enemy_attack) || 70;
+            const playerDef = Number(bsNow.player_defense) || 20;
+            const damage = Math.max(1, enemyAtk - playerDef);
+
+            const status = window.UserStatus?.getStatus?.();
+            if (!status) {
+                console.warn(LOG, 'enemyAutoAttack: UserStatus 未取得');
+                return;
+            }
+
+            const curHP = status.curHP;
+            const newHP = Math.max(0, curHP - damage);
+
+            window.UserStatus.setStatus({ curHP: newHP });
+
+            console.log(
+                LOG,
+                `👹 敵の攻撃: プレイヤーHP ${curHP} → ${newHP} ` +
+                `(ダメージ ${damage} = ${enemyAtk} - ${playerDef})`
+            );
+
+            // ターン切替（プレイヤーへ戻す）
+            bsNow.enemy_turn = 0;
+            bsNow.player_turn = 1;
+            saveBattleState();
+
+            const isPlayerDefeated = newHP <= 0;
+
+            if (isPlayerDefeated) {
+                console.log(LOG, '💀 プレイヤーHPが0以下 → バトル終了 + エントリ999ロード');
+                await setBattleModeVar(0);
+                endBattle();
+                forceRender();
+
+                setTimeout(() => {
+                    try {
+                        loadEntry999();
+                    } catch (e) {
+                        console.warn(LOG, 'エントリ999ロードエラー:', e);
+                    }
+                }, ENTRY_999_DELAY_MS);
+            } else {
+                forceRender();
+            }
+        } catch (e) {
+            console.warn(LOG, 'enemyAutoAttack error:', e);
+        } finally {
+            _enemyAttackInProgress = false;
+        }
+    }
+
+    // ★ エントリ999を自動送信
+    function loadEntry999() {
+        const textarea = document.getElementById('send_textarea');
+        if (!textarea) {
+            console.warn(LOG, 'loadEntry999: send_textarea が見つかりません');
+            return;
+        }
+
+        textarea.value = '999';
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+
+        const sendBtn = document.getElementById('send_but');
+        if (sendBtn) {
+            sendBtn.click();
+            console.log(LOG, '📨 エントリ999を自動送信しました');
+        } else {
+            const ev = new KeyboardEvent('keydown', {
+                key: 'Enter', code: 'Enter', keyCode: 13, which: 13,
+                bubbles: true, cancelable: true,
+            });
+            textarea.dispatchEvent(ev);
+            console.log(LOG, '📨 エントリ999を自動送信しました（Enterキー）');
+        }
+    }
+
+    // ============================================================
     // ★ バトルコマンド処理
     // ============================================================
     function forceRender() {
@@ -628,10 +723,14 @@
         tryRender().catch(e => console.warn(LOG, e));
     }
 
-    // ── 攻撃: 敵HP -= (player_attack - enemy_defense) ──
     async function handleAttack() {
         if (!_battleActive) return;
         const bs = getBattleState();
+
+        if (bs.player_turn !== 1) {
+            console.log(LOG, `攻撃スキップ: プレイヤーターンではありません (player_turn=${bs.player_turn})`);
+            return;
+        }
 
         const result = await getCurrentVariables();
         if (!result.ok || !result.uid) {
@@ -657,7 +756,6 @@
         const newHP = Math.max(0, curHP - damage);
         curHPVar.value = String(newHP);
 
-        // ★ 敵HP≤0 なら同じトランザクションでバトルモード=0 も書き込む
         const isEnemyDefeated = newHP <= 0;
         if (isEnemyDefeated) {
             const bmVar = varMap['バトルモード'];
@@ -668,7 +766,6 @@
             }
         }
 
-        // ロアブックに書き戻し
         try {
             const data = window.LorebookExpansion.getDataFor(result.worldName, result.uid, result.entry);
             data.variables = vars;
@@ -678,7 +775,6 @@
             return;
         }
 
-        // ターン切替
         bs.player_turn = 0;
         bs.enemy_turn = 1;
         saveBattleState();
@@ -691,19 +787,23 @@
 
         if (isEnemyDefeated) {
             console.log(LOG, '⚔️ 敵HPが0 → バトル終了（バトルモード=0）');
-            // ★ 先にバトル終了 → 敵HP表示を非表示化
             endBattle();
-            // ★ 非表示化後、敵HPを最大値に全回復
             await restoreEnemyHPFull();
+            forceRender();
+        } else {
+            // ★ 敵の自動攻撃をトリガー
+            await enemyAutoAttack();
         }
-
-        forceRender();
     }
 
-    // ── 防御: player_defense を2倍にしてターンエンド ──
-    function handleDefense() {
+    async function handleDefense() {
         if (!_battleActive) return;
         const bs = getBattleState();
+
+        if (bs.player_turn !== 1) {
+            console.log(LOG, `防御スキップ: プレイヤーターンではありません (player_turn=${bs.player_turn})`);
+            return;
+        }
 
         const before = Number(bs.player_defense) || 20;
         bs.player_defense = before * 2;
@@ -717,20 +817,15 @@
             `player_turn=0, enemy_turn=1`
         );
 
-        forceRender();
+        // ★ 敵の自動攻撃をトリガー
+        await enemyAutoAttack();
     }
 
-    // ── 逃走: バトルモードのみ0にし、敵HPを全回復 ──
     async function handleEscape() {
         if (!_battleActive) return;
 
-        // ★ バトルモード=0 のみ書き換え（バトル開始は触らない）
         await setBattleModeVar(0);
-
-        // ★ 先にバトル終了 → 敵HP表示を非表示化
         endBattle();
-
-        // ★ 非表示化後、敵HPを最大値に全回復
         await restoreEnemyHPFull();
 
         console.log(LOG, '🏃 逃走: バトルモードを終了し、敵HPを全回復しました');
@@ -952,6 +1047,7 @@
         isVisibleForChar,
         isStartButtonEnabledForChar,
         isBattleActive: () => _battleActive,
+        isEnemyAttackInProgress: () => _enemyAttackInProgress,
         startBattle,
         endBattle,
         getBattleState,
@@ -966,8 +1062,10 @@
         handleAttack,
         handleDefense,
         handleEscape,
+        enemyAutoAttack,
         setBattleModeVar,
         restoreEnemyHPFull,
+        loadEntry999,
         setVisibleForChar: (charName, visible) => {
             if (!charName) return false;
             const map = getVisibleByCharMap();
@@ -1000,6 +1098,7 @@
             battleState: getBattleState(),
             lastBattleMode: _lastBattleMode,
             startBattleInProgress: _startBattleInProgress,
+            enemyAttackInProgress: _enemyAttackInProgress,
         }),
         debugBattleButton: async () => {
             const charName = getCurrentCharName();
@@ -1013,6 +1112,7 @@
             }
             const lastAiIdx = getLastAiMessageIndex();
             const hasBtn = !!document.querySelector('.' + BATTLE_START_BTN_CLASS);
+            const userStatus = window.UserStatus?.getStatus?.();
             const info = {
                 charName,
                 場所チェック: visible,
@@ -1023,9 +1123,12 @@
                 バトルモード: varMap['バトルモード']?.value,
                 敵現在HP: varMap['敵キャラの現在HP']?.value,
                 敵最大HP: varMap['敵キャラの最大HP']?.value,
+                プレイヤーHP: userStatus ? `${userStatus.curHP}/${userStatus.maxHP}` : null,
                 _lastBattleMode,
                 _battleActive,
                 _startBattleInProgress,
+                _enemyAttackInProgress,
+                battleState: getBattleState(),
                 最後のAIメッセージ_idx: lastAiIdx,
                 ボタン存在: hasBtn,
             };
