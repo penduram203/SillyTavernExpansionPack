@@ -261,19 +261,19 @@ body.variable-battle-active #half-maximize-button {
 
 /* ============================================================
  * ★ バトルコマンド（攻撃/防御/道具/逃走）
- *   画面左端・高さ中央、縦1列
+ *   画面中心の十字配置 + 600x600正方形のホバー判定
  * ============================================================ */
 #variable-battle-commands {
     position: fixed;
-    left: 20px;
     top: 50%;
-    transform: translateY(-50%);
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 12px;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    display: none;
+    grid-template-columns: auto 160px auto;
+    grid-template-rows: auto 100px auto;
+    gap: 10px;
     z-index: 50;
-    pointer-events: auto;
+    pointer-events: none;
     user-select: none;
     -webkit-user-select: none;
 }
