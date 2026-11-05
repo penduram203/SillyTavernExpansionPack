@@ -261,58 +261,21 @@ body.variable-battle-active #half-maximize-button {
 
 /* ============================================================
  * ★ バトルコマンド（攻撃/防御/道具/逃走）
- *   画面中心の十字配置 + 600x600正方形のホバー判定
+ *   画面左端・高さ中央、縦1列
  * ============================================================ */
 #variable-battle-commands {
     position: fixed;
+    left: 20px;
     top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    display: grid;
-    grid-template-columns: auto 160px auto;
-    grid-template-rows: auto 100px auto;
-    gap: 10px;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
     z-index: 50;
-    pointer-events: none;
+    pointer-events: auto;
     user-select: none;
     -webkit-user-select: none;
-
-    /* ★ フェードアウト用（非表示状態） */
-    opacity: 0;
-    visibility: hidden;
-    transition: opacity 0.1s ease, visibility 0s linear 0.1s;
-}
-
-#variable-battle-commands.visible {
-    /* ★ フェードイン用（表示状態） */
-    opacity: 1;
-    visibility: visible;
-    transition: opacity 0.1s ease, visibility 0s linear 0s;
-}
-
-/* グリッド配置 */
-.variable-command-btn.variable-command-attack {
-    grid-area: 1 / 2;
-    align-self: end;
-    justify-self: center;
-}
-
-.variable-command-btn.variable-command-defense {
-    grid-area: 2 / 1;
-    align-self: center;
-    justify-self: end;
-}
-
-.variable-command-btn.variable-command-item {
-    grid-area: 2 / 3;
-    align-self: center;
-    justify-self: start;
-}
-
-.variable-command-btn.variable-command-escape {
-    grid-area: 3 / 2;
-    align-self: start;
-    justify-self: center;
 }
 
 .variable-command-btn {
@@ -338,7 +301,6 @@ body.variable-battle-active #half-maximize-button {
   letter-spacing: 0.05em;
   min-width: 80px;
   box-sizing: border-box;
-  pointer-events: auto;   /* ★ 追加: 親が pointer-events:none でもボタンは反応 */
 }
 
 .variable-command-btn:hover {
@@ -351,12 +313,11 @@ body.variable-battle-active #half-maximize-button {
 }
 
 /* ============================================================
- * ★ バトルコマンド: ホバー or 領域ホバー時に該当色、クリック時は明るい色
+ * ★ バトルコマンド: ホバー時は該当色、クリック時はさらに明るい色
  * ============================================================ */
 
 /* 攻撃: 赤 */
-.variable-command-btn.variable-command-attack:hover,
-.variable-command-btn.variable-command-attack.variable-command-active {
+.variable-command-btn.variable-command-attack:hover {
     background: rgba(180, 20, 20, 0.95) !important;
     border-color: #ff8888 !important;
 }
@@ -367,8 +328,7 @@ body.variable-battle-active #half-maximize-button {
 }
 
 /* 防御: 青 */
-.variable-command-btn.variable-command-defense:hover,
-.variable-command-btn.variable-command-defense.variable-command-active {
+.variable-command-btn.variable-command-defense:hover {
     background: rgba(20, 60, 180, 0.95) !important;
     border-color: #88bbff !important;
 }
@@ -379,8 +339,7 @@ body.variable-battle-active #half-maximize-button {
 }
 
 /* 道具: 緑 */
-.variable-command-btn.variable-command-item:hover,
-.variable-command-btn.variable-command-item.variable-command-active {
+.variable-command-btn.variable-command-item:hover {
     background: rgba(20, 140, 40, 0.95) !important;
     border-color: #88ff88 !important;
 }
@@ -391,8 +350,7 @@ body.variable-battle-active #half-maximize-button {
 }
 
 /* 逃走: 黄色 */
-.variable-command-btn.variable-command-escape:hover,
-.variable-command-btn.variable-command-escape.variable-command-active {
+.variable-command-btn.variable-command-escape:hover {
     background: rgba(200, 170, 20, 0.95) !important;
     border-color: #fff088 !important;
 }
