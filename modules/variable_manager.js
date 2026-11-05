@@ -497,7 +497,7 @@
 
         const cx = window.innerWidth / 2;
         const cy = window.innerHeight / 2;
-        const half = 300; // 600px / 2
+        const half = 225;
 
         if (Math.abs(mx - cx) > half || Math.abs(my - cy) > half) {
             return null;
