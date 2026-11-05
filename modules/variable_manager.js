@@ -7,6 +7,12 @@
 //   - バトル中は画面左下・高さ中央に「攻撃/防御/道具/逃走」ボタンを配置
 //   - 攻撃/防御/逃走の動作を実装（道具は未実装）
 //   - キャラクター管理メニューに「UI設定 / 開始ボタン / 場所」を追加
+//
+// ★ バトル開始ボタン消失対策:
+//   - _lastBattleMode で前回のバトルモード状態をキャッシュ
+//   - getCurrentVariables が一時的に失敗してもボタンを維持
+//   - MESSAGE_SENT で即時 render（反映遅延対策）
+//   - debugBattleButton() で内部状態を一括ダンプ
 
 (function () {
     'use strict';
@@ -42,6 +48,7 @@
     // ★ バトル状態
     let _battleActive = false;
     let _battlePrevChatHidden = null;
+    let _lastBattleMode = false;
 
     (function injectStyle() {
         if (document.getElementById(STYLE_ID)) return;
@@ -488,8 +495,18 @@
             }
         }
 
+        // ★ 取得失敗時は前回の状態を維持（ボタンが消えないように）
+        if (!result.ok) {
+            console.debug(LOG, `updateBattleUI: result not ok (${result.reason}) → 前回状態を維持`);
+            if (_lastBattleMode && !_battleActive) {
+                addBattleStartButton();
+            }
+            return;
+        }
+
         const battleModeRaw = varMap['バトルモード']?.value;
         const battleMode = String(battleModeRaw ?? '').trim() === '1';
+        _lastBattleMode = battleMode;
 
         if (!battleMode) {
             if (_battleActive) endBattle();
@@ -619,6 +636,7 @@
             console.warn(LOG, '逃走: バトルモード変数の更新に失敗', e);
         }
 
+        _lastBattleMode = false;
         endBattle();
         console.log(LOG, '🏃 逃走: バトルモードを終了しました');
         forceRender();
@@ -755,6 +773,7 @@
 
         const charName = getCurrentCharName();
         if (!isVisibleForChar(charName)) {
+            console.debug(LOG, `render: 場所未チェックのためスキップ (char="${charName}")`);
             if (_battleActive) endBattle();
             removeBattleStartButton();
             _lastRenderKey = '';
@@ -797,6 +816,13 @@
                 ];
                 for (const name of events) {
                     if (et[name] && typeof es.on === 'function') es.on(et[name], scheduleRender);
+                }
+
+                // ★ ユーザー送信直後にも素早く反映（ボタン消失防止）
+                if (et['MESSAGE_SENT'] && typeof es.on === 'function') {
+                    es.on(et['MESSAGE_SENT'], () => {
+                        setTimeout(render, 100);
+                    });
                 }
 
                 const resetEvents = ['CHAT_CHANGED', 'CHARACTER_SELECTED', 'CHARACTER_PAGE_LOADED'];
@@ -881,6 +907,34 @@
             startButtonMap: getStartButtonMap(),
             battleActive: _battleActive,
             battleState: getBattleState(),
+            lastBattleMode: _lastBattleMode,
         }),
+        debugBattleButton: async () => {
+            const charName = getCurrentCharName();
+            const visible = isVisibleForChar(charName);
+            const result = await getCurrentVariables();
+            const varMap = {};
+            if (result.ok) {
+                for (const v of result.variables) {
+                    if (v && v.name) varMap[v.name] = v;
+                }
+            }
+            const lastAiIdx = getLastAiMessageIndex();
+            const hasBtn = !!document.querySelector('.' + BATTLE_START_BTN_CLASS);
+            const info = {
+                charName,
+                場所チェック: visible,
+                result_ok: result.ok,
+                reason: result.reason,
+                選択肢番号: result.choiceNum,
+                バトルモード: varMap['バトルモード']?.value,
+                _lastBattleMode,
+                _battleActive,
+                最後のAIメッセージ_idx: lastAiIdx,
+                ボタン存在: hasBtn,
+            };
+            console.log(LOG, 'debugBattleButton:', info);
+            return info;
+        },
     };
 })();
