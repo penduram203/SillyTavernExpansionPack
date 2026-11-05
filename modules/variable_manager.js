@@ -7,7 +7,7 @@
 //   - バトル中は画面左下・高さ中央に「攻撃/防御/道具/逃走」ボタンを配置
 //   - 攻撃/防御/逃走の動作を実装（道具は未実装）
 //
-// ★ 変数の役割分担（今回の改修）:
+// ★ 変数の役割分担:
 //   - バトル開始 : 選択肢末尾の「バトル開始」ボタンを表示するかどうか（常に1で維持）
 //   - バトルモード : 実際のバトル進行状態（1=バトル中, 0=非バトル）
 //   → 逃走時はバトル開始を触らずバトルモードのみ0にする。
@@ -15,7 +15,7 @@
 //
 // ★ バトルモード遷移:
 //   バトル開始ボタン押下 → バトルモード=1
-//   敵HP≤0 / 逃走      → バトルモード=0
+//   敵HP≤0 / 逃走      → バトルモード=0 → 敵HPを最大値に全回復
 
 (function () {
     'use strict';
@@ -51,8 +51,8 @@
     // ★ バトル状態
     let _battleActive = false;
     let _battlePrevChatHidden = null;
-    let _lastBattleMode = false;          // 「バトル開始」変数の値キャッシュ
-    let _startBattleInProgress = false;   // startBattle 実行中の保護フラグ
+    let _lastBattleMode = false;
+    let _startBattleInProgress = false;
 
     (function injectStyle() {
         if (document.getElementById(STYLE_ID)) return;
@@ -211,6 +211,44 @@
             return true;
         } catch (e) {
             console.warn(LOG, 'setBattleModeVar error:', e);
+            return false;
+        }
+    }
+
+    // ★ 敵HPを最大値に全回復
+    async function restoreEnemyHPFull() {
+        try {
+            const result = await getCurrentVariables();
+            if (!result.ok || !result.uid) {
+                console.warn(LOG, `restoreEnemyHPFull: 変数取得失敗 (${result.reason})`);
+                return false;
+            }
+            const vars = result.variables.map(v => ({ ...v }));
+            const varMap = {};
+            for (const v of vars) if (v && v.name) varMap[v.name] = v;
+
+            const curHPVar = varMap['敵キャラの現在HP'];
+            const maxHPVar = varMap['敵キャラの最大HP'];
+            if (!curHPVar || !maxHPVar) {
+                console.warn(LOG, 'restoreEnemyHPFull: 敵HP変数が見つかりません');
+                return false;
+            }
+
+            const maxHP = parseFloat(maxHPVar.value);
+            if (!isFinite(maxHP) || maxHP <= 0) {
+                console.warn(LOG, 'restoreEnemyHPFull: 最大HPが無効です', maxHPVar.value);
+                return false;
+            }
+
+            curHPVar.value = String(maxHP);
+
+            const data = window.LorebookExpansion.getDataFor(result.worldName, result.uid, result.entry);
+            data.variables = vars;
+            window.LorebookExpansion.setDataFor(result.worldName, result.uid, result.entry, data);
+            console.log(LOG, `💚 敵HPを最大値(${maxHP})に全回復`);
+            return true;
+        } catch (e) {
+            console.warn(LOG, 'restoreEnemyHPFull error:', e);
             return false;
         }
     }
@@ -545,7 +583,7 @@
             return;
         }
 
-        // ★ ボタン表示は「バトル開始」変数で制御（常に1なら表示され続ける）
+        // ★ ボタン表示は「バトル開始」変数で制御
         const battleStartRaw = varMap['バトル開始']?.value;
         const battleStart = String(battleStartRaw ?? '').trim() === '1';
         _lastBattleMode = battleStart;
@@ -554,23 +592,17 @@
         const battleModeRaw = varMap['バトルモード']?.value;
         const battleMode = String(battleModeRaw ?? '').trim() === '1';
 
-        // バトルモード=1 かつ メモリ上 _battleActive=false → バトル中に復元
-        // （キャラ切替からの復帰等）
         if (battleMode && !_battleActive && !_startBattleInProgress) {
             console.log(LOG, 'バトルモード変数=1 を検出 → バトル中に復元');
             _battleActive = true;
             document.body.classList.add('variable-battle-active');
             _lastRenderKey = '';
             applyBattleCommandsVisibility();
-        }
-        // バトルモード=0 かつ メモリ上 _battleActive=true → バトル終了
-        // （外部から書き換えられた場合）
-        else if (!battleMode && _battleActive && !_startBattleInProgress) {
+        } else if (!battleMode && _battleActive && !_startBattleInProgress) {
             console.log(LOG, 'バトルモード変数=0 を検出 → バトル終了');
             endBattle();
         }
 
-        // ボタン表示制御
         if (!battleStart) {
             removeBattleStartButton();
         } else if (!_battleActive) {
@@ -659,7 +691,10 @@
 
         if (isEnemyDefeated) {
             console.log(LOG, '⚔️ 敵HPが0 → バトル終了（バトルモード=0）');
+            // ★ 先にバトル終了 → 敵HP表示を非表示化
             endBattle();
+            // ★ 非表示化後、敵HPを最大値に全回復
+            await restoreEnemyHPFull();
         }
 
         forceRender();
@@ -685,15 +720,20 @@
         forceRender();
     }
 
-    // ── 逃走: バトルモードのみ0にし、バトル開始は維持 ──
+    // ── 逃走: バトルモードのみ0にし、敵HPを全回復 ──
     async function handleEscape() {
         if (!_battleActive) return;
 
         // ★ バトルモード=0 のみ書き換え（バトル開始は触らない）
         await setBattleModeVar(0);
 
+        // ★ 先にバトル終了 → 敵HP表示を非表示化
         endBattle();
-        console.log(LOG, '🏃 逃走: バトルモードを終了しました（バトル開始は維持）');
+
+        // ★ 非表示化後、敵HPを最大値に全回復
+        await restoreEnemyHPFull();
+
+        console.log(LOG, '🏃 逃走: バトルモードを終了し、敵HPを全回復しました');
         forceRender();
     }
 
@@ -712,7 +752,7 @@
         const buttons = [
             { label: '攻撃', color: 'attack', handler: handleAttack },
             { label: '防御', color: 'defense', handler: handleDefense },
-            { label: '道具', color: 'item', handler: null },          // 未実装
+            { label: '道具', color: 'item', handler: null },
             { label: '逃走', color: 'escape', handler: handleEscape },
         ];
         for (const b of buttons) {
@@ -757,13 +797,11 @@
             }
         }
 
-        // 場所（常に表示）
         const locVal = varMap['場所']?.value;
         const locationText = (locVal !== undefined && locVal !== null && String(locVal).trim())
             ? String(locVal)
             : '場所';
 
-        // 敵キャラ情報（バトル中のみ）
         let enemyName = null;
         let hp = null;
         if (_battleActive) {
@@ -870,7 +908,6 @@
                     if (et[name] && typeof es.on === 'function') es.on(et[name], scheduleRender);
                 }
 
-                // ★ ユーザー送信直後にも素早く反映（ボタン消失防止）
                 if (et['MESSAGE_SENT'] && typeof es.on === 'function') {
                     es.on(et['MESSAGE_SENT'], () => {
                         setTimeout(render, 100);
@@ -930,6 +967,7 @@
         handleDefense,
         handleEscape,
         setBattleModeVar,
+        restoreEnemyHPFull,
         setVisibleForChar: (charName, visible) => {
             if (!charName) return false;
             const map = getVisibleByCharMap();
@@ -983,6 +1021,8 @@
                 選択肢番号: result.choiceNum,
                 バトル開始: varMap['バトル開始']?.value,
                 バトルモード: varMap['バトルモード']?.value,
+                敵現在HP: varMap['敵キャラの現在HP']?.value,
+                敵最大HP: varMap['敵キャラの最大HP']?.value,
                 _lastBattleMode,
                 _battleActive,
                 _startBattleInProgress,
