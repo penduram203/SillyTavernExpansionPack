@@ -27,6 +27,12 @@
     let _initialized = false;
     let _uiObsPending = false;
 
+    // ★ バトルコマンドのホバー状態
+    let _battleHoverRegion = null;
+    let _lastMouseX = -1;
+    let _lastMouseY = -1;
+    let _mouseRafPending = false;    
+    
     // ★ バトル状態
     let _battleActive = false;
     let _battlePrevChatHidden = null;
@@ -405,6 +411,7 @@
         document.body.classList.add('variable-battle-active');
         removeBattleStartButton();
         _lastRenderKey = '';
+        _battleHoverRegion = null;
         console.log(LOG, '⚔️ バトル開始');
         applyBattleCommandsVisibility();
         render();
@@ -419,6 +426,7 @@
         _battlePrevChatHidden = null;
         removeBattleStartButton();
         _lastRenderKey = '';
+        _battleHoverRegion = null;
         console.log(LOG, '⚔️ バトル終了');
         applyBattleCommandsVisibility();
     }
@@ -480,12 +488,59 @@
         return container;
     }
 
+    // ============================================================
+    // ★ 600x600 正方形のマウスホバー判定
+    //   画面中心から外側に向けて 600px の正方形
+    //   斜め分割で上下左右の三角領域に分類
+    // ============================================================
+    function _getBattleHoverRegion(mx, my) {
+        if (mx < 0 || my < 0) return null;
+
+        const cx = window.innerWidth / 2;
+        const cy = window.innerHeight / 2;
+        const half = 300; // 600px / 2
+
+        if (Math.abs(mx - cx) > half || Math.abs(my - cy) > half) {
+            return null;
+        }
+
+        const dx = mx - cx;
+        const dy = my - cy;
+
+        if (Math.abs(dy) > Math.abs(dx)) {
+            return dy < 0 ? 'attack' : 'escape';
+        }
+        return dx < 0 ? 'defense' : 'item';
+    }
+    
     function applyBattleCommandsVisibility() {
         const container = document.getElementById(BATTLE_COMMANDS_ID);
         if (!container) return;
+
         const charName = getCurrentCharName();
-        const shouldShow = isVisibleForChar(charName) && _battleActive;
-        container.style.display = shouldShow ? '' : 'none';
+        const baseVisible = isVisibleForChar(charName) && _battleActive;
+
+        if (!baseVisible) {
+            container.classList.remove('visible');
+            _battleHoverRegion = null;
+            return;
+        }
+
+        const region = _getBattleHoverRegion(_lastMouseX, _lastMouseY);
+        _battleHoverRegion = region;
+
+        if (region === null) {
+            container.classList.remove('visible');
+        } else {
+            container.classList.add('visible');
+        }
+
+        // 各ボタンの .variable-command-active クラスを更新
+        ['attack', 'defense', 'item', 'escape'].forEach(r => {
+            const btn = container.querySelector('.variable-command-' + r);
+            if (!btn) return;
+            btn.classList.toggle('variable-command-active', region === r);
+        });
     }
 
     // ============================================================
@@ -630,6 +685,32 @@
         } catch (e) { /* ignore */ }
     }
 
+    // ============================================================
+    // ★ マウス位置追跡（バトルコマンドのホバー判定）
+    // ============================================================
+    function setupBattleHoverTracking() {
+        document.addEventListener('mousemove', (e) => {
+            _lastMouseX = e.clientX;
+            _lastMouseY = e.clientY;
+            if (_mouseRafPending) return;
+            _mouseRafPending = true;
+            requestAnimationFrame(() => {
+                _mouseRafPending = false;
+                if (_battleActive) applyBattleCommandsVisibility();
+            });
+        }, { passive: true });
+
+        document.addEventListener('mouseleave', () => {
+            _lastMouseX = -1;
+            _lastMouseY = -1;
+            applyBattleCommandsVisibility();
+        });
+
+        window.addEventListener('resize', () => {
+            if (_battleActive) applyBattleCommandsVisibility();
+        });
+    }
+    
     async function init() {
         if (_initialized) return;
         _initialized = true;
@@ -641,6 +722,7 @@
         ensureBattleCommands();
         ensureUISettings();
         setupEventListeners();
+        setupBattleHoverTracking();   // ★ 追加
         setupUISettingsObserver();
         await render();
 
