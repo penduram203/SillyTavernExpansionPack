@@ -278,6 +278,35 @@ body.variable-battle-active #half-maximize-button {
     -webkit-user-select: none;
 }
 
+#variable-battle-commands.visible {
+    display: grid;
+}
+
+/* グリッド配置 */
+.variable-command-btn.variable-command-attack {
+    grid-area: 1 / 2;
+    align-self: end;
+    justify-self: center;
+}
+
+.variable-command-btn.variable-command-defense {
+    grid-area: 2 / 1;
+    align-self: center;
+    justify-self: end;
+}
+
+.variable-command-btn.variable-command-item {
+    grid-area: 2 / 3;
+    align-self: center;
+    justify-self: start;
+}
+
+.variable-command-btn.variable-command-escape {
+    grid-area: 3 / 2;
+    align-self: start;
+    justify-self: center;
+}
+
 .variable-command-btn {
   display: inline-flex;
   align-items: center;
@@ -301,6 +330,7 @@ body.variable-battle-active #half-maximize-button {
   letter-spacing: 0.05em;
   min-width: 80px;
   box-sizing: border-box;
+  pointer-events: auto;   /* ★ 追加: 親が pointer-events:none でもボタンは反応 */
 }
 
 .variable-command-btn:hover {
@@ -313,11 +343,12 @@ body.variable-battle-active #half-maximize-button {
 }
 
 /* ============================================================
- * ★ バトルコマンド: ホバー時は該当色、クリック時はさらに明るい色
+ * ★ バトルコマンド: ホバー or 領域ホバー時に該当色、クリック時は明るい色
  * ============================================================ */
 
 /* 攻撃: 赤 */
-.variable-command-btn.variable-command-attack:hover {
+.variable-command-btn.variable-command-attack:hover,
+.variable-command-btn.variable-command-attack.variable-command-active {
     background: rgba(180, 20, 20, 0.95) !important;
     border-color: #ff8888 !important;
 }
@@ -328,7 +359,8 @@ body.variable-battle-active #half-maximize-button {
 }
 
 /* 防御: 青 */
-.variable-command-btn.variable-command-defense:hover {
+.variable-command-btn.variable-command-defense:hover,
+.variable-command-btn.variable-command-defense.variable-command-active {
     background: rgba(20, 60, 180, 0.95) !important;
     border-color: #88bbff !important;
 }
@@ -339,7 +371,8 @@ body.variable-battle-active #half-maximize-button {
 }
 
 /* 道具: 緑 */
-.variable-command-btn.variable-command-item:hover {
+.variable-command-btn.variable-command-item:hover,
+.variable-command-btn.variable-command-item.variable-command-active {
     background: rgba(20, 140, 40, 0.95) !important;
     border-color: #88ff88 !important;
 }
@@ -350,7 +383,8 @@ body.variable-battle-active #half-maximize-button {
 }
 
 /* 逃走: 黄色 */
-.variable-command-btn.variable-command-escape:hover {
+.variable-command-btn.variable-command-escape:hover,
+.variable-command-btn.variable-command-escape.variable-command-active {
     background: rgba(200, 170, 20, 0.95) !important;
     border-color: #fff088 !important;
 }
