@@ -467,7 +467,7 @@
         container = document.createElement('div');
         container.id = BATTLE_COMMANDS_ID;
         container.className = 'variable-battle-commands';
-        container.style.display = 'none';
+        // ★ container.style.display = 'none'; を削除（CSSの .visible で制御）
 
         const buttons = [
             { label: '攻撃', color: 'attack' },
@@ -480,7 +480,6 @@
             btn.type = 'button';
             btn.className = `variable-command-btn variable-command-${b.color}`;
             btn.textContent = b.label;
-            // プレースホルダー: クリックしても何もしない
             container.appendChild(btn);
         }
 
@@ -517,6 +516,11 @@
         const container = document.getElementById(BATTLE_COMMANDS_ID);
         if (!container) return;
 
+        // ★ 万が一インラインスタイルが残っていてもクリア
+        if (container.style.display) {
+            container.style.display = '';
+        }
+
         const charName = getCurrentCharName();
         const baseVisible = isVisibleForChar(charName) && _battleActive;
 
@@ -533,9 +537,9 @@
             container.classList.remove('visible');
         } else {
             container.classList.add('visible');
+            console.log(LOG, `⚔️ コマンド領域: ${region} (mouse=${_lastMouseX},${_lastMouseY})`);
         }
 
-        // 各ボタンの .variable-command-active クラスを更新
         ['attack', 'defense', 'item', 'escape'].forEach(r => {
             const btn = container.querySelector('.variable-command-' + r);
             if (!btn) return;
