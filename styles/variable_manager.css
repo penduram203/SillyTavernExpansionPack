@@ -266,7 +266,7 @@ body.variable-battle-active #half-maximize-button {
 #variable-battle-commands {
     position: fixed;
     left: 20px;
-    top: 50%;
+    top: 75%;
     transform: translateY(-50%);
     display: flex;
     flex-direction: column;
