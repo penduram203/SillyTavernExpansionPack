@@ -268,7 +268,7 @@ body.variable-battle-active #half-maximize-button {
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    display: none;
+    display: grid;
     grid-template-columns: auto 160px auto;
     grid-template-rows: auto 100px auto;
     gap: 10px;
@@ -276,10 +276,18 @@ body.variable-battle-active #half-maximize-button {
     pointer-events: none;
     user-select: none;
     -webkit-user-select: none;
+
+    /* ★ フェードアウト用（非表示状態） */
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.1s ease, visibility 0s linear 0.1s;
 }
 
 #variable-battle-commands.visible {
-    display: grid;
+    /* ★ フェードイン用（表示状態） */
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 0.1s ease, visibility 0s linear 0s;
 }
 
 /* グリッド配置 */
