@@ -1963,12 +1963,26 @@
                     if (eventType && typeof eventSource.on === 'function') eventSource.on(eventType, handler);
                 };
                 safeOn(eventTypes.STREAM_TOKEN_RECEIVED, handleStreamingUpdate);
-                const immediateUpdate = () => updateImage();
-                safeOn(eventTypes.CHARACTER_MESSAGE_RENDERED, immediateUpdate);
-                safeOn(eventTypes.USER_MESSAGE_RENDERED, immediateUpdate);
-                if (eventTypes.MESSAGE_DELETED) safeOn(eventTypes.MESSAGE_DELETED, immediateUpdate);
-                if (eventTypes.MESSAGE_EDITED) safeOn(eventTypes.MESSAGE_EDITED, immediateUpdate);
-                if (eventTypes.CHAT_LOADED) safeOn(eventTypes.CHAT_LOADED, immediateUpdate);
+            const immediateUpdate = () => updateImage();
+            safeOn(eventTypes.CHARACTER_MESSAGE_RENDERED, immediateUpdate);
+            safeOn(eventTypes.USER_MESSAGE_RENDERED, immediateUpdate);
+
+            // ★ メッセージの削除・編集時はキーワード画像ロックを解除して再スキャン
+            //    （削除されたメッセージのキーワード画像が居座り続けるバグを修正）
+            const clearLockAndUpdate = () => {
+                _lastSentKeywordImage = null;
+                invalidateMatchCache();
+                // DOM 更新を待ってから再スキャン
+                //   （ST は MESSAGE_DELETED を emit してから printMessages() するため、
+                //     同期実行だと削除前のメッセージを読んでしまう）
+                setTimeout(() => {
+                    updateImage();
+                }, 100);
+            };
+            if (eventTypes.MESSAGE_DELETED) safeOn(eventTypes.MESSAGE_DELETED, clearLockAndUpdate);
+            if (eventTypes.MESSAGE_EDITED) safeOn(eventTypes.MESSAGE_EDITED, clearLockAndUpdate);
+
+            if (eventTypes.CHAT_LOADED) safeOn(eventTypes.CHAT_LOADED, immediateUpdate);
                 const onCharacterOrChatChanged = () => {
                     _lastSentKeywordImage = null;   // ★ ロック解除
                     invalidateMatchCache();
