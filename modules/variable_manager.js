@@ -222,6 +222,22 @@
         }
     }
 
+    // ★ プレイヤーHPを最大値に全回復
+    function restorePlayerHPFull() {
+        try {
+            if (!window.UserStatus?.fullHeal) {
+                console.warn(LOG, 'restorePlayerHPFull: UserStatus.fullHeal が見つかりません');
+                return false;
+            }
+            window.UserStatus.fullHeal();
+            console.log(LOG, '💚 プレイヤーHPを最大値に全回復');
+            return true;
+        } catch (e) {
+            console.warn(LOG, 'restorePlayerHPFull error:', e);
+            return false;
+        }
+    }    
+    
     async function restoreEnemyHPFull() {
         try {
             const result = await getCurrentVariables();
@@ -652,19 +668,29 @@
                 `(ダメージ ${damage} = ${enemyAtk} - ${playerDef})`
             );
 
-            // ターン切替（プレイヤーへ戻す）
-            bsNow.enemy_turn = 0;
-            bsNow.player_turn = 1;
-            saveBattleState();
-
             const isPlayerDefeated = newHP <= 0;
 
             if (isPlayerDefeated) {
                 console.log(LOG, '💀 プレイヤーHPが0以下 → バトル終了 + エントリ999ロード');
+
+                // ── ① バトルモード=0 ──
                 await setBattleModeVar(0);
+
+                // ── ② バトル終了（HP表示を非表示化） ──
                 endBattle();
+
+                // ── ③ 描画してHP非表示を確定 ──
                 forceRender();
 
+                // ── ④ HP非表示後にプレイヤーHPを最大値に全回復 ──
+                restorePlayerHPFull();
+
+                // ── ⑤ ターンリセット（プレイヤーへ戻す） ──
+                bsNow.enemy_turn = 0;
+                bsNow.player_turn = 1;
+                saveBattleState();
+
+                // ── ⑥ エントリ999を自動送信 ──
                 setTimeout(() => {
                     try {
                         loadEntry999();
@@ -673,6 +699,10 @@
                     }
                 }, ENTRY_999_DELAY_MS);
             } else {
+                // 生存：ターン切替（プレイヤーへ戻す）
+                bsNow.enemy_turn = 0;
+                bsNow.player_turn = 1;
+                saveBattleState();
                 forceRender();
             }
         } catch (e) {
