@@ -3,16 +3,19 @@
 //   - 現在のエントリ = 最後のユーザーメッセージの番号に対応するロアブックエントリ
 //   - 変数値のみを文字列として表示（ヘッダー・折りたたみ・枠なし）
 //   - 「場所」は常に表示、敵キャラの名前/HPはバトル開始後のみ表示
-//   - 「バトルモード」が 1 の時、AIメッセージ末尾に「バトル開始」ボタンを表示
+//   - 「バトル開始」変数が 1 の時、AIメッセージ末尾に「バトル開始」ボタンを表示
 //   - バトル中は画面左下・高さ中央に「攻撃/防御/道具/逃走」ボタンを配置
 //   - 攻撃/防御/逃走の動作を実装（道具は未実装）
-//   - キャラクター管理メニューに「UI設定 / 開始ボタン / 場所」を追加
 //
-// ★ バトル開始ボタン消失対策:
-//   - _lastBattleMode で前回のバトルモード状態をキャッシュ
-//   - getCurrentVariables が一時的に失敗してもボタンを維持
-//   - MESSAGE_SENT で即時 render（反映遅延対策）
-//   - debugBattleButton() で内部状態を一括ダンプ
+// ★ 変数の役割分担（今回の改修）:
+//   - バトル開始 : 選択肢末尾の「バトル開始」ボタンを表示するかどうか（常に1で維持）
+//   - バトルモード : 実際のバトル進行状態（1=バトル中, 0=非バトル）
+//   → 逃走時はバトル開始を触らずバトルモードのみ0にする。
+//     これにより逃走後もバトル開始ボタンは選択肢末尾に表示され続ける。
+//
+// ★ バトルモード遷移:
+//   バトル開始ボタン押下 → バトルモード=1
+//   敵HP≤0 / 逃走      → バトルモード=0
 
 (function () {
     'use strict';
@@ -48,7 +51,8 @@
     // ★ バトル状態
     let _battleActive = false;
     let _battlePrevChatHidden = null;
-    let _lastBattleMode = false;
+    let _lastBattleMode = false;          // 「バトル開始」変数の値キャッシュ
+    let _startBattleInProgress = false;   // startBattle 実行中の保護フラグ
 
     (function injectStyle() {
         if (document.getElementById(STYLE_ID)) return;
@@ -180,6 +184,38 @@
     }
 
     // ============================================================
+    // ★ ロアブック変数の更新ヘルパー
+    // ============================================================
+    async function setBattleModeVar(value) {
+        try {
+            const result = await getCurrentVariables();
+            if (!result.ok || !result.uid) {
+                console.warn(LOG, `setBattleModeVar: 変数取得失敗 (${result.reason})`);
+                return false;
+            }
+            const vars = result.variables.map(v => ({ ...v }));
+            const varMap = {};
+            for (const v of vars) if (v && v.name) varMap[v.name] = v;
+
+            const bmVar = varMap['バトルモード'];
+            if (bmVar) {
+                bmVar.value = String(value);
+            } else {
+                vars.push({ type: 'number', name: 'バトルモード', value: String(value) });
+            }
+
+            const data = window.LorebookExpansion.getDataFor(result.worldName, result.uid, result.entry);
+            data.variables = vars;
+            window.LorebookExpansion.setDataFor(result.worldName, result.uid, result.entry, data);
+            console.log(LOG, `バトルモード変数を ${value} に更新`);
+            return true;
+        } catch (e) {
+            console.warn(LOG, 'setBattleModeVar error:', e);
+            return false;
+        }
+    }
+
+    // ============================================================
     // UI設定
     // ============================================================
     function getCurrentCharName() {
@@ -278,7 +314,6 @@
         const container = document.createElement('div');
         container.className = UI_SETTINGS_CLASS;
 
-        // UI設定（太字）
         const uiLabel = document.createElement('span');
         uiLabel.className = 'variable-manager-ui-label';
         uiLabel.textContent = 'UI設定';
@@ -335,10 +370,8 @@
         });
         container.appendChild(placeWrap);
 
-        // select の直後（label の内側）に挿入
         select.insertAdjacentElement('afterend', container);
 
-        // label を flex コンテナ化
         label.style.setProperty('display', 'flex', 'important');
         label.style.setProperty('align-items', 'center', 'important');
         label.style.setProperty('gap', '6px', 'important');
@@ -431,17 +464,24 @@
         btn.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            startBattle();
+            Promise.resolve(startBattle()).catch(err => console.warn(LOG, err));
         });
 
         mesTextEl.appendChild(btn);
     }
 
-    function startBattle() {
-        if (_battleActive) return;
+    async function startBattle() {
+        if (_battleActive || _startBattleInProgress) return;
+        _startBattleInProgress = true;
         _battleActive = true;
 
-        // ★ バトルステート初期化
+        try {
+            // ★ バトルモード変数=1（バトル開始変数は触らない）
+            await setBattleModeVar(1);
+        } catch (e) {
+            console.warn(LOG, 'startBattle: setBattleModeVar error', e);
+        }
+
         const s = _ensureExtSettings();
         if (s) {
             s.battleState = {
@@ -462,6 +502,7 @@
         _lastRenderKey = '';
         console.log(LOG, '⚔️ バトル開始', getBattleState());
         applyBattleCommandsVisibility();
+        _startBattleInProgress = false;
         render();
     }
 
@@ -504,20 +545,38 @@
             return;
         }
 
+        // ★ ボタン表示は「バトル開始」変数で制御（常に1なら表示され続ける）
+        const battleStartRaw = varMap['バトル開始']?.value;
+        const battleStart = String(battleStartRaw ?? '').trim() === '1';
+        _lastBattleMode = battleStart;
+
+        // ★ バトル進行状態は「バトルモード」変数で制御
         const battleModeRaw = varMap['バトルモード']?.value;
         const battleMode = String(battleModeRaw ?? '').trim() === '1';
-        _lastBattleMode = battleMode;
 
-        if (!battleMode) {
-            if (_battleActive) endBattle();
-            removeBattleStartButton();
-            return;
+        // バトルモード=1 かつ メモリ上 _battleActive=false → バトル中に復元
+        // （キャラ切替からの復帰等）
+        if (battleMode && !_battleActive && !_startBattleInProgress) {
+            console.log(LOG, 'バトルモード変数=1 を検出 → バトル中に復元');
+            _battleActive = true;
+            document.body.classList.add('variable-battle-active');
+            _lastRenderKey = '';
+            applyBattleCommandsVisibility();
+        }
+        // バトルモード=0 かつ メモリ上 _battleActive=true → バトル終了
+        // （外部から書き換えられた場合）
+        else if (!battleMode && _battleActive && !_startBattleInProgress) {
+            console.log(LOG, 'バトルモード変数=0 を検出 → バトル終了');
+            endBattle();
         }
 
-        if (_battleActive) {
+        // ボタン表示制御
+        if (!battleStart) {
             removeBattleStartButton();
-        } else {
+        } else if (!_battleActive) {
             addBattleStartButton();
+        } else {
+            removeBattleStartButton();
         }
     }
 
@@ -548,7 +607,6 @@
             return;
         }
 
-        // ★ 変数のコピーを作成（元配列を破壊しない）
         const vars = result.variables.map(v => ({ ...v }));
         const varMap = {};
         for (const v of vars) if (v && v.name) varMap[v.name] = v;
@@ -565,8 +623,18 @@
 
         const damage = Math.max(1, playerAtk - enemyDef);
         const newHP = Math.max(0, curHP - damage);
-
         curHPVar.value = String(newHP);
+
+        // ★ 敵HP≤0 なら同じトランザクションでバトルモード=0 も書き込む
+        const isEnemyDefeated = newHP <= 0;
+        if (isEnemyDefeated) {
+            const bmVar = varMap['バトルモード'];
+            if (bmVar) {
+                bmVar.value = '0';
+            } else {
+                vars.push({ type: 'number', name: 'バトルモード', value: '0' });
+            }
+        }
 
         // ロアブックに書き戻し
         try {
@@ -574,7 +642,7 @@
             data.variables = vars;
             window.LorebookExpansion.setDataFor(result.worldName, result.uid, result.entry, data);
         } catch (e) {
-            console.warn(LOG, 'バトル: 敵HPの保存に失敗', e);
+            console.warn(LOG, 'バトル: 変数の保存に失敗', e);
             return;
         }
 
@@ -588,6 +656,11 @@
             `⚔️ 攻撃: 敵HP ${curHP} → ${newHP} (ダメージ ${damage} = ${playerAtk} - ${enemyDef}) / ` +
             `player_turn=0, enemy_turn=1`
         );
+
+        if (isEnemyDefeated) {
+            console.log(LOG, '⚔️ 敵HPが0 → バトル終了（バトルモード=0）');
+            endBattle();
+        }
 
         forceRender();
     }
@@ -612,33 +685,15 @@
         forceRender();
     }
 
-    // ── 逃走: バトルモードを終了し元のチャットを表示 ──
+    // ── 逃走: バトルモードのみ0にし、バトル開始は維持 ──
     async function handleEscape() {
         if (!_battleActive) return;
 
-        // バトルモード変数を 0 にセット（バトル開始ボタンが再表示されないように）
-        try {
-            const result = await getCurrentVariables();
-            if (result.ok && result.uid) {
-                const vars = result.variables.map(v => ({ ...v }));
-                const varMap = {};
-                for (const v of vars) if (v && v.name) varMap[v.name] = v;
+        // ★ バトルモード=0 のみ書き換え（バトル開始は触らない）
+        await setBattleModeVar(0);
 
-                const bmVar = varMap['バトルモード'];
-                if (bmVar) {
-                    bmVar.value = '0';
-                    const data = window.LorebookExpansion.getDataFor(result.worldName, result.uid, result.entry);
-                    data.variables = vars;
-                    window.LorebookExpansion.setDataFor(result.worldName, result.uid, result.entry, data);
-                }
-            }
-        } catch (e) {
-            console.warn(LOG, '逃走: バトルモード変数の更新に失敗', e);
-        }
-
-        _lastBattleMode = false;
         endBattle();
-        console.log(LOG, '🏃 逃走: バトルモードを終了しました');
+        console.log(LOG, '🏃 逃走: バトルモードを終了しました（バトル開始は維持）');
         forceRender();
     }
 
@@ -734,13 +789,11 @@
 
         panel.innerHTML = '';
 
-        // 場所
         const locEl = document.createElement('div');
         locEl.className = 'variable-manager-value-text variable-location';
         locEl.textContent = locationText;
         panel.appendChild(locEl);
 
-        // 敵キャラの名前
         if (enemyName) {
             const nameEl = document.createElement('div');
             nameEl.className = 'variable-manager-value-text variable-enemy-name';
@@ -748,7 +801,6 @@
             panel.appendChild(nameEl);
         }
 
-        // HPバー + 数値
         if (hp) {
             const wrap = document.createElement('div');
             wrap.className = 'variable-hp-bar-wrap';
@@ -877,6 +929,7 @@
         handleAttack,
         handleDefense,
         handleEscape,
+        setBattleModeVar,
         setVisibleForChar: (charName, visible) => {
             if (!charName) return false;
             const map = getVisibleByCharMap();
@@ -908,6 +961,7 @@
             battleActive: _battleActive,
             battleState: getBattleState(),
             lastBattleMode: _lastBattleMode,
+            startBattleInProgress: _startBattleInProgress,
         }),
         debugBattleButton: async () => {
             const charName = getCurrentCharName();
@@ -927,9 +981,11 @@
                 result_ok: result.ok,
                 reason: result.reason,
                 選択肢番号: result.choiceNum,
+                バトル開始: varMap['バトル開始']?.value,
                 バトルモード: varMap['バトルモード']?.value,
                 _lastBattleMode,
                 _battleActive,
+                _startBattleInProgress,
                 最後のAIメッセージ_idx: lastAiIdx,
                 ボタン存在: hasBtn,
             };
