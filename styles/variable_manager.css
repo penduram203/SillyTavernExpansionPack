@@ -359,3 +359,13 @@ body.variable-battle-active #half-maximize-button {
     border-color: #ffffdd !important;
     box-shadow: 0 0 16px rgba(255, 220, 80, 0.9) !important;
 }
+
+/* ============================================================
+ * ★ キャラクター管理ドロップダウンの幅を 10% に固定
+ *    （ST本体の .drawer-content select { width: 100% } を上書き）
+ * ============================================================ */
+#char-management-dropdown {
+    width: 10% !important;
+    min-width: 0 !important;
+    font-size: calc(var(--mainFontSize) * 0.95);
+}
