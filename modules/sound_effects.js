@@ -1,11 +1,7 @@
 // sound_effects.js
-const SOUND_EFFECTS = {
-    // 攻撃ボタン用の効果音 (Base64文字列)
-    // ※ 実際のBase64データは sound_effects_data.js に移動することを推奨
-    attack: '', // ← ここにBase64を貼り付けるか、外部ファイルから読み込む
-
-    // 防御ボタン用の効果音 (Base64文字列)
-    defense: '', // ← 同上
+const SOUND_EFFECTS = window.SOUND_EFFECTS_DATA || {
+    attack: '',
+    defense: '',
 };
 
 const audioContext = new (window.AudioContext || window.webkitAudioContext)();
