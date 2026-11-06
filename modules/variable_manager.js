@@ -924,12 +924,12 @@
 
                 // ボタンの種類に応じて効果音を再生
                 if (b.color === 'attack') {
-                    playSound(SOUND_EFFECTS.attack);
+                    window.playSound?.(window.SOUND_EFFECTS?.attack);
                 } else if (b.color === 'defense') {
-                    playSound(SOUND_EFFECTS.defense);
+                    window.playSound?.(window.SOUND_EFFECTS?.defense);
                 } else if (b.color === 'escape') {
                     // 逃走用の音があれば追加
-                    // playSound(SOUND_EFFECTS.escape);
+                    // window.playSound?.(window.SOUND_EFFECTS?.escape);
                 }
 
                 // 既存の処理を実行
