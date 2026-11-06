@@ -3,6 +3,10 @@
 //   各拡張をモジュールとして読み込むエントリポイント
 // ============================================================
 
+// ★ 効果音モジュールを最初に読み込む
+//   （window.playSound / window.SOUND_EFFECTS を確定させる）
+import './modules/sound_effects.js';
+
 import './modules/character_store.js';
 // ---- Image Display ----
 // ★ text-styling.js が window.ImageDisplayExtension を参照するため先に読み込む
