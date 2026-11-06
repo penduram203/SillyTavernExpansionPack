@@ -487,11 +487,43 @@
         return -1;
     }
 
+    function getLastAiMessageIndex() {
+        const ctx = getSTContext();
+        if (!ctx?.chat || ctx.chat.length === 0) return -1;
+        for (let i = ctx.chat.length - 1; i >= 0; i--) {
+            const m = ctx.chat[i];
+            if (m.is_system) continue;
+            if (!m.is_user) return i;
+        }
+        return -1;
+    }
+
+    // ★ 最後の非システムメッセージが AI かどうか
+    //   （ユーザー送信直後〜AI生成完了までは false を返す）
+    function isLastMessageAi() {
+        const ctx = getSTContext();
+        if (!ctx?.chat || ctx.chat.length === 0) return false;
+        for (let i = ctx.chat.length - 1; i >= 0; i--) {
+            const m = ctx.chat[i];
+            if (m.is_system) continue;
+            return !m.is_user;
+        }
+        return false;
+    }
+    
     function removeBattleStartButton() {
         document.querySelectorAll('.' + BATTLE_START_BTN_CLASS).forEach(el => el.remove());
     }
 
     function addBattleStartButton() {
+        // ★ 最後のメッセージがAIでない場合はボタンを表示しない
+        //    （ユーザー送信直後〜AI生成完了までは、直前のAIメッセージに
+        //      ボタンが残ったままになるのを防ぐ）
+        if (!isLastMessageAi()) {
+            removeBattleStartButton();
+            return;
+        }
+
         const lastAiIdx = getLastAiMessageIndex();
         if (lastAiIdx < 0) {
             removeBattleStartButton();
