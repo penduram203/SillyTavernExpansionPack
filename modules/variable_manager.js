@@ -922,17 +922,20 @@
                 e.preventDefault();
                 e.stopPropagation();
 
-                // ボタンの種類に応じて効果音を再生
-                if (b.color === 'attack') {
-                    window.playSound?.(window.SOUND_EFFECTS?.attack);
-                } else if (b.color === 'defense') {
-                    window.playSound?.(window.SOUND_EFFECTS?.defense);
-                } else if (b.color === 'escape') {
-                    // 逃走用の音があれば追加
-                    // window.playSound?.(window.SOUND_EFFECTS?.escape);
+                // 効果音（window経由 + 失敗しても後続を止めない）
+                try {
+                    if (b.color === 'attack') {
+                        window.playSound?.(window.SOUND_EFFECTS?.attack);
+                    } else if (b.color === 'defense') {
+                        window.playSound?.(window.SOUND_EFFECTS?.defense);
+                    } else if (b.color === 'escape') {
+                        // window.playSound?.(window.SOUND_EFFECTS?.escape);
+                    }
+                } catch (err) {
+                    console.warn(LOG, '効果音エラー:', err);
                 }
 
-                // 既存の処理を実行
+                // 既存の処理
                 if (typeof b.handler === 'function') {
                     Promise.resolve(b.handler()).catch(err => console.warn(LOG, err));
                 }
