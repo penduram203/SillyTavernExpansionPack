@@ -2,6 +2,7 @@
 // SillyTavern Expansion Pack
 //   各拡張をモジュールとして読み込むエントリポイント
 // ============================================================
+#index.js
 
 import './modules/character_store.js';
 // ---- Image Display ----
