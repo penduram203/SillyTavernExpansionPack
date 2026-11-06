@@ -917,13 +917,26 @@
             btn.type = 'button';
             btn.className = `variable-command-btn variable-command-${b.color}`;
             btn.textContent = b.label;
-            if (typeof b.handler === 'function') {
-                btn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
+            // ★ クリック時に効果音を再生
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+
+                // ボタンの種類に応じて効果音を再生
+                if (b.color === 'attack') {
+                    playSound(SOUND_EFFECTS.attack);
+                } else if (b.color === 'defense') {
+                    playSound(SOUND_EFFECTS.defense);
+                } else if (b.color === 'escape') {
+                    // 逃走用の音があれば追加
+                    // playSound(SOUND_EFFECTS.escape);
+                }
+
+                // 既存の処理を実行
+                if (typeof b.handler === 'function') {
                     Promise.resolve(b.handler()).catch(err => console.warn(LOG, err));
-                });
-            }
+                }
+            });
             container.appendChild(btn);
         }
 
