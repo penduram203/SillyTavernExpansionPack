@@ -21,17 +21,24 @@
 //   敵ダメージ = max(1, enemy_attack - player_defense)
 //   プレイヤーHP≤0 → バトルモード=0, バトル終了, エントリ999を自動送信
 //
-// ★ フロート表示フロー（v2）:
+// ★ フロート表示フロー（v3）:
 //   - プレイヤー攻撃 → 「（敵名）に（ダメージ）のダメージ！」を表示し、
 //     フロートが消えるまで await する。
 //   - その後に敵の自動攻撃 → 「（プレイヤー名）に（ダメージ）のダメージ」を
 //     表示し、フロート表示と同時にプレイヤーHPを減らす。
 //     フロートが消えるまで await する。
-//   - HP が 0 以下になった場合は、バトル終了フロート
+//   - どちらかの HP が 0 以下になった場合は、バトル終了フロート
 //     「（敵名）を倒した！」/「（プレイヤー名）は（敵名）に敗北した！」
 //     を表示し、消えるまで await してから後続処理に進む。
+//   - ★ バトル終了フロートが消えるまでは バトルモード=0 を書き込まない。
+//     これにより UserStatus の HP バーがフロート表示中も表示され続ける。
 //   - フロート表示中は _battleEndingInProgress フラグを立て、
 //     ポーリング経由の updateBattleUI が勝手に endBattle() しないようにする。
+//
+// ★ 二度押し防止（v3）:
+//   - _actionInProgress フラグで攻撃/防御/逃走の多重実行を防止。
+//   - クリック直後（最初の await より前）に updateBattleCommandsState() を呼び、
+//     ボタンを即座に半透明化・クリック不可にする。
 
 // ★ 効果音モジュール（window.SoundEffects を公開）を非同期ロード
 import('./sound_effects.js').catch(err => {
@@ -53,10 +60,11 @@ import('./sound_effects.js').catch(err => {
     const BATTLE_START_BTN_CLASS = 'variable-battle-start-btn';
     const BATTLE_COMMANDS_ID = 'variable-battle-commands';
 
-    const ENEMY_ATTACK_DELAY_MS = 600;
+    // ★ タイミング定数（v3 で短縮）
+    const ENEMY_ATTACK_DELAY_MS = 100;   // フロート消失後、敵攻撃までの小休止
     const ENTRY_999_DELAY_MS = 800;
-    const DAMAGE_FLOAT_DELAY_MS = 400;   // プレイヤー攻撃の効果音再生から一呼吸おいて表示
-    const DAMAGE_FLOAT_HOLD_MS = 1800;   // フロート表示の保持時間
+    const DAMAGE_FLOAT_DELAY_MS = 100;   // 効果音再生からフロート表示までの遅延
+    const DAMAGE_FLOAT_HOLD_MS = 1500;   // フロート保持時間
     const DAMAGE_FLOAT_FADE_MS = 200;    // フェードアウトに要する時間
 
     const BATTLE_DEFAULTS = {
@@ -82,6 +90,10 @@ import('./sound_effects.js').catch(err => {
     let _enemyAttackInProgress = false;
     // ★ フロート表示〜後続処理の間、外部からの endBattle を抑止するフラグ
     let _battleEndingInProgress = false;
+    // ★ 攻撃/防御/逃走の多重実行防止
+    let _actionInProgress = false;
+    // ★ 敵名キャッシュ（フロート表示時に無駄な再取得を避ける）
+    let _cachedEnemyName = '敵';
 
     (function injectStyle() {
         if (document.getElementById(STYLE_ID)) return;
@@ -525,7 +537,11 @@ import('./sound_effects.js').catch(err => {
                 }
             }
         } catch (e) { /* ignore */ }
-        return '敵';
+        return _cachedEnemyName || '敵';
+    }
+
+    function getCachedEnemyName() {
+        return _cachedEnemyName || '敵';
     }
 
     // ============================================================
@@ -784,7 +800,9 @@ import('./sound_effects.js').catch(err => {
     // ★ 敵の自動攻撃
     //   - ダメージ計算 → 敵ダメージフロート表示（HP減少はフロートと同時）→
     //     フロートが消えるまで await →
-    //     プレイヤー敗北時はバトル終了フロート表示 → 消えるまで await → 後続処理
+    //     プレイヤー敗北時はバトル終了フロート表示 → 消えるまで await →
+    //     バトルモード=0 書き込み → UserStatus.refresh() で HP バー非表示 →
+    //     endBattle() → プレイヤーHP全回復 → エントリ999
     // ============================================================
     async function enemyAutoAttack() {
         if (_enemyAttackInProgress) return;
@@ -796,7 +814,7 @@ import('./sound_effects.js').catch(err => {
         _enemyAttackInProgress = true;
 
         try {
-            // プレイヤーの行動結果をユーザーが認識できるよう少し待つ
+            // フロート消失後、敵攻撃までの小休止
             await new Promise(r => setTimeout(r, ENEMY_ATTACK_DELAY_MS));
 
             if (!_battleActive) return;
@@ -841,28 +859,28 @@ import('./sound_effects.js').catch(err => {
                     console.log(LOG, '💀 プレイヤーHPが0以下 → バトル終了 + エントリ999ロード');
 
                     // ── ① バトル終了フロート表示 → 消えるまで待つ ──
-                    const enemyName = await getEnemyName();
+                    //      この間 _battleActive = true のままなので HP バーは表示され続ける
+                    const enemyName = getCachedEnemyName();
                     await showBattleEndFloatAsync(`${playerName}は${enemyName}に敗北した！`);
 
-                    // ── ② バトルモード=0 ──
+                    // ── ② ここで初めて バトルモード=0 を書き込む ──
+                    //      UserStatus のポーリングを待たずに refresh() で即時反映
                     await setBattleModeVar(0);
+                    try { window.UserStatus?.refresh?.(); } catch (e) { /* ignore */ }
 
-                    // ── ③ バトル終了（body クラス解除）──
+                    // ── ③ バトル終了（body クラス解除 → チャット復帰）──
                     endBattle();
 
-                    // ── ④ 描画して HP 非表示を確定 ──
-                    forceRender();
-
-                    // ── ⑤ プレイヤーHPを最大値に全回復 ──
+                    // ── ④ プレイヤーHPを最大値に全回復（HPバーは既に非表示） ──
                     restorePlayerHPFull();
 
-                    // ── ⑥ ターンリセット ──
+                    // ── ⑤ ターンリセット ──
                     bsNow.enemy_turn = 0;
                     bsNow.player_turn = 1;
                     saveBattleState();
                     updateBattleCommandsState();
 
-                    // ── ⑦ エントリ999を自動送信 ──
+                    // ── ⑥ エントリ999を自動送信 ──
                     setTimeout(() => {
                         try {
                             loadEntry999();
@@ -878,7 +896,7 @@ import('./sound_effects.js').catch(err => {
                 bsNow.enemy_turn = 0;
                 bsNow.player_turn = 1;
                 saveBattleState();
-                // ★ ボタンの半透明表示を即座に解除
+                // ★ ボタンの半透明表示を解除（_actionInProgress は上位の finally で false になる）
                 updateBattleCommandsState();
                 forceRender();
             }
@@ -933,135 +951,164 @@ import('./sound_effects.js').catch(err => {
 
     async function handleAttack() {
         if (!_battleActive) return;
-        const bs = getBattleState();
+        if (_actionInProgress) return;   // ★ 二度押し防止
 
+        const bs = getBattleState();
         if (bs.player_turn !== 1) {
             console.log(LOG, `攻撃スキップ: プレイヤーターンではありません (player_turn=${bs.player_turn})`);
             return;
         }
 
-        const result = await getCurrentVariables();
-        if (!result.ok || !result.uid) {
-            console.warn(LOG, 'バトル: 変数を取得できませんでした');
-            return;
-        }
-
-        const vars = result.variables.map(v => ({ ...v }));
-        const varMap = {};
-        for (const v of vars) if (v && v.name) varMap[v.name] = v;
-
-        const curHPVar = varMap['敵キャラの現在HP'];
-        if (!curHPVar) {
-            console.warn(LOG, 'バトル: 敵キャラの現在HP 変数が見つかりません');
-            return;
-        }
-
-        // ★ 敵キャラの名前を取得（ダメージフロート表示用）
-        const enemyNameVal = varMap['敵キャラの名前']?.value;
-        const enemyName = (enemyNameVal !== undefined && enemyNameVal !== null && String(enemyNameVal).trim())
-            ? String(enemyNameVal)
-            : '敵';
-
-        const curHP = parseFloat(curHPVar.value) || 0;
-        const playerAtk = Number(bs.player_attack) || 60;
-        const enemyDef = Number(bs.enemy_defense) || 20;
-
-        const damage = Math.max(1, playerAtk - enemyDef);
-        const newHP = Math.max(0, curHP - damage);
-        curHPVar.value = String(newHP);
-
-        const isEnemyDefeated = newHP <= 0;
-        if (isEnemyDefeated) {
-            // ★ フロート表示中は外部からの endBattle を抑止する
-            _battleEndingInProgress = true;
-            const bmVar = varMap['バトルモード'];
-            if (bmVar) {
-                bmVar.value = '0';
-            } else {
-                vars.push({ type: 'number', name: 'バトルモード', value: '0' });
-            }
-        }
-
-        try {
-            const data = window.LorebookExpansion.getDataFor(result.worldName, result.uid, result.entry);
-            data.variables = vars;
-            window.LorebookExpansion.setDataFor(result.worldName, result.uid, result.entry, data);
-        } catch (e) {
-            console.warn(LOG, 'バトル: 変数の保存に失敗', e);
-            if (isEnemyDefeated) _battleEndingInProgress = false;
-            return;
-        }
-
-        bs.player_turn = 0;
-        bs.enemy_turn = 1;
-        saveBattleState();
-
-        // ★ 即座にボタンを半透明化・クリック不可にする
+        // ★ 最初の await より前に UI をロック（即時フィードバック）
+        _actionInProgress = true;
         updateBattleCommandsState();
 
-        console.log(
-            LOG,
-            `⚔️ 攻撃: 敵HP ${curHP} → ${newHP} (ダメージ ${damage} = ${playerAtk} - ${enemyDef}) / ` +
-            `player_turn=0, enemy_turn=1`
-        );
+        try {
+            const result = await getCurrentVariables();
+            if (!result.ok || !result.uid) {
+                console.warn(LOG, 'バトル: 変数を取得できませんでした');
+                return;
+            }
 
-        // ★ プレイヤーの攻撃ダメージフロート → 消えるまで待つ
-        await showDamageFloatAsync(enemyName, damage, { delayMs: DAMAGE_FLOAT_DELAY_MS });
+            const vars = result.variables.map(v => ({ ...v }));
+            const varMap = {};
+            for (const v of vars) if (v && v.name) varMap[v.name] = v;
 
-        if (isEnemyDefeated) {
+            const curHPVar = varMap['敵キャラの現在HP'];
+            if (!curHPVar) {
+                console.warn(LOG, 'バトル: 敵キャラの現在HP 変数が見つかりません');
+                return;
+            }
+
+            // ★ 敵キャラの名前（ダメージフロート表示用）
+            const enemyNameVal = varMap['敵キャラの名前']?.value;
+            const enemyName = (enemyNameVal !== undefined && enemyNameVal !== null && String(enemyNameVal).trim())
+                ? String(enemyNameVal)
+                : getCachedEnemyName();
+            // キャッシュも更新
+            if (enemyName && enemyName !== '敵') _cachedEnemyName = enemyName;
+
+            const curHP = parseFloat(curHPVar.value) || 0;
+            const playerAtk = Number(bs.player_attack) || 60;
+            const enemyDef = Number(bs.enemy_defense) || 20;
+
+            const damage = Math.max(1, playerAtk - enemyDef);
+            const newHP = Math.max(0, curHP - damage);
+            curHPVar.value = String(newHP);
+
+            const isEnemyDefeated = newHP <= 0;
+            if (isEnemyDefeated) {
+                // ★ バトル終了フロート表示中は外部からの endBattle を抑止
+                _battleEndingInProgress = true;
+                // ※ ここでは バトルモード=0 をまだ書き込まない。
+                //    バトル終了フロートが消えた後に書き込む。
+            }
+
             try {
+                const data = window.LorebookExpansion.getDataFor(result.worldName, result.uid, result.entry);
+                data.variables = vars;
+                window.LorebookExpansion.setDataFor(result.worldName, result.uid, result.entry, data);
+            } catch (e) {
+                console.warn(LOG, 'バトル: 変数の保存に失敗', e);
+                return;
+            }
+
+            bs.player_turn = 0;
+            bs.enemy_turn = 1;
+            saveBattleState();
+
+            console.log(
+                LOG,
+                `⚔️ 攻撃: 敵HP ${curHP} → ${newHP} (ダメージ ${damage} = ${playerAtk} - ${enemyDef}) / ` +
+                `player_turn=0, enemy_turn=1`
+            );
+
+            // ★ プレイヤーの攻撃ダメージフロート → 消えるまで待つ
+            await showDamageFloatAsync(enemyName, damage, { delayMs: DAMAGE_FLOAT_DELAY_MS });
+
+            if (isEnemyDefeated) {
                 // ★ バトル終了フロート表示 → 消えるまで待つ
                 await showBattleEndFloatAsync(`${enemyName}を倒した！`);
+
+                // ── ここで初めて バトルモード=0 を書き込む ──
+                //    UserStatus のポーリングを待たずに refresh() で即時反映
+                await setBattleModeVar(0);
+                try { window.UserStatus?.refresh?.(); } catch (e) { /* ignore */ }
+
+                // ── バトル終了（チャット復帰） ──
                 endBattle();
+
+                // ── 敵HPを最大値に全回復 ──
                 await restoreEnemyHPFull();
                 forceRender();
-            } finally {
-                _battleEndingInProgress = false;
+                return;
             }
-            return;
-        }
 
-        // ★ フロートが消えた後で敵の自動攻撃をトリガー
-        await enemyAutoAttack();
+            // ★ フロートが消えた後で敵の自動攻撃をトリガー
+            await enemyAutoAttack();
+        } finally {
+            _actionInProgress = false;
+            _battleEndingInProgress = false;
+            updateBattleCommandsState();
+        }
     }
 
     async function handleDefense() {
         if (!_battleActive) return;
-        const bs = getBattleState();
+        if (_actionInProgress) return;   // ★ 二度押し防止
 
+        const bs = getBattleState();
         if (bs.player_turn !== 1) {
             console.log(LOG, `防御スキップ: プレイヤーターンではありません (player_turn=${bs.player_turn})`);
             return;
         }
 
-        const before = Number(bs.player_defense) || 20;
-        bs.player_defense = before * 2;
-        bs.player_turn = 0;
-        bs.enemy_turn = 1;
-        saveBattleState();
-
-        // ★ 即座にボタンを半透明化・クリック不可にする
+        // ★ 最初の await より前に UI をロック
+        _actionInProgress = true;
         updateBattleCommandsState();
 
-        console.log(
-            LOG,
-            `🛡️ 防御: player_defense ${before} → ${bs.player_defense} / ` +
-            `player_turn=0, enemy_turn=1`
-        );
+        try {
+            const before = Number(bs.player_defense) || 20;
+            bs.player_defense = before * 2;
+            bs.player_turn = 0;
+            bs.enemy_turn = 1;
+            saveBattleState();
 
-        // ★ 敵の自動攻撃をトリガー（敵ダメージフロートの表示・待機も内部で行う）
-        await enemyAutoAttack();
+            console.log(
+                LOG,
+                `🛡️ 防御: player_defense ${before} → ${bs.player_defense} / ` +
+                `player_turn=0, enemy_turn=1`
+            );
+
+            // ★ 敵の自動攻撃をトリガー
+            await enemyAutoAttack();
+        } finally {
+            _actionInProgress = false;
+            _battleEndingInProgress = false;
+            updateBattleCommandsState();
+        }
     }
 
     async function handleEscape() {
         if (!_battleActive) return;
+        if (_actionInProgress) return;   // ★ 二度押し防止
 
-        await setBattleModeVar(0);
-        endBattle();
-        await restoreEnemyHPFull();
+        _actionInProgress = true;
+        updateBattleCommandsState();
 
-        console.log(LOG, '🏃 逃走: バトルモードを終了し、敵HPを全回復しました');
-        forceRender();
+        try {
+            await setBattleModeVar(0);
+            try { window.UserStatus?.refresh?.(); } catch (e) { /* ignore */ }
+            endBattle();
+            await restoreEnemyHPFull();
+
+            console.log(LOG, '🏃 逃走: バトルモードを終了し、敵HPを全回復しました');
+            forceRender();
+        } finally {
+            _actionInProgress = false;
+            _battleEndingInProgress = false;
+            updateBattleCommandsState();
+        }
     }
 
     // ============================================================
@@ -1098,7 +1145,6 @@ import('./sound_effects.js').catch(err => {
                     console.debug(LOG, '効果音の再生に失敗:', err);
                 }
 
-                // 既存の処理を実行
                 if (typeof b.handler === 'function') {
                     Promise.resolve(b.handler()).catch(err => console.warn(LOG, err));
                 }
@@ -1113,8 +1159,8 @@ import('./sound_effects.js').catch(err => {
     // ============================================================
     // ★ バトルコマンドの表示状態を更新
     //   - 非バトル中 / 場所未チェック → 非表示
-    //   - player_turn = 1           → 通常表示（クリック可能）
-    //   - player_turn = 0           → 半透明・クリック不可
+    //   - player_turn = 1 かつ _actionInProgress = false → 通常表示
+    //   - それ以外 → 半透明・クリック不可
     // ============================================================
     function updateBattleCommandsState() {
         const container = document.getElementById(BATTLE_COMMANDS_ID);
@@ -1131,276 +1177,10 @@ import('./sound_effects.js').catch(err => {
 
         const bs = getBattleState();
         const isPlayerTurn = Number(bs.player_turn) === 1;
-        container.classList.toggle('variable-battle-commands-waiting', !isPlayerTurn);
+        // ★ アクション実行中も待機扱い（二度押し防止）
+        const shouldBeWaiting = !isPlayerTurn || _actionInProgress;
+        container.classList.toggle('variable-battle-commands-waiting', shouldBeWaiting);
     }
 
     // ============================================================
     // レンダリング
-    // ============================================================
-    function renderPanel(panel, result) {
-        if (!panel) return;
-
-        const varMap = {};
-        if (result.ok && Array.isArray(result.variables)) {
-            for (const v of result.variables) {
-                if (v && typeof v.name === 'string' && v.name) {
-                    varMap[v.name] = v;
-                }
-            }
-        }
-
-        const locVal = varMap['場所']?.value;
-        const locationText = (locVal !== undefined && locVal !== null && String(locVal).trim())
-            ? String(locVal)
-            : '場所';
-
-        let enemyName = null;
-        let hp = null;
-        if (_battleActive) {
-            const enemyNameVal = varMap['敵キャラの名前']?.value;
-            if (enemyNameVal !== undefined && enemyNameVal !== null && String(enemyNameVal).trim()) {
-                enemyName = String(enemyNameVal);
-            }
-
-            const curHP = parseFloat(varMap['敵キャラの現在HP']?.value);
-            const maxHP = parseFloat(varMap['敵キャラの最大HP']?.value);
-            if (isFinite(curHP) && isFinite(maxHP) && maxHP > 0) {
-                hp = {
-                    cur: curHP,
-                    max: maxHP,
-                    ratio: Math.max(0, Math.min(1, curHP / maxHP)),
-                };
-            }
-        }
-
-        const signature = JSON.stringify({ locationText, enemyName, hp });
-        if (signature === _lastRenderKey) return;
-        _lastRenderKey = signature;
-
-        panel.innerHTML = '';
-
-        const locEl = document.createElement('div');
-        locEl.className = 'variable-manager-value-text variable-location';
-        locEl.textContent = locationText;
-        panel.appendChild(locEl);
-
-        if (enemyName) {
-            const nameEl = document.createElement('div');
-            nameEl.className = 'variable-manager-value-text variable-enemy-name';
-            nameEl.textContent = enemyName;
-            panel.appendChild(nameEl);
-        }
-
-        if (hp) {
-            const wrap = document.createElement('div');
-            wrap.className = 'variable-hp-bar-wrap';
-
-            const bar = document.createElement('div');
-            bar.className = 'variable-hp-bar';
-            bar.style.width = `${hp.ratio * 100}%`;
-            wrap.appendChild(bar);
-            panel.appendChild(wrap);
-
-            const hpText = document.createElement('div');
-            hpText.className = 'variable-hp-text';
-            hpText.textContent = String(Math.round(hp.cur));
-            panel.appendChild(hpText);
-        }
-    }
-
-    async function render() {
-        ensureUISettings();
-        ensureBattleCommands();
-        updateBattleCommandsState();
-
-        const charName = getCurrentCharName();
-        if (!isVisibleForChar(charName)) {
-            console.debug(LOG, `render: 場所未チェックのためスキップ (char="${charName}")`);
-            if (_battleActive && !_battleEndingInProgress) endBattle();
-            removeBattleStartButton();
-            _lastRenderKey = '';
-            return;
-        }
-
-        if (_renderInFlight) return;
-        _renderInFlight = true;
-        try {
-            const panel = ensurePanel();
-            applyPanelVisibility();
-            const result = await getCurrentVariables();
-            updateBattleUI(result);
-            renderPanel(panel, result);
-        } catch (e) {
-            console.warn(LOG, 'render error:', e);
-        } finally {
-            _renderInFlight = false;
-        }
-    }
-
-    function scheduleRender() { setTimeout(render, 150); }
-
-    function setupEventListeners() {
-        try {
-            const ctx = getSTContext();
-            if (ctx?.eventSource && ctx?.eventTypes) {
-                const et = ctx.eventTypes;
-                const es = ctx.eventSource;
-
-                const resetOnChange = () => {
-                    if (_battleActive && !_battleEndingInProgress) endBattle();
-                    scheduleRender();
-                };
-
-                const events = [
-                    'CHARACTER_MESSAGE_RENDERED', 'USER_MESSAGE_RENDERED',
-                    'MESSAGE_EDITED', 'MESSAGE_DELETED', 'MESSAGE_SWIPED',
-                    'CHAT_LOADED', 'GENERATION_ENDED',
-                ];
-                for (const name of events) {
-                    if (et[name] && typeof es.on === 'function') es.on(et[name], scheduleRender);
-                }
-
-                if (et['MESSAGE_SENT'] && typeof es.on === 'function') {
-                    es.on(et['MESSAGE_SENT'], () => {
-                        setTimeout(render, 100);
-                    });
-                }
-
-                const resetEvents = ['CHAT_CHANGED', 'CHARACTER_SELECTED', 'CHARACTER_PAGE_LOADED'];
-                for (const name of resetEvents) {
-                    if (et[name] && typeof es.on === 'function') es.on(et[name], resetOnChange);
-                }
-            }
-        } catch (e) { /* ignore */ }
-    }
-
-    async function init() {
-        if (_initialized) return;
-        _initialized = true;
-
-        const ready = await waitForLBE();
-        if (!ready) { _initialized = false; setTimeout(init, 1000); return; }
-
-        ensurePanel();
-        ensureBattleCommands();
-        ensureUISettings();
-        setupEventListeners();
-        setupUISettingsObserver();
-        await render();
-
-        setInterval(render, POLL_INTERVAL_MS);
-        console.log(LOG, '初期化完了');
-    }
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
-    } else {
-        init();
-    }
-
-    window.VariableManager = {
-        refresh: render,
-        getCurrentVariables,
-        isVisibleForChar,
-        isStartButtonEnabledForChar,
-        isBattleActive: () => _battleActive,
-        isEnemyAttackInProgress: () => _enemyAttackInProgress,
-        isBattleEndingInProgress: () => _battleEndingInProgress,
-        startBattle,
-        endBattle,
-        getBattleState,
-        setBattleState: (patch) => {
-            const s = _ensureExtSettings();
-            if (!s) return;
-            if (!s.battleState) s.battleState = { ...BATTLE_DEFAULTS };
-            Object.assign(s.battleState, patch || {});
-            saveBattleState();
-            // ★ ターンが変わった可能性があるので表示状態も同期
-            updateBattleCommandsState();
-            forceRender();
-        },
-        handleAttack,
-        handleDefense,
-        handleEscape,
-        enemyAutoAttack,
-        setBattleModeVar,
-        restoreEnemyHPFull,
-        loadEntry999,
-        getPlayerName,
-        getEnemyName,
-        showDamageFloatAsync,
-        showBattleEndFloatAsync,
-        updateBattleCommandsState,
-        setVisibleForChar: (charName, visible) => {
-            if (!charName) return false;
-            const map = getVisibleByCharMap();
-            map[charName] = !!visible;
-            saveVisibleByCharMap(map);
-            applyPanelVisibility();
-            render();
-            return true;
-        },
-        setStartButtonForChar: (charName, enabled) => {
-            if (!charName) return false;
-            const map = getStartButtonMap();
-            map[charName] = !!enabled;
-            saveStartButtonMap(map);
-            applyPanelVisibility();
-            try {
-                window.dispatchEvent(new CustomEvent(EVENT_START_CHANGED, {
-                    detail: { charName, enabled: !!enabled }
-                }));
-            } catch (e) { /* ignore */ }
-            return true;
-        },
-        _debug: () => ({
-            worldName: getWorldName(),
-            choiceNum: getLastChoiceNumber(),
-            currentChar: getCurrentCharName(),
-            visibleMap: getVisibleByCharMap(),
-            startButtonMap: getStartButtonMap(),
-            battleActive: _battleActive,
-            battleEndingInProgress: _battleEndingInProgress,
-            battleState: getBattleState(),
-            lastBattleMode: _lastBattleMode,
-            startBattleInProgress: _startBattleInProgress,
-            enemyAttackInProgress: _enemyAttackInProgress,
-        }),
-        debugBattleButton: async () => {
-            const charName = getCurrentCharName();
-            const visible = isVisibleForChar(charName);
-            const result = await getCurrentVariables();
-            const varMap = {};
-            if (result.ok) {
-                for (const v of result.variables) {
-                    if (v && v.name) varMap[v.name] = v;
-                }
-            }
-            const lastAiIdx = getLastAiMessageIndex();
-            const hasBtn = !!document.querySelector('.' + BATTLE_START_BTN_CLASS);
-            const userStatus = window.UserStatus?.getStatus?.();
-            const info = {
-                charName,
-                場所チェック: visible,
-                result_ok: result.ok,
-                reason: result.reason,
-                選択肢番号: result.choiceNum,
-                バトル開始: varMap['バトル開始']?.value,
-                バトルモード: varMap['バトルモード']?.value,
-                敵現在HP: varMap['敵キャラの現在HP']?.value,
-                敵最大HP: varMap['敵キャラの最大HP']?.value,
-                プレイヤーHP: userStatus ? `${userStatus.curHP}/${userStatus.maxHP}` : null,
-                _lastBattleMode,
-                _battleActive,
-                _battleEndingInProgress,
-                _startBattleInProgress,
-                _enemyAttackInProgress,
-                battleState: getBattleState(),
-                最後のAIメッセージ_idx: lastAiIdx,
-                ボタン存在: hasBtn,
-            };
-            console.log(LOG, 'debugBattleButton:', info);
-            return info;
-        },
-    };
-})();
