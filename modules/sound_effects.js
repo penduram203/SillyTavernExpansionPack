@@ -1,82 +1,90 @@
 // sound_effects.js
+// 効果音を MP3 ファイルから再生するユーティリティ。
+//   window.SoundEffects.play('attack') のように呼び出す。
+//
+// ファイル配置（拡張ルートからの相対パス）:
+//   SillyTavernExpansionPack/audio/attack.mp3
+//   SillyTavernExpansionPack/audio/defense.mp3
+//   SillyTavernExpansionPack/audio/item.mp3
+//   SillyTavernExpansionPack/audio/escape.mp3
+//
+// このファイルは SillyTavernExpansionPack/modules/sound_effects.js にあり、
+// ../audio/ が SillyTavernExpansionPack/audio/ に解決される。
+
 (function () {
     'use strict';
+
     const LOG = '[SoundEffects]';
 
-    // ★ sound_effects_data.js が先に読み込まれている前提
-    const SOUND_EFFECTS = window.SOUND_EFFECTS_DATA || {
-        attack: '',
-        defense: '',
+    // 拡張ルートからの相対パス
+    const AUDIO_BASE = new URL('../audio/', import.meta.url);
+
+    // 効果音名 → ファイル名
+    const SOUND_FILES = {
+        attack: 'attack.mp3',
+        defense: 'defense.mp3',
+        item: 'item.mp3',
+        escape: 'escape.mp3',
     };
 
-    const _audioUrlCache = new Map();
+    // Audio 要素キャッシュ（連打時のロード待ち・メモリリーク防止）
+    const _audioCache = new Map();
 
-    /**
-     * Base64文字列（改行・data URLヘッダー付き可）から data URL を作る
-     */
-    function _toDataUrl(base64Data) {
-        const clean = String(base64Data)
-            .replace(/^data:audio\/[^;]+;base64,/, '')
-            .replace(/\s+/g, '');
-        return 'data:audio/mpeg;base64,' + clean;
+    function resolveSrc(name) {
+        const fileName = SOUND_FILES[name];
+        if (!fileName) return null;
+        return new URL(fileName, AUDIO_BASE).href;
     }
 
-    /**
-     * 有効な Base64 データかどうかをざっくり判定する
-     *   - 空文字列
-     *   - コメント文字列（//, #, /*）
-     *   - 極端に短い（100文字未満）
-     * を弾く
-     */
-    function _isValidBase64(base64Data) {
-        if (!base64Data || typeof base64Data !== 'string') return false;
-        const t = base64Data.trim();
-        if (t.length < 100) return false;
-        if (t.startsWith('//') || t.startsWith('#') || t.startsWith('/*')) return false;
-        return true;
+    function getAudio(name) {
+        if (_audioCache.has(name)) return _audioCache.get(name);
+        const src = resolveSrc(name);
+        if (!src) return null;
+
+        const audio = new Audio();
+        audio.preload = 'auto';
+        audio.src = src;
+        // 404 等を無音で受け流す
+        audio.addEventListener('error', () => { /* ignore */ }, { once: true });
+
+        _audioCache.set(name, audio);
+        return audio;
     }
 
-    /**
-     * Base64 から効果音を再生する
-     * @param {string} base64Data - Base64エンコードされた音声データ
-     */
-    function playSound(base64Data) {
-        if (!_isValidBase64(base64Data)) {
-            console.warn(LOG, '無効な音声データのためスキップ (len=' +
-                (typeof base64Data === 'string' ? base64Data.length : 'n/a') + ')');
+    function play(name) {
+        const audio = getAudio(name);
+        if (!audio) {
+            console.warn(`${LOG} 未知の効果音:`, name);
             return;
         }
-
         try {
-            let dataUrl = _audioUrlCache.get(base64Data);
-            if (!dataUrl) {
-                dataUrl = _toDataUrl(base64Data);
-                _audioUrlCache.set(base64Data, dataUrl);
-            }
-
-            // ★ ユーザー操作（クリック）内で同期的に play() を呼ぶ
-            const audio = new Audio(dataUrl);
-            audio.volume = 1.0;
+            // 連打時は先頭に巻き戻して再生
+            audio.currentTime = 0;
             const p = audio.play();
             if (p && typeof p.catch === 'function') {
-                p.then(() => {
-                    console.log(LOG, '🔊 再生開始');
-                }).catch((e) => {
-                    console.warn(LOG, 'play() 失敗:', e);
+                // ユーザー操作外での自動再生制限などでブロックされた場合の保険
+                p.catch(err => {
+                    console.debug(`${LOG} 再生できませんでした:`, name, err);
                 });
             }
-        } catch (error) {
-            console.error(LOG, '音声の再生に失敗しました:', error);
+        } catch (e) {
+            console.debug(`${LOG} 再生例外:`, name, e);
         }
     }
 
-    // ★ グローバルに公開（variable_manager.js から参照できるようにする）
-    window.playSound = playSound;
-    window.SOUND_EFFECTS = SOUND_EFFECTS;
+    function preload() {
+        for (const name of Object.keys(SOUND_FILES)) {
+            try { getAudio(name); } catch (e) { /* ignore */ }
+        }
+    }
 
-    console.log(LOG, '✅ window.playSound / window.SOUND_EFFECTS を公開',
-        {
-            attackLen: SOUND_EFFECTS.attack.length,
-            defenseLen: SOUND_EFFECTS.defense.length,
-        });
+    preload();
+
+    window.SoundEffects = {
+        play,
+        preload,
+        SOUND_FILES,
+    };
+
+    console.log(`${LOG} 初期化完了 (audio base: ${AUDIO_BASE.href})`);
 })();
