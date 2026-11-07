@@ -1184,3 +1184,278 @@ import('./sound_effects.js').catch(err => {
 
     // ============================================================
     // レンダリング
+    // ============================================================
+    function renderPanel(panel, result) {
+        if (!panel) return;
+
+        const varMap = {};
+        if (result.ok && Array.isArray(result.variables)) {
+            for (const v of result.variables) {
+                if (v && typeof v.name === 'string' && v.name) {
+                    varMap[v.name] = v;
+                }
+            }
+        }
+
+        const locVal = varMap['場所']?.value;
+        const locationText = (locVal !== undefined && locVal !== null && String(locVal).trim())
+            ? String(locVal)
+            : '場所';
+
+        let enemyName = null;
+        let hp = null;
+        if (_battleActive) {
+            const enemyNameVal = varMap['敵キャラの名前']?.value;
+            if (enemyNameVal !== undefined && enemyNameVal !== null && String(enemyNameVal).trim()) {
+                enemyName = String(enemyNameVal);
+                // ★ キャッシュ更新
+                _cachedEnemyName = enemyName;
+            }
+
+            const curHP = parseFloat(varMap['敵キャラの現在HP']?.value);
+            const maxHP = parseFloat(varMap['敵キャラの最大HP']?.value);
+            if (isFinite(curHP) && isFinite(maxHP) && maxHP > 0) {
+                hp = {
+                    cur: curHP,
+                    max: maxHP,
+                    ratio: Math.max(0, Math.min(1, curHP / maxHP)),
+                };
+            }
+        }
+
+        const signature = JSON.stringify({ locationText, enemyName, hp });
+        if (signature === _lastRenderKey) return;
+        _lastRenderKey = signature;
+
+        panel.innerHTML = '';
+
+        const locEl = document.createElement('div');
+        locEl.className = 'variable-manager-value-text variable-location';
+        locEl.textContent = locationText;
+        panel.appendChild(locEl);
+
+        if (enemyName) {
+            const nameEl = document.createElement('div');
+            nameEl.className = 'variable-manager-value-text variable-enemy-name';
+            nameEl.textContent = enemyName;
+            panel.appendChild(nameEl);
+        }
+
+        if (hp) {
+            const wrap = document.createElement('div');
+            wrap.className = 'variable-hp-bar-wrap';
+
+            const bar = document.createElement('div');
+            bar.className = 'variable-hp-bar';
+            bar.style.width = `${hp.ratio * 100}%`;
+            wrap.appendChild(bar);
+            panel.appendChild(wrap);
+
+            const hpText = document.createElement('div');
+            hpText.className = 'variable-hp-text';
+            hpText.textContent = String(Math.round(hp.cur));
+            panel.appendChild(hpText);
+        }
+    }
+
+    async function render() {
+        ensureUISettings();
+        ensureBattleCommands();
+        updateBattleCommandsState();
+
+        const charName = getCurrentCharName();
+        if (!isVisibleForChar(charName)) {
+            console.debug(LOG, `render: 場所未チェックのためスキップ (char="${charName}")`);
+            if (_battleActive && !_battleEndingInProgress) endBattle();
+            removeBattleStartButton();
+            _lastRenderKey = '';
+            return;
+        }
+
+        if (_renderInFlight) return;
+        _renderInFlight = true;
+        try {
+            const panel = ensurePanel();
+            applyPanelVisibility();
+            const result = await getCurrentVariables();
+            updateBattleUI(result);
+            renderPanel(panel, result);
+        } catch (e) {
+            console.warn(LOG, 'render error:', e);
+        } finally {
+            _renderInFlight = false;
+        }
+    }
+
+    function scheduleRender() { setTimeout(render, 150); }
+
+    function setupEventListeners() {
+        try {
+            const ctx = getSTContext();
+            if (ctx?.eventSource && ctx?.eventTypes) {
+                const et = ctx.eventTypes;
+                const es = ctx.eventSource;
+
+                const resetOnChange = () => {
+                    if (_battleActive && !_battleEndingInProgress && !_actionInProgress) endBattle();
+                    scheduleRender();
+                };
+
+                const events = [
+                    'CHARACTER_MESSAGE_RENDERED', 'USER_MESSAGE_RENDERED',
+                    'MESSAGE_EDITED', 'MESSAGE_DELETED', 'MESSAGE_SWIPED',
+                    'CHAT_LOADED', 'GENERATION_ENDED',
+                ];
+                for (const name of events) {
+                    if (et[name] && typeof es.on === 'function') es.on(et[name], scheduleRender);
+                }
+
+                if (et['MESSAGE_SENT'] && typeof es.on === 'function') {
+                    es.on(et['MESSAGE_SENT'], () => {
+                        setTimeout(render, 100);
+                    });
+                }
+
+                const resetEvents = ['CHAT_CHANGED', 'CHARACTER_SELECTED', 'CHARACTER_PAGE_LOADED'];
+                for (const name of resetEvents) {
+                    if (et[name] && typeof es.on === 'function') es.on(et[name], resetOnChange);
+                }
+            }
+        } catch (e) { /* ignore */ }
+    }
+
+    async function init() {
+        if (_initialized) return;
+        _initialized = true;
+
+        const ready = await waitForLBE();
+        if (!ready) { _initialized = false; setTimeout(init, 1000); return; }
+
+        ensurePanel();
+        ensureBattleCommands();
+        ensureUISettings();
+        setupEventListeners();
+        setupUISettingsObserver();
+        await render();
+
+        setInterval(render, POLL_INTERVAL_MS);
+        console.log(LOG, '初期化完了');
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+
+    window.VariableManager = {
+        refresh: render,
+        getCurrentVariables,
+        isVisibleForChar,
+        isStartButtonEnabledForChar,
+        isBattleActive: () => _battleActive,
+        isEnemyAttackInProgress: () => _enemyAttackInProgress,
+        isBattleEndingInProgress: () => _battleEndingInProgress,
+        isActionInProgress: () => _actionInProgress,
+        startBattle,
+        endBattle,
+        getBattleState,
+        setBattleState: (patch) => {
+            const s = _ensureExtSettings();
+            if (!s) return;
+            if (!s.battleState) s.battleState = { ...BATTLE_DEFAULTS };
+            Object.assign(s.battleState, patch || {});
+            saveBattleState();
+            // ★ ターンが変わった可能性があるので表示状態も同期
+            updateBattleCommandsState();
+            forceRender();
+        },
+        handleAttack,
+        handleDefense,
+        handleEscape,
+        enemyAutoAttack,
+        setBattleModeVar,
+        restoreEnemyHPFull,
+        loadEntry999,
+        getPlayerName,
+        getEnemyName,
+        getCachedEnemyName,
+        showDamageFloatAsync,
+        showBattleEndFloatAsync,
+        updateBattleCommandsState,
+        setVisibleForChar: (charName, visible) => {
+            if (!charName) return false;
+            const map = getVisibleByCharMap();
+            map[charName] = !!visible;
+            saveVisibleByCharMap(map);
+            applyPanelVisibility();
+            render();
+            return true;
+        },
+        setStartButtonForChar: (charName, enabled) => {
+            if (!charName) return false;
+            const map = getStartButtonMap();
+            map[charName] = !!enabled;
+            saveStartButtonMap(map);
+            applyPanelVisibility();
+            try {
+                window.dispatchEvent(new CustomEvent(EVENT_START_CHANGED, {
+                    detail: { charName, enabled: !!enabled }
+                }));
+            } catch (e) { /* ignore */ }
+            return true;
+        },
+        _debug: () => ({
+            worldName: getWorldName(),
+            choiceNum: getLastChoiceNumber(),
+            currentChar: getCurrentCharName(),
+            visibleMap: getVisibleByCharMap(),
+            startButtonMap: getStartButtonMap(),
+            battleActive: _battleActive,
+            battleEndingInProgress: _battleEndingInProgress,
+            actionInProgress: _actionInProgress,
+            cachedEnemyName: _cachedEnemyName,
+            battleState: getBattleState(),
+            lastBattleMode: _lastBattleMode,
+            startBattleInProgress: _startBattleInProgress,
+            enemyAttackInProgress: _enemyAttackInProgress,
+        }),
+        debugBattleButton: async () => {
+            const charName = getCurrentCharName();
+            const visible = isVisibleForChar(charName);
+            const result = await getCurrentVariables();
+            const varMap = {};
+            if (result.ok) {
+                for (const v of result.variables) {
+                    if (v && v.name) varMap[v.name] = v;
+                }
+            }
+            const lastAiIdx = getLastAiMessageIndex();
+            const hasBtn = !!document.querySelector('.' + BATTLE_START_BTN_CLASS);
+            const userStatus = window.UserStatus?.getStatus?.();
+            const info = {
+                charName,
+                場所チェック: visible,
+                result_ok: result.ok,
+                reason: result.reason,
+                選択肢番号: result.choiceNum,
+                バトル開始: varMap['バトル開始']?.value,
+                バトルモード: varMap['バトルモード']?.value,
+                敵現在HP: varMap['敵キャラの現在HP']?.value,
+                敵最大HP: varMap['敵キャラの最大HP']?.value,
+                プレイヤーHP: userStatus ? `${userStatus.curHP}/${userStatus.maxHP}` : null,
+                _lastBattleMode,
+                _battleActive,
+                _battleEndingInProgress,
+                _actionInProgress,
+                _startBattleInProgress,
+                _enemyAttackInProgress,
+                battleState: getBattleState(),
+                最後のAIメッセージ_idx: lastAiIdx,
+                ボタン存在: hasBtn,
+            };
+            console.log(LOG, 'debugBattleButton:', info);
+            return info;
+        },
+    };
+})();
