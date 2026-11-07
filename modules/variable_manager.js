@@ -21,6 +21,11 @@
 //   敵ダメージ = max(1, enemy_attack - player_defense)
 //   プレイヤーHP≤0 → バトルモード=0, バトル終了, エントリ999を自動送信
 
+// ★ 効果音モジュール（window.SoundEffects を公開）を非同期ロード
+import('./sound_effects.js').catch(err => {
+    console.warn('[VarManager] sound_effects.js のロードに失敗:', err);
+});
+
 (function () {
     'use strict';
     const LOG = '[VarManager]';
@@ -236,8 +241,8 @@
             console.warn(LOG, 'restorePlayerHPFull error:', e);
             return false;
         }
-    }    
-    
+    }
+
     async function restoreEnemyHPFull() {
         try {
             const result = await getCurrentVariables();
@@ -510,7 +515,7 @@
         }
         return false;
     }
-    
+
     function removeBattleStartButton() {
         document.querySelectorAll('.' + BATTLE_START_BTN_CLASS).forEach(el => el.remove());
     }
@@ -917,25 +922,19 @@
             btn.type = 'button';
             btn.className = `variable-command-btn variable-command-${b.color}`;
             btn.textContent = b.label;
-            // ★ クリック時に効果音を再生
+            // ★ クリック時に MP3 効果音を再生
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
 
-                // 効果音（window経由 + 失敗しても後続を止めない）
+                // b.color がそのまま効果音名 ('attack' / 'defense' / 'item' / 'escape')
                 try {
-                    if (b.color === 'attack') {
-                        window.playSound?.(window.SOUND_EFFECTS?.attack);
-                    } else if (b.color === 'defense') {
-                        window.playSound?.(window.SOUND_EFFECTS?.defense);
-                    } else if (b.color === 'escape') {
-                        // window.playSound?.(window.SOUND_EFFECTS?.escape);
-                    }
+                    window.SoundEffects?.play?.(b.color);
                 } catch (err) {
-                    console.warn(LOG, '効果音エラー:', err);
+                    console.debug(LOG, '効果音の再生に失敗:', err);
                 }
 
-                // 既存の処理
+                // 既存の処理を実行
                 if (typeof b.handler === 'function') {
                     Promise.resolve(b.handler()).catch(err => console.warn(LOG, err));
                 }
