@@ -5,7 +5,6 @@
 
 // ★ 効果音モジュールを最初に読み込む
 //   （window.playSound / window.SOUND_EFFECTS を確定させる）
-import './modules/sound_effects_data.js';
 import './modules/sound_effects.js';
 
 import './modules/character_store.js';
