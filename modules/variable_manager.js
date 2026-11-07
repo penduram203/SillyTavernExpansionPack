@@ -43,6 +43,8 @@ import('./sound_effects.js').catch(err => {
 
     const ENEMY_ATTACK_DELAY_MS = 600;
     const ENTRY_999_DELAY_MS = 800;
+    const DAMAGE_FLOAT_DELAY_MS = 400;   // 効果音再生から一呼吸おいてダメージ表示
+    const DAMAGE_FLOAT_HOLD_MS = 1800;   // ダメージ表示の保持時間
 
     const BATTLE_DEFAULTS = {
         active: false,
@@ -492,17 +494,6 @@ import('./sound_effects.js').catch(err => {
         return -1;
     }
 
-    function getLastAiMessageIndex() {
-        const ctx = getSTContext();
-        if (!ctx?.chat || ctx.chat.length === 0) return -1;
-        for (let i = ctx.chat.length - 1; i >= 0; i--) {
-            const m = ctx.chat[i];
-            if (m.is_system) continue;
-            if (!m.is_user) return i;
-        }
-        return -1;
-    }
-
     // ★ 最後の非システムメッセージが AI かどうか
     //   （ユーザー送信直後〜AI生成完了までは false を返す）
     function isLastMessageAi() {
@@ -594,7 +585,7 @@ import('./sound_effects.js').catch(err => {
         removeBattleStartButton();
         _lastRenderKey = '';
         console.log(LOG, '⚔️ バトル開始', getBattleState());
-        applyBattleCommandsVisibility();
+        updateBattleCommandsState();
         _startBattleInProgress = false;
         render();
     }
@@ -616,7 +607,7 @@ import('./sound_effects.js').catch(err => {
         removeBattleStartButton();
         _lastRenderKey = '';
         console.log(LOG, '⚔️ バトル終了');
-        applyBattleCommandsVisibility();
+        updateBattleCommandsState();
     }
 
     function updateBattleUI(result) {
@@ -649,7 +640,7 @@ import('./sound_effects.js').catch(err => {
             _battleActive = true;
             document.body.classList.add('variable-battle-active');
             _lastRenderKey = '';
-            applyBattleCommandsVisibility();
+            updateBattleCommandsState();
         } else if (!battleMode && _battleActive && !_startBattleInProgress) {
             console.log(LOG, 'バトルモード変数=0 を検出 → バトル終了');
             endBattle();
@@ -662,6 +653,48 @@ import('./sound_effects.js').catch(err => {
         } else {
             removeBattleStartButton();
         }
+    }
+
+    // ============================================================
+    // ★ ダメージフロート表示
+    //   画面中央から左200px・下100pxの位置に
+    //   「（敵名）に（ダメージ）のダメージ！」を一定時間表示する。
+    // ============================================================
+    function showDamageFloat(enemyName, damage) {
+        // 既存のフロート表示があれば除去（連打時の重複防止）
+        document.querySelectorAll('.variable-damage-float').forEach(el => el.remove());
+
+        const safeName = (enemyName && String(enemyName).trim()) || '敵';
+        const safeDamage = Math.max(0, Math.round(Number(damage) || 0));
+
+        const el = document.createElement('div');
+        el.className = 'variable-damage-float';
+        el.textContent = `${safeName}に${safeDamage}のダメージ！`;
+        document.body.appendChild(el);
+
+        // フェードイン
+        requestAnimationFrame(() => {
+            el.classList.add('visible');
+        });
+
+        // 一定時間後にフェードアウト・削除
+        setTimeout(() => {
+            el.classList.remove('visible');
+            setTimeout(() => {
+                if (el.parentNode) el.parentNode.removeChild(el);
+            }, 200);
+        }, DAMAGE_FLOAT_HOLD_MS);
+    }
+
+    // 効果音の再生開始から一呼吸おいてダメージテキストを表示するヘルパ
+    function scheduleDamageFloat(enemyName, damage, delayMs = DAMAGE_FLOAT_DELAY_MS) {
+        setTimeout(() => {
+            try {
+                showDamageFloat(enemyName, damage);
+            } catch (e) {
+                console.debug(LOG, 'showDamageFloat error:', e);
+            }
+        }, delayMs);
     }
 
     // ============================================================
@@ -726,6 +759,8 @@ import('./sound_effects.js').catch(err => {
                 bsNow.enemy_turn = 0;
                 bsNow.player_turn = 1;
                 saveBattleState();
+                // ★ ボタン表示を即座に同期（endBattle 済みなので実際は非表示のまま）
+                updateBattleCommandsState();
 
                 // ── ⑥ エントリ999を自動送信 ──
                 setTimeout(() => {
@@ -740,6 +775,8 @@ import('./sound_effects.js').catch(err => {
                 bsNow.enemy_turn = 0;
                 bsNow.player_turn = 1;
                 saveBattleState();
+                // ★ ボタンの半透明表示を即座に解除
+                updateBattleCommandsState();
                 forceRender();
             }
         } catch (e) {
@@ -815,6 +852,12 @@ import('./sound_effects.js').catch(err => {
             return;
         }
 
+        // ★ 敵キャラの名前を取得（ダメージフロート表示用）
+        const enemyNameVal = varMap['敵キャラの名前']?.value;
+        const enemyName = (enemyNameVal !== undefined && enemyNameVal !== null && String(enemyNameVal).trim())
+            ? String(enemyNameVal)
+            : '敵';
+
         const curHP = parseFloat(curHPVar.value) || 0;
         const playerAtk = Number(bs.player_attack) || 60;
         const enemyDef = Number(bs.enemy_defense) || 20;
@@ -845,6 +888,12 @@ import('./sound_effects.js').catch(err => {
         bs.player_turn = 0;
         bs.enemy_turn = 1;
         saveBattleState();
+
+        // ★ 即座にボタンを半透明化・クリック不可にする
+        updateBattleCommandsState();
+
+        // ★ ダメージフロート表示（効果音が鳴り始めてから一呼吸おいて表示）
+        scheduleDamageFloat(enemyName, damage, DAMAGE_FLOAT_DELAY_MS);
 
         console.log(
             LOG,
@@ -877,6 +926,9 @@ import('./sound_effects.js').catch(err => {
         bs.player_turn = 0;
         bs.enemy_turn = 1;
         saveBattleState();
+
+        // ★ 即座にボタンを半透明化・クリック不可にする
+        updateBattleCommandsState();
 
         console.log(
             LOG,
@@ -922,12 +974,11 @@ import('./sound_effects.js').catch(err => {
             btn.type = 'button';
             btn.className = `variable-command-btn variable-command-${b.color}`;
             btn.textContent = b.label;
-            // ★ クリック時に MP3 効果音を再生
+            // ★ クリック時に効果音を再生（b.color がそのまま効果音名）
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
 
-                // b.color がそのまま効果音名 ('attack' / 'defense' / 'item' / 'escape')
                 try {
                     window.SoundEffects?.play?.(b.color);
                 } catch (err) {
@@ -946,12 +997,28 @@ import('./sound_effects.js').catch(err => {
         return container;
     }
 
-    function applyBattleCommandsVisibility() {
+    // ============================================================
+    // ★ バトルコマンドの表示状態を更新
+    //   - 非バトル中 / 場所未チェック → 非表示
+    //   - player_turn = 1           → 通常表示（クリック可能）
+    //   - player_turn = 0           → 半透明・クリック不可
+    // ============================================================
+    function updateBattleCommandsState() {
         const container = document.getElementById(BATTLE_COMMANDS_ID);
         if (!container) return;
+
         const charName = getCurrentCharName();
         const shouldShow = isVisibleForChar(charName) && _battleActive;
         container.style.display = shouldShow ? '' : 'none';
+
+        if (!shouldShow) {
+            container.classList.remove('variable-battle-commands-waiting');
+            return;
+        }
+
+        const bs = getBattleState();
+        const isPlayerTurn = Number(bs.player_turn) === 1;
+        container.classList.toggle('variable-battle-commands-waiting', !isPlayerTurn);
     }
 
     // ============================================================
@@ -1031,7 +1098,7 @@ import('./sound_effects.js').catch(err => {
     async function render() {
         ensureUISettings();
         ensureBattleCommands();
-        applyBattleCommandsVisibility();
+        updateBattleCommandsState();
 
         const charName = getCurrentCharName();
         if (!isVisibleForChar(charName)) {
@@ -1134,6 +1201,8 @@ import('./sound_effects.js').catch(err => {
             if (!s.battleState) s.battleState = { ...BATTLE_DEFAULTS };
             Object.assign(s.battleState, patch || {});
             saveBattleState();
+            // ★ ターンが変わった可能性があるので表示状態も同期
+            updateBattleCommandsState();
             forceRender();
         },
         handleAttack,
@@ -1143,6 +1212,8 @@ import('./sound_effects.js').catch(err => {
         setBattleModeVar,
         restoreEnemyHPFull,
         loadEntry999,
+        showDamageFloat,
+        updateBattleCommandsState,
         setVisibleForChar: (charName, visible) => {
             if (!charName) return false;
             const map = getVisibleByCharMap();
