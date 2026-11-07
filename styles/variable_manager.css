@@ -369,3 +369,60 @@ body.variable-battle-active #half-maximize-button {
     min-width: 0 !important;
     font-size: calc(var(--mainFontSize) * 0.95);
 }
+
+/* ============================================================
+ * ★ バトルコマンド無効化状態（player_turn=0 の時）
+ *   半透明 + クリック不可
+ * ============================================================ */
+#variable-battle-commands.variable-battle-commands-waiting {
+    pointer-events: none !important;
+}
+
+#variable-battle-commands.variable-battle-commands-waiting .variable-command-btn {
+    opacity: 0.3 !important;
+    pointer-events: none !important;
+    cursor: not-allowed !important;
+    filter: grayscale(0.6);
+    transition: opacity 0.15s ease, filter 0.15s ease;
+}
+
+/* ============================================================
+ * ★ ダメージフロート表示（攻撃時に敵のダメージを表示）
+ *   位置: 画面中央から左へ 200px、下へ 100px
+ *   書式: 40px 太字 白文字 黒縁取り（画面左端の他フォントと同系統）
+ * ============================================================ */
+.variable-damage-float {
+    position: fixed;
+    left: calc(50vw - 200px);
+    top: calc(50vh + 100px);
+    transform: translate(-50%, -50%);
+    z-index: 100;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    font-size: 40px;
+    font-weight: bold;
+    color: #ffffff;
+    -webkit-text-stroke: 10px #000000;
+    paint-order: stroke fill;
+    text-shadow:
+        -3px -3px 0 #000,
+         3px -3px 0 #000,
+        -3px  3px 0 #000,
+         3px  3px 0 #000,
+        -4px  0   0 #000,
+         4px  0   0 #000,
+         0   -4px 0 #000,
+         0    4px 0 #000,
+         0 0 10px rgba(0, 0, 0, 0.95);
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    line-height: 1.2;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.variable-damage-float.visible {
+    opacity: 1;
+}
