@@ -20,15 +20,20 @@
 //   敵ダメージ = max(1, enemy_attack - player_defense)
 //   プレイヤーHP≤0 → バトルモード=0, バトル終了, エントリ999を自動送信
 //
-// ★ 攻撃アナウンス＆ダメージフロート（v5）:
+// ★ 攻撃アナウンス＆ダメージフロート（v6）:
 //   攻撃ボタン押下 → 効果音 → 即座に
-//     「（攻撃者）は（対象）を攻撃した！」  ← T=0 表示、T=1500 非表示開始
+//     「（攻撃者）は（対象）を攻撃した！」  ← T=0 表示、T=2000 非表示開始
 //   250ms 後、その下に
-//     「（対象）に（ダメージ）のダメージ！」 ← T=250 表示、T=1750 非表示開始
-//   両方完全消滅 (T=1950) で Promise 解決。
-//   フロート表示前の遅延はゼロ。
+//     「（対象）に（ダメージ）のダメージ！」 ← T=250 表示、T=2250 非表示開始
+//   両方完全消滅 (T=2450) で Promise 解決。
+//   フロート表示前の遅延はゼロ。左寄せ表示。
 //
-// ★ バトル終了フロー（v5）:
+// ★ 効果音（v6）:
+//   - 攻撃/防御/道具/逃走ボタン押下: attack / defense / item / escape
+//   - 敵キャラの攻撃: enemy_attack
+//   - バトルコマンドボタンへのマウスホバー: interface7
+//
+// ★ バトル終了フロー（v6）:
 //   - どちらかの HP が 0 以下になった場合、攻撃シーケンス完了後に
 //     「（敵名）を倒した！」/「（プレイヤー名）は（敵名）に敗北した！」
 //     を表示し、消えるまで await。
@@ -37,13 +42,9 @@
 //   - バトルモード=0 書き込み → UserStatus.refresh() → HP バー非表示
 //     → endBattle() → 明示的 render で敵HPバー非表示
 //     → restorePlayerHPFull() → restoreEnemyHPFull()
-//   - これにより「プレイヤーと敵キャラ双方のHP/バーが非表示になった後」に
-//     敵HPの完全回復が行われる。
 //
-// ★ 二度押し防止（v5）:
+// ★ 二度押し防止（v6）:
 //   - _actionInProgress フラグで攻撃/防御/逃走の多重実行を防止。
-//   - クリック直後（最初の await より前）に updateBattleCommandsState() を呼び、
-//     ボタンを即座に半透明化・クリック不可にする。
 
 // ★ 効果音モジュール（window.SoundEffects を公開）を非同期ロード
 import('./sound_effects.js').catch(err => {
@@ -66,21 +67,19 @@ import('./sound_effects.js').catch(err => {
     const BATTLE_COMMANDS_ID = 'variable-battle-commands';
 
     // ★ タイミング定数
-    //   DAMAGE_FLOAT_DELAY_MS / ENEMY_ATTACK_DELAY_MS は「フロート表示前の遅延」には使わない。
-    //   現在は攻撃シーケンスが完全にフロートの消滅で区切られているため、
-    //   これらは将来の調整用に残置。
+    //   DAMAGE_FLOAT_DELAY_MS / ENEMY_ATTACK_DELAY_MS は現在未使用（将来の調整用に残置）。
     const ENEMY_ATTACK_DELAY_MS = 600;   // （現在未使用）
     const ENTRY_999_DELAY_MS = 800;
     const DAMAGE_FLOAT_DELAY_MS = 400;   // （現在未使用）
-    const DAMAGE_FLOAT_HOLD_MS = 1800;   // バトル終了フロートの保持時間
+    const DAMAGE_FLOAT_HOLD_MS = 2300;   // バトル終了フロートの保持時間（旧1800 + 500）
     const DAMAGE_FLOAT_FADE_MS = 200;    // フェードアウトに要する時間
 
-    // ★ 攻撃シーケンス用タイミング
+    // ★ 攻撃シーケンス用タイミング（v6 で +500ms 延長）
     const ATTACK_FLOAT_START_DELAY_MS = 0;        // 攻撃フロート表示開始
     const DAMAGE_FLOAT_START_DELAY_MS = 250;      // ダメージフロート表示開始
-    const ATTACK_FLOAT_HIDE_MS = 1500;            // 攻撃フロート非表示開始
-    const DAMAGE_FLOAT_HIDE_MS = 1750;            // ダメージフロート非表示開始
-    const ATTACK_SEQUENCE_END_MS = 1950;          // 両フロート完全消滅
+    const ATTACK_FLOAT_HIDE_MS = 2000;            // 攻撃フロート非表示開始（旧1500 + 500）
+    const DAMAGE_FLOAT_HIDE_MS = 2250;            // ダメージフロート非表示開始（旧1750 + 500）
+    const ATTACK_SEQUENCE_END_MS = 2450;          // 両フロート完全消滅（旧1950 + 500）
 
     const BATTLE_DEFAULTS = {
         active: false,
@@ -718,9 +717,9 @@ import('./sound_effects.js').catch(err => {
     //   attackerName が targetName を攻撃したことを段階的に表示する。
     //     T=0     「（攻撃者）は（対象）を攻撃した！」  表示開始
     //     T=250   「（対象）に（ダメージ）のダメージ！」 表示開始（1つ目の下）
-    //     T=1500  1つ目を非表示開始
-    //     T=1750  2つ目を非表示開始
-    //     T=1950  両方完全消滅 → Promise 解決
+    //     T=2000  1つ目を非表示開始
+    //     T=2250  2つ目を非表示開始
+    //     T=2450  両方完全消滅 → Promise 解決
     //   onDamageShow はダメージフロートが DOM に追加された瞬間に呼ばれる。
     // ============================================================
     function showAttackSequenceAsync(attackerName, targetName, damage, options = {}) {
@@ -755,17 +754,17 @@ import('./sound_effects.js').catch(err => {
                 }
             }, DAMAGE_FLOAT_START_DELAY_MS);
 
-            // ── ③ 攻撃フロート非表示開始（T=1500）──
+            // ── ③ 攻撃フロート非表示開始（T=2000）──
             setTimeout(() => {
                 attackEl.classList.remove('visible');
             }, ATTACK_FLOAT_HIDE_MS);
 
-            // ── ④ ダメージフロート非表示開始（T=1750）──
+            // ── ④ ダメージフロート非表示開始（T=2250）──
             setTimeout(() => {
                 if (damageEl) damageEl.classList.remove('visible');
             }, DAMAGE_FLOAT_HIDE_MS);
 
-            // ── ⑤ 両方除去・resolve（T=1950 = 1750 + 200ms フェード）──
+            // ── ⑤ 両方除去・resolve（T=2450 = 2250 + 200ms フェード）──
             setTimeout(() => {
                 if (attackEl.parentNode) attackEl.parentNode.removeChild(attackEl);
                 if (damageEl && damageEl.parentNode) damageEl.parentNode.removeChild(damageEl);
@@ -808,6 +807,7 @@ import('./sound_effects.js').catch(err => {
 
     // ============================================================
     // ★ 敵の自動攻撃
+    //   - 敵攻撃効果音 enemy_attack を再生
     //   - 攻撃シーケンスフロート（「（敵）は（プレイヤー）を攻撃した！」→
     //     250ms後「（プレイヤー）に（ダメージ）のダメージ！」）を表示
     //   - ダメージフロート表示と同時にプレイヤーHP減算
@@ -845,6 +845,13 @@ import('./sound_effects.js').catch(err => {
             const isPlayerDefeated = newHP <= 0;
 
             if (isPlayerDefeated) _battleEndingInProgress = true;
+
+            // ★ 敵攻撃効果音を再生（攻撃アナウンス表示前）
+            try {
+                window.SoundEffects?.play?.('enemy_attack');
+            } catch (err) {
+                console.debug(LOG, '効果音の再生に失敗:', err);
+            }
 
             // ★ 攻撃シーケンスフロート
             //   T=0    「（敵）は（プレイヤー）を攻撃した！」
@@ -978,7 +985,6 @@ import('./sound_effects.js').catch(err => {
             return;
         }
 
-        // ★ 最初の await より前に UI をロック（即時フィードバック）
         _actionInProgress = true;
         updateBattleCommandsState();
 
@@ -995,9 +1001,7 @@ import('./sound_effects.js').catch(err => {
         let newHP = 0;
 
         try {
-            // ★ 攻撃シーケンスフロートを即座に開始（フロート表示前の遅延ゼロ）
-            //   T=0    「（プレイヤー）は（敵）を攻撃した！」
-            //   T=250  「（敵）に（ダメージ）のダメージ！」
+            // ★ 攻撃シーケンスフロートを即座に開始
             const sequencePromise = showAttackSequenceAsync(playerName, enemyNameForFloat, damage);
 
             // ★ 並行でロアブック変数を取得・更新
@@ -1015,13 +1019,11 @@ import('./sound_effects.js').catch(err => {
                         curHPVar.value = String(newHP);
                         isEnemyDefeated = newHP <= 0;
 
-                        // 敵名キャッシュを最新化
                         const nameVal = varMap['敵キャラの名前']?.value;
                         if (nameVal !== undefined && nameVal !== null && String(nameVal).trim()) {
                             _cachedEnemyName = String(nameVal).trim();
                         }
 
-                        // 敵HP のみ更新（バトルモードはまだ書き換えない）
                         const data = window.LorebookExpansion.getDataFor(result.worldName, result.uid, result.entry);
                         data.variables = vars;
                         window.LorebookExpansion.setDataFor(result.worldName, result.uid, result.entry, data);
@@ -1037,7 +1039,6 @@ import('./sound_effects.js').catch(err => {
                 console.warn(LOG, 'バトル: 敵HP更新に失敗', e);
             }
 
-            // ★ ターン状態を更新（敵HPバーにも反映）
             bs.player_turn = 0;
             bs.enemy_turn = 1;
             saveBattleState();
@@ -1152,6 +1153,8 @@ import('./sound_effects.js').catch(err => {
 
     // ============================================================
     // ★ バトルコマンドUI
+    //   - クリック: attack / defense / item / escape の効果音
+    //   - マウスホバー: interface7 の効果音
     // ============================================================
     function ensureBattleCommands() {
         let container = document.getElementById(BATTLE_COMMANDS_ID);
@@ -1173,6 +1176,15 @@ import('./sound_effects.js').catch(err => {
             btn.type = 'button';
             btn.className = `variable-command-btn variable-command-${b.color}`;
             btn.textContent = b.label;
+
+            // ★ ホバー時の UI 効果音
+            btn.addEventListener('mouseenter', () => {
+                try {
+                    window.SoundEffects?.play?.('interface7');
+                } catch (err) { /* ignore */ }
+            });
+
+            // ★ クリック時の効果音（b.color がそのまま効果音名）
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
