@@ -16,26 +16,31 @@
 //   敵HP≤0 / 逃走      → バトルモード=0 → 敵HPを最大値に全回復
 //
 // ★ 敵の自動攻撃:
-//   プレイヤーの行動（攻撃/防御）で enemy_turn=1 になると、
-//   プレイヤーのダメージフロートが消えた後に敵キャラが自動攻撃する。
+//   プレイヤーの攻撃アナウンス＆ダメージフロートが消えた後に敵キャラが自動攻撃する。
 //   敵ダメージ = max(1, enemy_attack - player_defense)
 //   プレイヤーHP≤0 → バトルモード=0, バトル終了, エントリ999を自動送信
 //
-// ★ フロート表示フロー（v4）:
-//   - 攻撃ボタン押下 → 効果音 → 「ダメージフロート」を即座に表示。
-//     フロート表示前の遅延はゼロ。
-//   - 敵HPの更新（getCurrentVariables / setDataFor）はフロート表示と並行して実行。
-//   - フロートが消えるまでだけ await する。
-//   - 敵の自動攻撃も待ち時間なしで即座にダメージフロートを表示する。
-//   - どちらかの HP が 0 以下になった場合は、バトル終了フロート
-//     「（敵名）を倒した！」/「（プレイヤー名）は（敵名）に敗北した！」
-//     を表示し、消えるまで await してから後続処理に進む。
-//   - ★ バトル終了フロートが消えるまでは バトルモード=0 を書き込まない。
-//     これにより UserStatus の HP バーがフロート表示中も表示され続ける。
-//   - フロート表示中は _battleEndingInProgress フラグを立て、
-//     ポーリング経由の updateBattleUI が勝手に endBattle() しないようにする。
+// ★ 攻撃アナウンス＆ダメージフロート（v5）:
+//   攻撃ボタン押下 → 効果音 → 即座に
+//     「（攻撃者）は（対象）を攻撃した！」  ← T=0 表示、T=1500 非表示開始
+//   250ms 後、その下に
+//     「（対象）に（ダメージ）のダメージ！」 ← T=250 表示、T=1750 非表示開始
+//   両方完全消滅 (T=1950) で Promise 解決。
+//   フロート表示前の遅延はゼロ。
 //
-// ★ 二度押し防止（v4）:
+// ★ バトル終了フロー（v5）:
+//   - どちらかの HP が 0 以下になった場合、攻撃シーケンス完了後に
+//     「（敵名）を倒した！」/「（プレイヤー名）は（敵名）に敗北した！」
+//     を表示し、消えるまで await。
+//   - バトル終了フロートが消えるまでは バトルモード=0 を書き込まない。
+//     これにより UserStatus の HP バーがフロート表示中も表示され続ける。
+//   - バトルモード=0 書き込み → UserStatus.refresh() → HP バー非表示
+//     → endBattle() → 明示的 render で敵HPバー非表示
+//     → restorePlayerHPFull() → restoreEnemyHPFull()
+//   - これにより「プレイヤーと敵キャラ双方のHP/バーが非表示になった後」に
+//     敵HPの完全回復が行われる。
+//
+// ★ 二度押し防止（v5）:
 //   - _actionInProgress フラグで攻撃/防御/逃走の多重実行を防止。
 //   - クリック直後（最初の await より前）に updateBattleCommandsState() を呼び、
 //     ボタンを即座に半透明化・クリック不可にする。
@@ -60,15 +65,22 @@ import('./sound_effects.js').catch(err => {
     const BATTLE_START_BTN_CLASS = 'variable-battle-start-btn';
     const BATTLE_COMMANDS_ID = 'variable-battle-commands';
 
-    // ★ タイミング定数（元の値に戻す）
-    //   - ENEMY_ATTACK_DELAY_MS / DAMAGE_FLOAT_DELAY_MS は「フロート表示前の遅延」には使わない。
-    //     フロートは即座に表示し、フロートが消えてから次処理に進む設計に変更。
-    //   - DAMAGE_FLOAT_HOLD_MS のみフロートの保持時間として使用する。
-    const ENEMY_ATTACK_DELAY_MS = 600;   // （現在は未使用。将来の調整用に残置）
+    // ★ タイミング定数
+    //   DAMAGE_FLOAT_DELAY_MS / ENEMY_ATTACK_DELAY_MS は「フロート表示前の遅延」には使わない。
+    //   現在は攻撃シーケンスが完全にフロートの消滅で区切られているため、
+    //   これらは将来の調整用に残置。
+    const ENEMY_ATTACK_DELAY_MS = 600;   // （現在未使用）
     const ENTRY_999_DELAY_MS = 800;
-    const DAMAGE_FLOAT_DELAY_MS = 400;   // （現在は未使用。将来の調整用に残置）
-    const DAMAGE_FLOAT_HOLD_MS = 1800;   // フロート保持時間
+    const DAMAGE_FLOAT_DELAY_MS = 400;   // （現在未使用）
+    const DAMAGE_FLOAT_HOLD_MS = 1800;   // バトル終了フロートの保持時間
     const DAMAGE_FLOAT_FADE_MS = 200;    // フェードアウトに要する時間
+
+    // ★ 攻撃シーケンス用タイミング
+    const ATTACK_FLOAT_START_DELAY_MS = 0;        // 攻撃フロート表示開始
+    const DAMAGE_FLOAT_START_DELAY_MS = 250;      // ダメージフロート表示開始
+    const ATTACK_FLOAT_HIDE_MS = 1500;            // 攻撃フロート非表示開始
+    const DAMAGE_FLOAT_HIDE_MS = 1750;            // ダメージフロート非表示開始
+    const ATTACK_SEQUENCE_END_MS = 1950;          // 両フロート完全消滅
 
     const BATTLE_DEFAULTS = {
         active: false,
@@ -545,7 +557,6 @@ import('./sound_effects.js').catch(err => {
     }
 
     // ★ 最後の非システムメッセージが AI かどうか
-    //   （ユーザー送信直後〜AI生成完了までは false を返す）
     function isLastMessageAi() {
         const ctx = getSTContext();
         if (!ctx?.chat || ctx.chat.length === 0) return false;
@@ -562,7 +573,6 @@ import('./sound_effects.js').catch(err => {
     }
 
     function addBattleStartButton() {
-        // ★ 最後のメッセージがAIでない場合はボタンを表示しない
         if (!isLastMessageAi()) {
             removeBattleStartButton();
             return;
@@ -683,7 +693,6 @@ import('./sound_effects.js').catch(err => {
         const battleModeRaw = varMap['バトルモード']?.value;
         const battleMode = String(battleModeRaw ?? '').trim() === '1';
 
-        // ★ _battleEndingInProgress 中は外部からの endBattle を抑止する
         if (battleMode && !_battleActive && !_startBattleInProgress && !_battleEndingInProgress) {
             console.log(LOG, 'バトルモード変数=1 を検出 → バトル中に復元');
             _battleActive = true;
@@ -705,57 +714,77 @@ import('./sound_effects.js').catch(err => {
     }
 
     // ============================================================
-    // ★ ダメージフロート表示（非同期）
-    //   delayMs は既定で 0（フロート表示前の遅延なし）。
-    //   onShow はフロートが DOM に追加された瞬間に呼ばれる。
-    //   フロートが完全に消えたら Promise を解決する。
+    // ★ 攻撃シーケンスフロート（非同期）
+    //   attackerName が targetName を攻撃したことを段階的に表示する。
+    //     T=0     「（攻撃者）は（対象）を攻撃した！」  表示開始
+    //     T=250   「（対象）に（ダメージ）のダメージ！」 表示開始（1つ目の下）
+    //     T=1500  1つ目を非表示開始
+    //     T=1750  2つ目を非表示開始
+    //     T=1950  両方完全消滅 → Promise 解決
+    //   onDamageShow はダメージフロートが DOM に追加された瞬間に呼ばれる。
     // ============================================================
-    function showDamageFloatAsync(targetName, damage, options = {}) {
-        const { delayMs = 0, onShow = null } = options;
+    function showAttackSequenceAsync(attackerName, targetName, damage, options = {}) {
+        const { onDamageShow = null } = options;
 
         return new Promise((resolve) => {
+            // 既存フロートを除去（多重実行対策）
+            document.querySelectorAll('.variable-damage-float, .variable-attack-float').forEach(el => el.remove());
+
+            const safeAttacker = (attackerName && String(attackerName).trim()) || '誰か';
+            const safeTarget = (targetName && String(targetName).trim()) || '相手';
+            const safeDamage = Math.max(0, Math.round(Number(damage) || 0));
+
+            // ── ① 攻撃アナウンスフロート（T=0）──
+            const attackEl = document.createElement('div');
+            attackEl.className = 'variable-attack-float';
+            attackEl.textContent = `${safeAttacker}は${safeTarget}を攻撃した！`;
+            document.body.appendChild(attackEl);
+            requestAnimationFrame(() => attackEl.classList.add('visible'));
+
+            // ── ② ダメージフロート（T=250、攻撃フロートの下）──
+            let damageEl = null;
             setTimeout(() => {
-                // 既存のフロート表示があれば除去（連打時の重複防止）
-                document.querySelectorAll('.variable-damage-float').forEach(el => el.remove());
+                damageEl = document.createElement('div');
+                damageEl.className = 'variable-damage-float';
+                damageEl.textContent = `${safeTarget}に${safeDamage}のダメージ！`;
+                document.body.appendChild(damageEl);
+                requestAnimationFrame(() => damageEl.classList.add('visible'));
 
-                const safeName = (targetName && String(targetName).trim()) || '相手';
-                const safeDamage = Math.max(0, Math.round(Number(damage) || 0));
-
-                const el = document.createElement('div');
-                el.className = 'variable-damage-float';
-                el.textContent = `${safeName}に${safeDamage}のダメージ！`;
-                document.body.appendChild(el);
-
-                // ★ フロート表示と同時に副作用を実行（HP減少など）
-                if (typeof onShow === 'function') {
-                    try { onShow(); } catch (e) { console.debug(LOG, 'onShow error:', e); }
+                if (typeof onDamageShow === 'function') {
+                    try { onDamageShow(); } catch (e) { console.debug(LOG, 'onDamageShow error:', e); }
                 }
+            }, DAMAGE_FLOAT_START_DELAY_MS);
 
-                requestAnimationFrame(() => {
-                    el.classList.add('visible');
-                });
+            // ── ③ 攻撃フロート非表示開始（T=1500）──
+            setTimeout(() => {
+                attackEl.classList.remove('visible');
+            }, ATTACK_FLOAT_HIDE_MS);
 
-                setTimeout(() => {
-                    el.classList.remove('visible');
-                    setTimeout(() => {
-                        if (el.parentNode) el.parentNode.removeChild(el);
-                        resolve();
-                    }, DAMAGE_FLOAT_FADE_MS);
-                }, DAMAGE_FLOAT_HOLD_MS);
-            }, delayMs);
+            // ── ④ ダメージフロート非表示開始（T=1750）──
+            setTimeout(() => {
+                if (damageEl) damageEl.classList.remove('visible');
+            }, DAMAGE_FLOAT_HIDE_MS);
+
+            // ── ⑤ 両方除去・resolve（T=1950 = 1750 + 200ms フェード）──
+            setTimeout(() => {
+                if (attackEl.parentNode) attackEl.parentNode.removeChild(attackEl);
+                if (damageEl && damageEl.parentNode) damageEl.parentNode.removeChild(damageEl);
+                resolve();
+            }, ATTACK_SEQUENCE_END_MS);
         });
     }
 
     // ============================================================
     // ★ バトル終了フロート表示（非同期）
-    //   消えたら Promise を解決する。
+    //   「（敵名）を倒した！」/「（プレイヤー名）は（敵名）に敗北した！」
+    //   を表示し、消えたら Promise を解決する。
     // ============================================================
     function showBattleEndFloatAsync(message, options = {}) {
         const { delayMs = 0, holdMs = DAMAGE_FLOAT_HOLD_MS } = options;
 
         return new Promise((resolve) => {
             setTimeout(() => {
-                document.querySelectorAll('.variable-damage-float').forEach(el => el.remove());
+                document.querySelectorAll('.variable-damage-float, .variable-attack-float').forEach(el => el.remove());
 
                 const el = document.createElement('div');
                 el.className = 'variable-damage-float variable-battle-end-float';
@@ -779,12 +808,15 @@ import('./sound_effects.js').catch(err => {
 
     // ============================================================
     // ★ 敵の自動攻撃
-    //   - 待ち時間なしで即座にダメージフロートを表示
-    //   - HP 減少はフロート表示と同時
+    //   - 攻撃シーケンスフロート（「（敵）は（プレイヤー）を攻撃した！」→
+    //     250ms後「（プレイヤー）に（ダメージ）のダメージ！」）を表示
+    //   - ダメージフロート表示と同時にプレイヤーHP減算
     //   - フロートが消えるまで await →
     //     プレイヤー敗北時はバトル終了フロート表示 → 消えるまで await →
     //     バトルモード=0 書き込み → UserStatus.refresh() で HP バー非表示 →
-    //     endBattle() → プレイヤーHP全回復 → エントリ999
+    //     endBattle() → 明示 render で敵HPバー非表示 →
+    //     restorePlayerHPFull() → restoreEnemyHPFull() →
+    //     ターンリセット → エントリ999
     // ============================================================
     async function enemyAutoAttack() {
         if (_enemyAttackInProgress) return;
@@ -809,20 +841,16 @@ import('./sound_effects.js').catch(err => {
             const curHP = status.curHP;
             const newHP = Math.max(0, curHP - damage);
             const playerName = getPlayerName();
+            const enemyName = getCachedEnemyName();
             const isPlayerDefeated = newHP <= 0;
 
-            // ★ プレイヤー敗北時は、フロート表示中に外部から endBattle を呼ばれないように
             if (isPlayerDefeated) _battleEndingInProgress = true;
 
-            // ★ バトルモード=0 用の変数を並行取得（敗北確定時のみ必要）
-            const varsPromise = isPlayerDefeated
-                ? getCurrentVariables().catch(e => { console.warn(LOG, 'getCurrentVariables error:', e); return null; })
-                : null;
-
-            // ★ 待ち時間なしでダメージフロートを表示し、HP 減少も同時に実行
-            await showDamageFloatAsync(playerName, damage, {
-                delayMs: 0,
-                onShow: () => {
+            // ★ 攻撃シーケンスフロート
+            //   T=0    「（敵）は（プレイヤー）を攻撃した！」
+            //   T=250  「（プレイヤー）に（ダメージ）のダメージ！」+ HP 減算
+            await showAttackSequenceAsync(enemyName, playerName, damage, {
+                onDamageShow: () => {
                     window.UserStatus.setStatus({ curHP: newHP });
                     console.log(
                         LOG,
@@ -836,48 +864,33 @@ import('./sound_effects.js').catch(err => {
                 try {
                     console.log(LOG, '💀 プレイヤーHPが0以下 → バトル終了 + エントリ999ロード');
 
-                    // ── ① バトル終了フロート表示 → 消えるまで待つ ──
+                    // ── ① バトル終了フロート → 消えるまで待つ ──
                     //      この間 _battleActive = true のままなので HP バーは表示され続ける
-                    const enemyName = getCachedEnemyName();
                     await showBattleEndFloatAsync(`${playerName}は${enemyName}に敗北した！`);
 
                     // ── ② ここで初めて バトルモード=0 を書き込む ──
-                    //      取得済みの vars を使って同期的に更新（追加の getCurrentVariables を回避）
-                    try {
-                        const result = await varsPromise;
-                        if (result && result.ok && result.uid) {
-                            const vars = result.variables.map(v => ({ ...v }));
-                            const varMap = {};
-                            for (const v of vars) if (v && v.name) varMap[v.name] = v;
-                            const bmVar = varMap['バトルモード'];
-                            if (bmVar) {
-                                bmVar.value = '0';
-                            } else {
-                                vars.push({ type: 'number', name: 'バトルモード', value: '0' });
-                            }
-                            const data = window.LorebookExpansion.getDataFor(result.worldName, result.uid, result.entry);
-                            data.variables = vars;
-                            window.LorebookExpansion.setDataFor(result.worldName, result.uid, result.entry, data);
-                            console.log(LOG, 'バトルモード変数を 0 に更新');
-                        }
-                    } catch (e) { /* ignore */ }
+                    await setBattleModeVar(0);
 
-                    // ── ③ UserStatus を即時更新して HP バーを非表示に ──
-                    try { window.UserStatus?.refresh?.(); } catch (e) { /* ignore */ }
+                    // ── ③ UserStatus を即時更新 → プレイヤーHPバーを非表示 ──
+                    try { await window.UserStatus?.refresh?.(); } catch (e) { /* ignore */ }
 
                     // ── ④ バトル終了（body クラス解除 → チャット復帰）──
                     endBattle();
 
-                    // ── ⑤ プレイヤーHPを最大値に全回復 ──
-                    restorePlayerHPFull();
+                    // ── ⑤ 明示的に render して敵HPバーも確実に非表示化 ──
+                    await forceRenderAsync();
 
-                    // ── ⑥ ターンリセット ──
+                    // ── ⑥ ここで初めて HP を全回復（両バーが非表示になった後）──
+                    restorePlayerHPFull();
+                    await restoreEnemyHPFull();
+
+                    // ── ⑦ ターンリセット ──
                     bs.enemy_turn = 0;
                     bs.player_turn = 1;
                     saveBattleState();
                     updateBattleCommandsState();
 
-                    // ── ⑦ エントリ999を自動送信 ──
+                    // ── ⑧ エントリ999を自動送信 ──
                     setTimeout(() => {
                         try {
                             loadEntry999();
@@ -893,7 +906,6 @@ import('./sound_effects.js').catch(err => {
                 bs.enemy_turn = 0;
                 bs.player_turn = 1;
                 saveBattleState();
-                // ★ ボタンの半透明表示を解除
                 updateBattleCommandsState();
                 forceRender();
             }
@@ -946,6 +958,16 @@ import('./sound_effects.js').catch(err => {
         tryRender().catch(e => console.warn(LOG, e));
     }
 
+    async function forceRenderAsync() {
+        _lastRenderKey = '';
+        let attempts = 0;
+        while (_renderInFlight && attempts < 60) {
+            await new Promise(r => setTimeout(r, 50));
+            attempts++;
+        }
+        await render();
+    }
+
     async function handleAttack() {
         if (!_battleActive) return;
         if (_actionInProgress) return;   // ★ 二度押し防止
@@ -960,22 +982,25 @@ import('./sound_effects.js').catch(err => {
         _actionInProgress = true;
         updateBattleCommandsState();
 
-        // ★ フロート表示前の遅延ゼロで即座に表示できるよう、
-        //    キャッシュ済みの bs からダメージと敵名を先に算出する。
         const playerAtk = Number(bs.player_attack) || 60;
         const enemyDef = Number(bs.enemy_defense) || 20;
         const damage = Math.max(1, playerAtk - enemyDef);
         const enemyNameForFloat = getCachedEnemyName();
+        const playerName = getPlayerName();
 
         let result = null;
         let vars = null;
         let isEnemyDefeated = false;
+        let curHP = 0;
+        let newHP = 0;
 
         try {
-            // ★ 1) ダメージフロートを即座に表示開始（await しない）
-            const floatPromise = showDamageFloatAsync(enemyNameForFloat, damage, { delayMs: 0 });
+            // ★ 攻撃シーケンスフロートを即座に開始（フロート表示前の遅延ゼロ）
+            //   T=0    「（プレイヤー）は（敵）を攻撃した！」
+            //   T=250  「（敵）に（ダメージ）のダメージ！」
+            const sequencePromise = showAttackSequenceAsync(playerName, enemyNameForFloat, damage);
 
-            // ★ 2) 並行してロアブック変数を取得・更新
+            // ★ 並行でロアブック変数を取得・更新
             try {
                 result = await getCurrentVariables();
                 if (result.ok && result.uid) {
@@ -985,8 +1010,8 @@ import('./sound_effects.js').catch(err => {
 
                     const curHPVar = varMap['敵キャラの現在HP'];
                     if (curHPVar) {
-                        const curHP = parseFloat(curHPVar.value) || 0;
-                        const newHP = Math.max(0, curHP - damage);
+                        curHP = parseFloat(curHPVar.value) || 0;
+                        newHP = Math.max(0, curHP - damage);
                         curHPVar.value = String(newHP);
                         isEnemyDefeated = newHP <= 0;
 
@@ -996,7 +1021,7 @@ import('./sound_effects.js').catch(err => {
                             _cachedEnemyName = String(nameVal).trim();
                         }
 
-                        // ★ 敵HP のみ更新（バトルモードはまだ書き換えない）
+                        // 敵HP のみ更新（バトルモードはまだ書き換えない）
                         const data = window.LorebookExpansion.getDataFor(result.worldName, result.uid, result.entry);
                         data.variables = vars;
                         window.LorebookExpansion.setDataFor(result.worldName, result.uid, result.entry, data);
@@ -1012,23 +1037,22 @@ import('./sound_effects.js').catch(err => {
                 console.warn(LOG, 'バトル: 敵HP更新に失敗', e);
             }
 
-            // ★ 3) ターン状態を更新（ボタンは既にロック済み）
+            // ★ ターン状態を更新（敵HPバーにも反映）
             bs.player_turn = 0;
             bs.enemy_turn = 1;
             saveBattleState();
             forceRender();
 
-            // ★ 4) ダメージフロートが消えるまで待つ
-            await floatPromise;
+            // ★ 攻撃シーケンス完了を待つ
+            await sequencePromise;
 
-            // ★ 5) 敵撃破時はバトル終了フロート → 消えるまで待つ
             if (isEnemyDefeated) {
                 _battleEndingInProgress = true;
                 try {
-                    // バトル終了フロート表示
+                    // ── ① バトル終了フロート → 消えるまで待つ ──
                     await showBattleEndFloatAsync(`${enemyNameForFloat}を倒した！`);
 
-                    // ★ バトル終了フロートが消えてから、初めてバトルモード=0 を書き込む
+                    // ── ② ここで初めて バトルモード=0 を書き込む ──
                     if (vars && result && result.ok && result.uid) {
                         const varMap = {};
                         for (const v of vars) if (v && v.name) varMap[v.name] = v;
@@ -1044,22 +1068,24 @@ import('./sound_effects.js').catch(err => {
                         console.log(LOG, 'バトルモード変数を 0 に更新');
                     }
 
-                    // ★ UserStatus を即時更新して HP バーを非表示に
-                    try { window.UserStatus?.refresh?.(); } catch (e) { /* ignore */ }
+                    // ── ③ UserStatus 即時更新 → プレイヤーHPバー非表示 ──
+                    try { await window.UserStatus?.refresh?.(); } catch (e) { /* ignore */ }
 
-                    // バトル終了
+                    // ── ④ バトル終了（チャット復帰）──
                     endBattle();
 
-                    // 敵HPを最大値に全回復
+                    // ── ⑤ 明示的に render して敵HPバー非表示 ──
+                    await forceRenderAsync();
+
+                    // ── ⑥ 敵HPを最大値に全回復（両バー非表示後）──
                     await restoreEnemyHPFull();
-                    forceRender();
                 } finally {
                     _battleEndingInProgress = false;
                 }
                 return;
             }
 
-            // ★ 6) 敵の自動攻撃をトリガー
+            // ★ 敵の自動攻撃をトリガー
             await enemyAutoAttack();
         } finally {
             _actionInProgress = false;
@@ -1078,7 +1104,6 @@ import('./sound_effects.js').catch(err => {
             return;
         }
 
-        // ★ 最初の await より前に UI をロック
         _actionInProgress = true;
         updateBattleCommandsState();
 
@@ -1095,7 +1120,6 @@ import('./sound_effects.js').catch(err => {
                 `player_turn=0, enemy_turn=1`
             );
 
-            // ★ 敵の自動攻撃をトリガー（敵ダメージフロートの表示・待機も内部で行う）
             await enemyAutoAttack();
         } finally {
             _actionInProgress = false;
@@ -1113,12 +1137,12 @@ import('./sound_effects.js').catch(err => {
 
         try {
             await setBattleModeVar(0);
-            try { window.UserStatus?.refresh?.(); } catch (e) { /* ignore */ }
+            try { await window.UserStatus?.refresh?.(); } catch (e) { /* ignore */ }
             endBattle();
+            await forceRenderAsync();
             await restoreEnemyHPFull();
 
             console.log(LOG, '🏃 逃走: バトルモードを終了し、敵HPを全回復しました');
-            forceRender();
         } finally {
             _actionInProgress = false;
             _battleEndingInProgress = false;
@@ -1149,7 +1173,6 @@ import('./sound_effects.js').catch(err => {
             btn.type = 'button';
             btn.className = `variable-command-btn variable-command-${b.color}`;
             btn.textContent = b.label;
-            // ★ クリック時に効果音を再生（b.color がそのまま効果音名）
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -1173,9 +1196,6 @@ import('./sound_effects.js').catch(err => {
 
     // ============================================================
     // ★ バトルコマンドの表示状態を更新
-    //   - 非バトル中 / 場所未チェック → 非表示
-    //   - player_turn = 1 かつ _actionInProgress = false → 通常表示
-    //   - それ以外 → 半透明・クリック不可
     // ============================================================
     function updateBattleCommandsState() {
         const container = document.getElementById(BATTLE_COMMANDS_ID);
@@ -1192,7 +1212,6 @@ import('./sound_effects.js').catch(err => {
 
         const bs = getBattleState();
         const isPlayerTurn = Number(bs.player_turn) === 1;
-        // ★ アクション実行中も待機扱い（二度押し防止）
         const shouldBeWaiting = !isPlayerTurn || _actionInProgress;
         container.classList.toggle('variable-battle-commands-waiting', shouldBeWaiting);
     }
@@ -1223,7 +1242,6 @@ import('./sound_effects.js').catch(err => {
             const enemyNameVal = varMap['敵キャラの名前']?.value;
             if (enemyNameVal !== undefined && enemyNameVal !== null && String(enemyNameVal).trim()) {
                 enemyName = String(enemyNameVal);
-                // ★ キャッシュ更新
                 _cachedEnemyName = enemyName;
             }
 
@@ -1381,7 +1399,6 @@ import('./sound_effects.js').catch(err => {
             if (!s.battleState) s.battleState = { ...BATTLE_DEFAULTS };
             Object.assign(s.battleState, patch || {});
             saveBattleState();
-            // ★ ターンが変わった可能性があるので表示状態も同期
             updateBattleCommandsState();
             forceRender();
         },
@@ -1393,9 +1410,8 @@ import('./sound_effects.js').catch(err => {
         restoreEnemyHPFull,
         loadEntry999,
         getPlayerName,
-        getEnemyName: getCachedEnemyName,
         getCachedEnemyName,
-        showDamageFloatAsync,
+        showAttackSequenceAsync,
         showBattleEndFloatAsync,
         updateBattleCommandsState,
         setVisibleForChar: (charName, visible) => {
