@@ -389,13 +389,15 @@ body.variable-battle-active #half-maximize-button {
 /* ============================================================
  * ★ ダメージフロート表示（攻撃時に敵のダメージを表示）
  *   位置: 画面中央から左へ 200px、下へ 100px
+ *   左寄せ表示（transform の X 成分を 0 にして左端基準にする）
  *   書式: 40px 太字 白文字 黒縁取り（画面左端の他フォントと同系統）
  * ============================================================ */
 .variable-damage-float {
     position: fixed;
     left: calc(50vw - 200px);
     top: calc(50vh + 100px);
-    transform: translate(-50%, -50%);
+    transform: translate(0, -50%);
+    text-align: left;
     z-index: 100;
     pointer-events: none;
     user-select: none;
@@ -430,14 +432,15 @@ body.variable-battle-active #half-maximize-button {
 /* ============================================================
  * ★ 攻撃アナウンスフロート（ダメージフロートの上に表示）
  *   位置: 画面中央から左へ 200px、下へ 30px
- *   （ダメージフロートは +100px なので 70px 上に配置）
- *   書式: 40px 太字 白文字 黒縁取り（他のフロートと統一）
+ *   左寄せ表示（ダメージフロートと左端を揃える）
+ *   書式: 40px 太字 白文字 黒縁取り
  * ============================================================ */
 .variable-attack-float {
     position: fixed;
     left: calc(50vw - 200px);
     top: calc(50vh + 30px);
-    transform: translate(-50%, -50%);
+    transform: translate(0, -50%);
+    text-align: left;
     z-index: 100;
     pointer-events: none;
     user-select: none;
