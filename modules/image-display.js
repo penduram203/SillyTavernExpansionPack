@@ -28,6 +28,11 @@
     // ★ 送信時に確定したキーワード画像をロック（事前設定モード用）
     let _lastSentKeywordImage = null;
 
+    // ★ バトルモード中の背景画像ロック
+    //   VariableManager がバトルモード変数=1 を検知した時にロックし、
+    //   バトル終了時に解除する。ロック中は updateImage() が同じ画像を維持する。
+    let _battleImageLock = null;
+
     let lastMatchCache = { signature: null, url: null, timestamp: 0 };
     const MATCH_CACHE_TTL = 1500;
 
@@ -63,6 +68,39 @@
         return text.slice(-200);
     }
 
+    // ============================================================
+    // ★ バトルモード用の背景画像ロック
+    //   - バトルモード中は現在表示中の画像を維持し、自動更新をスキップする
+    //   - VariableManager から lockBattleImage() / unlockBattleImage() が明示的に呼ばれる
+    //   - isBattleModeActive() による自動検知も併用する（保険）
+    // ============================================================
+    function isBattleModeActive() {
+        try {
+            return window.VariableManager?.isBattleActive?.() === true;
+        } catch (e) { return false; }
+    }
+
+    function lockBattleImage() {
+        if (_battleImageLock) return; // 既にロック済み
+        _battleImageLock = currentImageUrl || null;
+        if (_battleImageLock) {
+            // 現在表示中の画像を強制ロック
+            _lastSentKeywordImage = _battleImageLock;
+        }
+        console.log(`[ImageDisplay] 🔒 バトル背景画像をロック: ${_battleImageLock}`);
+    }
+
+    function unlockBattleImage() {
+        if (!_battleImageLock) return;
+        const lockedUrl = _battleImageLock;
+        _battleImageLock = null;
+        // 解除後も同じ画像を維持するため、_lastSentKeywordImage に固定
+        if (lockedUrl) {
+            _lastSentKeywordImage = lockedUrl;
+        }
+        console.log(`[ImageDisplay] 🔓 バトル背景画像ロックを解除（画像維持: ${lockedUrl}）`);
+    }
+    
     function invalidateMatchCache() {
         lastMatchCache = { signature: null, url: null, timestamp: 0 };
     }
@@ -1185,6 +1223,25 @@
     }
 
     async function updateImage() {
+        // ★ バトルモード中の背景画像ロック
+        if (isBattleModeActive()) {
+            // バトルモード中: ロックして同じ画像を維持
+            if (!_battleImageLock) {
+                lockBattleImage();
+            }
+            if (_battleImageLock && currentImageUrl !== _battleImageLock) {
+                await updateImageWithUrl(_battleImageLock);
+            }
+            console.debug('[ImageDisplay] バトルモード中のため背景画像更新をスキップ');
+            return;
+        }
+
+        // ★ バトルモード解除を検知したらロックを解放（画像は維持）
+        if (_battleImageLock) {
+            unlockBattleImage();
+            console.debug('[ImageDisplay] バトルモード解除 → 背景画像ロックを解放');
+        }
+
         // ★ isDefaultImageFailed の早期 return を削除
         //   上流で return すると updateImageWithUrl の復帰ロジックに到達できず、
         //   一度 true になると永久に復帰不能になる catch-22 が発生するため。
@@ -1969,8 +2026,11 @@
 
             // ★ メッセージの削除・編集時はキーワード画像ロックを解除して再スキャン
             //    （削除されたメッセージのキーワード画像が居座り続けるバグを修正）
+            //    ★ バトルモード中はロックを保持して背景切替を防ぐ
             const clearLockAndUpdate = () => {
-                _lastSentKeywordImage = null;
+                if (!isBattleModeActive() && !_battleImageLock) {
+                    _lastSentKeywordImage = null;
+                }
                 invalidateMatchCache();
                 // DOM 更新を待ってから再スキャン
                 //   （ST は MESSAGE_DELETED を emit してから printMessages() するため、
@@ -1984,7 +2044,10 @@
 
             if (eventTypes.CHAT_LOADED) safeOn(eventTypes.CHAT_LOADED, immediateUpdate);
                 const onCharacterOrChatChanged = () => {
-                    _lastSentKeywordImage = null;   // ★ ロック解除
+                    // ★ バトルモード中はロックを保持（背景切替を防ぐ）
+                    if (!isBattleModeActive() && !_battleImageLock) {
+                        _lastSentKeywordImage = null;   // ★ ロック解除
+                    }
                     invalidateMatchCache();
                     loadCharacterData(true);
                 };
@@ -2254,6 +2317,9 @@
         syncChatHeaderVisibility, syncChatHeaderPosition,
         ensureChatExplicitPosition,
         applyTopBarBackground,
+        lockBattleImage,
+        unlockBattleImage,
+        isBattleImageLocked: () => !!_battleImageLock,
     };
     console.log("✅ Image Display Extension API を window.ImageDisplayExtension に公開しました");
 })();
