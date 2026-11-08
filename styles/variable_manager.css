@@ -394,7 +394,7 @@ body.variable-battle-active #half-maximize-button {
  * ============================================================ */
 .variable-damage-float {
     position: fixed;
-    left: calc(50vw - 200px);
+    left: calc(50vw - 450px);
     top: calc(50vh + 100px);
     transform: translate(0, -50%);
     text-align: left;
@@ -437,7 +437,7 @@ body.variable-battle-active #half-maximize-button {
  * ============================================================ */
 .variable-attack-float {
     position: fixed;
-    left: calc(50vw - 200px);
+    left: calc(50vw - 450px);
     top: calc(50vh + 30px);
     transform: translate(0, -50%);
     text-align: left;
