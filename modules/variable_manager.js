@@ -642,6 +642,12 @@ import('./sound_effects.js').catch(err => {
         removeBattleStartButton();
         _lastRenderKey = '';
         console.log(LOG, '⚔️ バトル開始', getBattleState());
+
+        // ★ 背景画像をロック（バトル中の自動切替を防ぐ）
+        try {
+            window.ImageDisplayExtension?.lockBattleImage?.();
+        } catch (e) { /* ignore */ }
+
         updateBattleCommandsState();
         _startBattleInProgress = false;
         render();
@@ -664,6 +670,12 @@ import('./sound_effects.js').catch(err => {
         removeBattleStartButton();
         _lastRenderKey = '';
         console.log(LOG, '⚔️ バトル終了');
+
+        // ★ 背景画像ロックを解除（画像は維持）
+        try {
+            window.ImageDisplayExtension?.unlockBattleImage?.();
+        } catch (e) { /* ignore */ }
+
         updateBattleCommandsState();
     }
 
@@ -698,6 +710,11 @@ import('./sound_effects.js').catch(err => {
             document.body.classList.add('variable-battle-active');
             _lastRenderKey = '';
             updateBattleCommandsState();
+
+            // ★ 背景画像をロック（バトル中の自動切替を防ぐ）
+            try {
+                window.ImageDisplayExtension?.lockBattleImage?.();
+            } catch (e) { /* ignore */ }
         } else if (!battleMode && _battleActive && !_startBattleInProgress && !_battleEndingInProgress) {
             console.log(LOG, 'バトルモード変数=0 を検出 → バトル終了');
             endBattle();
