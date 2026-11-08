@@ -50,10 +50,12 @@
 
     // 効果音名 → ファイル名（拡張子なし / もしくは拡張子込み）
     const SOUND_FILES = {
-        attack:  'attack',
-        defense: 'defense',
-        item:    'item',
-        escape:  'escape',
+        attack:       'attack',
+        defense:      'defense',
+        item:         'item',
+        escape:       'escape',
+        enemy_attack: 'enemy_attack',
+        interface7:   'interface7',
     };
 
     // name -> HTMLAudioElement
