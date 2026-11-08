@@ -426,3 +426,45 @@ body.variable-battle-active #half-maximize-button {
 .variable-damage-float.visible {
     opacity: 1;
 }
+
+/* ============================================================
+ * ★ 攻撃アナウンスフロート（ダメージフロートの上に表示）
+ *   位置: 画面中央から左へ 200px、下へ 30px
+ *   （ダメージフロートは +100px なので 70px 上に配置）
+ *   書式: 40px 太字 白文字 黒縁取り（他のフロートと統一）
+ * ============================================================ */
+.variable-attack-float {
+    position: fixed;
+    left: calc(50vw - 200px);
+    top: calc(50vh + 30px);
+    transform: translate(-50%, -50%);
+    z-index: 100;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    font-size: 40px;
+    font-weight: bold;
+    color: #ffffff;
+    -webkit-text-stroke: 10px #000000;
+    paint-order: stroke fill;
+    text-shadow:
+        -3px -3px 0 #000,
+         3px -3px 0 #000,
+        -3px  3px 0 #000,
+         3px  3px 0 #000,
+        -4px  0   0 #000,
+         4px  0   0 #000,
+         0   -4px 0 #000,
+         0    4px 0 #000,
+         0 0 10px rgba(0, 0, 0, 0.95);
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    line-height: 1.2;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.variable-attack-float.visible {
+    opacity: 1;
+}
