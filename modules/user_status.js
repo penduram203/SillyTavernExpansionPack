@@ -94,7 +94,8 @@
     async function waitForVariableManager(maxWaitMs = 10000) {
         const start = Date.now();
         while (Date.now() - start < maxWaitMs) {
-            if (window.VariableManager?.getCurrentVariables) return true;
+            if (window.VariableManager?.getCurrentVariables &&
+                window.VariableManager?.refreshCommonRuleFlags) return true;
             await new Promise(r => setTimeout(r, 200));
         }
         return false;
@@ -112,6 +113,31 @@
         return false;
     }
 
+    // ============================================================
+    // ★ RPGモード判定（VariableManager のキャッシュを同期参照）
+    //   キャッシュが未初期化なら1回だけ強制更新を待つ
+    // ============================================================
+    function isRPGModeSync() {
+        try {
+            const flags = window.VariableManager?.getCommonRuleFlags?.();
+            return flags?.rpgMode === true;
+        } catch (e) { return false; }
+    }
+
+    async function isRPGMode() {
+        try {
+            const flags = window.VariableManager?.getCommonRuleFlags?.();
+            if (flags && flags.ok === true) {
+                return flags.rpgMode === true;
+            }
+            if (window.VariableManager?.refreshCommonRuleFlags) {
+                const refreshed = await window.VariableManager.refreshCommonRuleFlags();
+                return refreshed?.rpgMode === true;
+            }
+        } catch (e) { /* ignore */ }
+        return false;
+    }
+    
     function getUserName() {
         // ペルソナ管理画面の .ch_name を参照（selected を優先）
         const el = document.querySelector('#user_avatar_block .avatar-container.selected .ch_name')
@@ -137,10 +163,10 @@
     }
 
     async function render() {
-        const active = await isBattleModeActive();
+        const active = await isRPGMode();
         const panel = ensurePanel();
 
-        // ★ バトルモード ≠ 1 の時は非表示
+        // ★ RPGモード = 1 で常に表示（バトルモードとは独立）
         if (!active) {
             panel.style.display = 'none';
             _lastRenderKey = '';
@@ -161,7 +187,7 @@
 
         panel.innerHTML = '';
 
-        // ── HPバー + 数値（先に追加） ──
+        // ── HPバー + 数値 ──
         const hpContainer = document.createElement('div');
         hpContainer.className = 'user-status-hp-container';
 
@@ -190,10 +216,10 @@
 
     async function init() {
         ensurePanel();
-        // パネルは初期状態で非表示
         const panel = document.getElementById(PANEL_ID);
         if (panel) panel.style.display = 'none';
 
+        // VariableManager の準備を待つ
         await waitForVariableManager();
         await render();
         setInterval(render, POLL_INTERVAL_MS);
@@ -238,5 +264,7 @@
         refresh: render,
         getUserName,
         isBattleModeActive,
+        isRPGMode,
+        isRPGModeSync,
     };
 })();
