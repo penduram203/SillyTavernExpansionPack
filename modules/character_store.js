@@ -42,8 +42,60 @@ function _updateBackup(char, namespace, payload) {
     if (!key) return;
     if (!_backup[key]) _backup[key] = {};
     try {
-        _backup[key][namespace] = JSON.parse(JSON.stringify(payload));
+        // ★ image_display_extension / lorebook_expansion / meta 系は null を除去
+        //    merge-attributes の深いマージで null 値が残り続けるのを防ぐため、
+        //    バックアップには null を保存しない。
+        let cleaned = payload;
+        if ((namespace === 'image_display_extension' ||
+             namespace === 'image_display_extension_meta' ||
+             namespace === 'lorebook_expansion') &&
+            payload && typeof payload === 'object' && !Array.isArray(payload)) {
+            cleaned = {};
+            for (const [k, v] of Object.entries(payload)) {
+                if (v !== null && v !== undefined) {
+                    cleaned[k] = v;
+                }
+            }
+        }
+        _backup[key][namespace] = JSON.parse(JSON.stringify(cleaned));
     } catch (e) { _backup[key][namespace] = payload; }
+}
+
+// ============================================================
+// ★ char.data.extensions から null / undefined を除去
+//    merge-attributes は null を「削除」ではなく「nullで上書き」
+//    として扱うため、STJ Editor の削除マーカー (null) が
+//    char.data に残り続ける。エクスポート直前に除去する。
+// ============================================================
+function _stripNullsFromExtensions(char) {
+    if (!char?.data?.extensions) return 0;
+    const ext = char.data.extensions;
+    let removed = 0;
+
+    const cleanObject = (obj) => {
+        if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return obj;
+        const cleaned = {};
+        for (const [k, v] of Object.entries(obj)) {
+            if (v === null || v === undefined) {
+                removed++;
+            } else {
+                cleaned[k] = v;
+            }
+        }
+        return cleaned;
+    };
+
+    if (ext.image_display_extension) {
+        ext.image_display_extension = cleanObject(ext.image_display_extension);
+    }
+    if (ext.image_display_extension_meta) {
+        ext.image_display_extension_meta = cleanObject(ext.image_display_extension_meta);
+    }
+    if (ext.lorebook_expansion) {
+        ext.lorebook_expansion = cleanObject(ext.lorebook_expansion);
+    }
+
+    return removed;
 }
 
 // ============================================================
@@ -339,7 +391,6 @@ export async function flushAll() {
         return el.id === 'export_button';
     }
 
-    // ---- JSON export ----
     function doJsonExport() {
         try {
             const char = _getCurrentChar();
@@ -354,6 +405,13 @@ export async function flushAll() {
                 if (!char.data.extensions) char.data.extensions = {};
                 char.data.extensions[ns] = JSON.parse(JSON.stringify(payload));
             }
+
+            // ★ null 値除去（バックアップ注入後）
+            const removed = _stripNullsFromExtensions(char);
+            if (removed > 0) {
+                console.log(`${LOG} 🧹 export 前に null 値を ${removed} 件除去`);
+            }
+
             const exportData = JSON.parse(JSON.stringify(char));
             exportData.create_date = exportData.create_date || new Date().toISOString();
             exportData.avatar_url = char.avatar || '';
@@ -435,8 +493,15 @@ export async function flushAll() {
 
     function patchPng(bytes) {
         const char = _getCurrentChar();
+
         // ★ per-world store の内容を char.data にマージ
         _syncLorebookExpansionFromWorldStore(char);
+
+        // ★ null 値除去
+        const removed = _stripNullsFromExtensions(char);
+        if (removed > 0) {
+            console.log(`${LOG} 🧹 PNG export 前に null 値を ${removed} 件除去`);
+        }
         const backups = _getBackupsForChar(char);
         if (Object.keys(backups).length === 0) {
             console.log(`${LOG} PNG: 現在キャラの backup なし → パッチスキップ`);
@@ -632,6 +697,12 @@ window.CharStore = {
     saveCharacterExtension,
     flushCharacterExtension,
     flushAll,
+    // ★ 手動クリーンアップ用
+    stripNullsFromExtensions: () => {
+        const char = _getCurrentChar();
+        if (!char) return 0;
+        return _stripNullsFromExtensions(char);
+    },
     _dumpBackup: () => {
         const out = {};
         for (const [key, ns] of Object.entries(_backup)) {
