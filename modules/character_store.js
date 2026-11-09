@@ -417,12 +417,14 @@ export async function flushAll() {
             exportData.avatar_url = char.avatar || '';
             exportData.ch_name = char.name || '';
 
-            // ★ json_data は内部保持用の生データのため、エクスポート時には削除する
-            //    これにより JSON ファイルのサイズを大幅に削減できる
-            if (exportData.json_data) {
-                delete exportData.json_data;
-                console.log(`${LOG} 🧹 json_data を削除してエクスポート`);
-            }
+            // ★ ここに追加（エクスポートに不要なメタデータを削除）
+            delete exportData.json_data;
+            delete exportData.chat;
+            delete exportData.chat_size;
+            delete exportData.date_last_chat;
+            delete exportData.data_size;
+            delete exportData.date_added;
+
             const jsonStr = JSON.stringify(exportData, null, 4);
             const filename = `${char.name || 'character'}.json`;
             const blob = new Blob([jsonStr], { type: 'application/json' });
@@ -509,6 +511,7 @@ export async function flushAll() {
         if (removed > 0) {
             console.log(`${LOG} 🧹 PNG export 前に null 値を ${removed} 件除去`);
         }
+
         const backups = _getBackupsForChar(char);
         if (Object.keys(backups).length === 0) {
             console.log(`${LOG} PNG: 現在キャラの backup なし → パッチスキップ`);
@@ -541,10 +544,28 @@ export async function flushAll() {
             const ni = td.indexOf(0);
             const b64 = String.fromCharCode(...td.slice(ni + 1));
             let json; try { json = JSON.parse(b2u(b64)); } catch (e) { continue; }
+
+            // ★ エクスポートに不要なメタデータを削除
+            //    json_data: インポート時の生 JSON 文字列（肥大化の主因）
+            //    chat, chat_size, date_last_chat, data_size, date_added: チャット関連メタ
+            delete json.json_data;
+            delete json.chat;
+            delete json.chat_size;
+            delete json.date_last_chat;
+            delete json.data_size;
+            delete json.date_added;
+
             const data = json.data || json;
-            if (data.json_data) {
+            // ★ V1/V2 形式で data === json の場合に備えて再度削除
+            if (data !== json) {
                 delete data.json_data;
+                delete data.chat;
+                delete data.chat_size;
+                delete data.date_last_chat;
+                delete data.data_size;
+                delete data.date_added;
             }
+            if (!data.extensions) data.extensions = {};
             let inj = 0;
             for (const [ns, p] of Object.entries(backups)) {
                 data.extensions[ns] = JSON.parse(JSON.stringify(p));
