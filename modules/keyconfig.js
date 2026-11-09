@@ -8,10 +8,14 @@
 //
 // 対象コンテキスト（優先度順）:
 //   1. バトルコマンド (.variable-command-btn × 4)
-//   2. チャット内インタラクティブ要素
-//      - .lbe-choice-item       ロアブックの選択肢
-//      - .variable-battle-start-btn  バトル開始ボタン
-//      - .game-start-choice     ゲーム開始ボタン
+//   2. チャット内インタラクティブ要素（最新のみ）
+//      - 最後の .lbe-choices-block 内の .lbe-choice-item
+//      - 最新の .variable-battle-start-btn
+//      - 最新の .game-start-choice
+//
+// 入力欄の制御:
+//   VariableManager の rpgMode / choicesMode が 1 の時は
+//   #send_textarea を非表示・非クリック化する。
 //
 // 安全策:
 //   - textarea / input / contenteditable にフォーカスがあるときは一切介入しない
@@ -25,6 +29,7 @@
 
     const STYLE_ID = 'keyconfig-style';
     const FOCUS_CLASS = 'keyconfig-focused';
+    const HIDE_INPUT_CLASS = 'keyconfig-hide-input';
 
     const NAV_UP_KEYS = ['ArrowUp', 'w', 'W'];
     const NAV_DOWN_KEYS = ['ArrowDown', 's', 'S'];
@@ -49,13 +54,9 @@
         },
         {
             name: 'chat-interactive',
-            selector: '.lbe-choice-item, .variable-battle-start-btn, .game-start-choice',
-            container: null,
-            visible: () => {
-                return document.querySelector('.lbe-choice-item') !== null ||
-                       document.querySelector('.variable-battle-start-btn') !== null ||
-                       document.querySelector('.game-start-choice') !== null;
-            },
+            // getElements を明示的に定義（最新のみに絞り込む）
+            getElements: () => getLatestChatInteractiveElements(),
+            visible: () => getLatestChatInteractiveElements().length > 0,
             multi: true,
         },
     ];
@@ -108,6 +109,51 @@
         return true;
     }
 
+    // ============================================================
+    // ★ 最新のチャット内インタラクティブ要素だけを取得
+    //   - 最後の .lbe-choices-block 内の .lbe-choice-item 全て
+    //   - 最後の .variable-battle-start-btn
+    //   - 最後の .game-start-choice
+    //   を DOM 順に並べて返す。
+    // ============================================================
+    function getLatestChatInteractiveElements() {
+        const result = [];
+
+        // ① 最新の選択肢ブロック内の選択肢
+        const blocks = document.querySelectorAll('.lbe-choices-block');
+        if (blocks.length > 0) {
+            const lastBlock = blocks[blocks.length - 1];
+            lastBlock.querySelectorAll('.lbe-choice-item').forEach(el => {
+                if (isElementVisible(el)) result.push(el);
+            });
+        }
+
+        // ② 最新のバトル開始ボタン
+        const battleBtns = document.querySelectorAll('.variable-battle-start-btn');
+        if (battleBtns.length > 0) {
+            const last = battleBtns[battleBtns.length - 1];
+            if (isElementVisible(last)) result.push(last);
+        }
+
+        // ③ 最新のゲーム開始ボタン
+        const gameBtns = document.querySelectorAll('.game-start-choice');
+        if (gameBtns.length > 0) {
+            const last = gameBtns[gameBtns.length - 1];
+            if (isElementVisible(last)) result.push(last);
+        }
+
+        // DOM 順でソート
+        result.sort((a, b) => {
+            if (a === b) return 0;
+            const pos = a.compareDocumentPosition(b);
+            if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+            if (pos & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+            return 0;
+        });
+
+        return result;
+    }
+
     function getActiveContext() {
         for (const ctx of CONTEXTS) {
             try {
@@ -118,6 +164,9 @@
     }
 
     function getElements(ctx) {
+        if (typeof ctx.getElements === 'function') {
+            try { return ctx.getElements(); } catch (e) { return []; }
+        }
         const root = ctx.container ? ctx.container() : document;
         if (!root) return [];
         return Array.from(root.querySelectorAll(ctx.selector)).filter(isElementVisible);
@@ -129,20 +178,48 @@
         });
     }
 
-    function applyFocus(ctx, elements) {
-        clearFocus();
-        if (!ctx.multi || elements.length === 0) return;
-        let idx = _indices[ctx.name] ?? 0;
-        if (idx >= elements.length) idx = elements.length - 1;
-        if (idx < 0) idx = 0;
-        _indices[ctx.name] = idx;
-        elements[idx].classList.add(FOCUS_CLASS);
+    // ============================================================
+    // 入力欄の非表示制御
+    //   VariableManager の共通ルールフラグ (rpgMode / choicesMode) が
+    //   true の時、body に keyconfig-hide-input を付与する。
+    // ============================================================
+    function isInputLocked() {
+        try {
+            const f = window.VariableManager?.getCommonRuleFlags?.();
+            if (!f || !f.ok) return false;
+            return f.rpgMode === true || f.choicesMode === true;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function updateInputLock() {
+        const locked = isInputLocked();
+        const already = document.body.classList.contains(HIDE_INPUT_CLASS);
+
+        if (locked === already) return;
+
+        document.body.classList.toggle(HIDE_INPUT_CLASS, locked);
+
+        if (locked) {
+            // フォーカスが textarea に残っていると keydown がそちらに吸われるため、
+            // 明示的に blur する。
+            const ta = document.getElementById('send_textarea');
+            if (ta && document.activeElement === ta) {
+                try { ta.blur(); } catch (e) { /* ignore */ }
+            }
+            console.log(LOG, '入力欄をロック (rpgMode または choicesMode が 1)');
+        } else {
+            console.log(LOG, '入力欄のロックを解除');
+        }
     }
 
     // ============================================================
     // フォーカス管理
     // ============================================================
     function ensureFocus() {
+        updateInputLock();
+
         const ctx = getActiveContext();
         if (!ctx) {
             if (_lastActiveContextName !== null) {
@@ -174,13 +251,11 @@
             _lastElementsSignature = sig;
         }
 
-        // clamp
         let idx = _indices[ctx.name] ?? 0;
         if (idx >= elements.length) idx = elements.length - 1;
         if (idx < 0) idx = 0;
         _indices[ctx.name] = idx;
 
-        // 適用
         clearFocus();
         if (ctx.multi) {
             elements[idx].classList.add(FOCUS_CLASS);
@@ -195,13 +270,16 @@
         if (!ctx || !ctx.multi) return;
         const elements = getElements(ctx);
         if (elements.length === 0) return;
+
         let idx = _indices[ctx.name] ?? 0;
         idx += delta;
         if (idx < 0) idx = elements.length - 1;
         if (idx >= elements.length) idx = 0;
         _indices[ctx.name] = idx;
+
         clearFocus();
         elements[idx].classList.add(FOCUS_CLASS);
+
         try {
             elements[idx].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         } catch (e) {
@@ -217,9 +295,11 @@
         if (!ctx) return false;
         const elements = getElements(ctx);
         if (elements.length === 0) return false;
+
         const idx = Math.min(_indices[ctx.name] ?? 0, elements.length - 1);
         const el = elements[idx];
         if (!el) return false;
+
         try {
             el.click();
             return true;
@@ -311,6 +391,21 @@
                 for (const k of Object.keys(_indices)) _indices[k] = 0;
             }
             ensureFocus();
+        },
+        // ★ デバッグ用: 現時点の navigable 要素を列挙
+        _debugElements: () => {
+            const ctx = getActiveContext();
+            if (!ctx) return { context: null, elements: [] };
+            const elements = getElements(ctx);
+            return {
+                context: ctx.name,
+                elements: elements.map(el => ({
+                    tag: el.tagName,
+                    class: el.className,
+                    text: (el.textContent || '').slice(0, 40),
+                    visible: isElementVisible(el),
+                })),
+            };
         },
     };
 })();
