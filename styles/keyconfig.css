@@ -1,0 +1,66 @@
+/* keyconfig.css */
+/* キーボード操作のフォーカス表示 */
+
+/* ============================================================
+ * ロアブック選択肢のフォーカス
+ *   choice_click.css の :hover と同じ見た目に合わせる
+ * ============================================================ */
+.lbe-choice-item.keyconfig-focused {
+    background-color: var(--choice-hover-bg, #0d47a1) !important;
+    border: 2px solid var(--choice-hover-border, #00e5ff) !important;
+    box-shadow:
+        0 0 0 2px var(--choice-hover-glow-ring, rgba(0, 229, 255, 0.4)),
+        0 4px 12px var(--choice-hover-glow-soft, rgba(0, 229, 255, 0.55)) !important;
+    color: #ffffff !important;
+    transform: translateX(2px) scale(1.01) !important;
+}
+
+.lbe-choice-item.keyconfig-focused::before {
+    width: 6px !important;
+}
+
+/* ============================================================
+ * バトルコマンドのフォーカス
+ * ============================================================ */
+.variable-command-btn.keyconfig-focused {
+    background: rgba(60, 60, 80, 0.95) !important;
+    transform: scale(1.08) !important;
+    box-shadow: 0 0 16px rgba(255, 255, 255, 0.7) !important;
+    outline: 3px solid #ffffff !important;
+    outline-offset: 2px !important;
+}
+
+/* 種類別フォーカス色（ホバー時の色を流用） */
+.variable-command-btn.variable-command-attack.keyconfig-focused {
+    background: rgba(180, 20, 20, 0.95) !important;
+    border-color: #ff8888 !important;
+    outline-color: #ff8888 !important;
+}
+.variable-command-btn.variable-command-defense.keyconfig-focused {
+    background: rgba(20, 60, 180, 0.95) !important;
+    border-color: #88bbff !important;
+    outline-color: #88bbff !important;
+}
+.variable-command-btn.variable-command-item.keyconfig-focused {
+    background: rgba(20, 140, 40, 0.95) !important;
+    border-color: #88ff88 !important;
+    outline-color: #88ff88 !important;
+}
+.variable-command-btn.variable-command-escape.keyconfig-focused {
+    background: rgba(200, 170, 20, 0.95) !important;
+    border-color: #fff088 !important;
+    outline-color: #fff088 !important;
+}
+
+/* ============================================================
+ * ゲーム開始ボタン / バトル開始ボタンのフォーカス
+ * ============================================================ */
+.game-start-choice.keyconfig-focused,
+.variable-battle-start-btn.keyconfig-focused {
+    outline: 3px solid #ffd54f !important;
+    outline-offset: 3px !important;
+    box-shadow:
+        0 0 0 2px rgba(255, 213, 79, 0.4),
+        0 0 20px rgba(255, 213, 79, 0.9) !important;
+    transform: translateY(-1px) scale(1.02) !important;
+}
