@@ -1473,6 +1473,8 @@ import('./sound_effects.js').catch(err => {
         isVisibleForChar,
         isStartButtonEnabledForChar,
         shouldShowBattleStartButton,
+        // ★ バトル開始変数のキャッシュを返す（keyconfig.js が参照）
+        getBattleStartVar: () => _lastBattleStartVar,
         isBattleActive: () => _battleActive,
         isEnemyAttackInProgress: () => _enemyAttackInProgress,
         isBattleEndingInProgress: () => _battleEndingInProgress,
