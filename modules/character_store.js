@@ -46,6 +46,56 @@ function _updateBackup(char, namespace, payload) {
     } catch (e) { _backup[key][namespace] = payload; }
 }
 
+// ============================================================
+// ★ lorebook_expansion: per-world store の内容を char.data にマージ
+//   - エクスポート直前に呼ぶ。RPGモード/選択肢モード等の
+//     共通ルール変数が確実に JSON に含まれるようになる。
+//   - per-world store が権威ソースなので、char.data の内容を
+//     上書きする。
+// ============================================================
+function _syncLorebookExpansionFromWorldStore(char) {
+    if (!char) return;
+    try {
+        const ctx = _getCtx();
+        const store = ctx?.extensionSettings?.lorebook_expansion?.data;
+        if (!store || typeof store !== 'object') return;
+
+        const charName = char.name || '';
+        const assocWorld =
+            (typeof char.data?.extensions?.world === 'string' && char.data.extensions.world) ||
+            (typeof char.data?.world === 'string' && char.data.world) ||
+            '';
+        const ownWorld = assocWorld || charName;
+        if (!ownWorld) return;
+
+        const worldData = store[ownWorld];
+        if (!worldData || typeof worldData !== 'object') return;
+
+        if (!char.data) char.data = {};
+        if (!char.data.extensions) char.data.extensions = {};
+        if (!char.data.extensions.lorebook_expansion ||
+            typeof char.data.extensions.lorebook_expansion !== 'object') {
+            char.data.extensions.lorebook_expansion = {};
+        }
+
+        const target = char.data.extensions.lorebook_expansion;
+        let merged = 0;
+        for (const [charKey, value] of Object.entries(worldData)) {
+            if (!value || typeof value !== 'object') continue;
+            const storageKey = `${ownWorld}\x1f${charKey}`;
+            target[storageKey] = JSON.parse(JSON.stringify(value));
+            merged++;
+        }
+
+        if (merged > 0) {
+            _updateBackup(char, 'lorebook_expansion', target);
+            console.debug(`[CharStore] lorebook_expansion: ${merged}件を per-world store からマージ`);
+        }
+    } catch (e) {
+        console.warn('[CharStore] lorebook_expansion sync failed:', e);
+    }
+}
+
 function _getBackupsForChar(char) {
     const key = _charKey(char);
     return _backup[key] || {};
@@ -288,6 +338,10 @@ export async function flushAll() {
         try {
             const char = _getCurrentChar();
             if (!char) return false;
+
+            // ★ per-world store の内容を char.data にマージ
+            _syncLorebookExpansionFromWorldStore(char);
+
             const backups = _getBackupsForChar(char);
             for (const [ns, payload] of Object.entries(backups)) {
                 if (!char.data) char.data = {};
@@ -375,6 +429,8 @@ export async function flushAll() {
 
     function patchPng(bytes) {
         const char = _getCurrentChar();
+        // ★ per-world store の内容を char.data にマージ
+        _syncLorebookExpansionFromWorldStore(char);
         const backups = _getBackupsForChar(char);
         if (Object.keys(backups).length === 0) {
             console.log(`${LOG} PNG: 現在キャラの backup なし → パッチスキップ`);
