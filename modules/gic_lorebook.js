@@ -150,10 +150,22 @@ function getEntryKeys(entry) {
     return [];
 }
 
+// ★ ST 表示用注釈を除去（Lorebook_Expansion.js と同一ロジック）
+function normalizeEntryComment(comment) {
+    if (typeof comment !== 'string') return '';
+    let s = comment.trim();
+    if (!s) return '';
+    s = s.replace(/\s*[（(](?:常時有効|無効|Constant|Disabled)[）)]\s*$/i, '').trim();
+    return s;
+}
+
 // ===== エントリキー決定 =====
 function getEntryCharKey(entry, uid) {
-    if (entry && typeof entry.comment === 'string' && entry.comment.trim()) {
-        return entry.comment.trim();
+    if (entry) {
+        const normalized = normalizeEntryComment(
+            typeof entry.comment === 'string' ? entry.comment : ''
+        );
+        if (normalized) return normalized;
     }
     const keys = getEntryKeys(entry);
     if (keys.length > 0 && String(keys[0]).trim()) {
