@@ -7,6 +7,12 @@
 //     一度押すと「リセット」ボタンに変化する。
 //     リセットボタンを押すと ST の「新しいチャットを開始」と同じ動作を実行し、
 //     ゲーム開始ボタンに戻る。
+//
+// ★ リセット時のダイアログ自動解決:
+//   ST の「新しいチャットを開始」はダイアログを挟むが、本拡張では
+//   armDialogAutoResolver() によりダイアログを検出した瞬間に
+//   「Also delete the current chat file」を ON にし「はい」を自動クリックする。
+//   そのためユーザーはリセットボタン押下のみで完結する。
 
 (function () {
     'use strict';
@@ -176,6 +182,91 @@
     }
 
     // ============================================================
+    // ★ ST「Start new chat?」ダイアログ自動解決
+    //   - armDialogAutoResolver() で数秒間だけ MutationObserver を有効化
+    //   - #del_chat_checkbox を持つダイアログ（= Start new chat?）を検出したら
+    //     チェックを ON にして .popup-button-ok[data-result="1"] をクリック
+    //   - 解決済みダイアログは WeakSet で記録し二重クリックを防止
+    // ============================================================
+    const _resolvedDialogs = new WeakSet();
+    let _dialogResolverObserver = null;
+    let _dialogResolverTimer = null;
+
+    function isNewChatDialog(dialog) {
+        if (!dialog) return false;
+        // #del_chat_checkbox を持つ = 「Start new chat?」確定
+        if (dialog.querySelector('#del_chat_checkbox')) return true;
+        // フォールバック: テキストで判定
+        const text = (dialog.textContent || '').toLowerCase();
+        return /start new chat|新しいチャット/.test(text) &&
+               dialog.querySelector('.popup-button-ok[data-result="1"]') !== null;
+    }
+
+    function resolveNewChatDialog(dialog) {
+        if (!dialog) return false;
+
+        // チェックボックスを ON
+        const cb = dialog.querySelector('#del_chat_checkbox');
+        if (cb && !cb.checked) {
+            cb.checked = true;
+            try {
+                cb.dispatchEvent(new Event('input', { bubbles: true }));
+                cb.dispatchEvent(new Event('change', { bubbles: true }));
+            } catch (e) { /* ignore */ }
+        }
+
+        // 「はい」をクリック
+        const ok = dialog.querySelector('.popup-button-ok[data-result="1"]')
+                || dialog.querySelector('.popup-controls [data-result="1"]');
+        if (ok) {
+            ok.click();
+            return true;
+        }
+        return false;
+    }
+
+    function scanAndResolveDialogs() {
+        const dialogs = document.querySelectorAll('dialog.popup[open], dialog[open]');
+        for (const d of dialogs) {
+            if (_resolvedDialogs.has(d)) continue;
+            if (!isNewChatDialog(d)) continue;
+            if (resolveNewChatDialog(d)) {
+                _resolvedDialogs.add(d);
+                console.log(LOG, 'Start new chat ダイアログを自動解決しました');
+            }
+        }
+    }
+
+    function armDialogAutoResolver(durationMs = 5000) {
+        if (_dialogResolverObserver) {
+            _dialogResolverObserver.disconnect();
+            _dialogResolverObserver = null;
+        }
+        if (_dialogResolverTimer) {
+            clearTimeout(_dialogResolverTimer);
+            _dialogResolverTimer = null;
+        }
+
+        // 即座に 1 回スキャン
+        scanAndResolveDialogs();
+
+        // DOM 変化を監視
+        _dialogResolverObserver = new MutationObserver(() => {
+            scanAndResolveDialogs();
+        });
+        _dialogResolverObserver.observe(document.body, { childList: true, subtree: true });
+
+        // 一定時間後に停止
+        _dialogResolverTimer = setTimeout(() => {
+            if (_dialogResolverObserver) {
+                _dialogResolverObserver.disconnect();
+                _dialogResolverObserver = null;
+            }
+            _dialogResolverTimer = null;
+        }, durationMs);
+    }
+
+    // ============================================================
     // ゲーム開始 / リセットボタン
     // ============================================================
     function createGameButton(isReset) {
@@ -201,7 +292,6 @@
                 const charName = _getCurrentCharName();
                 if (charName) {
                     setStartState(charName, 'clicked');
-                    // 状態変化を即時反映（リセットボタンに切り替え）
                     try { setupFirstMessageAsChoice(); } catch (err) { /* ignore */ }
                 }
 
@@ -239,25 +329,41 @@
         } catch (e) { /* ignore */ }
 
         // ボタンを一時的に隠す
-        const prevDisplay = btn.style.display;
         btn.style.display = 'none';
 
         const success = await triggerNewChat();
 
-        if (success) {
-            setStartState(charName, 'initial');
-            // リセット完了。新しいチャットが読み込まれた時点で
-            // setupFirstMessageAsChoice がゲーム開始ボタンを再生成する。
+        if (!success) {
+            console.warn(LOG, 'リセットに失敗しました。ボタンを復元します');
             try { setupFirstMessageAsChoice(); } catch (e) { /* ignore */ }
-        } else {
-            // リセットに失敗したら状態を戻してボタンを再表示
-            btn.style.display = prevDisplay;
-            console.warn(LOG, 'リセットに失敗しました');
+            return;
         }
+
+        // state 更新とボタン再生成は CHAT_CHANGED ハンドラ
+        // (checkAndResetStateOnChatChanged) に一任する。
+        // ただし 5 秒経っても反映されない場合は明示的に再生成。
+        const startTime = Date.now();
+        const watch = () => {
+            if (getStartState(charName) === 'initial') {
+                try { setupFirstMessageAsChoice(); } catch (e) { /* ignore */ }
+                return;
+            }
+            if (Date.now() - startTime > 5000) {
+                console.warn(LOG, 'リセット完了を検出できませんでした。ボタンを復元します');
+                try { setupFirstMessageAsChoice(); } catch (e) { /* ignore */ }
+                return;
+            }
+            setTimeout(watch, 200);
+        };
+        setTimeout(watch, 200);
     }
 
     async function triggerNewChat() {
-        // ① ST のメニュー項目をクリック（最も確実）
+        // ★ ダイアログ自動解決を有効化（メニューアイテム経由で
+        //   「Start new chat?」ダイアログが出ても自動で「はい」まで進める）
+        armDialogAutoResolver(5000);
+
+        // ① メニューアイテム経由（ST 標準のリセットフロー。ダイアログは resolver が解決）
         try {
             const menuItem = document.getElementById('option_start_new_chat');
             if (menuItem) {
@@ -266,11 +372,11 @@
             }
         } catch (e) { /* fall through */ }
 
-        // ② Slash command 経由（ST API）
+        // ② Slash command 経由（ダイアログを出さずに直接実行できる場合）
         try {
             const ctx = _getCtx();
             if (ctx?.executeSlashCommandsWithOptions) {
-                await ctx.executeSlashCommandsWithOptions('/newchat');
+                await ctx.executeSlashCommandsWithOptions('/newchat delete=true');
                 return true;
             }
         } catch (e) { /* fall through */ }
@@ -278,7 +384,7 @@
         // ③ Slash command 経由（window グローバル）
         try {
             if (typeof window.executeSlashCommandsWithOptions === 'function') {
-                await window.executeSlashCommandsWithOptions('/newchat');
+                await window.executeSlashCommandsWithOptions('/newchat delete=true');
                 return true;
             }
         } catch (e) { /* fall through */ }
@@ -319,10 +425,13 @@
             const existing = target.querySelector(':scope > .game-start-choice');
             if (existing) {
                 const isReset = existing.classList.contains('game-reset-choice');
-                if (isReset === needsReset) return;  // 既に正しい種別
+                if (isReset === needsReset) {
+                    // 既に正しい種別 → display:none だけクリア
+                    existing.style.removeProperty('display');
+                    return;
+                }
                 existing.remove();
             }
-            // 余計なボタンを除去
             target.querySelectorAll(':scope > .game-start-choice').forEach(el => el.remove());
             target.appendChild(createGameButton(needsReset));
         };
@@ -330,7 +439,6 @@
         // ── ① mes_text が存在する → その末尾に配置 ──
         if (mesTextEl) {
             if (existingContainer) existingContainer.remove();
-            // mes_text 以外の場所にあるボタン/フォールバックを除去
             document.querySelectorAll('.game-start-choice').forEach(el => {
                 if (!mesTextEl.contains(el)) el.remove();
             });
@@ -495,8 +603,6 @@
 
     // ============================================================
     // 新規チャット検出時の state リセット
-    //   - 「新しいチャットを開始」で state を自動的に initial に戻す
-    //   - 既存のゲーム進行中チャット（メッセージ数 > 1）は state を保持
     // ============================================================
     function checkAndResetStateOnChatChanged() {
         try {
@@ -510,7 +616,6 @@
                 if (getStartState(charName) !== 'initial') {
                     setStartState(charName, 'initial');
                     console.log(LOG, `新しいチャットを検出: state を initial にリセット (char="${charName}")`);
-                    // ゲーム開始ボタンを再生成
                     setTimeout(() => {
                         try { setupFirstMessageAsChoice(); } catch (e) { /* ignore */ }
                     }, 100);
@@ -589,5 +694,9 @@
         setupGameStart: setupFirstMessageAsChoice,
         getStartState,
         setStartState,
+        // ★ デバッグ用: ダイアログを手動でスキャンして解決
+        _resolveDialogOnce: () => {
+            scanAndResolveDialogs();
+        },
     };
 })();
