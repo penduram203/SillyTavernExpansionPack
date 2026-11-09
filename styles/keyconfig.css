@@ -2,6 +2,18 @@
 /* キーボード操作のフォーカス表示 */
 
 /* ============================================================
+ * ★ 入力欄の非表示化
+ *   body.keyconfig-hide-input が付与されている間、
+ *   #send_textarea を非表示・非クリック・フォーカス不可にする。
+ *   （rpgMode または choicesMode が 1 の時）
+ * ============================================================ */
+body.keyconfig-hide-input #send_textarea {
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
+/* ============================================================
  * ロアブック選択肢のフォーカス
  *   choice_click.css の :hover と同じ見た目に合わせる
  * ============================================================ */
