@@ -7,20 +7,28 @@
 //   - バトル中は画面左下・高さ中央に「攻撃/防御/道具/逃走」ボタンを配置
 //   - 攻撃/防御/逃走の動作を実装（道具は未実装）
 //
-// ★ ロアブックの「00_共通ルール」エントリによる制御（v8）:
+// ★ ロアブックの「00_共通ルール」エントリによる制御（v9）:
 //   - RPGモード = 1    → 変数パネル（場所・敵情報）を表示、左下にプレイヤーHPバー表示
 //   - バトル開始 = 1   → RPGモード=1 と併せて「バトル開始」ボタンを表示
 //   - 選択肢モード = 1 → チャット開始時の「ゲーム開始」ボタン表示（choice_click.js）
 //   - バトル中の4ボタン・敵HP表示は RPGモード=1 かつ バトルモード=1 の時のみ
 //   - キャラクター管理メニューの UI設定チェックボックスは全廃。
 //
-// ★ 2種類の「開始ボタン」の役割分担（v8）:
+// ★ worldbook名の解決（v9）:
+//   キャラクタがどのロアブックを使っているかを複数の候補から判定する。
+//   優先順位:
+//     1. char.data.extensions.world   (ST のキャラ設定で明示されたロアブック)
+//     2. char.data.world              (旧形式のフィールド)
+//     3. char.name                    (キャラ名と同名のロアブックがある場合)
+//     4. #world_info の選択値         (グローバルにアクティブなロアブック)
+//     5. #world_editor_select         (編集ドロップダウンの値)
+//   refreshCommonRuleFlags() は各候補を順に試し、最初に「00_共通ルール」を持つ
+//   ロアブックを採用する。これにより、編集ドロップダウンが別ロアブックを指して
+//   いても、キャラ本来のロアブックから RPGモード / 選択肢モード を正しく読める。
+//
+// ★ 2種類の「開始ボタン」の役割分担（v9）:
 //   - ゲーム開始ボタン（choice_click.js）  : 選択肢モード変数で制御
-//     ・チャット開始時、first_mes の末尾に表示される
-//     ・クリックすると "000" を自動送信する
 //   - バトル開始ボタン（variable_manager.js）: RPGモード変数 かつ バトル開始変数で制御
-//     ・最新の AI メッセージ末尾に表示される
-//     ・クリックするとバトルモードへ移行する
 //
 // ★ 変数の役割分担:
 //   - RPGモード    : 変数パネル・プレイヤーHP表示・バトル開始ボタンの前提条件
@@ -32,19 +40,21 @@
 //   バトル開始ボタン押下 → バトルモード=1
 //   敵HP≤0 / 逃走      → バトルモード=0 → 敵HPを最大値に全回復
 //
-// ★ 攻撃アナウンス＆ダメージフロート（v6 から継続）:
+// ★ 攻撃アナウンス＆ダメージフロート:
 //   攻撃ボタン押下 → 効果音 → 即座に
 //     「（攻撃者）は（対象）を攻撃した！」  ← T=0 表示、T=2000 非表示開始
 //   250ms 後、その下に
 //     「（対象）に（ダメージ）のダメージ！」 ← T=250 表示、T=2250 非表示開始
 //   両方完全消滅 (T=2450) で Promise 解決。左寄せ表示。
 //
-// ★ バトル終了フロー（v6 から継続）:
+// ★ 効果音:
+//   - 攻撃/防御/道具/逃走ボタン押下: attack / defense / item / escape
+//   - 敵キャラの攻撃: enemy_attack
+//   - バトルコマンドボタンへのマウスホバー: interface7
+//
+// ★ バトル終了フロー:
 //   バトル終了フロートが消えるまでバトルモード=0 を書き込まない。
 //   endBattle() → 明示的 render → restorePlayerHPFull() → restoreEnemyHPFull()
-//
-// ★ 二度押し防止（v6 から継続）:
-//   - _actionInProgress フラグで攻撃/防御/逃走の多重実行を防止。
 
 // ★ 効果音モジュール（window.SoundEffects を公開）を非同期ロード
 import('./sound_effects.js').catch(err => {
@@ -80,6 +90,13 @@ import('./sound_effects.js').catch(err => {
     const DAMAGE_FLOAT_HIDE_MS = 2250;
     const ATTACK_SEQUENCE_END_MS = 2450;
 
+    // ★ 共通ルールフラグの短時間キャッシュ（連続 render の負荷低減）
+    const COMMON_RULE_FLAGS_CACHE_MS = 200;
+
+    // ★ ロアブック候補解決のタイムアウト
+    const PRIMARY_WORLDBOOK_TIMEOUT_MS = 3000;
+    const SECONDARY_WORLDBOOK_TIMEOUT_MS = 800;
+
     const BATTLE_DEFAULTS = {
         active: false,
         player_turn: 0,
@@ -104,11 +121,11 @@ import('./sound_effects.js').catch(err => {
     let _cachedEnemyName = '敵';
 
     // ★ 共通ルール（RPGモード / 選択肢モード）のキャッシュ
-    let _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false };
+    //   worldName フィールドには、実際に採用したロアブック名が入る（診断用）
+    let _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, worldName: null };
+    let _commonRuleFlagsLastRefresh = 0;
 
     // ★ バトル開始変数のキャッシュ
-    //   「バトル開始」ボタンの表示条件に使う。
-    //   変数取得失敗時は前回の値を維持する。
     let _lastBattleStartVar = false;
 
     (function injectStyle() {
@@ -150,18 +167,75 @@ import('./sound_effects.js').catch(err => {
         return null;
     }
 
-    function getWorldName() {
+    // ============================================================
+    // ★ worldbook名の候補を優先順位付きで列挙する
+    //   1. char.data.extensions.world   (authoritative)
+    //   2. char.data.world
+    //   3. char.name
+    //   4. #world_info の選択値
+    //   5. #world_editor_select の選択値（editor dropdown）
+    //   重複排除して返す。
+    // ============================================================
+    function getWorldNameCandidates() {
+        const candidates = [];
+
+        // 1〜3. キャラクタのデータから
+        try {
+            const ctx = getSTContext();
+            const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
+            if (char) {
+                const fromExt = char.data?.extensions?.world;
+                if (fromExt && typeof fromExt === 'string' && fromExt.trim()) {
+                    candidates.push(fromExt.trim());
+                }
+                const fromData = char.data?.world;
+                if (fromData && typeof fromData === 'string' && fromData.trim()) {
+                    candidates.push(fromData.trim());
+                }
+                if (char.name && typeof char.name === 'string' && char.name.trim()) {
+                    candidates.push(char.name.trim());
+                }
+            }
+        } catch (e) { /* ignore */ }
+
+        // 4. #world_info（グローバルにアクティブなロアブック、複数選択可）
+        try {
+            const wi = document.querySelector('#world_info');
+            if (wi) {
+                const selected = Array.from(wi.selectedOptions || []);
+                for (const opt of selected) {
+                    const v = (opt.value || '').trim();
+                    const t = (opt.textContent || '').trim();
+                    if (v && !/^\d+$/.test(v)) candidates.push(v);
+                    else if (t) candidates.push(t);
+                }
+            }
+        } catch (e) { /* ignore */ }
+
+        // 5. #world_editor_select（編集ドロップダウン）
         if (window.LorebookExpansion?.getCurrentWorldName) {
             try {
                 const n = window.LorebookExpansion.getCurrentWorldName();
-                if (n) return n;
+                if (n) candidates.push(n);
             } catch (e) { /* ignore */ }
         }
-        try {
-            const ctx = getSTContext();
-            const char = ctx?.characters?.[ctx?.characterId];
-            return char?.data?.extensions?.world || char?.data?.world || null;
-        } catch (e) { return null; }
+
+        // 重複排除
+        const seen = new Set();
+        const unique = [];
+        for (const c of candidates) {
+            if (!c || seen.has(c)) continue;
+            seen.add(c);
+            unique.push(c);
+        }
+        return unique;
+    }
+
+    // ★ 単一の worldName を返すバージョン（変数取得・保存のパスで使用）
+    //   複数候補がある場合は最優先の候補を返す
+    function getWorldName() {
+        const candidates = getWorldNameCandidates();
+        return candidates.length > 0 ? candidates[0] : null;
     }
 
     function getLastChoiceNumber() {
@@ -226,74 +300,84 @@ import('./sound_effects.js').catch(err => {
     }
 
     // ============================================================
-    // ★ 共通ルール変数の取得
-    //   ロアブックの「00_共通ルール」エントリから RPGモード / 選択肢モード を抽出し、
-    //   _commonRuleFlags キャッシュを更新する。
-    // ============================================================
-    // ============================================================
-    // ★ 共通ルール変数の取得
-    //   ロアブックの「00_共通ルール」エントリから RPGモード / 選択肢モード を抽出し、
-    //   _commonRuleFlags キャッシュを更新する。
+    // ★ 共通ルール変数の取得（v9）
+    //   候補の worldName を順に試し、最初に「00_共通ルール」エントリを持つ
+    //   ロアブックを採用する。キャラの本来のロアブック（char.data.extensions.world）
+    //   が編集ドロップダウンの値と異なる場合でも、正しいフラグを読める。
     //
-    //   ★ キャラ未選択の場合は何もせず ok:false, rpgMode:false, choicesMode:false を返す。
-    //     これにより、ST起動直後にUI要素（#world_editor_select / #world_info）から
-    //     ワールド名が拾えてしまっても、プレイヤーHPパネルや変数パネルが
-    //     キャラ未選択状態で表示されることがなくなる。
+    //   force=false の場合は短時間（200ms）のキャッシュを返す。
     // ============================================================
-    async function refreshCommonRuleFlags() {
+    async function refreshCommonRuleFlags(force = false) {
         try {
-            // ★ キャラ未選択なら早期リターン
+            if (!force &&
+                _commonRuleFlagsLastRefresh > 0 &&
+                Date.now() - _commonRuleFlagsLastRefresh < COMMON_RULE_FLAGS_CACHE_MS) {
+                return _commonRuleFlags;
+            }
+            _commonRuleFlagsLastRefresh = Date.now();
+
             const charName = getCurrentCharName();
             if (!charName) {
-                _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false };
+                _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, worldName: null };
                 return _commonRuleFlags;
             }
 
-            const worldName = getWorldName();
-            if (!worldName || !window.LorebookExpansion?.loadWorldInfoEntriesByName) {
-                _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false };
+            if (!window.LorebookExpansion?.loadWorldInfoEntriesByName) {
+                _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, worldName: null };
                 return _commonRuleFlags;
             }
 
-            let entries = null;
-            try {
-                entries = await window.LorebookExpansion.loadWorldInfoEntriesByName(worldName);
-            } catch (e) { /* ignore */ }
-            if (!entries) {
-                _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false };
+            const candidates = getWorldNameCandidates();
+            if (candidates.length === 0) {
+                _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, worldName: null };
                 return _commonRuleFlags;
             }
 
-            const list = Array.isArray(entries) ? entries : Object.values(entries);
-            let targetEntry = null;
-            for (const e of list) {
-                if (!e) continue;
-                const comment = typeof e.comment === 'string' ? e.comment.trim() : '';
-                const keys = getEntryKeys(e).map(k => String(k).trim());
-                if (comment === COMMON_RULE_ENTRY_NAME || keys.includes(COMMON_RULE_ENTRY_NAME)) {
-                    targetEntry = e;
-                    break;
+            for (let i = 0; i < candidates.length; i++) {
+                const worldName = candidates[i];
+                const isPrimary = (i === 0);
+                const timeoutMs = isPrimary ? PRIMARY_WORLDBOOK_TIMEOUT_MS : SECONDARY_WORLDBOOK_TIMEOUT_MS;
+
+                let entries = null;
+                try {
+                    entries = await Promise.race([
+                        window.LorebookExpansion.loadWorldInfoEntriesByName(worldName),
+                        new Promise(r => setTimeout(() => r(null), timeoutMs)),
+                    ]);
+                } catch (e) { continue; }
+                if (!entries) continue;
+
+                const list = Array.isArray(entries) ? entries : Object.values(entries);
+                let targetEntry = null;
+                for (const e of list) {
+                    if (!e) continue;
+                    const comment = typeof e.comment === 'string' ? e.comment.trim() : '';
+                    const keys = getEntryKeys(e).map(k => String(k).trim());
+                    if (comment === COMMON_RULE_ENTRY_NAME || keys.includes(COMMON_RULE_ENTRY_NAME)) {
+                        targetEntry = e;
+                        break;
+                    }
+                }
+
+                if (targetEntry) {
+                    const varMap = buildVarMapFromEntry(worldName, targetEntry);
+                    const flags = extractCommonRuleFlags(varMap);
+                    _commonRuleFlags = { ok: true, ...flags, worldName };
+                    return _commonRuleFlags;
                 }
             }
 
-            if (!targetEntry) {
-                _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false };
-                return _commonRuleFlags;
-            }
-
-            const varMap = buildVarMapFromEntry(worldName, targetEntry);
-            const flags = extractCommonRuleFlags(varMap);
-            _commonRuleFlags = { ok: true, ...flags };
+            _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, worldName: null };
             return _commonRuleFlags;
         } catch (e) {
             console.warn(LOG, 'refreshCommonRuleFlags error:', e);
-            _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false };
+            _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, worldName: null };
             return _commonRuleFlags;
         }
     }
 
     async function getCommonRuleVariables() {
-        await refreshCommonRuleFlags();
+        await refreshCommonRuleFlags(true);
         return { ..._commonRuleFlags };
     }
 
@@ -434,10 +518,8 @@ import('./sound_effects.js').catch(err => {
     function getCurrentCharName() {
         try {
             const ctx = getSTContext();
-            // 優先: ctx.characters[ctx.characterId]
             const char = ctx?.characters?.[ctx?.characterId];
             if (char?.name) return char.name;
-            // フォールバック: ctx.character
             if (ctx?.character?.name) return ctx.character.name;
             return null;
         } catch (e) { return null; }
@@ -456,10 +538,6 @@ import('./sound_effects.js').catch(err => {
 
     // ============================================================
     // ★ 表示制御（ロアブックの共通ルール変数ベース）
-    //   isVisibleForChar       : RPGモード=1 で true（変数パネル・プレイヤーHP表示）
-    //   isStartButtonEnabledForChar : 選択肢モード=1 で true
-    //                                 ※ choice_click.js の「ゲーム開始ボタン」用
-    //                                 ※ 「バトル開始」ボタンには使わない
     // ============================================================
     function isVisibleForChar(charName) {
         if (!charName) return false;
@@ -471,11 +549,6 @@ import('./sound_effects.js').catch(err => {
         return _commonRuleFlags.choicesMode === true;
     }
 
-    // ============================================================
-    // ★ バトル開始ボタン表示条件
-    //   RPGモード=1 かつ バトル開始変数=1 かつ バトル非アクティブ
-    //   ※ 選択肢モードには依存しない
-    // ============================================================
     function shouldShowBattleStartButton() {
         if (!_commonRuleFlags.rpgMode) return false;
         if (_battleActive) return false;
@@ -496,9 +569,6 @@ import('./sound_effects.js').catch(err => {
         return panel;
     }
 
-    // ============================================================
-    // ★ 名前取得ヘルパー
-    // ============================================================
     function getPlayerName() {
         try {
             if (window.UserStatus?.getUserName) {
@@ -546,7 +616,6 @@ import('./sound_effects.js').catch(err => {
     }
 
     function addBattleStartButton() {
-        // ★ バトル開始ボタン表示条件: RPGモード=1 かつ バトル開始変数=1 かつ バトル非アクティブ
         if (!shouldShowBattleStartButton()) {
             removeBattleStartButton();
             return;
@@ -668,8 +737,6 @@ import('./sound_effects.js').catch(err => {
         }
 
         if (!result.ok) {
-            // ★ 変数取得失敗時は _lastBattleStartVar を前回値のまま保持し、
-            //   ボタン状態だけ再評価する。
             console.debug(LOG, `updateBattleUI: result not ok (${result.reason}) → 前回状態を維持`);
             if (shouldShowBattleStartButton()) {
                 addBattleStartButton();
@@ -679,7 +746,6 @@ import('./sound_effects.js').catch(err => {
             return;
         }
 
-        // ★ バトル開始変数を更新（バトル開始ボタンの表示条件）
         const battleStartRaw = varMap[VAR_NAME_BATTLE_START]?.value;
         const battleStart = String(battleStartRaw ?? '').trim() === '1';
         _lastBattleStartVar = battleStart;
@@ -702,8 +768,6 @@ import('./sound_effects.js').catch(err => {
             endBattle();
         }
 
-        // ★ バトル開始ボタン表示制御
-        //   RPGモード=1 かつ バトル開始変数=1 かつ バトル非アクティブ の時のみ表示
         if (shouldShowBattleStartButton()) {
             addBattleStartButton();
         } else {
@@ -1250,10 +1314,8 @@ import('./sound_effects.js').catch(err => {
             const charName = getCurrentCharName();
             const panel = ensurePanel();
 
-            // ★ RPGモード=0 またはキャラ未選択の場合は全て非表示
-            //   （バトル開始ボタンも RPGモード=1 が前提のため非表示になる）
             if (!isVisibleForChar(charName)) {
-                console.debug(LOG, `render: RPGモード=0 のため非表示 (char="${charName}")`);
+                console.debug(LOG, `render: RPGモード=0 のため非表示 (char="${charName}", world="${_commonRuleFlags.worldName || '?'}")`);
                 if (_battleActive && !_battleEndingInProgress) endBattle();
                 removeBattleStartButton();
                 if (panel) {
@@ -1276,7 +1338,15 @@ import('./sound_effects.js').catch(err => {
         }
     }
 
-    function scheduleRender() { setTimeout(render, 150); }
+    // ★ 正しいデバウンス（連続呼び出しを 1 回にまとめる）
+    let _scheduleRenderTimer = null;
+    function scheduleRender() {
+        if (_scheduleRenderTimer) clearTimeout(_scheduleRenderTimer);
+        _scheduleRenderTimer = setTimeout(() => {
+            _scheduleRenderTimer = null;
+            render();
+        }, 150);
+    }
 
     function setupEventListeners() {
         try {
@@ -1287,6 +1357,8 @@ import('./sound_effects.js').catch(err => {
 
                 const resetOnChange = () => {
                     if (_battleActive && !_battleEndingInProgress && !_actionInProgress) endBattle();
+                    // ★ キャラ切替時は共通ルールフラグを強制再取得
+                    refreshCommonRuleFlags(true).catch(e => console.warn(LOG, e));
                     scheduleRender();
                 };
 
@@ -1341,10 +1413,10 @@ import('./sound_effects.js').catch(err => {
         getCommonRuleVariables,
         refreshCommonRuleFlags,
         getCommonRuleFlags: () => ({ ..._commonRuleFlags }),
+        getWorldNameCandidates,
+        getWorldName,
         isVisibleForChar,
-        // ★ choice_click.js の「ゲーム開始」ボタン制御用（選択肢モード）
         isStartButtonEnabledForChar,
-        // ★ variable_manager.js の「バトル開始」ボタン表示条件
         shouldShowBattleStartButton,
         isBattleActive: () => _battleActive,
         isEnemyAttackInProgress: () => _enemyAttackInProgress,
@@ -1376,6 +1448,7 @@ import('./sound_effects.js').catch(err => {
         updateBattleCommandsState,
         _debug: () => ({
             worldName: getWorldName(),
+            worldNameCandidates: getWorldNameCandidates(),
             choiceNum: getLastChoiceNumber(),
             currentChar: getCurrentCharName(),
             commonRuleFlags: { ..._commonRuleFlags },
@@ -1406,6 +1479,8 @@ import('./sound_effects.js').catch(err => {
             const userStatus = window.UserStatus?.getStatus?.();
             const info = {
                 charName,
+                worldNameCandidates: getWorldNameCandidates(),
+                resolvedWorldName: _commonRuleFlags.worldName,
                 RPGモード: _commonRuleFlags.rpgMode,
                 選択肢モード: _commonRuleFlags.choicesMode,
                 バトル開始変数: _lastBattleStartVar,
