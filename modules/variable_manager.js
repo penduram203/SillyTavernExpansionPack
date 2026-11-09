@@ -7,25 +7,30 @@
 //   - バトル中は画面左下・高さ中央に「攻撃/防御/道具/逃走」ボタンを配置
 //   - 攻撃/防御/逃走の動作を実装（道具は未実装）
 //
-// ★ ロアブックの「00_共通ルール」エントリによる制御（v7）:
+// ★ ロアブックの「00_共通ルール」エントリによる制御（v8）:
 //   - RPGモード = 1    → 変数パネル（場所・敵情報）を表示、左下にプレイヤーHPバー表示
-//   - 選択肢モード = 1 → チャット末尾に「バトル開始」ボタンを表示
+//   - バトル開始 = 1   → RPGモード=1 と併せて「バトル開始」ボタンを表示
+//   - 選択肢モード = 1 → チャット開始時の「ゲーム開始」ボタン表示（choice_click.js）
 //   - バトル中の4ボタン・敵HP表示は RPGモード=1 かつ バトルモード=1 の時のみ
 //   - キャラクター管理メニューの UI設定チェックボックスは全廃。
 //
+// ★ 2種類の「開始ボタン」の役割分担（v8）:
+//   - ゲーム開始ボタン（choice_click.js）  : 選択肢モード変数で制御
+//     ・チャット開始時、first_mes の末尾に表示される
+//     ・クリックすると "000" を自動送信する
+//   - バトル開始ボタン（variable_manager.js）: RPGモード変数 かつ バトル開始変数で制御
+//     ・最新の AI メッセージ末尾に表示される
+//     ・クリックするとバトルモードへ移行する
+//
 // ★ 変数の役割分担:
-//   - RPGモード    : 変数パネル・プレイヤーHP表示の ON/OFF（ロアブックで設定）
-//   - 選択肢モード : 「バトル開始」ボタン表示の ON/OFF（ロアブックで設定）
+//   - RPGモード    : 変数パネル・プレイヤーHP表示・バトル開始ボタンの前提条件
+//   - バトル開始   : 「バトル開始」ボタンの表示 ON/OFF
+//   - 選択肢モード : 「ゲーム開始」ボタンの表示 ON/OFF（choice_click.js 用）
 //   - バトルモード : 実際のバトル進行状態（1=バトル中, 0=非バトル）
 //
 // ★ バトルモード遷移:
 //   バトル開始ボタン押下 → バトルモード=1
 //   敵HP≤0 / 逃走      → バトルモード=0 → 敵HPを最大値に全回復
-//
-// ★ 敵の自動攻撃:
-//   プレイヤーの攻撃アナウンス＆ダメージフロートが消えた後に敵キャラが自動攻撃する。
-//   敵ダメージ = max(1, enemy_attack - player_defense)
-//   プレイヤーHP≤0 → バトルモード=0, バトル終了, エントリ999を自動送信
 //
 // ★ 攻撃アナウンス＆ダメージフロート（v6 から継続）:
 //   攻撃ボタン押下 → 効果音 → 即座に
@@ -34,19 +39,9 @@
 //     「（対象）に（ダメージ）のダメージ！」 ← T=250 表示、T=2250 非表示開始
 //   両方完全消滅 (T=2450) で Promise 解決。左寄せ表示。
 //
-// ★ 効果音（v6 から継続）:
-//   - 攻撃/防御/道具/逃走ボタン押下: attack / defense / item / escape
-//   - 敵キャラの攻撃: enemy_attack
-//   - バトルコマンドボタンへのマウスホバー: interface7
-//
 // ★ バトル終了フロー（v6 から継続）:
-//   - どちらかの HP が 0 以下になった場合、攻撃シーケンス完了後に
-//     「（敵名）を倒した！」/「（プレイヤー名）は（敵名）に敗北した！」
-//     を表示し、消えるまで await。
-//   - バトル終了フロートが消えるまでは バトルモード=0 を書き込まない。
-//   - バトルモード=0 書き込み → UserStatus.refresh() → HP バー非表示
-//     → endBattle() → 明示的 render で敵HPバー非表示
-//     → restorePlayerHPFull() → restoreEnemyHPFull()
+//   バトル終了フロートが消えるまでバトルモード=0 を書き込まない。
+//   endBattle() → 明示的 render → restorePlayerHPFull() → restoreEnemyHPFull()
 //
 // ★ 二度押し防止（v6 から継続）:
 //   - _actionInProgress フラグで攻撃/防御/逃走の多重実行を防止。
@@ -69,13 +64,14 @@ import('./sound_effects.js').catch(err => {
     const COMMON_RULE_ENTRY_NAME = '00_共通ルール';
     const VAR_NAME_RPG_MODE = 'RPGモード';
     const VAR_NAME_CHOICES_MODE = '選択肢モード';
+    const VAR_NAME_BATTLE_START = 'バトル開始';
 
     // ★ タイミング定数
     const ENEMY_ATTACK_DELAY_MS = 600;   // （現在未使用）
     const ENTRY_999_DELAY_MS = 800;
     const DAMAGE_FLOAT_DELAY_MS = 400;   // （現在未使用）
-    const DAMAGE_FLOAT_HOLD_MS = 2300;   // バトル終了フロートの保持時間
-    const DAMAGE_FLOAT_FADE_MS = 200;    // フェードアウトに要する時間
+    const DAMAGE_FLOAT_HOLD_MS = 2300;
+    const DAMAGE_FLOAT_FADE_MS = 200;
 
     // ★ 攻撃シーケンス用タイミング
     const ATTACK_FLOAT_START_DELAY_MS = 0;
@@ -108,9 +104,12 @@ import('./sound_effects.js').catch(err => {
     let _cachedEnemyName = '敵';
 
     // ★ 共通ルール（RPGモード / 選択肢モード）のキャッシュ
-    //   render() 内で refreshCommonRuleFlags() により更新される。
-    //   user_status.js 等から同期参照するために getCommonRuleFlags() を公開。
     let _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false };
+
+    // ★ バトル開始変数のキャッシュ
+    //   「バトル開始」ボタンの表示条件に使う。
+    //   変数取得失敗時は前回の値を維持する。
+    let _lastBattleStartVar = false;
 
     (function injectStyle() {
         if (document.getElementById(STYLE_ID)) return;
@@ -188,7 +187,6 @@ import('./sound_effects.js').catch(err => {
         return null;
     }
 
-    // ★ エントリのキー配列を取得（key / keys 両対応）
     function getEntryKeys(entry) {
         if (!entry) return [];
         if (window.LorebookExpansion?.getEntryKeys) {
@@ -204,7 +202,6 @@ import('./sound_effects.js').catch(err => {
         return [];
     }
 
-    // ★ エントリの変数から名前→値のマップを作る
     function buildVarMapFromEntry(worldName, entry) {
         if (!worldName || !entry) return {};
         const uid = entry.uid;
@@ -220,7 +217,6 @@ import('./sound_effects.js').catch(err => {
         } catch (e) { return {}; }
     }
 
-    // ★ 「00_共通ルール」エントリの変数から RPGモード / 選択肢モード を取得
     function extractCommonRuleFlags(varMap) {
         const rpgRaw = varMap?.[VAR_NAME_RPG_MODE]?.value;
         const choicesRaw = varMap?.[VAR_NAME_CHOICES_MODE]?.value;
@@ -279,7 +275,6 @@ import('./sound_effects.js').catch(err => {
         }
     }
 
-    // ★ 公開用: 共通ルール変数を非同期で取得（loadWorldInfoEntriesByName を毎回呼ぶ）
     async function getCommonRuleVariables() {
         await refreshCommonRuleFlags();
         return { ..._commonRuleFlags };
@@ -338,9 +333,6 @@ import('./sound_effects.js').catch(err => {
         } catch (e) { /* ignore */ }
     }
 
-    // ============================================================
-    // ★ ロアブック変数の更新ヘルパー
-    // ============================================================
     async function setBattleModeVar(value) {
         try {
             const result = await getCurrentVariables();
@@ -422,9 +414,6 @@ import('./sound_effects.js').catch(err => {
         }
     }
 
-    // ============================================================
-    // キャラ・設定ヘルパー
-    // ============================================================
     function getCurrentCharName() {
         try {
             const ctx = getSTContext();
@@ -447,9 +436,9 @@ import('./sound_effects.js').catch(err => {
     // ============================================================
     // ★ 表示制御（ロアブックの共通ルール変数ベース）
     //   isVisibleForChar       : RPGモード=1 で true（変数パネル・プレイヤーHP表示）
-    //   isStartButtonEnabledForChar : 選択肢モード=1 で true（バトル開始ボタン表示）
-    //   ※ charName が null の場合は常に false
-    //   ※ _commonRuleFlags キャッシュを同期参照する。render() 内で更新される。
+    //   isStartButtonEnabledForChar : 選択肢モード=1 で true
+    //                                 ※ choice_click.js の「ゲーム開始ボタン」用
+    //                                 ※ 「バトル開始」ボタンには使わない
     // ============================================================
     function isVisibleForChar(charName) {
         if (!charName) return false;
@@ -459,6 +448,19 @@ import('./sound_effects.js').catch(err => {
     function isStartButtonEnabledForChar(charName) {
         if (!charName) return false;
         return _commonRuleFlags.choicesMode === true;
+    }
+
+    // ============================================================
+    // ★ バトル開始ボタン表示条件
+    //   RPGモード=1 かつ バトル開始変数=1 かつ バトル非アクティブ
+    //   ※ 選択肢モードには依存しない
+    // ============================================================
+    function shouldShowBattleStartButton() {
+        if (!_commonRuleFlags.rpgMode) return false;
+        if (_battleActive) return false;
+        if (_battleEndingInProgress) return false;
+        if (!_lastBattleStartVar) return false;
+        return true;
     }
 
     function ensurePanel() {
@@ -523,8 +525,8 @@ import('./sound_effects.js').catch(err => {
     }
 
     function addBattleStartButton() {
-        // ★ 選択肢モード=0 の時はボタンを表示しない
-        if (!isStartButtonEnabledForChar(getCurrentCharName())) {
+        // ★ バトル開始ボタン表示条件: RPGモード=1 かつ バトル開始変数=1 かつ バトル非アクティブ
+        if (!shouldShowBattleStartButton()) {
             removeBattleStartButton();
             return;
         }
@@ -645,12 +647,21 @@ import('./sound_effects.js').catch(err => {
         }
 
         if (!result.ok) {
+            // ★ 変数取得失敗時は _lastBattleStartVar を前回値のまま保持し、
+            //   ボタン状態だけ再評価する。
             console.debug(LOG, `updateBattleUI: result not ok (${result.reason}) → 前回状態を維持`);
-            if (isStartButtonEnabledForChar(getCurrentCharName()) && !_battleActive && !_battleEndingInProgress) {
+            if (shouldShowBattleStartButton()) {
                 addBattleStartButton();
+            } else {
+                removeBattleStartButton();
             }
             return;
         }
+
+        // ★ バトル開始変数を更新（バトル開始ボタンの表示条件）
+        const battleStartRaw = varMap[VAR_NAME_BATTLE_START]?.value;
+        const battleStart = String(battleStartRaw ?? '').trim() === '1';
+        _lastBattleStartVar = battleStart;
 
         const battleModeRaw = varMap['バトルモード']?.value;
         const battleMode = String(battleModeRaw ?? '').trim() === '1';
@@ -670,10 +681,9 @@ import('./sound_effects.js').catch(err => {
             endBattle();
         }
 
-        // ★ 選択肢モード による開始ボタン表示制御
-        if (!isStartButtonEnabledForChar(getCurrentCharName())) {
-            removeBattleStartButton();
-        } else if (!_battleActive && !_battleEndingInProgress) {
+        // ★ バトル開始ボタン表示制御
+        //   RPGモード=1 かつ バトル開始変数=1 かつ バトル非アクティブ の時のみ表示
+        if (shouldShowBattleStartButton()) {
             addBattleStartButton();
         } else {
             removeBattleStartButton();
@@ -1113,11 +1123,6 @@ import('./sound_effects.js').catch(err => {
         return container;
     }
 
-    // ============================================================
-    // ★ バトルコマンドの表示状態を更新
-    //   RPGモード=1 かつ バトルモード=1（_battleActive）の時のみ表示
-    //   player_turn=0 または _actionInProgress 中は半透明・クリック不可
-    // ============================================================
     function updateBattleCommandsState() {
         const container = document.getElementById(BATTLE_COMMANDS_ID);
         if (!container) return;
@@ -1219,13 +1224,13 @@ import('./sound_effects.js').catch(err => {
         if (_renderInFlight) return;
         _renderInFlight = true;
         try {
-            // ★ 共通ルール（RPGモード / 選択肢モード）を最新化
             await refreshCommonRuleFlags();
 
             const charName = getCurrentCharName();
             const panel = ensurePanel();
 
             // ★ RPGモード=0 またはキャラ未選択の場合は全て非表示
+            //   （バトル開始ボタンも RPGモード=1 が前提のため非表示になる）
             if (!isVisibleForChar(charName)) {
                 console.debug(LOG, `render: RPGモード=0 のため非表示 (char="${charName}")`);
                 if (_battleActive && !_battleEndingInProgress) endBattle();
@@ -1316,7 +1321,10 @@ import('./sound_effects.js').catch(err => {
         refreshCommonRuleFlags,
         getCommonRuleFlags: () => ({ ..._commonRuleFlags }),
         isVisibleForChar,
+        // ★ choice_click.js の「ゲーム開始」ボタン制御用（選択肢モード）
         isStartButtonEnabledForChar,
+        // ★ variable_manager.js の「バトル開始」ボタン表示条件
+        shouldShowBattleStartButton,
         isBattleActive: () => _battleActive,
         isEnemyAttackInProgress: () => _enemyAttackInProgress,
         isBattleEndingInProgress: () => _battleEndingInProgress,
@@ -1350,6 +1358,8 @@ import('./sound_effects.js').catch(err => {
             choiceNum: getLastChoiceNumber(),
             currentChar: getCurrentCharName(),
             commonRuleFlags: { ..._commonRuleFlags },
+            lastBattleStartVar: _lastBattleStartVar,
+            shouldShowBattleStartButton: shouldShowBattleStartButton(),
             battleActive: _battleActive,
             battleEndingInProgress: _battleEndingInProgress,
             actionInProgress: _actionInProgress,
@@ -1362,6 +1372,7 @@ import('./sound_effects.js').catch(err => {
             const charName = getCurrentCharName();
             const visible = isVisibleForChar(charName);
             const choicesEnabled = isStartButtonEnabledForChar(charName);
+            const shouldShow = shouldShowBattleStartButton();
             const result = await getCurrentVariables();
             const varMap = {};
             if (result.ok) {
@@ -1376,8 +1387,10 @@ import('./sound_effects.js').catch(err => {
                 charName,
                 RPGモード: _commonRuleFlags.rpgMode,
                 選択肢モード: _commonRuleFlags.choicesMode,
+                バトル開始変数: _lastBattleStartVar,
                 パネル表示: visible,
-                開始ボタン有効: choicesEnabled,
+                ゲーム開始ボタン有効: choicesEnabled,
+                バトル開始ボタン表示条件: shouldShow,
                 result_ok: result.ok,
                 reason: result.reason,
                 選択肢番号: result.choiceNum,
