@@ -1367,6 +1367,17 @@ import('./sound_effects.js').catch(err => {
         try {
             await refreshCommonRuleFlags();
 
+            // ★ 選択肢モード / RPGモード時はユーザー発言を非表示
+            //    rpgMode または choicesMode が true の時だけ body に
+            //    varmgr-hide-user-messages を付与する。
+            //    CSS 側で .mes[is_user="true"] を display:none にする。
+            try {
+                const hideUserMessages =
+                    _commonRuleFlags.rpgMode === true ||
+                    _commonRuleFlags.choicesMode === true;
+                document.body.classList.toggle('varmgr-hide-user-messages', hideUserMessages);
+            } catch (e) { /* ignore */ }
+
             const charName = getCurrentCharName();
             const panel = ensurePanel();
 
