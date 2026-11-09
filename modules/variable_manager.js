@@ -305,28 +305,23 @@ import('./sound_effects.js').catch(err => {
     let _commonRuleRefreshInFlight = null;
 
     // ============================================================
-    // ★ 共通ルール変数の取得（v10）
-    //   候補の worldName を順に試し、最初に「00_共通ルール」エントリを持つ
-    //   ロアブックを採用する。
-    //   - 並行呼び出しは 1 本にまとめる（同じ Promise を共有）
-    //   - 失敗時は診断ログを console.warn で出力
-    //   - 成功・失敗を問わず _commonRuleFlagsLastRefresh を更新
+    // ★ 共通ルール変数の取得（v11）
+    //   - Promise.race のタイムアウトは削除。
+    //     loadWorldInfoEntriesByName 側の内部制御に任せる。
+    //   - 各候補の失敗理由を console.warn で必ず出力する。
     // ============================================================
     async function refreshCommonRuleFlags(force = false) {
-        // ── キャッシュチェック ──
         if (!force &&
             _commonRuleFlagsLastRefresh > 0 &&
             Date.now() - _commonRuleFlagsLastRefresh < COMMON_RULE_FLAGS_CACHE_MS) {
             return _commonRuleFlags;
         }
 
-        // ── 並行呼び出しの重複排除 ──
         if (_commonRuleRefreshInFlight) {
             return await _commonRuleRefreshInFlight;
         }
 
         _commonRuleRefreshInFlight = (async () => {
-            const diagnostics = [];
             try {
                 const charName = getCurrentCharName();
                 if (!charName) {
@@ -335,40 +330,36 @@ import('./sound_effects.js').catch(err => {
                 }
 
                 if (!window.LorebookExpansion?.loadWorldInfoEntriesByName) {
-                    console.warn(LOG, 'refreshCommonRuleFlags: LorebookExpansion.loadWorldInfoEntriesByName が利用できません');
+                    console.warn('[VarManager] loadWorldInfoEntriesByName が提供されていません');
                     _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, worldName: null };
                     return _commonRuleFlags;
                 }
 
                 const candidates = getWorldNameCandidates();
+                console.warn(`[VarManager] 🔎 worldbook候補 (char="${charName}"):`, candidates);
+
                 if (candidates.length === 0) {
-                    console.warn(LOG, 'refreshCommonRuleFlags: worldbook候補なし', { charName });
                     _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, worldName: null };
                     return _commonRuleFlags;
                 }
 
-                for (let i = 0; i < candidates.length; i++) {
-                    const worldName = candidates[i];
-                    const isPrimary = (i === 0);
-                    const timeoutMs = isPrimary ? PRIMARY_WORLDBOOK_TIMEOUT_MS : SECONDARY_WORLDBOOK_TIMEOUT_MS;
-
+                for (const worldName of candidates) {
                     let entries = null;
                     try {
-                        entries = await Promise.race([
-                            window.LorebookExpansion.loadWorldInfoEntriesByName(worldName),
-                            new Promise(r => setTimeout(() => r(null), timeoutMs)),
-                        ]);
+                        entries = await window.LorebookExpansion.loadWorldInfoEntriesByName(worldName);
                     } catch (e) {
-                        diagnostics.push({ worldName, reason: 'exception', error: String(e) });
+                        console.warn(`[VarManager] "${worldName}" 取得例外:`, e);
                         continue;
                     }
 
                     if (!entries) {
-                        diagnostics.push({ worldName, reason: 'no-entries' });
+                        console.warn(`[VarManager] "${worldName}" → null (取得失敗)`);
                         continue;
                     }
 
                     const list = Array.isArray(entries) ? entries : Object.values(entries);
+                    console.warn(`[VarManager] "${worldName}" のエントリ数: ${list.length}`);
+
                     let targetEntry = null;
                     for (const e of list) {
                         if (!e) continue;
@@ -381,21 +372,24 @@ import('./sound_effects.js').catch(err => {
                     }
 
                     if (!targetEntry) {
-                        diagnostics.push({ worldName, reason: 'no-common-rule-entry', entryCount: list.length });
+                        const comments = list.slice(0, 8).map(e => e?.comment || '(none)').join(' / ');
+                        console.warn(`[VarManager] "${worldName}" に「${COMMON_RULE_ENTRY_NAME}」なし。先頭コメント: ${comments}`);
                         continue;
                     }
 
                     const varMap = buildVarMapFromEntry(worldName, targetEntry);
+                    console.warn(`[VarManager] ✅ "${worldName}::${COMMON_RULE_ENTRY_NAME}" 変数名:`, Object.keys(varMap));
+                    console.warn(`[VarManager] 変数値:`, Object.fromEntries(
+                        Object.entries(varMap).map(([k, v]) => [k, v?.value])
+                    ));
+
                     const flags = extractCommonRuleFlags(varMap);
                     _commonRuleFlags = { ok: true, ...flags, worldName };
+                    console.warn(`[VarManager] ✅ 解決完了:`, _commonRuleFlags);
                     return _commonRuleFlags;
                 }
 
-                console.warn(
-                    LOG,
-                    'refreshCommonRuleFlags: すべての候補で「00_共通ルール」エントリを取得できませんでした',
-                    { charName, candidates, diagnostics }
-                );
+                console.warn('[VarManager] ❌ すべての候補で「00_共通ルール」エントリを取得できませんでした');
                 _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, worldName: null };
                 return _commonRuleFlags;
             } finally {
@@ -1549,21 +1543,25 @@ import('./sound_effects.js').catch(err => {
             for (const w of candidates) {
                 let entryCount = 0;
                 let hasCommonRule = false;
+                let sampleComments = [];
                 let error = null;
                 try {
                     const entries = await window.LorebookExpansion?.loadWorldInfoEntriesByName?.(w);
                     if (entries) {
                         const list = Array.isArray(entries) ? entries : Object.values(entries);
                         entryCount = list.length;
-                        hasCommonRule = list.some(e =>
-                            e?.comment === COMMON_RULE_ENTRY_NAME ||
-                            (Array.isArray(e?.key) && e.key.includes(COMMON_RULE_ENTRY_NAME))
-                        );
+                        sampleComments = list.slice(0, 8).map(e => e?.comment || '(none)');
+                        hasCommonRule = list.some(e => {
+                            if (!e) return false;
+                            const c = typeof e.comment === 'string' ? e.comment.trim() : '';
+                            const keys = getEntryKeys(e).map(k => String(k).trim());
+                            return c === COMMON_RULE_ENTRY_NAME || keys.includes(COMMON_RULE_ENTRY_NAME);
+                        });
                     }
                 } catch (e) {
                     error = String(e);
                 }
-                results.push({ worldName: w, entryCount, hasCommonRule, error });
+                results.push({ worldName: w, entryCount, hasCommonRule, sampleComments, error });
             }
 
             return {
