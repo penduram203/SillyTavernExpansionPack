@@ -2,10 +2,7 @@
 /* キーボード操作のフォーカス表示 */
 
 /* ============================================================
- * ★ 入力欄の非表示化
- *   body.keyconfig-hide-input が付与されている間、
- *   #send_textarea を非表示・非クリック・フォーカス不可にする。
- *   （rpgMode または choicesMode が 1 の時）
+ * 入力欄の非表示化
  * ============================================================ */
 body.keyconfig-hide-input #send_textarea {
     display: none !important;
@@ -15,7 +12,6 @@ body.keyconfig-hide-input #send_textarea {
 
 /* ============================================================
  * ロアブック選択肢のフォーカス
- *   choice_click.css の :hover と同じ見た目に合わせる
  * ============================================================ */
 .lbe-choice-item.keyconfig-focused {
     background-color: var(--choice-hover-bg, #0d47a1) !important;
@@ -42,7 +38,6 @@ body.keyconfig-hide-input #send_textarea {
     outline-offset: 2px !important;
 }
 
-/* 種類別フォーカス色（ホバー時の色を流用） */
 .variable-command-btn.variable-command-attack.keyconfig-focused {
     background: rgba(180, 20, 20, 0.95) !important;
     border-color: #ff8888 !important;
@@ -66,8 +61,10 @@ body.keyconfig-hide-input #send_textarea {
 
 /* ============================================================
  * ゲーム開始ボタン / バトル開始ボタンのフォーカス
+ *   リセットボタン (.game-reset-choice) は keyconfig 側で対象外のため
+ *   ここには含めない。
  * ============================================================ */
-.game-start-choice.keyconfig-focused,
+.game-start-choice:not(.game-reset-choice).keyconfig-focused,
 .variable-battle-start-btn.keyconfig-focused {
     outline: 3px solid #ffd54f !important;
     outline-offset: 3px !important;
