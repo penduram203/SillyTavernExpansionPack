@@ -305,10 +305,10 @@ import('./sound_effects.js').catch(err => {
     let _commonRuleRefreshInFlight = null;
 
     // ============================================================
-    // ★ 共通ルール変数の取得（v11）
-    //   - Promise.race のタイムアウトは削除。
-    //     loadWorldInfoEntriesByName 側の内部制御に任せる。
-    //   - 各候補の失敗理由を console.warn で必ず出力する。
+    // ★ 共通ルール変数の取得（v12）
+    //   ST が comment に付加する「（常時有効）」等の注釈を
+    //   完全一致 / 前方一致 / NFKC正規化 / 括弧除去 の4段階で吸収する。
+    //   見つからない場合は最初の5件のコードポイントを出力して原因究明を助ける。
     // ============================================================
     async function refreshCommonRuleFlags(force = false) {
         if (!force &&
@@ -343,6 +343,32 @@ import('./sound_effects.js').catch(err => {
                     return _commonRuleFlags;
                 }
 
+                // ★ 4段階マッチング
+                const tryMatch = (raw) => {
+                    if (typeof raw !== 'string') return false;
+                    const t = raw.trim();
+                    if (!t) return false;
+                    const target = COMMON_RULE_ENTRY_NAME;
+
+                    // 1) 完全一致
+                    if (t === target) return true;
+                    // 2) 前方一致（「00_共通ルール（常時有効）」等）
+                    if (t.startsWith(target)) return true;
+                    // 3) NFKC 正規化
+                    try {
+                        const nt = t.normalize('NFKC');
+                        const ntarget = target.normalize('NFKC');
+                        if (nt === ntarget) return true;
+                        if (nt.startsWith(ntarget)) return true;
+                    } catch (e) { /* ignore */ }
+                    // 4) 括弧書きの末尾注釈を除去
+                    const stripped = t.replace(/\s*[（(].*?[）)]\s*$/, '').trim();
+                    if (stripped === target) return true;
+                    if (stripped.startsWith(target)) return true;
+
+                    return false;
+                };
+
                 for (const worldName of candidates) {
                     let entries = null;
                     try {
@@ -363,22 +389,41 @@ import('./sound_effects.js').catch(err => {
                     let targetEntry = null;
                     for (const e of list) {
                         if (!e) continue;
-                        const comment = typeof e.comment === 'string' ? e.comment.trim() : '';
-                        const keys = getEntryKeys(e).map(k => String(k).trim());
-                        if (comment === COMMON_RULE_ENTRY_NAME || keys.includes(COMMON_RULE_ENTRY_NAME)) {
-                            targetEntry = e;
-                            break;
+                        if (tryMatch(e.comment)) { targetEntry = e; break; }
+                        const keys = getEntryKeys(e);
+                        let keyHit = false;
+                        for (const k of keys) {
+                            if (tryMatch(String(k))) { keyHit = true; break; }
                         }
+                        if (keyHit) { targetEntry = e; break; }
                     }
 
                     if (!targetEntry) {
-                        const comments = list.slice(0, 8).map(e => e?.comment || '(none)').join(' / ');
-                        console.warn(`[VarManager] "${worldName}" に「${COMMON_RULE_ENTRY_NAME}」なし。先頭コメント: ${comments}`);
+                        // ★ 診断: 最初の5件の comment とコードポイントを出力
+                        const diag = list.slice(0, 5).map((e, i) => {
+                            const c = e?.comment;
+                            if (typeof c !== 'string') return `[${i}] (non-string: ${typeof c})`;
+                            const codes = Array.from(c.slice(0, 15))
+                                .map(ch => 'U+' + ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0'))
+                                .join(' ');
+                            return `[${i}] "${c}" → ${codes}`;
+                        }).join('\n    ');
+                        const targetCodes = Array.from(COMMON_RULE_ENTRY_NAME)
+                            .map(ch => 'U+' + ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0'))
+                            .join(' ');
+                        console.warn(
+                            `[VarManager] "${worldName}" に共通ルールエントリが見つかりません。\n` +
+                            `  比較対象 COMMON_RULE_ENTRY_NAME = "${COMMON_RULE_ENTRY_NAME}" → ${targetCodes}\n` +
+                            `  最初の5件:\n    ${diag}`
+                        );
                         continue;
                     }
 
                     const varMap = buildVarMapFromEntry(worldName, targetEntry);
-                    console.warn(`[VarManager] ✅ "${worldName}::${COMMON_RULE_ENTRY_NAME}" 変数名:`, Object.keys(varMap));
+                    console.warn(
+                        `[VarManager] ✅ "${worldName}::${targetEntry.comment || '(no comment)'}" 変数名:`,
+                        Object.keys(varMap)
+                    );
                     console.warn(`[VarManager] 変数値:`, Object.fromEntries(
                         Object.entries(varMap).map(([k, v]) => [k, v?.value])
                     ));
