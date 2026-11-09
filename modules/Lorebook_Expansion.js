@@ -432,21 +432,29 @@ async function getWorldInfoModule() {
 }
 
     // ============================================================
-    // ★ world_info entries の同期キャッシュ
-    //   - 一度でも取得成功した worldName → entries を Map に保持
-    //   - 2回目以降は同期アクセスで即座に返す（fetch を行わない）
-    //   - 並行呼び出しは同じ Promise を共有して二重 fetch を防止
+    // ★ world_info entries の同期キャッシュ + 失敗キャッシュ
+    //   - 一度でも取得成功した worldName → entries を保持
+    //   - 失敗時は NEGATIVE_CACHE_MS 間だけ「失敗」を記録し、
+    //     連続呼び出しによる fetch の連打を防ぐ
+    //   - 並行呼び出しは同じ Promise を共有
     // ============================================================
     const _worldInfoEntriesSyncCache = new Map();
     const _worldInfoEntriesInFlight = new Map();
+    const _worldInfoEntriesNegativeCache = new Map(); // worldName -> timestamp
+    const WORLD_INFO_NEGATIVE_CACHE_MS = 5000;
 
     function _hasEntries(entries) {
         return !!entries && typeof entries === 'object' && Object.keys(entries).length > 0;
     }
 
     function clearWorldInfoEntriesCache(worldName) {
-        if (worldName) _worldInfoEntriesSyncCache.delete(worldName);
-        else _worldInfoEntriesSyncCache.clear();
+        if (worldName) {
+            _worldInfoEntriesSyncCache.delete(worldName);
+            _worldInfoEntriesNegativeCache.delete(worldName);
+        } else {
+            _worldInfoEntriesSyncCache.clear();
+            _worldInfoEntriesNegativeCache.clear();
+        }
     }
 
 function getCurrentWorldName() {
@@ -523,57 +531,81 @@ async function fetchWorldInfoWithRetry(worldName, maxRetries = WORLDIINFO_FETCH_
     async function loadWorldInfoEntriesByName(worldName) {
         if (!worldName) return null;
 
-        // ── 1. 同期キャッシュヒット ──
+        // ── 1. 成功キャッシュ ──
         if (_worldInfoEntriesSyncCache.has(worldName)) {
             const cached = _worldInfoEntriesSyncCache.get(worldName);
-            if (_hasEntries(cached)) {
-                return cached;
-            }
+            if (_hasEntries(cached)) return cached;
         }
 
-        // ── 2. 並行呼び出しの重複排除 ──
+        // ── 2. 失敗キャッシュ（連続 fetch 抑止）──
+        const negTs = _worldInfoEntriesNegativeCache.get(worldName);
+        if (negTs && (Date.now() - negTs < WORLD_INFO_NEGATIVE_CACHE_MS)) {
+            console.warn(`[LBE] "${worldName}" は直前に失敗したため ${WORLD_INFO_NEGATIVE_CACHE_MS}ms 待機中`);
+            return null;
+        }
+
+        // ── 3. 並行呼び出しの重複排除 ──
         if (_worldInfoEntriesInFlight.has(worldName)) {
             return await _worldInfoEntriesInFlight.get(worldName);
         }
 
         const promise = (async () => {
-            // ── 2a. ST 内部キャッシュ（mod.world_info）──
+            const diag = [];
+
+            // === A. ST 内部キャッシュ (mod.world_info) ===
             try {
                 const mod = await getWorldInfoModule();
-                const e = mod?.world_info?.[worldName]?.entries;
-                if (_hasEntries(e)) {
-                    _worldInfoEntriesSyncCache.set(worldName, e);
-                    debugLog(`world_info["${worldName}"].entries 取得 (ST cache, ${Object.keys(e).length}件)`);
-                    return e;
+                if (!mod) {
+                    diag.push('A: world-info.js モジュールが null');
+                } else {
+                    const worldData = mod.world_info?.[worldName];
+                    if (!worldData) {
+                        const available = mod.world_info ? Object.keys(mod.world_info).slice(0, 5).join(', ') : '(world_info 未定義)';
+                        diag.push(`A: mod.world_info["${worldName}"] なし (world_info keys: ${available})`);
+                    } else {
+                        const e = worldData.entries;
+                        if (_hasEntries(e)) {
+                            _worldInfoEntriesSyncCache.set(worldName, e);
+                            _worldInfoEntriesNegativeCache.delete(worldName);
+                            console.warn(`[LBE] ✅ A (mod.world_info) ヒット: "${worldName}" (${Object.keys(e).length}件)`);
+                            return e;
+                        }
+                        diag.push(`A: mod.world_info["${worldName}"].entries が空 (${e ? Object.keys(e).length + 'keys' : 'null'})`);
+                    }
                 }
-                if (mod?.world_info?.[worldName]) {
-                    debugLog(`world_info["${worldName}"].entries が空 → fetch フォールバック`);
-                }
-            } catch (e) { /* ignore */ }
+            } catch (e) {
+                diag.push(`A: 例外 ${e.message || e}`);
+            }
 
-            // ── 2b. window.world_info（レガシー）──
+            // === B. window.world_info ===
             try {
                 const e = window.world_info?.[worldName]?.entries;
                 if (_hasEntries(e)) {
                     _worldInfoEntriesSyncCache.set(worldName, e);
-                    debugLog(`window.world_info["${worldName}"].entries 取得 (${Object.keys(e).length}件)`);
+                    _worldInfoEntriesNegativeCache.delete(worldName);
+                    console.warn(`[LBE] ✅ B (window.world_info) ヒット: "${worldName}" (${Object.keys(e).length}件)`);
                     return e;
                 }
-            } catch (e) { /* ignore */ }
+                diag.push(`B: window.world_info["${worldName}"].entries なし`);
+            } catch (e) {
+                diag.push(`B: 例外 ${e.message || e}`);
+            }
 
-            // ── 2c. 高速 fetch（リトライなし、1回だけ）──
+            // === C. fetch（単発） ===
             try {
+                const headers = getRequestHeaders();
                 const resp = await fetch('/api/worldinfo/get', {
                     method: 'POST',
-                    headers: getRequestHeaders(),
+                    headers,
                     body: JSON.stringify({ name: worldName }),
                 });
+                console.warn(`[LBE] C (fetch /api/worldinfo/get) status=${resp.status} ok=${resp.ok} for "${worldName}"`);
                 if (resp.ok) {
                     const data = await resp.json();
                     const e = data?.entries;
                     if (_hasEntries(e)) {
                         _worldInfoEntriesSyncCache.set(worldName, e);
-                        // ST 側のメモリにも反映
+                        _worldInfoEntriesNegativeCache.delete(worldName);
                         try {
                             const mod = await getWorldInfoModule();
                             if (mod) {
@@ -581,21 +613,24 @@ async function fetchWorldInfoWithRetry(worldName, maxRetries = WORLDIINFO_FETCH_
                                 mod.world_info[worldName] = { entries: e, name: worldName };
                             }
                         } catch (err) { /* ignore */ }
-                        debugLog(`fetch("/api/worldinfo/get", "${worldName}") 成功 (${Object.keys(e).length}件)`);
+                        console.warn(`[LBE] ✅ C (fetch) ヒット: "${worldName}" (${Object.keys(e).length}件)`);
                         return e;
                     }
-                    console.debug(`[LBE] fetch("${worldName}") の entries が空`);
+                    diag.push(`C: fetch の entries が空 (data keys: ${data ? Object.keys(data).join(',') : 'null'})`);
                 } else {
-                    console.debug(`[LBE] fetch("${worldName}") 失敗 (HTTP ${resp.status})`);
+                    let errBody = '';
+                    try { errBody = (await resp.text()).slice(0, 200); } catch (err) {}
+                    diag.push(`C: fetch HTTP ${resp.status} body="${errBody}"`);
                 }
             } catch (e) {
-                console.warn(`[LBE] fetch("${worldName}") 例外:`, e);
+                diag.push(`C: fetch 例外 ${e.message || e}`);
             }
 
-            // ── 2d. 最後の手段: 既存のリトライループ ──
+            // === D. リトライ fetch ===
             const retryEntries = await fetchWorldInfoWithRetry(worldName);
             if (_hasEntries(retryEntries)) {
                 _worldInfoEntriesSyncCache.set(worldName, retryEntries);
+                _worldInfoEntriesNegativeCache.delete(worldName);
                 try {
                     const mod = await getWorldInfoModule();
                     if (mod) {
@@ -603,14 +638,17 @@ async function fetchWorldInfoWithRetry(worldName, maxRetries = WORLDIINFO_FETCH_
                         mod.world_info[worldName] = { entries: retryEntries, name: worldName };
                     }
                 } catch (err) { /* ignore */ }
-                debugLog(`fetchWorldInfoWithRetry("${worldName}") 成功 (${Object.keys(retryEntries).length}件)`);
+                console.warn(`[LBE] ✅ D (retry fetch) ヒット: "${worldName}" (${Object.keys(retryEntries).length}件)`);
                 return retryEntries;
             }
+            diag.push('D: リトライ fetch 失敗');
 
+            // === 全滅 ===
             console.warn(
-                `[LBE] world "${worldName}" のエントリを全経路で取得できませんでした ` +
-                `(ST cache / window.world_info / fetch / retry すべて失敗)`
+                `[LBE] ❌ world="${worldName}" のエントリを全経路で取得できませんでした。診断:\n  ` +
+                diag.join('\n  ')
             );
+            _worldInfoEntriesNegativeCache.set(worldName, Date.now());
             return null;
         })();
 
