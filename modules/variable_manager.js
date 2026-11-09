@@ -230,8 +230,25 @@ import('./sound_effects.js').catch(err => {
     //   ロアブックの「00_共通ルール」エントリから RPGモード / 選択肢モード を抽出し、
     //   _commonRuleFlags キャッシュを更新する。
     // ============================================================
+    // ============================================================
+    // ★ 共通ルール変数の取得
+    //   ロアブックの「00_共通ルール」エントリから RPGモード / 選択肢モード を抽出し、
+    //   _commonRuleFlags キャッシュを更新する。
+    //
+    //   ★ キャラ未選択の場合は何もせず ok:false, rpgMode:false, choicesMode:false を返す。
+    //     これにより、ST起動直後にUI要素（#world_editor_select / #world_info）から
+    //     ワールド名が拾えてしまっても、プレイヤーHPパネルや変数パネルが
+    //     キャラ未選択状態で表示されることがなくなる。
+    // ============================================================
     async function refreshCommonRuleFlags() {
         try {
+            // ★ キャラ未選択なら早期リターン
+            const charName = getCurrentCharName();
+            if (!charName) {
+                _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false };
+                return _commonRuleFlags;
+            }
+
             const worldName = getWorldName();
             if (!worldName || !window.LorebookExpansion?.loadWorldInfoEntriesByName) {
                 _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false };
@@ -417,8 +434,12 @@ import('./sound_effects.js').catch(err => {
     function getCurrentCharName() {
         try {
             const ctx = getSTContext();
+            // 優先: ctx.characters[ctx.characterId]
             const char = ctx?.characters?.[ctx?.characterId];
-            return char?.name || null;
+            if (char?.name) return char.name;
+            // フォールバック: ctx.character
+            if (ctx?.character?.name) return ctx.character.name;
+            return null;
         } catch (e) { return null; }
     }
 
