@@ -170,3 +170,20 @@
     box-sizing: border-box;
     width: 100%;
 }
+
+/* ============================================================
+ * ★ リセットボタン（ゲーム開始ボタンから変化した状態）
+ * ============================================================ */
+.game-reset-choice {
+    background-color: rgba(200, 60, 60, 0.15) !important;
+    border-color: #ff6666 !important;
+    color: #ffffff !important;
+}
+
+.game-reset-choice:hover {
+    background-color: rgba(200, 60, 60, 0.5) !important;
+    border-color: #ff8888 !important;
+    box-shadow:
+        0 0 0 2px rgba(255, 60, 60, 0.4),
+        0 4px 16px rgba(255, 60, 60, 0.55) !important;
+}
