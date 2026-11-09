@@ -431,6 +431,24 @@ async function getWorldInfoModule() {
     }
 }
 
+    // ============================================================
+    // ★ world_info entries の同期キャッシュ
+    //   - 一度でも取得成功した worldName → entries を Map に保持
+    //   - 2回目以降は同期アクセスで即座に返す（fetch を行わない）
+    //   - 並行呼び出しは同じ Promise を共有して二重 fetch を防止
+    // ============================================================
+    const _worldInfoEntriesSyncCache = new Map();
+    const _worldInfoEntriesInFlight = new Map();
+
+    function _hasEntries(entries) {
+        return !!entries && typeof entries === 'object' && Object.keys(entries).length > 0;
+    }
+
+    function clearWorldInfoEntriesCache(worldName) {
+        if (worldName) _worldInfoEntriesSyncCache.delete(worldName);
+        else _worldInfoEntriesSyncCache.clear();
+    }
+
 function getCurrentWorldName() {
     const ed = document.querySelector('#world_editor_select');
     if (ed) {
@@ -502,68 +520,107 @@ async function fetchWorldInfoWithRetry(worldName, maxRetries = WORLDIINFO_FETCH_
     return null;
 }
 
-async function loadWorldInfoEntriesByName(worldName) {
-    if (!worldName) return null;
+    async function loadWorldInfoEntriesByName(worldName) {
+        if (!worldName) return null;
 
-    // ★ ST 内部キャッシュを確認（空オブジェクトを検出したら fetch にフォールバック）
-    try {
-        const mod = await getWorldInfoModule();
-        if (mod && mod.world_info && mod.world_info[worldName]?.entries) {
-            const entries = mod.world_info[worldName].entries;
-            if (entries && typeof entries === 'object' && Object.keys(entries).length > 0) {
-                return entries;
+        // ── 1. 同期キャッシュヒット ──
+        if (_worldInfoEntriesSyncCache.has(worldName)) {
+            const cached = _worldInfoEntriesSyncCache.get(worldName);
+            if (_hasEntries(cached)) {
+                return cached;
             }
-            debugLog(
-                `world_info["${worldName}"].entries が空のため fetch フォールバック ` +
-                `(STキャッシュ不整合の可能性)`
+        }
+
+        // ── 2. 並行呼び出しの重複排除 ──
+        if (_worldInfoEntriesInFlight.has(worldName)) {
+            return await _worldInfoEntriesInFlight.get(worldName);
+        }
+
+        const promise = (async () => {
+            // ── 2a. ST 内部キャッシュ（mod.world_info）──
+            try {
+                const mod = await getWorldInfoModule();
+                const e = mod?.world_info?.[worldName]?.entries;
+                if (_hasEntries(e)) {
+                    _worldInfoEntriesSyncCache.set(worldName, e);
+                    debugLog(`world_info["${worldName}"].entries 取得 (ST cache, ${Object.keys(e).length}件)`);
+                    return e;
+                }
+                if (mod?.world_info?.[worldName]) {
+                    debugLog(`world_info["${worldName}"].entries が空 → fetch フォールバック`);
+                }
+            } catch (e) { /* ignore */ }
+
+            // ── 2b. window.world_info（レガシー）──
+            try {
+                const e = window.world_info?.[worldName]?.entries;
+                if (_hasEntries(e)) {
+                    _worldInfoEntriesSyncCache.set(worldName, e);
+                    debugLog(`window.world_info["${worldName}"].entries 取得 (${Object.keys(e).length}件)`);
+                    return e;
+                }
+            } catch (e) { /* ignore */ }
+
+            // ── 2c. 高速 fetch（リトライなし、1回だけ）──
+            try {
+                const resp = await fetch('/api/worldinfo/get', {
+                    method: 'POST',
+                    headers: getRequestHeaders(),
+                    body: JSON.stringify({ name: worldName }),
+                });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    const e = data?.entries;
+                    if (_hasEntries(e)) {
+                        _worldInfoEntriesSyncCache.set(worldName, e);
+                        // ST 側のメモリにも反映
+                        try {
+                            const mod = await getWorldInfoModule();
+                            if (mod) {
+                                if (!mod.world_info) mod.world_info = {};
+                                mod.world_info[worldName] = { entries: e, name: worldName };
+                            }
+                        } catch (err) { /* ignore */ }
+                        debugLog(`fetch("/api/worldinfo/get", "${worldName}") 成功 (${Object.keys(e).length}件)`);
+                        return e;
+                    }
+                    console.debug(`[LBE] fetch("${worldName}") の entries が空`);
+                } else {
+                    console.debug(`[LBE] fetch("${worldName}") 失敗 (HTTP ${resp.status})`);
+                }
+            } catch (e) {
+                console.warn(`[LBE] fetch("${worldName}") 例外:`, e);
+            }
+
+            // ── 2d. 最後の手段: 既存のリトライループ ──
+            const retryEntries = await fetchWorldInfoWithRetry(worldName);
+            if (_hasEntries(retryEntries)) {
+                _worldInfoEntriesSyncCache.set(worldName, retryEntries);
+                try {
+                    const mod = await getWorldInfoModule();
+                    if (mod) {
+                        if (!mod.world_info) mod.world_info = {};
+                        mod.world_info[worldName] = { entries: retryEntries, name: worldName };
+                    }
+                } catch (err) { /* ignore */ }
+                debugLog(`fetchWorldInfoWithRetry("${worldName}") 成功 (${Object.keys(retryEntries).length}件)`);
+                return retryEntries;
+            }
+
+            console.warn(
+                `[LBE] world "${worldName}" のエントリを全経路で取得できませんでした ` +
+                `(ST cache / window.world_info / fetch / retry すべて失敗)`
             );
-        }
-    } catch (e) { /* ignore */ }
+            return null;
+        })();
 
-    try {
-        if (window.world_info && window.world_info[worldName]?.entries) {
-            const entries = window.world_info[worldName].entries;
-            if (entries && typeof entries === 'object' && Object.keys(entries).length > 0) {
-                return entries;
-            }
+        _worldInfoEntriesInFlight.set(worldName, promise);
+        try {
+            return await promise;
+        } finally {
+            _worldInfoEntriesInFlight.delete(worldName);
         }
-    } catch (e) { /* ignore */ }
-
-    // ★ サーバから直接取得（リトライ付き）
-    const entries = await fetchWorldInfoWithRetry(worldName);
-    if (entries) {
-        // 取得したデータを ST 側の world_info キャッシュにも反映（次回以降のため）
-        try {
-            const mod = await getWorldInfoModule();
-            if (mod) {
-                if (!mod.world_info) mod.world_info = {};
-                if (!mod.world_info[worldName] || !mod.world_info[worldName].entries ||
-                    Object.keys(mod.world_info[worldName].entries || {}).length === 0) {
-                    mod.world_info[worldName] = {
-                        entries,
-                        name: worldName,
-                    };
-                    debugLog(`world_info["${worldName}"] を fetch 結果で復元`);
-                }
-            }
-        } catch (e) { /* ignore */ }
-        try {
-            if (window.world_info) {
-                if (!window.world_info[worldName] || !window.world_info[worldName].entries ||
-                    Object.keys(window.world_info[worldName].entries || {}).length === 0) {
-                    window.world_info[worldName] = {
-                        entries,
-                        name: worldName,
-                    };
-                }
-            }
-        } catch (e) { /* ignore */ }
-        return entries;
     }
-
-    console.warn(LOG, `/api/worldinfo/get 失敗 (world="${worldName}", リトライ後も取得できず)`);
-    return null;
-}
 
 // ============================================================
 // 選択肢番号の抽出
@@ -1824,5 +1881,6 @@ window.LorebookExpansion = {
     getChoicesWorldName,
     
     MODULE_NAME,
+    clearWorldInfoEntriesCache,
 };
 console.log(LOG, 'window.LorebookExpansion に API を公開しました');
