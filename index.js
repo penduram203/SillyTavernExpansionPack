@@ -3,6 +3,7 @@
 //   各拡張をモジュールとして読み込むエントリポイント
 // ============================================================
 
+import './modules/keyconfig.js';
 // ★ 効果音モジュールを最初に読み込む
 //   （window.playSound / window.SOUND_EFFECTS を確定させる）
 import './modules/sound_effects.js';
