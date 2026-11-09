@@ -4,7 +4,8 @@
 //   - デフォルト: 最大HP=500, 現在HP=500
 //   - 名前は #user_avatar_block の .ch_name から取得（ペルソナ名）
 //   - 表示形式は variable_manager.js の敵HPバーと同形式
-//   - バトルモード変数が 1 の時のみ表示
+//   - ★ ロアブック「00_共通ルール」の RPGモード 変数が 1 の時のみ表示
+//   - ★ キャラ未選択の時は絶対に表示しない（ST起動直後対策）
 
 (function () {
     'use strict';
@@ -39,6 +40,25 @@
             }
         } catch (e) { /* ignore */ }
         return null;
+    }
+
+    // ============================================================
+    // ★ キャラが選択されているか（同期判定）
+    //   - ctx.characters[ctx.characterId] に名前があるか
+    //   - 無ければ ctx.character?.name にフォールバック
+    // ============================================================
+    function hasActiveCharacter() {
+        try {
+            const ctx = getSTContext();
+            if (!ctx) return false;
+
+            if (ctx.characterId !== undefined && ctx.characterId !== null) {
+                const char = ctx.characters?.[ctx.characterId];
+                if (char?.name) return true;
+            }
+            if (ctx.character?.name) return true;
+            return false;
+        } catch (e) { return false; }
     }
 
     function _ensureSettings() {
@@ -89,8 +109,36 @@
     }
 
     // ============================================================
-    // ★ バトルモード判定（VariableManager 経由）
+    // ★ RPGモード判定
+    //   - キャラ未選択 → false
+    //   - VariableManager のキャッシュが ok:true → その rpgMode を返す
+    //   - キャッシュが ok:false → refreshCommonRuleFlags を呼んで再取得
     // ============================================================
+    function isRPGModeSync() {
+        if (!hasActiveCharacter()) return false;
+        try {
+            const flags = window.VariableManager?.getCommonRuleFlags?.();
+            return flags?.rpgMode === true;
+        } catch (e) { return false; }
+    }
+
+    async function isRPGMode() {
+        // ★ キャラ未選択なら VariableManager に問い合わせず即 false
+        if (!hasActiveCharacter()) return false;
+
+        try {
+            const flags = window.VariableManager?.getCommonRuleFlags?.();
+            if (flags && flags.ok === true) {
+                return flags.rpgMode === true;
+            }
+            if (window.VariableManager?.refreshCommonRuleFlags) {
+                const refreshed = await window.VariableManager.refreshCommonRuleFlags();
+                return refreshed?.rpgMode === true;
+            }
+        } catch (e) { /* ignore */ }
+        return false;
+    }
+
     async function waitForVariableManager(maxWaitMs = 10000) {
         const start = Date.now();
         while (Date.now() - start < maxWaitMs) {
@@ -113,33 +161,7 @@
         return false;
     }
 
-    // ============================================================
-    // ★ RPGモード判定（VariableManager のキャッシュを同期参照）
-    //   キャッシュが未初期化なら1回だけ強制更新を待つ
-    // ============================================================
-    function isRPGModeSync() {
-        try {
-            const flags = window.VariableManager?.getCommonRuleFlags?.();
-            return flags?.rpgMode === true;
-        } catch (e) { return false; }
-    }
-
-    async function isRPGMode() {
-        try {
-            const flags = window.VariableManager?.getCommonRuleFlags?.();
-            if (flags && flags.ok === true) {
-                return flags.rpgMode === true;
-            }
-            if (window.VariableManager?.refreshCommonRuleFlags) {
-                const refreshed = await window.VariableManager.refreshCommonRuleFlags();
-                return refreshed?.rpgMode === true;
-            }
-        } catch (e) { /* ignore */ }
-        return false;
-    }
-    
     function getUserName() {
-        // ペルソナ管理画面の .ch_name を参照（selected を優先）
         const el = document.querySelector('#user_avatar_block .avatar-container.selected .ch_name')
                 || document.querySelector('#user_avatar_block .ch_name');
         if (el) {
@@ -158,20 +180,34 @@
         panel = document.createElement('div');
         panel.id = PANEL_ID;
         panel.className = 'user-status-panel';
+        panel.style.display = 'none';
         document.body.appendChild(panel);
         return panel;
     }
 
     async function render() {
-        const active = await isRPGMode();
         const panel = ensurePanel();
 
-        // ★ RPGモード = 1 で常に表示（バトルモードとは独立）
-        if (!active) {
-            panel.style.display = 'none';
+        // ★ キャラ未選択なら即座に非表示
+        if (!hasActiveCharacter()) {
+            if (panel.style.display !== 'none') {
+                panel.style.display = 'none';
+            }
             _lastRenderKey = '';
             return;
         }
+
+        const active = await isRPGMode();
+
+        // ★ RPGモード=0 なら非表示
+        if (!active) {
+            if (panel.style.display !== 'none') {
+                panel.style.display = 'none';
+            }
+            _lastRenderKey = '';
+            return;
+        }
+
         panel.style.display = '';
 
         const status = getUserStatus();
@@ -219,7 +255,6 @@
         const panel = document.getElementById(PANEL_ID);
         if (panel) panel.style.display = 'none';
 
-        // VariableManager の準備を待つ
         await waitForVariableManager();
         await render();
         setInterval(render, POLL_INTERVAL_MS);
@@ -263,6 +298,7 @@
         },
         refresh: render,
         getUserName,
+        hasActiveCharacter,
         isBattleModeActive,
         isRPGMode,
         isRPGModeSync,
