@@ -304,11 +304,35 @@ import('./sound_effects.js').catch(err => {
     // ★ 並行呼び出しの重複排除
     let _commonRuleRefreshInFlight = null;
 
+    // ★ 状態変化検出用（ログ抑制）
+    let _lastLoggedState = {
+        ok: null,
+        rpg: null,
+        choices: null,
+        world: null,
+    };
+
+    function _logStateIfChanged(flags) {
+        if (_lastLoggedState.ok === flags.ok &&
+            _lastLoggedState.rpg === flags.rpgMode &&
+            _lastLoggedState.choices === flags.choicesMode &&
+            _lastLoggedState.world === flags.worldName) {
+            return;
+        }
+        _lastLoggedState = {
+            ok: flags.ok,
+            rpg: flags.rpgMode,
+            choices: flags.choicesMode,
+            world: flags.worldName,
+        };
+        console.log(
+            `[VarManager] 共通ルール: ok=${flags.ok} rpg=${flags.rpgMode} ` +
+            `choices=${flags.choicesMode} world=${flags.worldName || '?'}`
+        );
+    }
+
     // ============================================================
-    // ★ 共通ルール変数の取得（v12）
-    //   ST が comment に付加する「（常時有効）」等の注釈を
-    //   完全一致 / 前方一致 / NFKC正規化 / 括弧除去 の4段階で吸収する。
-    //   見つからない場合は最初の5件のコードポイントを出力して原因究明を助ける。
+    // ★ 共通ルール変数の取得（v13: ログ抑制版）
     // ============================================================
     async function refreshCommonRuleFlags(force = false) {
         if (!force &&
@@ -326,46 +350,37 @@ import('./sound_effects.js').catch(err => {
                 const charName = getCurrentCharName();
                 if (!charName) {
                     _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, worldName: null };
+                    _logStateIfChanged(_commonRuleFlags);
                     return _commonRuleFlags;
                 }
 
                 if (!window.LorebookExpansion?.loadWorldInfoEntriesByName) {
-                    console.warn('[VarManager] loadWorldInfoEntriesByName が提供されていません');
                     _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, worldName: null };
+                    _logStateIfChanged(_commonRuleFlags);
                     return _commonRuleFlags;
                 }
 
                 const candidates = getWorldNameCandidates();
-                console.warn(`[VarManager] 🔎 worldbook候補 (char="${charName}"):`, candidates);
-
                 if (candidates.length === 0) {
                     _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, worldName: null };
+                    _logStateIfChanged(_commonRuleFlags);
                     return _commonRuleFlags;
                 }
 
-                // ★ 4段階マッチング
                 const tryMatch = (raw) => {
                     if (typeof raw !== 'string') return false;
                     const t = raw.trim();
                     if (!t) return false;
                     const target = COMMON_RULE_ENTRY_NAME;
-
-                    // 1) 完全一致
                     if (t === target) return true;
-                    // 2) 前方一致（「00_共通ルール（常時有効）」等）
                     if (t.startsWith(target)) return true;
-                    // 3) NFKC 正規化
                     try {
                         const nt = t.normalize('NFKC');
                         const ntarget = target.normalize('NFKC');
-                        if (nt === ntarget) return true;
-                        if (nt.startsWith(ntarget)) return true;
+                        if (nt === ntarget || nt.startsWith(ntarget)) return true;
                     } catch (e) { /* ignore */ }
-                    // 4) 括弧書きの末尾注釈を除去
                     const stripped = t.replace(/\s*[（(].*?[）)]\s*$/, '').trim();
-                    if (stripped === target) return true;
-                    if (stripped.startsWith(target)) return true;
-
+                    if (stripped === target || stripped.startsWith(target)) return true;
                     return false;
                 };
 
@@ -374,17 +389,12 @@ import('./sound_effects.js').catch(err => {
                     try {
                         entries = await window.LorebookExpansion.loadWorldInfoEntriesByName(worldName);
                     } catch (e) {
-                        console.warn(`[VarManager] "${worldName}" 取得例外:`, e);
                         continue;
                     }
 
-                    if (!entries) {
-                        console.warn(`[VarManager] "${worldName}" → null (取得失敗)`);
-                        continue;
-                    }
+                    if (!entries) continue;
 
                     const list = Array.isArray(entries) ? entries : Object.values(entries);
-                    console.warn(`[VarManager] "${worldName}" のエントリ数: ${list.length}`);
 
                     let targetEntry = null;
                     for (const e of list) {
@@ -398,44 +408,17 @@ import('./sound_effects.js').catch(err => {
                         if (keyHit) { targetEntry = e; break; }
                     }
 
-                    if (!targetEntry) {
-                        // ★ 診断: 最初の5件の comment とコードポイントを出力
-                        const diag = list.slice(0, 5).map((e, i) => {
-                            const c = e?.comment;
-                            if (typeof c !== 'string') return `[${i}] (non-string: ${typeof c})`;
-                            const codes = Array.from(c.slice(0, 15))
-                                .map(ch => 'U+' + ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0'))
-                                .join(' ');
-                            return `[${i}] "${c}" → ${codes}`;
-                        }).join('\n    ');
-                        const targetCodes = Array.from(COMMON_RULE_ENTRY_NAME)
-                            .map(ch => 'U+' + ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0'))
-                            .join(' ');
-                        console.warn(
-                            `[VarManager] "${worldName}" に共通ルールエントリが見つかりません。\n` +
-                            `  比較対象 COMMON_RULE_ENTRY_NAME = "${COMMON_RULE_ENTRY_NAME}" → ${targetCodes}\n` +
-                            `  最初の5件:\n    ${diag}`
-                        );
-                        continue;
-                    }
+                    if (!targetEntry) continue;
 
                     const varMap = buildVarMapFromEntry(worldName, targetEntry);
-                    console.warn(
-                        `[VarManager] ✅ "${worldName}::${targetEntry.comment || '(no comment)'}" 変数名:`,
-                        Object.keys(varMap)
-                    );
-                    console.warn(`[VarManager] 変数値:`, Object.fromEntries(
-                        Object.entries(varMap).map(([k, v]) => [k, v?.value])
-                    ));
-
                     const flags = extractCommonRuleFlags(varMap);
                     _commonRuleFlags = { ok: true, ...flags, worldName };
-                    console.warn(`[VarManager] ✅ 解決完了:`, _commonRuleFlags);
+                    _logStateIfChanged(_commonRuleFlags);
                     return _commonRuleFlags;
                 }
 
-                console.warn('[VarManager] ❌ すべての候補で「00_共通ルール」エントリを取得できませんでした');
                 _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, worldName: null };
+                _logStateIfChanged(_commonRuleFlags);
                 return _commonRuleFlags;
             } finally {
                 _commonRuleFlagsLastRefresh = Date.now();
@@ -1388,7 +1371,6 @@ import('./sound_effects.js').catch(err => {
             const panel = ensurePanel();
 
             if (!isVisibleForChar(charName)) {
-                console.debug(LOG, `render: RPGモード=0 のため非表示 (char="${charName}", world="${_commonRuleFlags.worldName || '?'}")`);
                 if (_battleActive && !_battleEndingInProgress) endBattle();
                 removeBattleStartButton();
                 if (panel) {
