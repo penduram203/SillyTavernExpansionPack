@@ -3,14 +3,17 @@
 //   - 通常クリック: 選択肢番号をチャット入力欄にセットして自動送信
 //   - Shift+クリック: 入力欄にセットするだけ（自動送信しない）
 //   - ホバー配色は Text Styling のセリフ色 (#q-text-color) から動的に導出
-//   - 最初のメッセージが「ゲーム開始」ならクリック可能なボタン化して
-//     クリックで "000" を自動送信する
+//   - 選択肢モードでは最初に「ゲーム開始」ボタンを first_mes 末尾に表示し、
+//     一度押すと「リセット」ボタンに変化する。
+//     リセットボタンを押すと ST の「新しいチャットを開始」と同じ動作を実行し、
+//     ゲーム開始ボタンに戻る。
 
 (function () {
     'use strict';
     const LOG = '[ChoiceClick]';
     const CLICK_DEBOUNCE_MS = 1200;
     const GAME_START_NUMBER = '000';
+    const STATE_KEY = 'choice_click';
 
     // ---- CSS 注入 ----
     (function injectStyle() {
@@ -28,6 +31,57 @@
 
     let _lastClickTime = 0;
 
+    // ============================================================
+    // コンテキスト・状態ヘルパー
+    // ============================================================
+    function _getCtx() {
+        try {
+            return window.SillyTavern?.getContext?.() || null;
+        } catch (e) { return null; }
+    }
+
+    function _getCurrentCharName() {
+        try {
+            const ctx = _getCtx();
+            return ctx?.characters?.[ctx?.characterId]?.name || null;
+        } catch (e) { return null; }
+    }
+
+    function getStartState(charName) {
+        if (!charName) return 'initial';
+        const ctx = _getCtx();
+        if (!ctx?.extensionSettings) return 'initial';
+        const m = ctx.extensionSettings[STATE_KEY]?.startStateByChar || {};
+        return m[charName] === 'clicked' ? 'clicked' : 'initial';
+    }
+
+    function setStartState(charName, state) {
+        if (!charName) return;
+        const ctx = _getCtx();
+        if (!ctx?.extensionSettings) return;
+        if (!ctx.extensionSettings[STATE_KEY]) ctx.extensionSettings[STATE_KEY] = {};
+        if (!ctx.extensionSettings[STATE_KEY].startStateByChar) {
+            ctx.extensionSettings[STATE_KEY].startStateByChar = {};
+        }
+        ctx.extensionSettings[STATE_KEY].startStateByChar[charName] =
+            state === 'clicked' ? 'clicked' : 'initial';
+        if (typeof ctx.saveSettingsDebounced === 'function') ctx.saveSettingsDebounced();
+    }
+
+    function isStartButtonEnabledForCurrentChar() {
+        try {
+            const charName = _getCurrentCharName();
+            if (!charName) return false;
+            if (window.VariableManager?.isStartButtonEnabledForChar) {
+                return window.VariableManager.isStartButtonEnabledForChar(charName) === true;
+            }
+            return false;
+        } catch (e) { return false; }
+    }
+
+    // ============================================================
+    // 汎用ヘルパー
+    // ============================================================
     function extractNumFromItem(item) {
         if (!item) return null;
         const text = (item.textContent || '').trim();
@@ -63,6 +117,9 @@
         }, 600);
     }
 
+    // ============================================================
+    // 選択肢クリック処理
+    // ============================================================
     function handleChoiceClick(item, event) {
         if (!item) return;
         const num = item.dataset.choiceNum;
@@ -118,27 +175,19 @@
         });
     }
 
-    function isStartButtonEnabledForCurrentChar() {
-        try {
-            const ctx = window.SillyTavern?.getContext?.();
-            const char = ctx?.characters?.[ctx?.characterId];
-            const charName = char?.name;
-            if (!charName) return false;
-            // ★ ロアブックの共通ルール変数「選択肢モード」で判定
-            if (window.VariableManager?.isStartButtonEnabledForChar) {
-                return window.VariableManager.isStartButtonEnabledForChar(charName) === true;
-            }
-            return false;
-        } catch (e) { return false; }
-    }
-
-    function createGameStartButton() {
+    // ============================================================
+    // ゲーム開始 / リセットボタン
+    // ============================================================
+    function createGameButton(isReset) {
         const btn = document.createElement('div');
         btn.className = 'game-start-choice';
-        btn.textContent = 'ゲーム開始';
+        if (isReset) btn.classList.add('game-reset-choice');
+        btn.textContent = isReset ? 'リセット' : 'ゲーム開始';
         btn.setAttribute('role', 'button');
         btn.setAttribute('tabindex', '0');
-        btn.setAttribute('title', `クリックで「${GAME_START_NUMBER}」を送信`);
+        btn.setAttribute('title', isReset
+            ? 'クリックでチャットをリセットしてゲームを最初からやり直す'
+            : `クリックで「${GAME_START_NUMBER}」を送信`);
 
         const handler = (e) => {
             if (e) { e.preventDefault(); e.stopPropagation(); }
@@ -146,14 +195,25 @@
             if (now - _lastClickTime < CLICK_DEBOUNCE_MS) return;
             _lastClickTime = now;
 
-            const textarea = document.getElementById('send_textarea');
-            if (!textarea) {
-                console.warn(LOG, '#send_textarea が見つかりません');
-                return;
+            if (isReset) {
+                handleResetClick(btn);
+            } else {
+                const charName = _getCurrentCharName();
+                if (charName) {
+                    setStartState(charName, 'clicked');
+                    // 状態変化を即時反映（リセットボタンに切り替え）
+                    try { setupFirstMessageAsChoice(); } catch (err) { /* ignore */ }
+                }
+
+                const textarea = document.getElementById('send_textarea');
+                if (!textarea) {
+                    console.warn(LOG, '#send_textarea が見つかりません');
+                    return;
+                }
+                setTextareaValue(textarea, GAME_START_NUMBER);
+                flashItem(btn, 'sending');
+                sendMessage(textarea);
             }
-            setTextareaValue(textarea, GAME_START_NUMBER);
-            flashItem(btn, 'sending');
-            sendMessage(textarea);
         };
 
         btn.addEventListener('click', handler);
@@ -167,6 +227,65 @@
         return btn;
     }
 
+    async function handleResetClick(btn) {
+        const charName = _getCurrentCharName();
+        if (!charName) return;
+
+        // バトル中なら終了させておく
+        try {
+            if (window.VariableManager?.isBattleActive?.()) {
+                window.VariableManager.endBattle();
+            }
+        } catch (e) { /* ignore */ }
+
+        // ボタンを一時的に隠す
+        const prevDisplay = btn.style.display;
+        btn.style.display = 'none';
+
+        const success = await triggerNewChat();
+
+        if (success) {
+            setStartState(charName, 'initial');
+            // リセット完了。新しいチャットが読み込まれた時点で
+            // setupFirstMessageAsChoice がゲーム開始ボタンを再生成する。
+            try { setupFirstMessageAsChoice(); } catch (e) { /* ignore */ }
+        } else {
+            // リセットに失敗したら状態を戻してボタンを再表示
+            btn.style.display = prevDisplay;
+            console.warn(LOG, 'リセットに失敗しました');
+        }
+    }
+
+    async function triggerNewChat() {
+        // ① ST のメニュー項目をクリック（最も確実）
+        try {
+            const menuItem = document.getElementById('option_start_new_chat');
+            if (menuItem) {
+                menuItem.click();
+                return true;
+            }
+        } catch (e) { /* fall through */ }
+
+        // ② Slash command 経由（ST API）
+        try {
+            const ctx = _getCtx();
+            if (ctx?.executeSlashCommandsWithOptions) {
+                await ctx.executeSlashCommandsWithOptions('/newchat');
+                return true;
+            }
+        } catch (e) { /* fall through */ }
+
+        // ③ Slash command 経由（window グローバル）
+        try {
+            if (typeof window.executeSlashCommandsWithOptions === 'function') {
+                await window.executeSlashCommandsWithOptions('/newchat');
+                return true;
+            }
+        } catch (e) { /* fall through */ }
+
+        return false;
+    }
+
     function removeGameStartButtons() {
         document.querySelectorAll('.game-start-choice').forEach(el => el.remove());
         const c = document.getElementById('game-start-button-container');
@@ -174,32 +293,49 @@
         document.querySelectorAll('.gic-game-start-fallback').forEach(el => el.remove());
     }
 
+    // ============================================================
+    // first_mes 末尾へのボタン配置
+    // ============================================================
     function setupFirstMessageAsChoice() {
         const enabled = isStartButtonEnabledForCurrentChar();
 
-        // 無効時: すべて削除
         if (!enabled) {
             removeGameStartButtons();
             return;
         }
+
+        const charName = _getCurrentCharName();
+        const state = getStartState(charName);
+        const needsReset = state === 'clicked';
 
         const mesEl = document.querySelector('.mes[mesid="0"]');
         const isUser = mesEl?.getAttribute('is_user') === 'true';
         const mesTextEl = (mesEl && !isUser) ? mesEl.querySelector('.mes_text') : null;
         const existingContainer = document.getElementById('game-start-button-container');
 
+        // 対象要素に正しい種別のボタンが入っていることを保証するヘルパ
+        const ensureButton = (target) => {
+            if (!target) return;
+            const existing = target.querySelector(':scope > .game-start-choice');
+            if (existing) {
+                const isReset = existing.classList.contains('game-reset-choice');
+                if (isReset === needsReset) return;  // 既に正しい種別
+                existing.remove();
+            }
+            // 余計なボタンを除去
+            target.querySelectorAll(':scope > .game-start-choice').forEach(el => el.remove());
+            target.appendChild(createGameButton(needsReset));
+        };
+
         // ── ① mes_text が存在する → その末尾に配置 ──
         if (mesTextEl) {
             if (existingContainer) existingContainer.remove();
-            // 他の位置のボタン/フォールバックを除去
+            // mes_text 以外の場所にあるボタン/フォールバックを除去
             document.querySelectorAll('.game-start-choice').forEach(el => {
-                if (el.parentNode !== mesTextEl) el.remove();
+                if (!mesTextEl.contains(el)) el.remove();
             });
             document.querySelectorAll('.gic-game-start-fallback').forEach(el => el.remove());
-
-            if (mesTextEl.querySelectorAll(':scope > .game-start-choice').length === 0) {
-                mesTextEl.appendChild(createGameStartButton());
-            }
+            ensureButton(mesTextEl);
             return;
         }
 
@@ -215,17 +351,14 @@
                 contentEl.appendChild(fallback);
             }
 
-            // 他の位置のボタン/フォールバックを除去
             document.querySelectorAll('.game-start-choice').forEach(el => {
-                if (el.parentNode !== fallback) el.remove();
+                if (!fallback.contains(el)) el.remove();
             });
             document.querySelectorAll('.gic-game-start-fallback').forEach(el => {
                 if (el !== fallback) el.remove();
             });
 
-            if (fallback.querySelectorAll(':scope > .game-start-choice').length === 0) {
-                fallback.appendChild(createGameStartButton());
-            }
+            ensureButton(fallback);
             return;
         }
 
@@ -233,7 +366,10 @@
         document.querySelectorAll('.mes .game-start-choice').forEach(el => el.remove());
         document.querySelectorAll('.gic-game-start-fallback').forEach(el => el.remove());
 
-        if (existingContainer) return; // 既に #chat 直下に存在
+        if (existingContainer) {
+            ensureButton(existingContainer);
+            return;
+        }
 
         const chatEl = document.getElementById('chat');
         if (!chatEl) return;
@@ -241,7 +377,7 @@
         const container = document.createElement('div');
         container.id = 'game-start-button-container';
         container.className = 'game-start-button-container';
-        container.appendChild(createGameStartButton());
+        container.appendChild(createGameButton(needsReset));
 
         const firstMes = chatEl.querySelector('.mes');
         if (firstMes && firstMes.parentNode === chatEl) {
@@ -252,7 +388,7 @@
     }
 
     // ============================================================
-    // ★ セリフ色 (#q-text-color) からホバー配色を動的に導出
+    // セリフ色 (#q-text-color) からホバー配色を動的に導出
     // ============================================================
     function hexToHsl(hex) {
         hex = String(hex || '').replace('#', '').trim();
@@ -292,20 +428,18 @@
         const hsl = hexToHsl(input.value);
         if (!hsl) return;
 
-        // グレー系セリフ色でも色味が出るように最低彩度を確保
         const baseS = Math.max(hsl.s, 55);
         const accentS = Math.min(Math.max(hsl.s, 75), 100);
         const hue = hsl.h;
 
-        // 背景 L=42% / 明るい枠 L=65%
-        const bg        = hslCss(hue, baseS, 42);
-        const border    = hslCss(hue, accentS, 65);
-        const bar       = border;
-        const glowSoft  = hslCss(hue, accentS, 65, 0.55);
-        const glowRing  = hslCss(hue, accentS, 65, 0.40);
-        const activeBg  = hslCss(hue, baseS, 34);   // 押下時: ホバーより少し暗く
-        const sendingBg = hslCss(hue, baseS, 50);   // 送信40%地点
-        const sendingFl = hslCss(hue, baseS, 62);   // 送信0%地点
+        const bg = hslCss(hue, baseS, 42);
+        const border = hslCss(hue, accentS, 65);
+        const bar = border;
+        const glowSoft = hslCss(hue, accentS, 65, 0.55);
+        const glowRing = hslCss(hue, accentS, 65, 0.40);
+        const activeBg = hslCss(hue, baseS, 34);
+        const sendingBg = hslCss(hue, baseS, 50);
+        const sendingFl = hslCss(hue, baseS, 62);
 
         const root = document.documentElement.style;
         root.setProperty('--choice-hover-bg', bg);
@@ -359,7 +493,57 @@
         check();
     }
 
-    // ---- 監視 ----
+    // ============================================================
+    // 新規チャット検出時の state リセット
+    //   - 「新しいチャットを開始」で state を自動的に initial に戻す
+    //   - 既存のゲーム進行中チャット（メッセージ数 > 1）は state を保持
+    // ============================================================
+    function checkAndResetStateOnChatChanged() {
+        try {
+            const ctx = _getCtx();
+            if (!ctx?.chat) return;
+            const charName = _getCurrentCharName();
+            if (!charName) return;
+
+            const nonSystem = ctx.chat.filter(m => !m.is_system).length;
+            if (nonSystem <= 1) {
+                if (getStartState(charName) !== 'initial') {
+                    setStartState(charName, 'initial');
+                    console.log(LOG, `新しいチャットを検出: state を initial にリセット (char="${charName}")`);
+                    // ゲーム開始ボタンを再生成
+                    setTimeout(() => {
+                        try { setupFirstMessageAsChoice(); } catch (e) { /* ignore */ }
+                    }, 100);
+                }
+            }
+        } catch (e) { /* ignore */ }
+    }
+
+    (function setupChatChangedListeners() {
+        const tryInstall = () => {
+            const ctx = _getCtx();
+            if (!ctx?.eventSource || !ctx?.eventTypes) {
+                setTimeout(tryInstall, 500);
+                return;
+            }
+            const et = ctx.eventTypes;
+            const es = ctx.eventSource;
+            const on = (name, fn) => {
+                if (et[name] && typeof es.on === 'function') es.on(et[name], fn);
+            };
+            on('CHAT_CHANGED', () => {
+                setTimeout(checkAndResetStateOnChatChanged, 200);
+            });
+            on('CHARACTER_SELECTED', () => {
+                setTimeout(checkAndResetStateOnChatChanged, 300);
+            });
+        };
+        tryInstall();
+    })();
+
+    // ============================================================
+    // MutationObserver + 初期化
+    // ============================================================
     let _pending = false;
     function scheduleBind() {
         if (_pending) return;
@@ -396,9 +580,14 @@
         init();
     }
 
+    // ============================================================
+    // 公開 API
+    // ============================================================
     window.ChoiceClick = {
         bind: bindChoiceItems,
         updateColors: updateChoiceColorsFromQ,
         setupGameStart: setupFirstMessageAsChoice,
+        getStartState,
+        setStartState,
     };
 })();
