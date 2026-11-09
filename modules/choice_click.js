@@ -118,35 +118,17 @@
         });
     }
 
-    // ============================================================
-    // ★ 開始ボタンチェックボックス連動で first message 末尾にゲーム開始ボタンを追加
-    //    （first_mes の内容には依存しない）
-    // ============================================================
     function isStartButtonEnabledForCurrentChar() {
         try {
             const ctx = window.SillyTavern?.getContext?.();
             const char = ctx?.characters?.[ctx?.characterId];
             const charName = char?.name;
             if (!charName) return false;
-            const map = ctx?.extensionSettings?.variable_manager?.startButtonByChar || {};
-            return map[charName] === true;
-        } catch (e) { return false; }
-    }
-
-    // ============================================================
-    // ★ 開始ボタンチェックボックス連動でゲーム開始ボタンを追加
-    //    ・first_mes の内容には依存しない
-    //    ・mes_text が無い場合はメッセージ内にフォールバックを作成
-    //    ・mesid=0 自体が無い場合は #chat 直下に専用コンテナを作成
-    // ============================================================
-    function isStartButtonEnabledForCurrentChar() {
-        try {
-            const ctx = window.SillyTavern?.getContext?.();
-            const char = ctx?.characters?.[ctx?.characterId];
-            const charName = char?.name;
-            if (!charName) return false;
-            const map = ctx?.extensionSettings?.variable_manager?.startButtonByChar || {};
-            return map[charName] === true;
+            // ★ ロアブックの共通ルール変数「選択肢モード」で判定
+            if (window.VariableManager?.isStartButtonEnabledForChar) {
+                return window.VariableManager.isStartButtonEnabledForChar(charName) === true;
+            }
+            return false;
         } catch (e) { return false; }
     }
 
