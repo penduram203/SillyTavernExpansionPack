@@ -471,3 +471,14 @@ body.variable-battle-active #half-maximize-button {
 .variable-attack-float.visible {
     opacity: 1;
 }
+
+/* ============================================================
+ * ★ ユーザー発言の非表示化
+ *   body.varmgr-hide-user-messages は選択肢モード=1 または
+ *   RPGモード=1 の時に variable_manager.js から付与される。
+ *   この状態の時、ユーザー自身の発言（is_user="true"）を
+ *   チャット上に表示しない。
+ * ============================================================ */
+body.varmgr-hide-user-messages .mes[is_user="true"] {
+    display: none !important;
+}
