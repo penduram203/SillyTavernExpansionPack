@@ -349,6 +349,76 @@ function migrateCharacterLexDataToWorldStore() {
     }
 }
 
+// ============================================================
+// ★ 現在のキャラクターの character.data → per-world store 追加マージ
+//   - JSON インポート後に呼ばれる。既存の per-world store に
+//     データがある場合は上書きしない（additive）。
+//   - これにより、JSON に保存された RPGモード / 選択肢モード が
+//     per-world store に復元される。
+//   - migrateCharacterLexDataToWorldStore と異なり、フラグで
+//     1回限りに制限せず、キャラロード毎に実行される。
+// ============================================================
+function migrateCurrentCharacterToWorldStore() {
+    try {
+        const ctx = getContext();
+        const char = ctx?.characters?.[ctx?.characterId];
+        if (!char) return;
+
+        const charLex = char?.data?.extensions?.lorebook_expansion;
+        if (!charLex || typeof charLex !== 'object') return;
+
+        const charName = typeof char.name === 'string' ? char.name : '';
+        const assocWorld =
+            (typeof char.data?.extensions?.world === 'string' && char.data.extensions.world) ||
+            (typeof char.data?.world === 'string' && char.data.world) ||
+            '';
+        const ownWorld = assocWorld || charName;
+
+        const store = getLexStore();
+        let migrated = 0;
+        let skipped = 0;
+
+        for (const [key, value] of Object.entries(charLex)) {
+            if (!value || typeof value !== 'object') continue;
+
+            let worldName, charKey;
+            if (key.includes(STORAGE_KEY_SEPARATOR)) {
+                const idx = key.indexOf(STORAGE_KEY_SEPARATOR);
+                worldName = key.slice(0, idx);
+                charKey = key.slice(idx + 1);
+            } else {
+                if (!ownWorld) continue;
+                worldName = ownWorld;
+                charKey = key;
+            }
+
+            if (!worldName || !charKey) continue;
+
+            if (!store[worldName] || typeof store[worldName] !== 'object') {
+                store[worldName] = {};
+            }
+
+            // ★ additive: per-world store にデータが無い場合のみ追加
+            if (!store[worldName][charKey]) {
+                store[worldName][charKey] = normalizeLexData(value);
+                migrated++;
+            } else {
+                skipped++;
+            }
+        }
+
+        if (migrated > 0) {
+            saveLexStore();
+            debugLog(
+                `character.data → per-world store: ${migrated} 件移行 ` +
+                `(char="${charName}", 既存優先で ${skipped} 件スキップ)`
+            );
+        }
+    } catch (e) {
+        console.warn(LOG, 'migrateCurrentCharacterToWorldStore エラー:', e);
+    }
+}
+
 function getCharacterLexData() {
     try {
         const ctx = getContext();
@@ -415,10 +485,44 @@ function setDataFor(worldName, uid, entry, data) {
         return;
     }
 
+    // ── 1) per-world store へ保存（一次情報源）──
     const store = getWorldLexStore(worldName);
     store[charKey] = normalized;
     saveLexStore();
     debugLog(`per-world store に保存: ${worldName}::${charKey}`);
+
+    // ── 2) character.data にもミラー保存（JSONエクスポート/インポート用）──
+    //    プライマリはあくまで per-world store。character.data は
+    //    JSON の可搬性のためのコピー。
+    try {
+        const ctx = getContext();
+        const char = ctx?.characters?.[ctx?.characterId];
+        if (!char) return;
+
+        if (!char.data) char.data = {};
+        if (!char.data.extensions) char.data.extensions = {};
+        if (!char.data.extensions[MODULE_NAME] ||
+            typeof char.data.extensions[MODULE_NAME] !== 'object') {
+            char.data.extensions[MODULE_NAME] = {};
+        }
+
+        const storageKey = getStorageKey(worldName, charKey);
+        if (!storageKey) return;
+
+        char.data.extensions[MODULE_NAME][storageKey] =
+            JSON.parse(JSON.stringify(normalized));
+
+        // CharStore 経由でサーバ保存（デバウンス付き・export時の _backup も同期更新される）
+        if (window.CharStore?.saveCharacterExtension) {
+            window.CharStore.saveCharacterExtension(
+                MODULE_NAME,
+                char.data.extensions[MODULE_NAME]
+            );
+        }
+        debugLog(`character.data にミラー保存: ${storageKey}`);
+    } catch (e) {
+        console.warn(LOG, 'character.data へのミラー保存に失敗:', e);
+    }
 }
 
 function getExpansionData(entry) {
@@ -1585,7 +1689,6 @@ function registerEventListeners() {
     if (event_types.MESSAGE_DELETED) {
         eventSource.on(event_types.MESSAGE_DELETED, onMessageUpdatedOrDeleted);
     }
-    // ★ キャラクター選択時にも即座に旧選択肢を削除
     if (event_types.CHARACTER_SELECTED) {
         eventSource.on(event_types.CHARACTER_SELECTED, () => {
             removeAllChoicesBlocks();
@@ -1596,7 +1699,10 @@ function registerEventListeners() {
     }
     if (event_types.CHARACTER_PAGE_LOADED) {
         eventSource.on(event_types.CHARACTER_PAGE_LOADED, () => {
+            // 初回起動時の一括移行（フラグで制御・後方互換）
             migrateCharacterLexDataToWorldStore();
+            // ★ 現在キャラの character.data → per-world store 追加マージ
+            migrateCurrentCharacterToWorldStore();
         });
     }
 }
@@ -1939,5 +2045,6 @@ window.LorebookExpansion = {
     
     MODULE_NAME,
     clearWorldInfoEntriesCache,
+    migrateCurrentCharacterToWorldStore,
 };
 console.log(LOG, 'window.LorebookExpansion に API を公開しました');
