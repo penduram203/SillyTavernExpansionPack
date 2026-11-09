@@ -6,22 +6,20 @@
 //   ↓ / S  … 次の要素へ
 //   Enter / Space / E / F … 選択決定（要素を .click()）
 //
-// 対象コンテキスト（優先度順）:
-//   1. バトルコマンド (.variable-command-btn × 4)
-//   2. チャット内インタラクティブ要素（最新のみ）
-//      - 最後の .lbe-choices-block 内の .lbe-choice-item
-//      - 最新の .variable-battle-start-btn
-//      - 最新の .game-start-choice
+// コンテキスト決定（優先度順）:
+//   1. RPGモード=1 かつ バトルモード=1
+//      → 画面左端の .variable-command-btn 4 つのみ
+//   2. RPGモード=1 かつ バトル開始変数=1
+//      → 最後に表示されたバトル開始ボタンのみ
+//   3. 選択肢モード=1 かつ state=initial
+//      → ゲーム開始ボタンのみ
+//   4. RPGモード=1 または (選択肢モード=1 かつ state=clicked)
+//      → 最後の .lbe-choices-block 内の選択肢のみ
+//   5. それ以外 → キーボード介入なし
 //
 // 入力欄の制御:
 //   VariableManager の rpgMode / choicesMode が 1 の時は
 //   #send_textarea を非表示・非クリック化する。
-//
-// 安全策:
-//   - textarea / input / contenteditable にフォーカスがあるときは一切介入しない
-//   - Ctrl / Alt / Meta 併用時は介入しない
-//   - IME 変換中 (isComposing) は介入しない
-//   - Enter のオートリピートは無視（多重送信防止）
 
 (function () {
     'use strict';
@@ -35,40 +33,14 @@
     const NAV_DOWN_KEYS = ['ArrowDown', 's', 'S'];
     const CONFIRM_KEYS = ['Enter', ' ', 'e', 'E', 'f', 'F'];
 
-    // ============================================================
-    // コンテキスト定義（優先度順）
-    // ============================================================
-    const CONTEXTS = [
-        {
-            name: 'battle-commands',
-            selector: '.variable-command-btn',
-            container: () => document.getElementById('variable-battle-commands'),
-            visible: () => {
-                const c = document.getElementById('variable-battle-commands');
-                if (!c) return false;
-                const cs = window.getComputedStyle(c);
-                if (cs.display === 'none' || cs.visibility === 'hidden') return false;
-                return c.querySelectorAll('.variable-command-btn').length > 0;
-            },
-            multi: true,
-        },
-        {
-            name: 'chat-interactive',
-            // getElements を明示的に定義（最新のみに絞り込む）
-            getElements: () => getLatestChatInteractiveElements(),
-            visible: () => getLatestChatInteractiveElements().length > 0,
-            multi: true,
-        },
-    ];
-
-    // コンテキストごとのフォーカス index
     const _indices = {
         'battle-commands': 0,
-        'chat-interactive': 0,
+        'battle-start': 0,
+        'game-start': 0,
+        'choices': 0,
     };
-
-    let _lastActiveContextName = null;
-    let _lastElementsSignature = '';
+    let _lastContextName = null;
+    let _lastChoicesBlock = null;
 
     // ============================================================
     // CSS 注入
@@ -109,79 +81,90 @@
         return true;
     }
 
-    // ============================================================
-    // ★ 最新のチャット内インタラクティブ要素だけを取得
-    //   - 最後の .lbe-choices-block 内の .lbe-choice-item 全て
-    //   - 最後の .variable-battle-start-btn
-    //   - 最後の .game-start-choice
-    //   を DOM 順に並べて返す。
-    // ============================================================
-    function getLatestChatInteractiveElements() {
-        const result = [];
-
-        // ① 最新の選択肢ブロック内の選択肢
-        const blocks = document.querySelectorAll('.lbe-choices-block');
-        if (blocks.length > 0) {
-            const lastBlock = blocks[blocks.length - 1];
-            lastBlock.querySelectorAll('.lbe-choice-item').forEach(el => {
-                if (isElementVisible(el)) result.push(el);
-            });
-        }
-
-        // ② 最新のバトル開始ボタン
-        const battleBtns = document.querySelectorAll('.variable-battle-start-btn');
-        if (battleBtns.length > 0) {
-            const last = battleBtns[battleBtns.length - 1];
-            if (isElementVisible(last)) result.push(last);
-        }
-
-        // ③ 最新のゲーム開始ボタン
-        const gameBtns = document.querySelectorAll('.game-start-choice');
-        if (gameBtns.length > 0) {
-            const last = gameBtns[gameBtns.length - 1];
-            if (isElementVisible(last)) result.push(last);
-        }
-
-        // DOM 順でソート
-        result.sort((a, b) => {
-            if (a === b) return 0;
-            const pos = a.compareDocumentPosition(b);
-            if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
-            if (pos & Node.DOCUMENT_POSITION_PRECEDING) return 1;
-            return 0;
-        });
-
-        return result;
+    function getCurrentCharName() {
+        try {
+            const ctx = window.SillyTavern?.getContext?.();
+            return ctx?.characters?.[ctx?.characterId]?.name || null;
+        } catch (e) { return null; }
     }
 
-    function getActiveContext() {
-        for (const ctx of CONTEXTS) {
-            try {
-                if (ctx.visible()) return ctx;
-            } catch (e) { /* ignore */ }
+    // ============================================================
+    // キーボードコンテキストの決定
+    // ============================================================
+    function getKeyboardContext() {
+        const flags = window.VariableManager?.getCommonRuleFlags?.();
+        if (!flags || !flags.ok) return null;
+        const rpg = flags.rpgMode === true;
+        const choices = flags.choicesMode === true;
+        if (!rpg && !choices) return null;
+
+        const battleActive = window.VariableManager?.isBattleActive?.() === true;
+        const battleStart = window.VariableManager?.getBattleStartVar?.() === true;
+        const charName = getCurrentCharName();
+        const state = window.ChoiceClick?.getStartState?.(charName) || 'initial';
+
+        // ① RPGモード + バトルモード → 左端の4ボタンのみ
+        if (rpg && battleActive) {
+            const container = document.getElementById('variable-battle-commands');
+            if (container && isElementVisible(container)) {
+                const btns = Array.from(container.querySelectorAll('.variable-command-btn')).filter(isElementVisible);
+                if (btns.length > 0) {
+                    return { name: 'battle-commands', multi: true, elements: btns };
+                }
+            }
+            return null;
         }
+
+        // ② RPGモード + バトル開始変数=1 → 最後のバトル開始ボタンのみ
+        if (rpg && battleStart) {
+            const btns = document.querySelectorAll('.variable-battle-start-btn');
+            if (btns.length > 0) {
+                const last = btns[btns.length - 1];
+                if (isElementVisible(last)) {
+                    return { name: 'battle-start', multi: false, elements: [last] };
+                }
+            }
+            return null;
+        }
+
+        // ③ 選択肢モード + state=initial → ゲーム開始ボタンのみ
+        //    （RPGモードと併用時も、まだ開始前ならここで扱う）
+        if (choices && state === 'initial') {
+            const btns = document.querySelectorAll('.game-start-choice:not(.game-reset-choice)');
+            if (btns.length > 0) {
+                const last = btns[btns.length - 1];
+                if (isElementVisible(last)) {
+                    return { name: 'game-start', multi: false, elements: [last] };
+                }
+            }
+            return null;
+        }
+
+        // ④ 最後の選択肢ブロック内の選択肢のみ
+        if (rpg || (choices && state === 'clicked')) {
+            return getLastChoicesContext();
+        }
+
         return null;
     }
 
-    function getElements(ctx) {
-        if (typeof ctx.getElements === 'function') {
-            try { return ctx.getElements(); } catch (e) { return []; }
-        }
-        const root = ctx.container ? ctx.container() : document;
-        if (!root) return [];
-        return Array.from(root.querySelectorAll(ctx.selector)).filter(isElementVisible);
-    }
+    function getLastChoicesContext() {
+        const blocks = document.querySelectorAll('.lbe-choices-block');
+        if (blocks.length === 0) return null;
+        const last = blocks[blocks.length - 1];
+        const items = Array.from(last.querySelectorAll('.lbe-choice-item')).filter(isElementVisible);
+        if (items.length === 0) return null;
 
-    function clearFocus() {
-        document.querySelectorAll('.' + FOCUS_CLASS).forEach(el => {
-            el.classList.remove(FOCUS_CLASS);
-        });
+        // 新しい選択肢ブロックに切り替わったらインデックスをリセット
+        if (last !== _lastChoicesBlock) {
+            _lastChoicesBlock = last;
+            _indices['choices'] = 0;
+        }
+        return { name: 'choices', multi: true, elements: items };
     }
 
     // ============================================================
     // 入力欄の非表示制御
-    //   VariableManager の共通ルールフラグ (rpgMode / choicesMode) が
-    //   true の時、body に keyconfig-hide-input を付与する。
     // ============================================================
     function isInputLocked() {
         try {
@@ -196,19 +179,16 @@
     function updateInputLock() {
         const locked = isInputLocked();
         const already = document.body.classList.contains(HIDE_INPUT_CLASS);
-
         if (locked === already) return;
 
         document.body.classList.toggle(HIDE_INPUT_CLASS, locked);
 
         if (locked) {
-            // フォーカスが textarea に残っていると keydown がそちらに吸われるため、
-            // 明示的に blur する。
             const ta = document.getElementById('send_textarea');
             if (ta && document.activeElement === ta) {
                 try { ta.blur(); } catch (e) { /* ignore */ }
             }
-            console.log(LOG, '入力欄をロック (rpgMode または choicesMode が 1)');
+            console.log(LOG, '入力欄をロック');
         } else {
             console.log(LOG, '入力欄のロックを解除');
         }
@@ -217,38 +197,33 @@
     // ============================================================
     // フォーカス管理
     // ============================================================
+    function clearFocus() {
+        document.querySelectorAll('.' + FOCUS_CLASS).forEach(el => {
+            el.classList.remove(FOCUS_CLASS);
+        });
+    }
+
     function ensureFocus() {
         updateInputLock();
 
-        const ctx = getActiveContext();
+        const ctx = getKeyboardContext();
         if (!ctx) {
-            if (_lastActiveContextName !== null) {
+            if (_lastContextName !== null) {
                 clearFocus();
-                _lastActiveContextName = null;
-                _lastElementsSignature = '';
+                _lastContextName = null;
             }
             return;
         }
 
-        if (_lastActiveContextName !== ctx.name) {
-            if (ctx.multi) _indices[ctx.name] = 0;
-            _lastActiveContextName = ctx.name;
-            _lastElementsSignature = '';
+        if (_lastContextName !== ctx.name) {
+            _indices[ctx.name] = 0;
+            _lastContextName = ctx.name;
         }
 
-        const elements = getElements(ctx);
-        if (elements.length === 0) {
+        const elements = ctx.elements;
+        if (!elements || elements.length === 0) {
             clearFocus();
             return;
-        }
-
-        // 内容が変わったら index をリセット（新しい選択肢が出た等）
-        const sig = elements.map(el => el.textContent?.slice(0, 30) || '').join('|');
-        if (sig !== _lastElementsSignature) {
-            if (_lastElementsSignature === '') {
-                _indices[ctx.name] = 0;
-            }
-            _lastElementsSignature = sig;
         }
 
         let idx = _indices[ctx.name] ?? 0;
@@ -257,18 +232,16 @@
         _indices[ctx.name] = idx;
 
         clearFocus();
-        if (ctx.multi) {
-            elements[idx].classList.add(FOCUS_CLASS);
-        }
+        elements[idx].classList.add(FOCUS_CLASS);
     }
 
     // ============================================================
     // ナビゲーション
     // ============================================================
     function navigate(delta) {
-        const ctx = getActiveContext();
+        const ctx = getKeyboardContext();
         if (!ctx || !ctx.multi) return;
-        const elements = getElements(ctx);
+        const elements = ctx.elements;
         if (elements.length === 0) return;
 
         let idx = _indices[ctx.name] ?? 0;
@@ -279,7 +252,6 @@
 
         clearFocus();
         elements[idx].classList.add(FOCUS_CLASS);
-
         try {
             elements[idx].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         } catch (e) {
@@ -288,18 +260,16 @@
     }
 
     // ============================================================
-    // 決定（要素の .click() を発火）
+    // 決定
     // ============================================================
     function confirm() {
-        const ctx = getActiveContext();
+        const ctx = getKeyboardContext();
         if (!ctx) return false;
-        const elements = getElements(ctx);
+        const elements = ctx.elements;
         if (elements.length === 0) return false;
-
         const idx = Math.min(_indices[ctx.name] ?? 0, elements.length - 1);
         const el = elements[idx];
         if (!el) return false;
-
         try {
             el.click();
             return true;
@@ -309,14 +279,14 @@
     }
 
     // ============================================================
-    // キーイベントハンドラ（capture フェーズ）
+    // キーイベント
     // ============================================================
     document.addEventListener('keydown', (e) => {
         if (e.ctrlKey || e.altKey || e.metaKey) return;
         if (e.isComposing) return;
         if (isTypingTarget(e.target)) return;
 
-        const ctx = getActiveContext();
+        const ctx = getKeyboardContext();
         if (!ctx) return;
 
         const key = e.key;
@@ -334,7 +304,7 @@
             return;
         }
         if (CONFIRM_KEYS.includes(key)) {
-            if (e.repeat) return;      // Enter 押しっぱなしの多重送信防止
+            if (e.repeat) return;
             confirm();
             e.preventDefault();
             e.stopPropagation();
@@ -343,7 +313,7 @@
     }, true);
 
     // ============================================================
-    // DOM 監視 + ポーリング
+    // 監視・初期化
     // ============================================================
     let _rafPending = false;
     const observer = new MutationObserver(() => {
@@ -362,7 +332,7 @@
         }
         observer.observe(document.body, { childList: true, subtree: true });
         ensureFocus();
-        setInterval(ensureFocus, 500);
+        setInterval(ensureFocus, 400);
         console.log(LOG, '初期化完了');
     }
 
@@ -379,31 +349,20 @@
         refresh: ensureFocus,
         navigate,
         confirm,
-        getActiveContextName: () => {
-            const ctx = getActiveContext();
+        getContextName: () => {
+            const ctx = getKeyboardContext();
             return ctx ? ctx.name : null;
         },
         getIndices: () => ({ ..._indices }),
-        resetIndex: (name) => {
-            if (name && _indices[name] !== undefined) {
-                _indices[name] = 0;
-            } else {
-                for (const k of Object.keys(_indices)) _indices[k] = 0;
-            }
-            ensureFocus();
-        },
-        // ★ デバッグ用: 現時点の navigable 要素を列挙
         _debugElements: () => {
-            const ctx = getActiveContext();
+            const ctx = getKeyboardContext();
             if (!ctx) return { context: null, elements: [] };
-            const elements = getElements(ctx);
             return {
                 context: ctx.name,
-                elements: elements.map(el => ({
+                elements: ctx.elements.map(el => ({
                     tag: el.tagName,
                     class: el.className,
                     text: (el.textContent || '').slice(0, 40),
-                    visible: isElementVisible(el),
                 })),
             };
         },
