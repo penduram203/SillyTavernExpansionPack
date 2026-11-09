@@ -55,6 +55,12 @@ function _updateBackup(char, namespace, payload) {
 // ============================================================
 function _syncLorebookExpansionFromWorldStore(char) {
     if (!char) return;
+    
+    // ★ エクスポート前に重複キーをクリーンアップ
+    try {
+        window.LorebookExpansion?.cleanupLexDuplicateKeys?.();
+    } catch (e) { /* ignore */ }
+    
     try {
         const ctx = _getCtx();
         const store = ctx?.extensionSettings?.lorebook_expansion?.data;
