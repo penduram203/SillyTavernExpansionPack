@@ -416,6 +416,13 @@ export async function flushAll() {
             exportData.create_date = exportData.create_date || new Date().toISOString();
             exportData.avatar_url = char.avatar || '';
             exportData.ch_name = char.name || '';
+
+            // ★ json_data は内部保持用の生データのため、エクスポート時には削除する
+            //    これにより JSON ファイルのサイズを大幅に削減できる
+            if (exportData.json_data) {
+                delete exportData.json_data;
+                console.log(`${LOG} 🧹 json_data を削除してエクスポート`);
+            }
             const jsonStr = JSON.stringify(exportData, null, 4);
             const filename = `${char.name || 'character'}.json`;
             const blob = new Blob([jsonStr], { type: 'application/json' });
@@ -535,7 +542,9 @@ export async function flushAll() {
             const b64 = String.fromCharCode(...td.slice(ni + 1));
             let json; try { json = JSON.parse(b2u(b64)); } catch (e) { continue; }
             const data = json.data || json;
-            if (!data.extensions) data.extensions = {};
+            if (data.json_data) {
+                delete data.json_data;
+            }
             let inj = 0;
             for (const [ns, p] of Object.entries(backups)) {
                 data.extensions[ns] = JSON.parse(JSON.stringify(p));
