@@ -7,8 +7,15 @@
 //   - バトル中は画面左下・高さ中央に「攻撃/防御/道具/逃走」ボタンを配置
 //   - 攻撃/防御/逃走の動作を実装（道具は未実装）
 //
+// ★ ロアブックの「00_共通ルール」エントリによる制御（v7）:
+//   - RPGモード = 1    → 変数パネル（場所・敵情報）を表示、左下にプレイヤーHPバー表示
+//   - 選択肢モード = 1 → チャット末尾に「バトル開始」ボタンを表示
+//   - バトル中の4ボタン・敵HP表示は RPGモード=1 かつ バトルモード=1 の時のみ
+//   - キャラクター管理メニューの UI設定チェックボックスは全廃。
+//
 // ★ 変数の役割分担:
-//   - バトル開始 : 選択肢末尾の「バトル開始」ボタンを表示するかどうか（常に1で維持）
+//   - RPGモード    : 変数パネル・プレイヤーHP表示の ON/OFF（ロアブックで設定）
+//   - 選択肢モード : 「バトル開始」ボタン表示の ON/OFF（ロアブックで設定）
 //   - バトルモード : 実際のバトル進行状態（1=バトル中, 0=非バトル）
 //
 // ★ バトルモード遷移:
@@ -20,30 +27,28 @@
 //   敵ダメージ = max(1, enemy_attack - player_defense)
 //   プレイヤーHP≤0 → バトルモード=0, バトル終了, エントリ999を自動送信
 //
-// ★ 攻撃アナウンス＆ダメージフロート（v6）:
+// ★ 攻撃アナウンス＆ダメージフロート（v6 から継続）:
 //   攻撃ボタン押下 → 効果音 → 即座に
 //     「（攻撃者）は（対象）を攻撃した！」  ← T=0 表示、T=2000 非表示開始
 //   250ms 後、その下に
 //     「（対象）に（ダメージ）のダメージ！」 ← T=250 表示、T=2250 非表示開始
-//   両方完全消滅 (T=2450) で Promise 解決。
-//   フロート表示前の遅延はゼロ。左寄せ表示。
+//   両方完全消滅 (T=2450) で Promise 解決。左寄せ表示。
 //
-// ★ 効果音（v6）:
+// ★ 効果音（v6 から継続）:
 //   - 攻撃/防御/道具/逃走ボタン押下: attack / defense / item / escape
 //   - 敵キャラの攻撃: enemy_attack
 //   - バトルコマンドボタンへのマウスホバー: interface7
 //
-// ★ バトル終了フロー（v6）:
+// ★ バトル終了フロー（v6 から継続）:
 //   - どちらかの HP が 0 以下になった場合、攻撃シーケンス完了後に
 //     「（敵名）を倒した！」/「（プレイヤー名）は（敵名）に敗北した！」
 //     を表示し、消えるまで await。
 //   - バトル終了フロートが消えるまでは バトルモード=0 を書き込まない。
-//     これにより UserStatus の HP バーがフロート表示中も表示され続ける。
 //   - バトルモード=0 書き込み → UserStatus.refresh() → HP バー非表示
 //     → endBattle() → 明示的 render で敵HPバー非表示
 //     → restorePlayerHPFull() → restoreEnemyHPFull()
 //
-// ★ 二度押し防止（v6）:
+// ★ 二度押し防止（v6 から継続）:
 //   - _actionInProgress フラグで攻撃/防御/逃走の多重実行を防止。
 
 // ★ 効果音モジュール（window.SoundEffects を公開）を非同期ロード
@@ -58,28 +63,26 @@ import('./sound_effects.js').catch(err => {
     const STYLE_ID = 'variable-manager-style';
     const POLL_INTERVAL_MS = 1500;
 
-    const UI_SETTINGS_CLASS = 'variable-manager-ui-settings';
-    const VISIBLE_CHECKBOX_ID = 'variable-manager-visible-checkbox';
-    const START_CHECKBOX_ID = 'variable-manager-start-checkbox';
     const EXT_SETTINGS_KEY = 'variable_manager';
-    const EVENT_START_CHANGED = 'variable-manager-start-changed';
     const BATTLE_START_BTN_CLASS = 'variable-battle-start-btn';
     const BATTLE_COMMANDS_ID = 'variable-battle-commands';
+    const COMMON_RULE_ENTRY_NAME = '00_共通ルール';
+    const VAR_NAME_RPG_MODE = 'RPGモード';
+    const VAR_NAME_CHOICES_MODE = '選択肢モード';
 
     // ★ タイミング定数
-    //   DAMAGE_FLOAT_DELAY_MS / ENEMY_ATTACK_DELAY_MS は現在未使用（将来の調整用に残置）。
     const ENEMY_ATTACK_DELAY_MS = 600;   // （現在未使用）
     const ENTRY_999_DELAY_MS = 800;
     const DAMAGE_FLOAT_DELAY_MS = 400;   // （現在未使用）
-    const DAMAGE_FLOAT_HOLD_MS = 2300;   // バトル終了フロートの保持時間（旧1800 + 500）
+    const DAMAGE_FLOAT_HOLD_MS = 2300;   // バトル終了フロートの保持時間
     const DAMAGE_FLOAT_FADE_MS = 200;    // フェードアウトに要する時間
 
-    // ★ 攻撃シーケンス用タイミング（v6 で +500ms 延長）
-    const ATTACK_FLOAT_START_DELAY_MS = 0;        // 攻撃フロート表示開始
-    const DAMAGE_FLOAT_START_DELAY_MS = 250;      // ダメージフロート表示開始
-    const ATTACK_FLOAT_HIDE_MS = 2000;            // 攻撃フロート非表示開始（旧1500 + 500）
-    const DAMAGE_FLOAT_HIDE_MS = 2250;            // ダメージフロート非表示開始（旧1750 + 500）
-    const ATTACK_SEQUENCE_END_MS = 2450;          // 両フロート完全消滅（旧1950 + 500）
+    // ★ 攻撃シーケンス用タイミング
+    const ATTACK_FLOAT_START_DELAY_MS = 0;
+    const DAMAGE_FLOAT_START_DELAY_MS = 250;
+    const ATTACK_FLOAT_HIDE_MS = 2000;
+    const DAMAGE_FLOAT_HIDE_MS = 2250;
+    const ATTACK_SEQUENCE_END_MS = 2450;
 
     const BATTLE_DEFAULTS = {
         active: false,
@@ -94,20 +97,20 @@ import('./sound_effects.js').catch(err => {
     let _lastRenderKey = '';
     let _renderInFlight = false;
     let _initialized = false;
-    let _uiObsPending = false;
 
     // ★ バトル状態
     let _battleActive = false;
     let _battlePrevChatHidden = null;
-    let _lastBattleMode = false;
     let _startBattleInProgress = false;
     let _enemyAttackInProgress = false;
-    // ★ フロート表示〜後続処理の間、外部からの endBattle を抑止するフラグ
     let _battleEndingInProgress = false;
-    // ★ 攻撃/防御/逃走の多重実行防止
     let _actionInProgress = false;
-    // ★ 敵名キャッシュ（フロート表示時に無駄な再取得を避ける）
     let _cachedEnemyName = '敵';
+
+    // ★ 共通ルール（RPGモード / 選択肢モード）のキャッシュ
+    //   render() 内で refreshCommonRuleFlags() により更新される。
+    //   user_status.js 等から同期参照するために getCommonRuleFlags() を公開。
+    let _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false };
 
     (function injectStyle() {
         if (document.getElementById(STYLE_ID)) return;
@@ -183,6 +186,103 @@ import('./sound_effects.js').catch(err => {
             if (num) return num;
         }
         return null;
+    }
+
+    // ★ エントリのキー配列を取得（key / keys 両対応）
+    function getEntryKeys(entry) {
+        if (!entry) return [];
+        if (window.LorebookExpansion?.getEntryKeys) {
+            try {
+                const keys = window.LorebookExpansion.getEntryKeys(entry);
+                if (Array.isArray(keys)) return keys;
+            } catch (e) { /* ignore */ }
+        }
+        if (Array.isArray(entry.keys) && entry.keys.length) return entry.keys;
+        if (Array.isArray(entry.key) && entry.key.length) return entry.key;
+        if (typeof entry.keys === 'string' && entry.keys.trim()) return [entry.keys];
+        if (typeof entry.key === 'string' && entry.key.trim()) return [entry.key];
+        return [];
+    }
+
+    // ★ エントリの変数から名前→値のマップを作る
+    function buildVarMapFromEntry(worldName, entry) {
+        if (!worldName || !entry) return {};
+        const uid = entry.uid;
+        if (uid === null || uid === undefined) return {};
+        try {
+            const data = window.LorebookExpansion.getDataFor(worldName, uid, entry);
+            const vars = Array.isArray(data?.variables) ? data.variables : [];
+            const varMap = {};
+            for (const v of vars) {
+                if (v && typeof v.name === 'string' && v.name) varMap[v.name] = v;
+            }
+            return varMap;
+        } catch (e) { return {}; }
+    }
+
+    // ★ 「00_共通ルール」エントリの変数から RPGモード / 選択肢モード を取得
+    function extractCommonRuleFlags(varMap) {
+        const rpgRaw = varMap?.[VAR_NAME_RPG_MODE]?.value;
+        const choicesRaw = varMap?.[VAR_NAME_CHOICES_MODE]?.value;
+        const rpgMode = String(rpgRaw ?? '').trim() === '1';
+        const choicesMode = String(choicesRaw ?? '').trim() === '1';
+        return { rpgMode, choicesMode };
+    }
+
+    // ============================================================
+    // ★ 共通ルール変数の取得
+    //   ロアブックの「00_共通ルール」エントリから RPGモード / 選択肢モード を抽出し、
+    //   _commonRuleFlags キャッシュを更新する。
+    // ============================================================
+    async function refreshCommonRuleFlags() {
+        try {
+            const worldName = getWorldName();
+            if (!worldName || !window.LorebookExpansion?.loadWorldInfoEntriesByName) {
+                _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false };
+                return _commonRuleFlags;
+            }
+
+            let entries = null;
+            try {
+                entries = await window.LorebookExpansion.loadWorldInfoEntriesByName(worldName);
+            } catch (e) { /* ignore */ }
+            if (!entries) {
+                _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false };
+                return _commonRuleFlags;
+            }
+
+            const list = Array.isArray(entries) ? entries : Object.values(entries);
+            let targetEntry = null;
+            for (const e of list) {
+                if (!e) continue;
+                const comment = typeof e.comment === 'string' ? e.comment.trim() : '';
+                const keys = getEntryKeys(e).map(k => String(k).trim());
+                if (comment === COMMON_RULE_ENTRY_NAME || keys.includes(COMMON_RULE_ENTRY_NAME)) {
+                    targetEntry = e;
+                    break;
+                }
+            }
+
+            if (!targetEntry) {
+                _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false };
+                return _commonRuleFlags;
+            }
+
+            const varMap = buildVarMapFromEntry(worldName, targetEntry);
+            const flags = extractCommonRuleFlags(varMap);
+            _commonRuleFlags = { ok: true, ...flags };
+            return _commonRuleFlags;
+        } catch (e) {
+            console.warn(LOG, 'refreshCommonRuleFlags error:', e);
+            _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false };
+            return _commonRuleFlags;
+        }
+    }
+
+    // ★ 公開用: 共通ルール変数を非同期で取得（loadWorldInfoEntriesByName を毎回呼ぶ）
+    async function getCommonRuleVariables() {
+        await refreshCommonRuleFlags();
+        return { ..._commonRuleFlags };
     }
 
     async function getCurrentVariables() {
@@ -270,7 +370,6 @@ import('./sound_effects.js').catch(err => {
         }
     }
 
-    // ★ プレイヤーHPを最大値に全回復
     function restorePlayerHPFull() {
         try {
             if (!window.UserStatus?.fullHeal) {
@@ -324,7 +423,7 @@ import('./sound_effects.js').catch(err => {
     }
 
     // ============================================================
-    // UI設定
+    // キャラ・設定ヘルパー
     // ============================================================
     function getCurrentCharName() {
         try {
@@ -345,169 +444,21 @@ import('./sound_effects.js').catch(err => {
         } catch (e) { return null; }
     }
 
-    function getVisibleByCharMap() {
-        const s = _ensureExtSettings();
-        if (!s) return {};
-        if (!s.visibleByChar || typeof s.visibleByChar !== 'object') s.visibleByChar = {};
-        return s.visibleByChar;
-    }
-
-    function saveVisibleByCharMap(map) {
-        const s = _ensureExtSettings();
-        if (!s) return;
-        s.visibleByChar = map;
-        try {
-            const ctx = getSTContext();
-            if (typeof ctx?.saveSettingsDebounced === 'function') ctx.saveSettingsDebounced();
-        } catch (e) { /* ignore */ }
-    }
-
-    function getStartButtonMap() {
-        const s = _ensureExtSettings();
-        if (!s) return {};
-        if (!s.startButtonByChar || typeof s.startButtonByChar !== 'object') s.startButtonByChar = {};
-        return s.startButtonByChar;
-    }
-
-    function saveStartButtonMap(map) {
-        const s = _ensureExtSettings();
-        if (!s) return;
-        s.startButtonByChar = map;
-        try {
-            const ctx = getSTContext();
-            if (typeof ctx?.saveSettingsDebounced === 'function') ctx.saveSettingsDebounced();
-        } catch (e) { /* ignore */ }
-    }
-
+    // ============================================================
+    // ★ 表示制御（ロアブックの共通ルール変数ベース）
+    //   isVisibleForChar       : RPGモード=1 で true（変数パネル・プレイヤーHP表示）
+    //   isStartButtonEnabledForChar : 選択肢モード=1 で true（バトル開始ボタン表示）
+    //   ※ charName が null の場合は常に false
+    //   ※ _commonRuleFlags キャッシュを同期参照する。render() 内で更新される。
+    // ============================================================
     function isVisibleForChar(charName) {
         if (!charName) return false;
-        return getVisibleByCharMap()[charName] === true;
+        return _commonRuleFlags.rpgMode === true;
     }
 
     function isStartButtonEnabledForChar(charName) {
         if (!charName) return false;
-        return getStartButtonMap()[charName] === true;
-    }
-
-    function applyPanelVisibility() {
-        const panel = document.getElementById(PANEL_ID);
-        const charName = getCurrentCharName();
-        const visible = isVisibleForChar(charName);
-        const startEnabled = isStartButtonEnabledForChar(charName);
-
-        if (panel) {
-            panel.classList.toggle('variable-manager-disabled', !visible);
-        }
-        const visCb = document.getElementById(VISIBLE_CHECKBOX_ID);
-        if (visCb) {
-            visCb.checked = visible;
-            visCb.disabled = !charName;
-        }
-        const startCb = document.getElementById(START_CHECKBOX_ID);
-        if (startCb) {
-            startCb.checked = startEnabled;
-            startCb.disabled = !charName;
-        }
-    }
-
-    function createUISettings() {
-        if (document.getElementById(VISIBLE_CHECKBOX_ID)) return;
-
-        const select = document.getElementById('char-management-dropdown');
-        if (!select) return;
-
-        const label = select.closest('label') || select.parentElement;
-        if (!label) return;
-
-        const container = document.createElement('div');
-        container.className = UI_SETTINGS_CLASS;
-
-        const uiLabel = document.createElement('span');
-        uiLabel.className = 'variable-manager-ui-label';
-        uiLabel.textContent = 'UI設定';
-        container.appendChild(uiLabel);
-
-        const startWrap = document.createElement('label');
-        startWrap.className = 'variable-manager-checkbox-wrap';
-        startWrap.title = 'ゲーム開始ボタンを表示（キャラ毎に保存）';
-        const startCb = document.createElement('input');
-        startCb.type = 'checkbox';
-        startCb.id = START_CHECKBOX_ID;
-        startCb.className = 'variable-manager-visible-checkbox';
-        startWrap.appendChild(startCb);
-        const startText = document.createElement('span');
-        startText.className = 'variable-manager-checkbox-text';
-        startText.textContent = '開始ボタン';
-        startWrap.appendChild(startText);
-        startCb.addEventListener('change', () => {
-            const charName = getCurrentCharName();
-            if (!charName) return;
-            const map = getStartButtonMap();
-            map[charName] = startCb.checked === true;
-            saveStartButtonMap(map);
-            try {
-                window.dispatchEvent(new CustomEvent(EVENT_START_CHANGED, {
-                    detail: { charName, enabled: startCb.checked === true }
-                }));
-            } catch (e) { /* ignore */ }
-        });
-        container.appendChild(startWrap);
-
-        const placeWrap = document.createElement('label');
-        placeWrap.className = 'variable-manager-checkbox-wrap';
-        placeWrap.title = '変数ウインドウを表示（キャラ毎に保存）';
-        const visCb = document.createElement('input');
-        visCb.type = 'checkbox';
-        visCb.id = VISIBLE_CHECKBOX_ID;
-        visCb.className = 'variable-manager-visible-checkbox';
-        placeWrap.appendChild(visCb);
-        const placeText = document.createElement('span');
-        placeText.className = 'variable-manager-checkbox-text';
-        placeText.textContent = '場所';
-        placeWrap.appendChild(placeText);
-        visCb.addEventListener('change', () => {
-            const charName = getCurrentCharName();
-            if (!charName) return;
-            const map = getVisibleByCharMap();
-            map[charName] = visCb.checked === true;
-            saveVisibleByCharMap(map);
-            applyPanelVisibility();
-            render();
-        });
-        container.appendChild(placeWrap);
-
-        select.insertAdjacentElement('afterend', container);
-
-        label.style.setProperty('display', 'flex', 'important');
-        label.style.setProperty('align-items', 'center', 'important');
-        label.style.setProperty('gap', '6px', 'important');
-        label.style.setProperty('flex-wrap', 'nowrap', 'important');
-        label.style.setProperty('min-width', '0', 'important');
-    }
-
-    function ensureUISettings() {
-        const select = document.getElementById('char-management-dropdown');
-        if (select) {
-            const next = select.nextElementSibling;
-            const isProper = next && next.classList && next.classList.contains(UI_SETTINGS_CLASS);
-            if (!isProper) {
-                document.querySelectorAll('.' + UI_SETTINGS_CLASS).forEach(el => el.remove());
-                createUISettings();
-            }
-        }
-        applyPanelVisibility();
-    }
-
-    function setupUISettingsObserver() {
-        const obs = new MutationObserver(() => {
-            if (_uiObsPending) return;
-            _uiObsPending = true;
-            requestAnimationFrame(() => {
-                _uiObsPending = false;
-                ensureUISettings();
-            });
-        });
-        obs.observe(document.body, { childList: true, subtree: true });
+        return _commonRuleFlags.choicesMode === true;
     }
 
     function ensurePanel() {
@@ -516,7 +467,8 @@ import('./sound_effects.js').catch(err => {
 
         panel = document.createElement('div');
         panel.id = PANEL_ID;
-        panel.className = 'variable-manager-panel variable-manager-disabled';
+        panel.className = 'variable-manager-panel';
+        panel.style.display = 'none';
         document.body.appendChild(panel);
         return panel;
     }
@@ -555,7 +507,6 @@ import('./sound_effects.js').catch(err => {
         return -1;
     }
 
-    // ★ 最後の非システムメッセージが AI かどうか
     function isLastMessageAi() {
         const ctx = getSTContext();
         if (!ctx?.chat || ctx.chat.length === 0) return false;
@@ -572,6 +523,12 @@ import('./sound_effects.js').catch(err => {
     }
 
     function addBattleStartButton() {
+        // ★ 選択肢モード=0 の時はボタンを表示しない
+        if (!isStartButtonEnabledForChar(getCurrentCharName())) {
+            removeBattleStartButton();
+            return;
+        }
+
         if (!isLastMessageAi()) {
             removeBattleStartButton();
             return;
@@ -643,7 +600,6 @@ import('./sound_effects.js').catch(err => {
         _lastRenderKey = '';
         console.log(LOG, '⚔️ バトル開始', getBattleState());
 
-        // ★ 背景画像をロック（バトル中の自動切替を防ぐ）
         try {
             window.ImageDisplayExtension?.lockBattleImage?.();
         } catch (e) { /* ignore */ }
@@ -671,7 +627,6 @@ import('./sound_effects.js').catch(err => {
         _lastRenderKey = '';
         console.log(LOG, '⚔️ バトル終了');
 
-        // ★ 背景画像ロックを解除（画像は維持）
         try {
             window.ImageDisplayExtension?.unlockBattleImage?.();
         } catch (e) { /* ignore */ }
@@ -691,15 +646,11 @@ import('./sound_effects.js').catch(err => {
 
         if (!result.ok) {
             console.debug(LOG, `updateBattleUI: result not ok (${result.reason}) → 前回状態を維持`);
-            if (_lastBattleMode && !_battleActive && !_battleEndingInProgress) {
+            if (isStartButtonEnabledForChar(getCurrentCharName()) && !_battleActive && !_battleEndingInProgress) {
                 addBattleStartButton();
             }
             return;
         }
-
-        const battleStartRaw = varMap['バトル開始']?.value;
-        const battleStart = String(battleStartRaw ?? '').trim() === '1';
-        _lastBattleMode = battleStart;
 
         const battleModeRaw = varMap['バトルモード']?.value;
         const battleMode = String(battleModeRaw ?? '').trim() === '1';
@@ -711,7 +662,6 @@ import('./sound_effects.js').catch(err => {
             _lastRenderKey = '';
             updateBattleCommandsState();
 
-            // ★ 背景画像をロック（バトル中の自動切替を防ぐ）
             try {
                 window.ImageDisplayExtension?.lockBattleImage?.();
             } catch (e) { /* ignore */ }
@@ -720,7 +670,8 @@ import('./sound_effects.js').catch(err => {
             endBattle();
         }
 
-        if (!battleStart) {
+        // ★ 選択肢モード による開始ボタン表示制御
+        if (!isStartButtonEnabledForChar(getCurrentCharName())) {
             removeBattleStartButton();
         } else if (!_battleActive && !_battleEndingInProgress) {
             addBattleStartButton();
@@ -731,33 +682,23 @@ import('./sound_effects.js').catch(err => {
 
     // ============================================================
     // ★ 攻撃シーケンスフロート（非同期）
-    //   attackerName が targetName を攻撃したことを段階的に表示する。
-    //     T=0     「（攻撃者）は（対象）を攻撃した！」  表示開始
-    //     T=250   「（対象）に（ダメージ）のダメージ！」 表示開始（1つ目の下）
-    //     T=2000  1つ目を非表示開始
-    //     T=2250  2つ目を非表示開始
-    //     T=2450  両方完全消滅 → Promise 解決
-    //   onDamageShow はダメージフロートが DOM に追加された瞬間に呼ばれる。
     // ============================================================
     function showAttackSequenceAsync(attackerName, targetName, damage, options = {}) {
         const { onDamageShow = null } = options;
 
         return new Promise((resolve) => {
-            // 既存フロートを除去（多重実行対策）
             document.querySelectorAll('.variable-damage-float, .variable-attack-float').forEach(el => el.remove());
 
             const safeAttacker = (attackerName && String(attackerName).trim()) || '誰か';
             const safeTarget = (targetName && String(targetName).trim()) || '相手';
             const safeDamage = Math.max(0, Math.round(Number(damage) || 0));
 
-            // ── ① 攻撃アナウンスフロート（T=0）──
             const attackEl = document.createElement('div');
             attackEl.className = 'variable-attack-float';
             attackEl.textContent = `${safeAttacker}は${safeTarget}を攻撃した！`;
             document.body.appendChild(attackEl);
             requestAnimationFrame(() => attackEl.classList.add('visible'));
 
-            // ── ② ダメージフロート（T=250、攻撃フロートの下）──
             let damageEl = null;
             setTimeout(() => {
                 damageEl = document.createElement('div');
@@ -771,17 +712,14 @@ import('./sound_effects.js').catch(err => {
                 }
             }, DAMAGE_FLOAT_START_DELAY_MS);
 
-            // ── ③ 攻撃フロート非表示開始（T=2000）──
             setTimeout(() => {
                 attackEl.classList.remove('visible');
             }, ATTACK_FLOAT_HIDE_MS);
 
-            // ── ④ ダメージフロート非表示開始（T=2250）──
             setTimeout(() => {
                 if (damageEl) damageEl.classList.remove('visible');
             }, DAMAGE_FLOAT_HIDE_MS);
 
-            // ── ⑤ 両方除去・resolve（T=2450 = 2250 + 200ms フェード）──
             setTimeout(() => {
                 if (attackEl.parentNode) attackEl.parentNode.removeChild(attackEl);
                 if (damageEl && damageEl.parentNode) damageEl.parentNode.removeChild(damageEl);
@@ -790,11 +728,6 @@ import('./sound_effects.js').catch(err => {
         });
     }
 
-    // ============================================================
-    // ★ バトル終了フロート表示（非同期）
-    //   「（敵名）を倒した！」/「（プレイヤー名）は（敵名）に敗北した！」
-    //   を表示し、消えたら Promise を解決する。
-    // ============================================================
     function showBattleEndFloatAsync(message, options = {}) {
         const { delayMs = 0, holdMs = DAMAGE_FLOAT_HOLD_MS } = options;
 
@@ -824,16 +757,6 @@ import('./sound_effects.js').catch(err => {
 
     // ============================================================
     // ★ 敵の自動攻撃
-    //   - 敵攻撃効果音 enemy_attack を再生
-    //   - 攻撃シーケンスフロート（「（敵）は（プレイヤー）を攻撃した！」→
-    //     250ms後「（プレイヤー）に（ダメージ）のダメージ！」）を表示
-    //   - ダメージフロート表示と同時にプレイヤーHP減算
-    //   - フロートが消えるまで await →
-    //     プレイヤー敗北時はバトル終了フロート表示 → 消えるまで await →
-    //     バトルモード=0 書き込み → UserStatus.refresh() で HP バー非表示 →
-    //     endBattle() → 明示 render で敵HPバー非表示 →
-    //     restorePlayerHPFull() → restoreEnemyHPFull() →
-    //     ターンリセット → エントリ999
     // ============================================================
     async function enemyAutoAttack() {
         if (_enemyAttackInProgress) return;
@@ -863,16 +786,12 @@ import('./sound_effects.js').catch(err => {
 
             if (isPlayerDefeated) _battleEndingInProgress = true;
 
-            // ★ 敵攻撃効果音を再生（攻撃アナウンス表示前）
             try {
                 window.SoundEffects?.play?.('enemy_attack');
             } catch (err) {
                 console.debug(LOG, '効果音の再生に失敗:', err);
             }
 
-            // ★ 攻撃シーケンスフロート
-            //   T=0    「（敵）は（プレイヤー）を攻撃した！」
-            //   T=250  「（プレイヤー）に（ダメージ）のダメージ！」+ HP 減算
             await showAttackSequenceAsync(enemyName, playerName, damage, {
                 onDamageShow: () => {
                     window.UserStatus.setStatus({ curHP: newHP });
@@ -888,33 +807,22 @@ import('./sound_effects.js').catch(err => {
                 try {
                     console.log(LOG, '💀 プレイヤーHPが0以下 → バトル終了 + エントリ999ロード');
 
-                    // ── ① バトル終了フロート → 消えるまで待つ ──
-                    //      この間 _battleActive = true のままなので HP バーは表示され続ける
                     await showBattleEndFloatAsync(`${playerName}は${enemyName}に敗北した！`);
 
-                    // ── ② ここで初めて バトルモード=0 を書き込む ──
                     await setBattleModeVar(0);
-
-                    // ── ③ UserStatus を即時更新 → プレイヤーHPバーを非表示 ──
                     try { await window.UserStatus?.refresh?.(); } catch (e) { /* ignore */ }
 
-                    // ── ④ バトル終了（body クラス解除 → チャット復帰）──
                     endBattle();
-
-                    // ── ⑤ 明示的に render して敵HPバーも確実に非表示化 ──
                     await forceRenderAsync();
 
-                    // ── ⑥ ここで初めて HP を全回復（両バーが非表示になった後）──
                     restorePlayerHPFull();
                     await restoreEnemyHPFull();
 
-                    // ── ⑦ ターンリセット ──
                     bs.enemy_turn = 0;
                     bs.player_turn = 1;
                     saveBattleState();
                     updateBattleCommandsState();
 
-                    // ── ⑧ エントリ999を自動送信 ──
                     setTimeout(() => {
                         try {
                             loadEntry999();
@@ -926,7 +834,6 @@ import('./sound_effects.js').catch(err => {
                     _battleEndingInProgress = false;
                 }
             } else {
-                // 生存：ターン切替（プレイヤーへ戻す）
                 bs.enemy_turn = 0;
                 bs.player_turn = 1;
                 saveBattleState();
@@ -941,7 +848,6 @@ import('./sound_effects.js').catch(err => {
         }
     }
 
-    // ★ エントリ999を自動送信
     function loadEntry999() {
         const textarea = document.getElementById('send_textarea');
         if (!textarea) {
@@ -994,7 +900,7 @@ import('./sound_effects.js').catch(err => {
 
     async function handleAttack() {
         if (!_battleActive) return;
-        if (_actionInProgress) return;   // ★ 二度押し防止
+        if (_actionInProgress) return;
 
         const bs = getBattleState();
         if (bs.player_turn !== 1) {
@@ -1018,10 +924,8 @@ import('./sound_effects.js').catch(err => {
         let newHP = 0;
 
         try {
-            // ★ 攻撃シーケンスフロートを即座に開始
             const sequencePromise = showAttackSequenceAsync(playerName, enemyNameForFloat, damage);
 
-            // ★ 並行でロアブック変数を取得・更新
             try {
                 result = await getCurrentVariables();
                 if (result.ok && result.uid) {
@@ -1061,16 +965,13 @@ import('./sound_effects.js').catch(err => {
             saveBattleState();
             forceRender();
 
-            // ★ 攻撃シーケンス完了を待つ
             await sequencePromise;
 
             if (isEnemyDefeated) {
                 _battleEndingInProgress = true;
                 try {
-                    // ── ① バトル終了フロート → 消えるまで待つ ──
                     await showBattleEndFloatAsync(`${enemyNameForFloat}を倒した！`);
 
-                    // ── ② ここで初めて バトルモード=0 を書き込む ──
                     if (vars && result && result.ok && result.uid) {
                         const varMap = {};
                         for (const v of vars) if (v && v.name) varMap[v.name] = v;
@@ -1086,16 +987,10 @@ import('./sound_effects.js').catch(err => {
                         console.log(LOG, 'バトルモード変数を 0 に更新');
                     }
 
-                    // ── ③ UserStatus 即時更新 → プレイヤーHPバー非表示 ──
                     try { await window.UserStatus?.refresh?.(); } catch (e) { /* ignore */ }
 
-                    // ── ④ バトル終了（チャット復帰）──
                     endBattle();
-
-                    // ── ⑤ 明示的に render して敵HPバー非表示 ──
                     await forceRenderAsync();
-
-                    // ── ⑥ 敵HPを最大値に全回復（両バー非表示後）──
                     await restoreEnemyHPFull();
                 } finally {
                     _battleEndingInProgress = false;
@@ -1103,7 +998,6 @@ import('./sound_effects.js').catch(err => {
                 return;
             }
 
-            // ★ 敵の自動攻撃をトリガー
             await enemyAutoAttack();
         } finally {
             _actionInProgress = false;
@@ -1114,7 +1008,7 @@ import('./sound_effects.js').catch(err => {
 
     async function handleDefense() {
         if (!_battleActive) return;
-        if (_actionInProgress) return;   // ★ 二度押し防止
+        if (_actionInProgress) return;
 
         const bs = getBattleState();
         if (bs.player_turn !== 1) {
@@ -1148,7 +1042,7 @@ import('./sound_effects.js').catch(err => {
 
     async function handleEscape() {
         if (!_battleActive) return;
-        if (_actionInProgress) return;   // ★ 二度押し防止
+        if (_actionInProgress) return;
 
         _actionInProgress = true;
         updateBattleCommandsState();
@@ -1170,8 +1064,6 @@ import('./sound_effects.js').catch(err => {
 
     // ============================================================
     // ★ バトルコマンドUI
-    //   - クリック: attack / defense / item / escape の効果音
-    //   - マウスホバー: interface7 の効果音
     // ============================================================
     function ensureBattleCommands() {
         let container = document.getElementById(BATTLE_COMMANDS_ID);
@@ -1194,14 +1086,12 @@ import('./sound_effects.js').catch(err => {
             btn.className = `variable-command-btn variable-command-${b.color}`;
             btn.textContent = b.label;
 
-            // ★ ホバー時の UI 効果音
             btn.addEventListener('mouseenter', () => {
                 try {
                     window.SoundEffects?.play?.('interface7');
                 } catch (err) { /* ignore */ }
             });
 
-            // ★ クリック時の効果音（b.color がそのまま効果音名）
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -1225,6 +1115,8 @@ import('./sound_effects.js').catch(err => {
 
     // ============================================================
     // ★ バトルコマンドの表示状態を更新
+    //   RPGモード=1 かつ バトルモード=1（_battleActive）の時のみ表示
+    //   player_turn=0 または _actionInProgress 中は半透明・クリック不可
     // ============================================================
     function updateBattleCommandsState() {
         const container = document.getElementById(BATTLE_COMMANDS_ID);
@@ -1321,24 +1213,33 @@ import('./sound_effects.js').catch(err => {
     }
 
     async function render() {
-        ensureUISettings();
         ensureBattleCommands();
         updateBattleCommandsState();
-
-        const charName = getCurrentCharName();
-        if (!isVisibleForChar(charName)) {
-            console.debug(LOG, `render: 場所未チェックのためスキップ (char="${charName}")`);
-            if (_battleActive && !_battleEndingInProgress) endBattle();
-            removeBattleStartButton();
-            _lastRenderKey = '';
-            return;
-        }
 
         if (_renderInFlight) return;
         _renderInFlight = true;
         try {
+            // ★ 共通ルール（RPGモード / 選択肢モード）を最新化
+            await refreshCommonRuleFlags();
+
+            const charName = getCurrentCharName();
             const panel = ensurePanel();
-            applyPanelVisibility();
+
+            // ★ RPGモード=0 またはキャラ未選択の場合は全て非表示
+            if (!isVisibleForChar(charName)) {
+                console.debug(LOG, `render: RPGモード=0 のため非表示 (char="${charName}")`);
+                if (_battleActive && !_battleEndingInProgress) endBattle();
+                removeBattleStartButton();
+                if (panel) {
+                    panel.innerHTML = '';
+                    panel.style.display = 'none';
+                }
+                _lastRenderKey = '';
+                return;
+            }
+
+            panel.style.display = '';
+
             const result = await getCurrentVariables();
             updateBattleUI(result);
             renderPanel(panel, result);
@@ -1395,9 +1296,7 @@ import('./sound_effects.js').catch(err => {
 
         ensurePanel();
         ensureBattleCommands();
-        ensureUISettings();
         setupEventListeners();
-        setupUISettingsObserver();
         await render();
 
         setInterval(render, POLL_INTERVAL_MS);
@@ -1413,6 +1312,9 @@ import('./sound_effects.js').catch(err => {
     window.VariableManager = {
         refresh: render,
         getCurrentVariables,
+        getCommonRuleVariables,
+        refreshCommonRuleFlags,
+        getCommonRuleFlags: () => ({ ..._commonRuleFlags }),
         isVisibleForChar,
         isStartButtonEnabledForChar,
         isBattleActive: () => _battleActive,
@@ -1443,46 +1345,23 @@ import('./sound_effects.js').catch(err => {
         showAttackSequenceAsync,
         showBattleEndFloatAsync,
         updateBattleCommandsState,
-        setVisibleForChar: (charName, visible) => {
-            if (!charName) return false;
-            const map = getVisibleByCharMap();
-            map[charName] = !!visible;
-            saveVisibleByCharMap(map);
-            applyPanelVisibility();
-            render();
-            return true;
-        },
-        setStartButtonForChar: (charName, enabled) => {
-            if (!charName) return false;
-            const map = getStartButtonMap();
-            map[charName] = !!enabled;
-            saveStartButtonMap(map);
-            applyPanelVisibility();
-            try {
-                window.dispatchEvent(new CustomEvent(EVENT_START_CHANGED, {
-                    detail: { charName, enabled: !!enabled }
-                }));
-            } catch (e) { /* ignore */ }
-            return true;
-        },
         _debug: () => ({
             worldName: getWorldName(),
             choiceNum: getLastChoiceNumber(),
             currentChar: getCurrentCharName(),
-            visibleMap: getVisibleByCharMap(),
-            startButtonMap: getStartButtonMap(),
+            commonRuleFlags: { ..._commonRuleFlags },
             battleActive: _battleActive,
             battleEndingInProgress: _battleEndingInProgress,
             actionInProgress: _actionInProgress,
             cachedEnemyName: _cachedEnemyName,
             battleState: getBattleState(),
-            lastBattleMode: _lastBattleMode,
             startBattleInProgress: _startBattleInProgress,
             enemyAttackInProgress: _enemyAttackInProgress,
         }),
         debugBattleButton: async () => {
             const charName = getCurrentCharName();
             const visible = isVisibleForChar(charName);
+            const choicesEnabled = isStartButtonEnabledForChar(charName);
             const result = await getCurrentVariables();
             const varMap = {};
             if (result.ok) {
@@ -1495,16 +1374,17 @@ import('./sound_effects.js').catch(err => {
             const userStatus = window.UserStatus?.getStatus?.();
             const info = {
                 charName,
-                場所チェック: visible,
+                RPGモード: _commonRuleFlags.rpgMode,
+                選択肢モード: _commonRuleFlags.choicesMode,
+                パネル表示: visible,
+                開始ボタン有効: choicesEnabled,
                 result_ok: result.ok,
                 reason: result.reason,
                 選択肢番号: result.choiceNum,
-                バトル開始: varMap['バトル開始']?.value,
                 バトルモード: varMap['バトルモード']?.value,
                 敵現在HP: varMap['敵キャラの現在HP']?.value,
                 敵最大HP: varMap['敵キャラの最大HP']?.value,
                 プレイヤーHP: userStatus ? `${userStatus.curHP}/${userStatus.maxHP}` : null,
-                _lastBattleMode,
                 _battleActive,
                 _battleEndingInProgress,
                 _actionInProgress,
