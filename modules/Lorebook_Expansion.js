@@ -505,19 +505,61 @@ async function fetchWorldInfoWithRetry(worldName, maxRetries = WORLDIINFO_FETCH_
 async function loadWorldInfoEntriesByName(worldName) {
     if (!worldName) return null;
 
-    const mod = await getWorldInfoModule();
-    if (mod && mod.world_info && mod.world_info[worldName]?.entries) {
-        return mod.world_info[worldName].entries;
-    }
-
+    // ★ ST 内部キャッシュを確認（空オブジェクトを検出したら fetch にフォールバック）
     try {
-        if (window.world_info && window.world_info[worldName]?.entries) {
-            return window.world_info[worldName].entries;
+        const mod = await getWorldInfoModule();
+        if (mod && mod.world_info && mod.world_info[worldName]?.entries) {
+            const entries = mod.world_info[worldName].entries;
+            if (entries && typeof entries === 'object' && Object.keys(entries).length > 0) {
+                return entries;
+            }
+            debugLog(
+                `world_info["${worldName}"].entries が空のため fetch フォールバック ` +
+                `(STキャッシュ不整合の可能性)`
+            );
         }
     } catch (e) { /* ignore */ }
 
+    try {
+        if (window.world_info && window.world_info[worldName]?.entries) {
+            const entries = window.world_info[worldName].entries;
+            if (entries && typeof entries === 'object' && Object.keys(entries).length > 0) {
+                return entries;
+            }
+        }
+    } catch (e) { /* ignore */ }
+
+    // ★ サーバから直接取得（リトライ付き）
     const entries = await fetchWorldInfoWithRetry(worldName);
-    if (entries) return entries;
+    if (entries) {
+        // 取得したデータを ST 側の world_info キャッシュにも反映（次回以降のため）
+        try {
+            const mod = await getWorldInfoModule();
+            if (mod) {
+                if (!mod.world_info) mod.world_info = {};
+                if (!mod.world_info[worldName] || !mod.world_info[worldName].entries ||
+                    Object.keys(mod.world_info[worldName].entries || {}).length === 0) {
+                    mod.world_info[worldName] = {
+                        entries,
+                        name: worldName,
+                    };
+                    debugLog(`world_info["${worldName}"] を fetch 結果で復元`);
+                }
+            }
+        } catch (e) { /* ignore */ }
+        try {
+            if (window.world_info) {
+                if (!window.world_info[worldName] || !window.world_info[worldName].entries ||
+                    Object.keys(window.world_info[worldName].entries || {}).length === 0) {
+                    window.world_info[worldName] = {
+                        entries,
+                        name: worldName,
+                    };
+                }
+            }
+        } catch (e) { /* ignore */ }
+        return entries;
+    }
 
     console.warn(LOG, `/api/worldinfo/get 失敗 (world="${worldName}", リトライ後も取得できず)`);
     return null;
