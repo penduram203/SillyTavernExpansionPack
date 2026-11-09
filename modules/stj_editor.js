@@ -2491,14 +2491,42 @@
             //    （空 {} でも）character.data を権威ソースとして扱う
             if (ext !== undefined && typeof ext === 'object') {
                 hasCharData = true;
-                // ★ null 値（削除マーカー）を除外する
-                //    merge-attributes の深いマージで残った削除済みキーを無視するため。
+                // ★ null 値（削除マーカー）を除外
                 const filteredExt = {};
+                let nullRemoved = 0;
                 for (const [k, v] of Object.entries(ext)) {
                     if (v !== null && v !== undefined) {
                         filteredExt[k] = v;
+                    } else {
+                        nullRemoved++;
                     }
                 }
+
+                // ★ null があった場合は char.data をクリーンアップして保存
+                //    merge-attributes では null で「削除」できないため、
+                //    読み込み時にクリーンアップしてメモリとサーバの両方を更新する
+                if (nullRemoved > 0) {
+                    try {
+                        const context = getSTContext();
+                        const charFromList = context?.characters?.[context?.characterId];
+                        if (charFromList?.name === charName && charFromList?.data?.extensions) {
+                            charFromList.data.extensions.image_display_extension = filteredExt;
+                        }
+                        if (context?.character?.name === charName && context?.character?.data?.extensions) {
+                            context.character.data.extensions.image_display_extension = filteredExt;
+                        }
+                        window.CharStore?.saveCharacterExtension?.(
+                            'image_display_extension', filteredExt, { immediate: true }
+                        );
+                        console.log(
+                            `[STJ Editor] 🧹 null 値 ${nullRemoved} 件を除去して保存 ` +
+                            `(${Object.keys(filteredExt).length} entries)`
+                        );
+                    } catch (e) {
+                        console.warn('[STJ Editor] null 値クリーンアップ失敗:', e);
+                    }
+                }
+
                 if (Object.keys(filteredExt).length > 0) {
                     imageMap = filteredExt;
                     console.log(`[STJ Editor] ✅ image_display_extension を読込 (${Object.keys(filteredExt).length} entries)`);
@@ -2506,6 +2534,7 @@
                     console.log(`[STJ Editor] image_display_extension は空 ({}) → 空フォーム維持`);
                 }
             }
+
         } catch (e) { /* ignore */ }
 
         // ── ② 移行フォールバック: _ext.json（character.data にキーが無い時のみ）──
