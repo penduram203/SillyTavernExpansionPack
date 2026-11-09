@@ -1705,6 +1705,13 @@ function registerEventListeners() {
             migrateCurrentCharacterToWorldStore();
         });
     }
+    if (event_types.CHAT_CHANGED) {
+        eventSource.on(event_types.CHAT_CHANGED, () => {
+            setTimeout(() => {
+                try { migrateCurrentCharacterToWorldStore(); } catch (e) { /* ignore */ }
+            }, 200);
+        });
+    }
 }
 
 async function init() {
