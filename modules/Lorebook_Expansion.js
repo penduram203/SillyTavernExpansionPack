@@ -414,8 +414,97 @@ function migrateCurrentCharacterToWorldStore() {
                 `(char="${charName}", 既存優先で ${skipped} 件スキップ)`
             );
         }
+
+        // ★ 重複キーをクリーンアップ
+        cleanupLexDuplicateKeys();
     } catch (e) {
         console.warn(LOG, 'migrateCurrentCharacterToWorldStore エラー:', e);
+    }
+}
+
+// ============================================================
+// ★ per-world store と char.data の重複キーをクリーンアップ
+//   - 正規化後のキー（"00_共通ルール"）が存在する場合、
+//     非正規化キー（"00_共通ルール（常時有効）"）を削除
+//   - プレフィックス付きキー（"咲葉学園␟XXX"）が存在する場合、
+//     プレフィックスなしキー（"XXX"）を削除
+//   - データ内容は正規化キーを優先（新しい編集は正規化キーに保存される）
+// ============================================================
+function cleanupLexDuplicateKeys() {
+    try {
+        const store = getLexStore();
+        let removedStore = 0;
+
+        for (const worldName of Object.keys(store)) {
+            const map = store[worldName];
+            if (!map || typeof map !== 'object') continue;
+            for (const key of Object.keys(map)) {
+                const normalizedKey = normalizeEntryComment(key);
+                if (normalizedKey !== key && map[normalizedKey]) {
+                    delete map[key];
+                    removedStore++;
+                }
+            }
+        }
+
+        if (removedStore > 0) {
+            saveLexStore();
+            debugLog(`per-world store の重複キーを ${removedStore} 件削除`);
+        }
+
+        const ctx = getContext();
+        const char = ctx?.characters?.[ctx?.characterId];
+        if (!char) return;
+
+        const charLex = char?.data?.extensions?.lorebook_expansion;
+        if (!charLex || typeof charLex !== 'object') return;
+
+        const charName = typeof char.name === 'string' ? char.name : '';
+        const assocWorld =
+            (typeof char.data?.extensions?.world === 'string' && char.data.extensions.world) ||
+            (typeof char.data?.world === 'string' && char.data.world) ||
+            '';
+        const ownWorld = assocWorld || charName;
+
+        let removedChar = 0;
+        const seenNormalized = new Set();
+
+        for (const key of Object.keys(charLex)) {
+            if (key.includes(STORAGE_KEY_SEPARATOR)) {
+                const idx = key.indexOf(STORAGE_KEY_SEPARATOR);
+                const w = key.slice(0, idx);
+                const ck = key.slice(idx + 1);
+                const normalizedCk = normalizeEntryComment(ck);
+                const normalizedKey = `${w}${STORAGE_KEY_SEPARATOR}${normalizedCk}`;
+                if (normalizedKey !== key && charLex[normalizedKey]) {
+                    delete charLex[key];
+                    removedChar++;
+                    continue;
+                }
+                seenNormalized.add(normalizedKey);
+            } else {
+                if (!ownWorld) continue;
+                const normalizedCk = normalizeEntryComment(key);
+                const prefixedKey = `${ownWorld}${STORAGE_KEY_SEPARATOR}${normalizedCk}`;
+                if (charLex[prefixedKey]) {
+                    delete charLex[key];
+                    removedChar++;
+                }
+            }
+        }
+
+        if (removedChar > 0) {
+            if (window.CharStore?.saveCharacterExtension) {
+                window.CharStore.saveCharacterExtension(
+                    MODULE_NAME,
+                    charLex,
+                    { immediate: true }
+                );
+            }
+            debugLog(`char.data の重複キーを ${removedChar} 件削除`);
+        }
+    } catch (e) {
+        console.warn(LOG, 'cleanupLexDuplicateKeys エラー:', e);
     }
 }
 
@@ -2053,5 +2142,6 @@ window.LorebookExpansion = {
     MODULE_NAME,
     clearWorldInfoEntriesCache,
     migrateCurrentCharacterToWorldStore,
+    cleanupLexDuplicateKeys,
 };
 console.log(LOG, 'window.LorebookExpansion に API を公開しました');
