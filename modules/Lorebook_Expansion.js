@@ -193,11 +193,30 @@ function saveLexStore() {
 }
 
 // ============================================================
+// ★ ST が表示用に comment へ付加する注釈を除去して正規化する
+//   - "00_共通ルール（常時有効）" → "00_共通ルール"
+//   - "001（無効）"               → "001"
+//   - "foo(Disabled)"             → "foo"
+//   - "foo(Constant)"             → "foo"
+//   これにより per-world store のキーが保存時・読込時で一致する。
+// ============================================================
+function normalizeEntryComment(comment) {
+    if (typeof comment !== 'string') return '';
+    let s = comment.trim();
+    if (!s) return '';
+    s = s.replace(/\s*[（(](?:常時有効|無効|Constant|Disabled)[）)]\s*$/i, '').trim();
+    return s;
+}
+
+// ============================================================
 // ★ Phase 5: ストレージキー関連ヘルパー
 // ============================================================
 function getCharKey(entry, uid) {
-    if (entry && typeof entry.comment === 'string' && entry.comment.trim()) {
-        return entry.comment.trim();
+    if (entry) {
+        const normalized = normalizeEntryComment(
+            typeof entry.comment === 'string' ? entry.comment : ''
+        );
+        if (normalized) return normalized;
     }
     const keys = getEntryKeys(entry);
     if (keys.length > 0 && String(keys[0]).trim()) {
