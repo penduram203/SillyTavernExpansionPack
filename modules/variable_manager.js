@@ -93,9 +93,11 @@ import('./sound_effects.js').catch(err => {
     // ★ 共通ルールフラグの短時間キャッシュ（連続 render の負荷低減）
     const COMMON_RULE_FLAGS_CACHE_MS = 200;
 
-    // ★ ロアブック候補解決のタイムアウト
-    const PRIMARY_WORLDBOOK_TIMEOUT_MS = 3000;
-    const SECONDARY_WORLDBOOK_TIMEOUT_MS = 800;
+    // ★ タイミング定数
+    //   - 主候補（char.data.extensions.world 等）は fetch が長引くケースを考慮して 10 秒
+    //   - 副候補は 3 秒
+    const PRIMARY_WORLDBOOK_TIMEOUT_MS = 10000;
+    const SECONDARY_WORLDBOOK_TIMEOUT_MS = 3000;
 
     const BATTLE_DEFAULTS = {
         active: false,
@@ -299,80 +301,112 @@ import('./sound_effects.js').catch(err => {
         return { rpgMode, choicesMode };
     }
 
+    // ★ 並行呼び出しの重複排除
+    let _commonRuleRefreshInFlight = null;
+
     // ============================================================
-    // ★ 共通ルール変数の取得（v9）
+    // ★ 共通ルール変数の取得（v10）
     //   候補の worldName を順に試し、最初に「00_共通ルール」エントリを持つ
-    //   ロアブックを採用する。キャラの本来のロアブック（char.data.extensions.world）
-    //   が編集ドロップダウンの値と異なる場合でも、正しいフラグを読める。
-    //
-    //   force=false の場合は短時間（200ms）のキャッシュを返す。
+    //   ロアブックを採用する。
+    //   - 並行呼び出しは 1 本にまとめる（同じ Promise を共有）
+    //   - 失敗時は診断ログを console.warn で出力
+    //   - 成功・失敗を問わず _commonRuleFlagsLastRefresh を更新
     // ============================================================
     async function refreshCommonRuleFlags(force = false) {
-        try {
-            if (!force &&
-                _commonRuleFlagsLastRefresh > 0 &&
-                Date.now() - _commonRuleFlagsLastRefresh < COMMON_RULE_FLAGS_CACHE_MS) {
-                return _commonRuleFlags;
-            }
-            _commonRuleFlagsLastRefresh = Date.now();
+        // ── キャッシュチェック ──
+        if (!force &&
+            _commonRuleFlagsLastRefresh > 0 &&
+            Date.now() - _commonRuleFlagsLastRefresh < COMMON_RULE_FLAGS_CACHE_MS) {
+            return _commonRuleFlags;
+        }
 
-            const charName = getCurrentCharName();
-            if (!charName) {
-                _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, worldName: null };
-                return _commonRuleFlags;
-            }
+        // ── 並行呼び出しの重複排除 ──
+        if (_commonRuleRefreshInFlight) {
+            return await _commonRuleRefreshInFlight;
+        }
 
-            if (!window.LorebookExpansion?.loadWorldInfoEntriesByName) {
-                _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, worldName: null };
-                return _commonRuleFlags;
-            }
-
-            const candidates = getWorldNameCandidates();
-            if (candidates.length === 0) {
-                _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, worldName: null };
-                return _commonRuleFlags;
-            }
-
-            for (let i = 0; i < candidates.length; i++) {
-                const worldName = candidates[i];
-                const isPrimary = (i === 0);
-                const timeoutMs = isPrimary ? PRIMARY_WORLDBOOK_TIMEOUT_MS : SECONDARY_WORLDBOOK_TIMEOUT_MS;
-
-                let entries = null;
-                try {
-                    entries = await Promise.race([
-                        window.LorebookExpansion.loadWorldInfoEntriesByName(worldName),
-                        new Promise(r => setTimeout(() => r(null), timeoutMs)),
-                    ]);
-                } catch (e) { continue; }
-                if (!entries) continue;
-
-                const list = Array.isArray(entries) ? entries : Object.values(entries);
-                let targetEntry = null;
-                for (const e of list) {
-                    if (!e) continue;
-                    const comment = typeof e.comment === 'string' ? e.comment.trim() : '';
-                    const keys = getEntryKeys(e).map(k => String(k).trim());
-                    if (comment === COMMON_RULE_ENTRY_NAME || keys.includes(COMMON_RULE_ENTRY_NAME)) {
-                        targetEntry = e;
-                        break;
-                    }
+        _commonRuleRefreshInFlight = (async () => {
+            const diagnostics = [];
+            try {
+                const charName = getCurrentCharName();
+                if (!charName) {
+                    _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, worldName: null };
+                    return _commonRuleFlags;
                 }
 
-                if (targetEntry) {
+                if (!window.LorebookExpansion?.loadWorldInfoEntriesByName) {
+                    console.warn(LOG, 'refreshCommonRuleFlags: LorebookExpansion.loadWorldInfoEntriesByName が利用できません');
+                    _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, worldName: null };
+                    return _commonRuleFlags;
+                }
+
+                const candidates = getWorldNameCandidates();
+                if (candidates.length === 0) {
+                    console.warn(LOG, 'refreshCommonRuleFlags: worldbook候補なし', { charName });
+                    _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, worldName: null };
+                    return _commonRuleFlags;
+                }
+
+                for (let i = 0; i < candidates.length; i++) {
+                    const worldName = candidates[i];
+                    const isPrimary = (i === 0);
+                    const timeoutMs = isPrimary ? PRIMARY_WORLDBOOK_TIMEOUT_MS : SECONDARY_WORLDBOOK_TIMEOUT_MS;
+
+                    let entries = null;
+                    try {
+                        entries = await Promise.race([
+                            window.LorebookExpansion.loadWorldInfoEntriesByName(worldName),
+                            new Promise(r => setTimeout(() => r(null), timeoutMs)),
+                        ]);
+                    } catch (e) {
+                        diagnostics.push({ worldName, reason: 'exception', error: String(e) });
+                        continue;
+                    }
+
+                    if (!entries) {
+                        diagnostics.push({ worldName, reason: 'no-entries' });
+                        continue;
+                    }
+
+                    const list = Array.isArray(entries) ? entries : Object.values(entries);
+                    let targetEntry = null;
+                    for (const e of list) {
+                        if (!e) continue;
+                        const comment = typeof e.comment === 'string' ? e.comment.trim() : '';
+                        const keys = getEntryKeys(e).map(k => String(k).trim());
+                        if (comment === COMMON_RULE_ENTRY_NAME || keys.includes(COMMON_RULE_ENTRY_NAME)) {
+                            targetEntry = e;
+                            break;
+                        }
+                    }
+
+                    if (!targetEntry) {
+                        diagnostics.push({ worldName, reason: 'no-common-rule-entry', entryCount: list.length });
+                        continue;
+                    }
+
                     const varMap = buildVarMapFromEntry(worldName, targetEntry);
                     const flags = extractCommonRuleFlags(varMap);
                     _commonRuleFlags = { ok: true, ...flags, worldName };
                     return _commonRuleFlags;
                 }
-            }
 
-            _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, worldName: null };
-            return _commonRuleFlags;
-        } catch (e) {
-            console.warn(LOG, 'refreshCommonRuleFlags error:', e);
-            _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, worldName: null };
-            return _commonRuleFlags;
+                console.warn(
+                    LOG,
+                    'refreshCommonRuleFlags: すべての候補で「00_共通ルール」エントリを取得できませんでした',
+                    { charName, candidates, diagnostics }
+                );
+                _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, worldName: null };
+                return _commonRuleFlags;
+            } finally {
+                _commonRuleFlagsLastRefresh = Date.now();
+            }
+        })();
+
+        try {
+            return await _commonRuleRefreshInFlight;
+        } finally {
+            _commonRuleRefreshInFlight = null;
         }
     }
 
@@ -1505,6 +1539,45 @@ import('./sound_effects.js').catch(err => {
             };
             console.log(LOG, 'debugBattleButton:', info);
             return info;
+        },
+                // ★ worldbook 解決の診断用 API
+        debugWorldbookResolution: async () => {
+            const charName = getCurrentCharName();
+            const candidates = getWorldNameCandidates();
+            const results = [];
+
+            for (const w of candidates) {
+                let entryCount = 0;
+                let hasCommonRule = false;
+                let error = null;
+                try {
+                    const entries = await window.LorebookExpansion?.loadWorldInfoEntriesByName?.(w);
+                    if (entries) {
+                        const list = Array.isArray(entries) ? entries : Object.values(entries);
+                        entryCount = list.length;
+                        hasCommonRule = list.some(e =>
+                            e?.comment === COMMON_RULE_ENTRY_NAME ||
+                            (Array.isArray(e?.key) && e.key.includes(COMMON_RULE_ENTRY_NAME))
+                        );
+                    }
+                } catch (e) {
+                    error = String(e);
+                }
+                results.push({ worldName: w, entryCount, hasCommonRule, error });
+            }
+
+            return {
+                charName,
+                candidates,
+                results,
+                currentFlags: { ..._commonRuleFlags },
+                lastRefreshAt: _commonRuleFlagsLastRefresh,
+                inFlight: !!_commonRuleRefreshInFlight,
+            };
+        },
+        clearWorldInfoEntriesCache: (worldName) => {
+            window.LorebookExpansion?.clearWorldInfoEntriesCache?.(worldName);
+            _commonRuleFlagsLastRefresh = 0;
         },
     };
 })();
