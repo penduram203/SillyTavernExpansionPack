@@ -284,3 +284,49 @@
 .world_entry_edit.lbe-extras-collapsed .lbe-collapsible {
     display: none !important;
 }
+
+/* ============================================================
+ * Img_prompt ラベル行（ラベル + 解像度ドロップダウン）
+ * ============================================================ */
+.lbe-label-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    margin-top: 4px;
+    margin-bottom: 2px;
+    flex-wrap: nowrap;
+}
+
+.lbe-label-row > .lbe-label {
+    margin: 0;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.lbe-label-row > .lbe-resolution-select {
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 150px;
+    max-width: 200px;
+    font-size: 0.82em;
+    padding: 2px 4px;
+    box-sizing: border-box;
+}
+
+/* ============================================================
+ * SD拡張の解像度ドロップダウンを非表示
+ *   解像度はロアブックエントリ毎に設定するため、SD拡張側の
+ *   グローバル設定は使わない（gic_lorebook.js が生成直前に
+ *   extensionSettings.sd.resolution を一時差し替える）。
+ * ============================================================ */
+#sd_resolution,
+label[for="sd_resolution"] {
+    display: none !important;
+}
