@@ -9,6 +9,7 @@
 // コンテキスト決定（優先度順）:
 //   1. RPGモード=1 かつ バトルモード=1
 //      → 画面左端の .variable-command-btn 4 つのみ
+//      ※ 待機中 (.variable-battle-commands-waiting) は null を返し、無反応
 //   2. RPGモード=1 かつ バトル開始変数=1
 //      → 最後に表示されたバトル開始ボタンのみ
 //   3. 選択肢モード=1 かつ state=initial
@@ -23,7 +24,10 @@
 //   - IME 変換中 (isComposing) は介入しない
 //   - Enter のオートリピートは無視
 //   - 入力ロック中は ST のメッセージボタン等の自動クリックを抑止する
-//     （.mes_edit などにフォーカスが残っていると Enter/Space で誤爆する）
+//   - チャット表示中の ←/→ はスワイプ発動防止のためブロックする
+//   - マウスが navigable 要素に乗ったら keyboard focus を非表示にし、
+//     逆に keyboard 操作したら :hover を中和する（同時選択の禁止）
+//   - バトルコマンド待機中 (player_turn=0) は keyboard 無効 + focus を blur
 
 (function () {
     'use strict';
@@ -32,10 +36,16 @@
     const STYLE_ID = 'keyconfig-style';
     const FOCUS_CLASS = 'keyconfig-focused';
     const HIDE_INPUT_CLASS = 'keyconfig-hide-input';
+    const KB_MODE_CLASS = 'kbc-kb-mode';
 
     const NAV_UP_KEYS = ['ArrowUp', 'w', 'W'];
     const NAV_DOWN_KEYS = ['ArrowDown', 's', 'S'];
     const CONFIRM_KEYS = ['Enter', ' ', 'e', 'E', 'f', 'F'];
+    const NAV_LR_KEYS = ['ArrowLeft', 'ArrowRight'];
+
+    // navigable 要素（フォーカス・ホバー制御・確認の対象）
+    const NAV_SELECTOR =
+        '.lbe-choice-item, .game-start-choice, .variable-battle-start-btn, .variable-command-btn';
 
     const _indices = {
         'battle-commands': 0,
@@ -45,6 +55,9 @@
     };
     let _lastContextName = null;
     let _lastChoicesBlock = null;
+
+    // ★ マウスが navigable 要素の上にあるか
+    let _mouseHoveringNavigable = false;
 
     // ============================================================
     // CSS 注入
@@ -100,6 +113,15 @@
         return Array.from(document.querySelectorAll(selector)).filter(isElementVisible);
     }
 
+    // チャット画面が現在アクティブか（スワイプ阻止の判定用）
+    function isChatViewActive() {
+        const chatEl = document.getElementById('chat');
+        if (!chatEl || !isElementVisible(chatEl)) return false;
+        // ポップアップが開いている時はチャット操作用のキーではないので除外
+        if (document.querySelector('dialog.popup[open]')) return false;
+        return true;
+    }
+
     // ============================================================
     // キーボードコンテキストの決定
     // ============================================================
@@ -125,16 +147,20 @@
                     return window.VariableManager.getBattleStartVar() === true;
                 }
             } catch (e) { /* ignore */ }
-            return false;
+            return document.querySelector('.variable-battle-start-btn') !== null;
         })();
 
         const charName = getCurrentCharName();
         const state = window.ChoiceClick?.getStartState?.(charName) || 'initial';
 
         // ① バトルモード → 左端の4ボタンのみ
+        //    ★ 待機中 (player_turn=0) は null を返してキーボードを無効化
         if (rpg && battleActive) {
             const container = document.getElementById('variable-battle-commands');
             if (container && isElementVisible(container)) {
+                if (container.classList.contains('variable-battle-commands-waiting')) {
+                    return null;
+                }
                 const btns = Array.from(container.querySelectorAll('.variable-command-btn')).filter(isElementVisible);
                 if (btns.length > 0) return { name: 'battle-commands', multi: true, elements: btns };
             }
@@ -207,14 +233,27 @@
     // ============================================================
     // フォーカス管理
     // ============================================================
-    // ★ 入力ロック中、ST のメッセージボタン等にフォーカスが残っていると
-    //   Enter / Space のネイティブ click が発火して誤操作の原因になる。
-    //   我々のコンテキスト要素以外のフォーカスは積極的に blur する。
+    function isBattleCommandsWaiting() {
+        const container = document.getElementById('variable-battle-commands');
+        return !!container && container.classList.contains('variable-battle-commands-waiting');
+    }
+
     function blurForeignFocus() {
         const active = document.activeElement;
         if (!active || active === document.body) return;
-        if (active.matches('.lbe-choice-item, .game-start-choice, .variable-battle-start-btn, .variable-command-btn')) return;
         if (isTypingTarget(active)) return;
+
+        // ★ バトルコマンド待機中は、コマンドボタンのフォーカスを強制的に外す
+        //    フォーカスが残っていると Enter/Space のネイティブ click で
+        //    「鳴ってはいけない」効果音が再生される。
+        if (isBattleCommandsWaiting()) {
+            if (active.closest?.('#variable-battle-commands')) {
+                try { active.blur(); } catch (e) { /* ignore */ }
+                return;
+            }
+        }
+
+        if (active.matches(NAV_SELECTOR)) return;
         if (active.matches('.mes_button, .mes_edit, .mes_edit_cancel, .mes_edit_done, .mes_hide, .mes_copy, .mes_branch, .interactable[role="button"]')) {
             try { active.blur(); } catch (e) { /* ignore */ }
         }
@@ -228,6 +267,14 @@
         updateInputLock();
         if (document.body.classList.contains(HIDE_INPUT_CLASS)) {
             blurForeignFocus();
+        }
+
+        // 待機中は強制的に blur（コマンドボタンの keyboard ネイティブ click 防止）
+        if (isBattleCommandsWaiting()) {
+            const focused = document.activeElement;
+            if (focused?.closest?.('#variable-battle-commands')) {
+                try { focused.blur(); } catch (e) { /* ignore */ }
+            }
         }
 
         const ctx = getKeyboardContext();
@@ -255,7 +302,13 @@
         if (idx < 0) idx = 0;
         _indices[ctx.name] = idx;
 
-        // 対象要素以外のフォーカスクラスを除去
+        // ★ マウスが navigable の上にある時は keyboard focus を非表示にする
+        //   （キーボード選択とマウスホバーが同時に表示される問題の対策）
+        if (_mouseHoveringNavigable) {
+            clearFocus();
+            return;
+        }
+
         document.querySelectorAll('.' + FOCUS_CLASS).forEach(el => {
             if (!elements.includes(el)) el.classList.remove(FOCUS_CLASS);
         });
@@ -269,6 +322,10 @@
         if (!ctx || !ctx.multi) return;
         const elements = ctx.elements;
         if (elements.length === 0) return;
+
+        // ★ キーボード操作を開始 → マウスホバーモードからキーボードモードへ
+        _mouseHoveringNavigable = false;
+        document.body.classList.add(KB_MODE_CLASS);
 
         let idx = _indices[ctx.name] ?? 0;
         idx += delta;
@@ -290,6 +347,12 @@
         if (!ctx) return false;
         const elements = ctx.elements;
         if (elements.length === 0) return false;
+
+        // ★ バトルコマンド確認時は念のため待機中チェック
+        if (ctx.name === 'battle-commands' && isBattleCommandsWaiting()) {
+            return false;
+        }
+
         const idx = Math.min(_indices[ctx.name] ?? 0, elements.length - 1);
         const el = elements[idx];
         if (!el) return false;
@@ -297,12 +360,46 @@
     }
 
     // ============================================================
+    // マウス / キーボード の相互排他
+    //   - mouseover navigable → _mouseHoveringNavigable=true, keyboard focus 解除
+    //   - mouseout navigable → _mouseHoveringNavigable=false, focus 復元は次回 ensureFocus
+    // ============================================================
+    document.addEventListener('mouseover', (e) => {
+        const nav = e.target?.closest?.(NAV_SELECTOR);
+        if (!nav) return;
+        _mouseHoveringNavigable = true;
+        document.body.classList.remove(KB_MODE_CLASS);
+        clearFocus();
+    }, true);
+
+    document.addEventListener('mouseout', (e) => {
+        const from = e.target?.closest?.(NAV_SELECTOR);
+        if (!from) return;
+        const to = e.relatedTarget?.closest?.(NAV_SELECTOR);
+        if (to) return; // navigable 間の移動 → ホバー継続
+        _mouseHoveringNavigable = false;
+        // focus 復元は次の ensureFocus に任せる（mousemove 後の 400ms 以内）
+    }, true);
+
+    // ============================================================
     // キーイベントハンドラ（capture フェーズ）
     // ============================================================
-    document.addEventListener('keydown', (e) => {
+    function handleKeydown(e) {
         if (e.ctrlKey || e.altKey || e.metaKey) return;
         if (e.isComposing) return;
         if (isTypingTarget(e.target)) return;
+
+        // ★ ←/→ はチャット画面ではスワイプ発動防止のためブロック
+        if (NAV_LR_KEYS.includes(e.key)) {
+            const target = e.target;
+            const inChat = target?.closest?.('#chat, .mes, .swipe_left, .swipe_right, .swipeRightBlock, .swipeRightBlockArrow, .swipeLeftBlock');
+            const isBodyLevel = target === document.body || target === document.documentElement;
+            if (inChat || (isBodyLevel && isChatViewActive())) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                return;
+            }
+        }
 
         const isUp = NAV_UP_KEYS.includes(e.key);
         const isDown = NAV_DOWN_KEYS.includes(e.key);
@@ -313,11 +410,8 @@
         const inputLocked = isInputLocked();
         const ctx = getKeyboardContext();
 
-        // コンテキストも入力ロックも無ければ ST の動作を尊重
         if (!ctx && !inputLocked) return;
 
-        // ★ 入力ロック中は ST のメッセージボタン等のフォーカスを解除する
-        //    これにより Enter/Space のネイティブ click を防ぐ
         if (inputLocked) {
             blurForeignFocus();
         }
@@ -336,20 +430,56 @@
                 e.stopImmediatePropagation();
                 return;
             }
-            // ctx はあるが multi でない時、矢印キーはブラウザスクロール抑止
             if (!ctx.multi && (isUp || isDown)) {
+                // 単一要素コンテキストでもスクロールは阻止
                 e.preventDefault();
                 e.stopImmediatePropagation();
                 return;
             }
         }
 
-        // コンテキストが無いが入力ロック中 → ST のデフォルト動作もブロック
+        // ★ コンテキストが無いが入力ロック中
+        //    → バトル待機中の Enter/Space 等による誤爆・誤発音を抑止
         if (!ctx && inputLocked) {
             e.preventDefault();
             e.stopImmediatePropagation();
         }
-    }, true);
+    }
+
+    // window と document の両方の capture で受け、
+    // stopImmediatePropagation によって ST 側のデフォルト動作を確実に抑止する
+    window.addEventListener('keydown', handleKeydown, true);
+    document.addEventListener('keydown', handleKeydown, true);
+
+    // ============================================================
+    // バトルコマンド待機状態の監視
+    //   クラス付与の瞬間にボタンからフォーカスを外す
+    // ============================================================
+    function setupBattleWaitingBlurObserver() {
+        const attach = () => {
+            const container = document.getElementById('variable-battle-commands');
+            if (!container) {
+                setTimeout(attach, 500);
+                return;
+            }
+            if (container.dataset.kbcWaitObserved === '1') return;
+            container.dataset.kbcWaitObserved = '1';
+            const obs = new MutationObserver(() => {
+                if (container.classList.contains('variable-battle-commands-waiting')) {
+                    const focused = document.activeElement;
+                    if (focused?.closest?.('#variable-battle-commands')) {
+                        try { focused.blur(); } catch (e) { /* ignore */ }
+                    }
+                    clearFocus();
+                } else {
+                    ensureFocus();
+                }
+            });
+            obs.observe(container, { attributes: true, attributeFilter: ['class'] });
+        };
+        attach();
+        setInterval(attach, 1000);
+    }
 
     // ============================================================
     // 監視・初期化
@@ -367,6 +497,7 @@
     function start() {
         if (!document.body) { setTimeout(start, 200); return; }
         observer.observe(document.body, { childList: true, subtree: true });
+        setupBattleWaitingBlurObserver();
         ensureFocus();
         setInterval(ensureFocus, 400);
         console.log(LOG, '初期化完了');
@@ -407,6 +538,9 @@
                 state: window.ChoiceClick?.getStartState?.(charName) || 'initial',
                 inputLocked: isInputLocked(),
                 hideInputClass: document.body.classList.contains(HIDE_INPUT_CLASS),
+                kbModeClass: document.body.classList.contains(KB_MODE_CLASS),
+                mouseHoveringNavigable: _mouseHoveringNavigable,
+                battleWaiting: isBattleCommandsWaiting(),
                 activeElement: document.activeElement
                     ? `${document.activeElement.tagName}.${String(document.activeElement.className).slice(0, 40)}`
                     : null,
