@@ -1,5 +1,5 @@
 /* keyconfig.css */
-/* キーボード操作のフォーカス表示 */
+/* キーボード操作のフォーカス表示とモード排他制御 */
 
 /* ============================================================
  * 入力欄の非表示化
@@ -11,7 +11,7 @@ body.keyconfig-hide-input #send_textarea {
 }
 
 /* ============================================================
- * ロアブック選択肢のフォーカス
+ * ロアブック選択肢のキーボードフォーカス
  * ============================================================ */
 .lbe-choice-item.keyconfig-focused {
     background-color: var(--choice-hover-bg, #0d47a1) !important;
@@ -28,7 +28,23 @@ body.keyconfig-hide-input #send_textarea {
 }
 
 /* ============================================================
- * バトルコマンドのフォーカス
+ * ★ キーボードモード: マウスホバー効果を抑止
+ *   choice_click.css の :hover を無効化してキーボード選択だけを見せる
+ * ============================================================ */
+body.keyconfig-keyboard-mode .lbe-choice-item:hover {
+    background-color: rgba(255, 255, 255, 0.04) !important;
+    border-color: transparent !important;
+    box-shadow: none !important;
+    color: inherit !important;
+    transform: none !important;
+}
+
+body.keyconfig-keyboard-mode .lbe-choice-item:hover::before {
+    width: 0 !important;
+}
+
+/* ============================================================
+ * バトルコマンドのキーボードフォーカス
  * ============================================================ */
 .variable-command-btn.keyconfig-focused {
     background: rgba(60, 60, 80, 0.95) !important;
@@ -60,9 +76,18 @@ body.keyconfig-hide-input #send_textarea {
 }
 
 /* ============================================================
- * ゲーム開始ボタン / バトル開始ボタンのフォーカス
- *   リセットボタン (.game-reset-choice) は keyconfig 側で対象外のため
- *   ここには含めない。
+ * ★ キーボードモード: バトルボタンの :hover を抑止
+ *   variable_manager.css の .variable-command-btn:hover を無効化する
+ * ============================================================ */
+body.keyconfig-keyboard-mode .variable-command-btn:hover {
+    background: rgba(20, 20, 30, 0.85) !important;
+    border-color: #ffffff !important;
+    transform: none !important;
+}
+
+/* ============================================================
+ * ゲーム開始ボタン / バトル開始ボタンのキーボードフォーカス
+ *   リセットボタン (.game-reset-choice) は対象外
  * ============================================================ */
 .game-start-choice:not(.game-reset-choice).keyconfig-focused,
 .variable-battle-start-btn.keyconfig-focused {
