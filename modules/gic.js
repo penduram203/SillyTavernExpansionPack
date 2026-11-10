@@ -7656,57 +7656,57 @@ function exposeGicApi() {
     console.log('[GIC] ✅ window.GicApi を公開しました');
 }
 
-// ============================================================
-// ★ nanogallery2 の galleryMaxRows を 4 に強制
-//   ★ コンテナ幅を 568px に固定し、thumbnailWidth = 189px (568/3) で
-//     3列 × 4行 = 12アイテム/ページを強制
-//     （640px だとコンテナ/640 = 0.88 → 1列 → 4アイテム/ページになり、
-//       47ページに膨らむ）
-// ============================================================
-(function patchNanogallery2For3Cols4Rows() {
-    if (window.__gicNG2Patched) return;
-    if (typeof window.$ === 'undefined' || !window.$.fn || typeof window.$.fn.nanogallery2 !== 'function') {
-        setTimeout(patchNanogallery2For3Cols4Rows, 500);
-        return;
-    }
-    window.__gicNG2Patched = true;
-    const orig = window.$.fn.nanogallery2;
-    window.$.fn.nanogallery2 = function(options) {
-        try {
-            if (options && typeof options === 'object' && !Array.isArray(options)) {
-                // ★ 目標コンテナ幅: ST本来(480) + GALLERY_WINDOW_WIDTH_EXTRA(88) = 568
-                const TARGET_W = 480 + GALLERY_WINDOW_WIDTH_EXTRA;
+    // ============================================================
+    // ★ nanogallery2 の galleryMaxRows を 4 に強制
+    //   ★ コンテナ幅を 568px に固定し、thumbnailWidth = 189px (568/3) で
+    //     3列 × 4行 = 12アイテム/ページを強制
+    //     （640px だとコンテナ/640 = 0.88 → 1列 → 4アイテム/ページになり、
+    //       47ページに膨らむ）
+    // ============================================================
+    (function patchNanogallery2For3Cols4Rows() {
+        if (window.__gicNG2Patched) return;
+        if (typeof window.$ === 'undefined' || !window.$.fn || typeof window.$.fn.nanogallery2 !== 'function') {
+            setTimeout(patchNanogallery2For3Cols4Rows, 500);
+            return;
+        }
+        window.__gicNG2Patched = true;
+        const orig = window.$.fn.nanogallery2;
+        window.$.fn.nanogallery2 = function(options) {
+            try {
+                if (options && typeof options === 'object' && !Array.isArray(options)) {
+                    // ★ 目標コンテナ幅: ST本来(480) + GALLERY_WINDOW_WIDTH_EXTRA(88) = 568
+                    const TARGET_W = 480 + GALLERY_WINDOW_WIDTH_EXTRA;
 
-                // ★ nanogallery2 が参照する前にコンテナ幅を強制固定
-                //   （min-width を付けることで applyGalleryWindowLayout の測定時にも揺れない）
-                const containerEl = this[0];
-                if (containerEl) {
-                    try {
-                        containerEl.style.setProperty('width', TARGET_W + 'px', 'important');
-                        containerEl.style.setProperty('max-width', TARGET_W + 'px', 'important');
-                        containerEl.style.setProperty('min-width', TARGET_W + 'px', 'important');
-                    } catch (e) { /* ignore */ }
+                    // ★ nanogallery2 が参照する前にコンテナ幅を強制固定
+                    //   （min-width を付けることで applyGalleryWindowLayout の測定時にも揺れない）
+                    const containerEl = this[0];
+                    if (containerEl) {
+                        try {
+                            containerEl.style.setProperty('width', TARGET_W + 'px', 'important');
+                            containerEl.style.setProperty('max-width', TARGET_W + 'px', 'important');
+                            containerEl.style.setProperty('min-width', TARGET_W + 'px', 'important');
+                        } catch (e) { /* ignore */ }
+                    }
+
+                    // 行数上限
+                    if (typeof options.galleryMaxRows === 'number' && options.galleryMaxRows > 4) {
+                        console.log('[GIC] 🎯 galleryMaxRows:', options.galleryMaxRows, '→ 4');
+                        options.galleryMaxRows = 4;
+                    }
+
+                    // ★ thumbnailWidth = TARGET_W / 3 = 189px
+                    //   → 568 / 189 = 3.005 → floor 3列 ✓
+                    //   （floor/round どちらの計算方式でも 3 になる）
+                    const thumbnailW = Math.floor(TARGET_W / 3);
+                    console.log('[GIC] 🎯 3列強制: container=' + TARGET_W + 'px, thumbnailWidth=' + thumbnailW + 'px');
+                    options.thumbnailWidth = thumbnailW + 'px';
+                    options.thumbnailHeight = 180;
                 }
-
-                // 行数上限
-                if (typeof options.galleryMaxRows === 'number' && options.galleryMaxRows > 4) {
-                    console.log('[GIC] 🎯 galleryMaxRows:', options.galleryMaxRows, '→ 4');
-                    options.galleryMaxRows = 4;
-                }
-
-                // ★ thumbnailWidth = TARGET_W / 3 = 189px
-                //   → 568 / 189 = 3.005 → floor 3列 ✓
-                //   （floor/round どちらの計算方式でも 3 になる）
-                const thumbnailW = Math.floor(TARGET_W / 3);
-                console.log('[GIC] 🎯 3列強制: container=' + TARGET_W + 'px, thumbnailWidth=' + thumbnailW + 'px');
-                options.thumbnailWidth = thumbnailW + 'px';
-                options.thumbnailHeight = 180;
-            }
-        } catch (e) { /* ignore */ }
-        return orig.apply(this, arguments);
-    };
-    console.log('[GIC] ✅ nanogallery2 patch installed (3列 × 4行 = 12アイテム/ページ強制)');
-})();
+            } catch (e) { /* ignore */ }
+            return orig.apply(this, arguments);
+        };
+        console.log('[GIC] ✅ nanogallery2 patch installed (3列 × 4行 = 12アイテム/ページ強制)');
+    })();
 
 // ============================================================
 // ★ #dragGallery 幅を 760px に事前固定（4列分）
