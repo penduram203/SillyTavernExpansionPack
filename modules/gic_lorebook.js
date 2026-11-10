@@ -306,6 +306,42 @@ function getLexNegativePrompt(worldName, uid, entry) {
     return null;
 }
 
+// ============================================================
+// ★ 解像度の取得（v5 追加）
+//    per-world ストア → character.data の順で参照
+// ============================================================
+function getLexResolution(worldName, uid, entry) {
+    if (!worldName || uid === null || uid === undefined) return null;
+
+    // ① LorebookExpansion.getDataFor 経由（推奨）
+    if (window.LorebookExpansion?.getDataFor) {
+        try {
+            const data = window.LorebookExpansion.getDataFor(worldName, uid, entry);
+            if (data && typeof data.resolution === 'string' && data.resolution.trim()) {
+                return data.resolution.trim();
+            }
+        } catch (e) { /* ignore */ }
+    }
+
+    // ② extensionSettings を直接参照（フォールバック）
+    try {
+        const ctx = getContext();
+        const charKey = getEntryCharKey(entry, uid);
+        if (!charKey) return null;
+        const rec = ctx?.extensionSettings?.lorebook_expansion?.data?.[worldName]?.[charKey];
+        if (rec && typeof rec.resolution === 'string' && rec.resolution.trim()) {
+            return rec.resolution.trim();
+        }
+    } catch (e) { /* ignore */ }
+
+    return null;
+}
+
+function extractResolutionFromEntry(entry, worldName) {
+    if (!entry) return null;
+    return getLexResolution(worldName, entry.uid, entry);
+}
+
 function extractNegativePromptFromEntry(entry, worldName) {
     if (!entry) return null;
     return getLexNegativePrompt(worldName, entry.uid, entry);
@@ -551,39 +587,61 @@ async function loadSlashModules() {
 }
 
 // ===== /sd 実行 =====
-async function executeSd(prompt, negativePrompt = null) {
+async function executeSd(prompt, negativePrompt = null, resolution = null) {
     const rawPrompt = cleanPrompt(prompt).replace(/[\r\n]+/g, ' ');
     const escaped = rawPrompt.replace(/"/g, '\\"');
 
     const hasNeg = negativePrompt && negativePrompt.trim();
     const cleanNeg = hasNeg ? cleanPrompt(negativePrompt).replace(/[\r\n]+/g, ' ') : '';
 
-    // ★ SillyTavern の SD 拡張は negative_prompt を「名前付き引数」では受け付けない。
-    //    代わりに extensionSettings.sd.negative_prompt を直接読み取って
-    //    ComfyUI ワークフローの {{negative_prompt}} に流し込む仕様。
-    //    → 生成直前に一時的に設定を差し替え、生成完了後に元に戻す。
-    let ctx = null;
-    let originalNegPrompt = null;
-    let settingsModified = false;
-
-    if (hasNeg) {
-        try {
-            ctx = getContext();
-            const sdSettings = ctx?.extensionSettings?.sd;
-            if (sdSettings && typeof sdSettings.negative_prompt === 'string') {
-                originalNegPrompt = sdSettings.negative_prompt;
-                sdSettings.negative_prompt = cleanNeg;
-                settingsModified = true;
-                console.log(`[GIC-Lore] 🔧 SDネガティブプロンプトを一時設定: "${cleanNeg.slice(0, 100)}${cleanNeg.length > 100 ? '...' : ''}"`);
-            } else {
-                console.warn('[GIC-Lore] SD設定に negative_prompt が見つかりません（SD拡張未初期化の可能性）');
-            }
-        } catch (e) {
-            console.warn('[GIC-Lore] SDネガティブプロンプト設定エラー:', e);
+    // ★ 解像度の決定（'random' の場合はここでランダム選択）
+    let effectiveResolution = null;
+    if (resolution && typeof resolution === 'string') {
+        const trimmed = resolution.trim();
+        if (trimmed === 'random') {
+            const RESOLUTIONS = ['1280x720', '1152x896', '1024x1024', '896x1152', '720x1280'];
+            effectiveResolution = RESOLUTIONS[Math.floor(Math.random() * RESOLUTIONS.length)];
+            console.log(`[GIC-Lore] 🎲 解像度をランダム選択: ${effectiveResolution}`);
+        } else if (/^\d+x\d+$/.test(trimmed)) {
+            effectiveResolution = trimmed;
         }
     }
 
-    // ★ コマンドは quiet のみ（negative_prompt は設定経由で渡る）
+    // ★ SillyTavern の SD 拡張は negative_prompt / resolution を
+    //    extensionSettings.sd から読み取る仕様。
+    //    → 生成直前に一時的に設定を差し替え、生成完了後に元に戻す。
+    let ctx = null;
+    let originalNegPrompt = null;
+    let originalResolution = null;
+    let settingsModified = false;
+    let resolutionModified = false;
+
+    if (hasNeg || effectiveResolution) {
+        try {
+            ctx = getContext();
+            const sdSettings = ctx?.extensionSettings?.sd;
+            if (!sdSettings) {
+                console.warn('[GIC-Lore] SD設定が見つかりません（SD拡張未初期化の可能性）');
+            } else {
+                if (hasNeg && typeof sdSettings.negative_prompt === 'string') {
+                    originalNegPrompt = sdSettings.negative_prompt;
+                    sdSettings.negative_prompt = cleanNeg;
+                    settingsModified = true;
+                    console.log(`[GIC-Lore] 🔧 SDネガティブプロンプトを一時設定: "${cleanNeg.slice(0, 100)}${cleanNeg.length > 100 ? '...' : ''}"`);
+                }
+                if (effectiveResolution) {
+                    originalResolution = sdSettings.resolution;
+                    sdSettings.resolution = effectiveResolution;
+                    resolutionModified = true;
+                    console.log(`[GIC-Lore] 🔧 SD解像度を一時設定: "${effectiveResolution}" (元: "${originalResolution}")`);
+                }
+            }
+        } catch (e) {
+            console.warn('[GIC-Lore] SD設定の一時変更エラー:', e);
+        }
+    }
+
+    // ★ コマンドは quiet のみ（negative_prompt / resolution は設定経由で渡る）
     const cmd = settings.quiet
         ? `/sd quiet=true "${escaped}"`
         : `/sd "${escaped}"`;
@@ -640,10 +698,16 @@ async function executeSd(prompt, negativePrompt = null) {
         console.error('[GIC-Lore] ❌ /sd を実行する全ての方式が失敗しました');
         return false;
     } finally {
-        // ★ SD設定のネガティブプロンプトを元に戻す
-        if (settingsModified && ctx?.extensionSettings?.sd) {
-            ctx.extensionSettings.sd.negative_prompt = originalNegPrompt;
-            console.log(`[GIC-Lore] 🔧 SDネガティブプロンプトを復元: "${(originalNegPrompt || '').slice(0, 100)}${(originalNegPrompt || '').length > 100 ? '...' : ''}"`);
+        // ★ SD設定を元に戻す
+        if (ctx?.extensionSettings?.sd) {
+            if (settingsModified) {
+                ctx.extensionSettings.sd.negative_prompt = originalNegPrompt;
+                console.log(`[GIC-Lore] 🔧 SDネガティブプロンプトを復元: "${(originalNegPrompt || '').slice(0, 100)}${(originalNegPrompt || '').length > 100 ? '...' : ''}"`);
+            }
+            if (resolutionModified) {
+                ctx.extensionSettings.sd.resolution = originalResolution;
+                console.log(`[GIC-Lore] 🔧 SD解像度を復元: "${originalResolution}"`);
+            }
         }
     }
 }
@@ -763,6 +827,12 @@ async function processChoice(force = false) {
             console.log(`[GIC-Lore] ネガティブプロンプト: ${negativePrompt.slice(0, 80)}${negativePrompt.length > 80 ? '...' : ''}`);
         }
 
+        // ★ 解像度を取得（v5 追加）
+        const resolution = extractResolutionFromEntry(entry, worldName);
+        if (settings.verbose && resolution) {
+            console.log(`[GIC-Lore] 解像度: ${resolution}`);
+        }
+
         // ★ 生成コンテキストを保存（ファイル名リネーム用）
         _pendingGenerationContext = {
             entryKey: extractEntryKey(entry),
@@ -770,10 +840,11 @@ async function processChoice(force = false) {
             worldName,
             prompt,
             negativePrompt,
+            resolution,
             triggeredAt: Date.now(),
         };
         if (settings.verbose) {
-            console.log(`[GIC-Lore] 生成コンテキスト設定: entryKey="${_pendingGenerationContext.entryKey}"`);
+            console.log(`[GIC-Lore] 生成コンテキスト設定: entryKey="${_pendingGenerationContext.entryKey}", resolution=${resolution || '(未設定)'}`);
         }
 
         // ★ 画像生成開始を通知（status_indicator.js が「画像生成中…」を表示）
@@ -784,12 +855,13 @@ async function processChoice(force = false) {
                     worldName,
                     prompt,
                     negativePrompt,
+                    resolution,
                 },
             }));
         } catch (e) { /* ignore */ }
 
         try {
-            await executeSd(prompt, negativePrompt);
+            await executeSd(prompt, negativePrompt, resolution);
         } finally {
             // ★ 画像生成終了を通知（成功・失敗にかかわらず必ず発火）
             try {
@@ -840,7 +912,8 @@ async function registerSlashCommand() {
                     if (found) {
                         console.log('6) 抽出プロンプト:', extractPromptFromEntry(found, wn));
                         console.log('6b) ネガティブプロンプト:', extractNegativePromptFromEntry(found, wn));
-                        console.log('6c) entryKey (ファイル名用):', extractEntryKey(found));
+                        console.log('6c) 解像度:', extractResolutionFromEntry(found, wn));
+                        console.log('6d) entryKey (ファイル名用):', extractEntryKey(found));
                     }
                 }
                 try {
@@ -988,7 +1061,9 @@ window.GicLorebook = {
     extractEntryKey,
     getLexImgPrompt,
     getLexNegativePrompt,                  // ★ v4 追加
+    getLexResolution,                      // ★ v5 追加
     extractNegativePromptFromEntry,        // ★ v4 追加
+    extractResolutionFromEntry,            // ★ v5 追加
     loadWorldInfoEntries,
     findEntryByChoice,
     getEntryKeys,
