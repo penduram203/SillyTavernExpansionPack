@@ -5,11 +5,11 @@
 //   ↑ / W  … 前の要素へ
 //   ↓ / S  … 次の要素へ
 //   Enter / Space / E / F … 選択決定（要素を .click()）
+//   ← / →  … 常にブロック（ST のスワイプ操作誤爆防止）
 //
 // コンテキスト決定（優先度順）:
-//   1. RPGモード=1 かつ バトルモード=1
+//   1. RPGモード=1 かつ バトルモード=1 かつ プレイヤーターン
 //      → 画面左端の .variable-command-btn 4 つのみ
-//      ※ 待機中 (.variable-battle-commands-waiting) は null を返し、無反応
 //   2. RPGモード=1 かつ バトル開始変数=1
 //      → 最後に表示されたバトル開始ボタンのみ
 //   3. 選択肢モード=1 かつ state=initial
@@ -18,16 +18,16 @@
 //      → 最後の .lbe-choices-block 内の選択肢のみ
 //   5. それ以外 → キーボード介入なし
 //
+// ★ キーボード / マウスの排他制御:
+//   body.keyconfig-mouse-mode    … マウス操作が優先。:hover を有効化、キーボード focus は非表示。
+//   body.keyconfig-keyboard-mode … キーボード操作が優先。:hover を CSS で抑止、キーボード focus を表示。
+//   選択状態 _indices は常に 1 つ。Enter/Space/E/F は _indices の要素のみ .click() する。
+//
 // 安全策:
 //   - textarea / input / contenteditable にフォーカスがあるときは一切介入しない
 //   - Ctrl / Alt / Meta 併用時は介入しない
 //   - IME 変換中 (isComposing) は介入しない
 //   - Enter のオートリピートは無視
-//   - 入力ロック中は ST のメッセージボタン等の自動クリックを抑止する
-//   - チャット表示中の ←/→ はスワイプ発動防止のためブロックする
-//   - マウスが navigable 要素に乗ったら keyboard focus を非表示にし、
-//     逆に keyboard 操作したら :hover を中和する（同時選択の禁止）
-//   - バトルコマンド待機中 (player_turn=0) は keyboard 無効 + focus を blur
 
 (function () {
     'use strict';
@@ -36,16 +36,12 @@
     const STYLE_ID = 'keyconfig-style';
     const FOCUS_CLASS = 'keyconfig-focused';
     const HIDE_INPUT_CLASS = 'keyconfig-hide-input';
-    const KB_MODE_CLASS = 'kbc-kb-mode';
+    const MOUSE_MODE_CLASS = 'keyconfig-mouse-mode';
+    const KEYBOARD_MODE_CLASS = 'keyconfig-keyboard-mode';
 
     const NAV_UP_KEYS = ['ArrowUp', 'w', 'W'];
     const NAV_DOWN_KEYS = ['ArrowDown', 's', 'S'];
     const CONFIRM_KEYS = ['Enter', ' ', 'e', 'E', 'f', 'F'];
-    const NAV_LR_KEYS = ['ArrowLeft', 'ArrowRight'];
-
-    // navigable 要素（フォーカス・ホバー制御・確認の対象）
-    const NAV_SELECTOR =
-        '.lbe-choice-item, .game-start-choice, .variable-battle-start-btn, .variable-command-btn';
 
     const _indices = {
         'battle-commands': 0,
@@ -55,9 +51,7 @@
     };
     let _lastContextName = null;
     let _lastChoicesBlock = null;
-
-    // ★ マウスが navigable 要素の上にあるか
-    let _mouseHoveringNavigable = false;
+    let _lastHoverTarget = null;
 
     // ============================================================
     // CSS 注入
@@ -113,13 +107,28 @@
         return Array.from(document.querySelectorAll(selector)).filter(isElementVisible);
     }
 
-    // チャット画面が現在アクティブか（スワイプ阻止の判定用）
-    function isChatViewActive() {
-        const chatEl = document.getElementById('chat');
-        if (!chatEl || !isElementVisible(chatEl)) return false;
-        // ポップアップが開いている時はチャット操作用のキーではないので除外
-        if (document.querySelector('dialog.popup[open]')) return false;
-        return true;
+    // ============================================================
+    // モード切替
+    // ============================================================
+    function switchToMouseMode() {
+        if (document.body.classList.contains(MOUSE_MODE_CLASS) &&
+            !document.body.classList.contains(KEYBOARD_MODE_CLASS)) {
+            return;
+        }
+        document.body.classList.remove(KEYBOARD_MODE_CLASS);
+        document.body.classList.add(MOUSE_MODE_CLASS);
+        clearFocus();
+    }
+
+    function switchToKeyboardMode() {
+        if (document.body.classList.contains(KEYBOARD_MODE_CLASS) &&
+            !document.body.classList.contains(MOUSE_MODE_CLASS)) {
+            return;
+        }
+        document.body.classList.remove(MOUSE_MODE_CLASS);
+        document.body.classList.add(KEYBOARD_MODE_CLASS);
+        // 矢印キー押下でマウス位置関係をリセット → 次の mouseover を確実に発火させる
+        _lastHoverTarget = null;
     }
 
     // ============================================================
@@ -130,7 +139,7 @@
         let rpg = flags?.rpgMode === true;
         let choices = flags?.choicesMode === true;
 
-        // フラグがまだ準備できていない時のDOMフォールバック
+        // フラグ準備前の DOM フォールバック
         if (!rpg && !choices && document.body.classList.contains(HIDE_INPUT_CLASS)) {
             if (findVisible('.variable-command-btn').length > 0) rpg = true;
             else if (findVisible('.variable-battle-start-btn').length > 0) rpg = true;
@@ -147,23 +156,25 @@
                     return window.VariableManager.getBattleStartVar() === true;
                 }
             } catch (e) { /* ignore */ }
-            return document.querySelector('.variable-battle-start-btn') !== null;
+            return false;
         })();
 
         const charName = getCurrentCharName();
         const state = window.ChoiceClick?.getStartState?.(charName) || 'initial';
 
         // ① バトルモード → 左端の4ボタンのみ
-        //    ★ 待機中 (player_turn=0) は null を返してキーボードを無効化
         if (rpg && battleActive) {
             const container = document.getElementById('variable-battle-commands');
             if (container && isElementVisible(container)) {
+                // ★ 非プレイヤーターン中は完全無効
                 if (container.classList.contains('variable-battle-commands-waiting')) {
                     return null;
                 }
                 const btns = Array.from(container.querySelectorAll('.variable-command-btn')).filter(isElementVisible);
                 if (btns.length > 0) return { name: 'battle-commands', multi: true, elements: btns };
             }
+            // バトル中で操作対象なし → 他コンテキストへのフォールスルー禁止
+            return null;
         }
 
         // ② RPG + バトル開始変数=1 → 最後のバトル開始ボタンのみ
@@ -173,7 +184,6 @@
         }
 
         // ③ 選択肢モード + 初期状態 → ゲーム開始ボタン（リセット除外）
-        //    ボタンが未生成の時は ④ にフォールスルー
         if (choices && state === 'initial') {
             const btns = document.querySelectorAll('.game-start-choice:not(.game-reset-choice)');
             let found = null;
@@ -202,12 +212,15 @@
         if (last !== _lastChoicesBlock) {
             _lastChoicesBlock = last;
             _indices['choices'] = 0;
+            _lastHoverTarget = null;
+            // 新しい選択肢ブロックでは初期状態（マウス優先）に戻す
+            switchToMouseMode();
         }
         return { name: 'choices', multi: true, elements: items };
     }
 
     // ============================================================
-    // 入力欄のロック状態
+    // 入力ロック
     // ============================================================
     function isInputLocked() {
         try {
@@ -233,27 +246,11 @@
     // ============================================================
     // フォーカス管理
     // ============================================================
-    function isBattleCommandsWaiting() {
-        const container = document.getElementById('variable-battle-commands');
-        return !!container && container.classList.contains('variable-battle-commands-waiting');
-    }
-
     function blurForeignFocus() {
         const active = document.activeElement;
         if (!active || active === document.body) return;
+        if (active.matches('.lbe-choice-item, .game-start-choice, .variable-battle-start-btn, .variable-command-btn')) return;
         if (isTypingTarget(active)) return;
-
-        // ★ バトルコマンド待機中は、コマンドボタンのフォーカスを強制的に外す
-        //    フォーカスが残っていると Enter/Space のネイティブ click で
-        //    「鳴ってはいけない」効果音が再生される。
-        if (isBattleCommandsWaiting()) {
-            if (active.closest?.('#variable-battle-commands')) {
-                try { active.blur(); } catch (e) { /* ignore */ }
-                return;
-            }
-        }
-
-        if (active.matches(NAV_SELECTOR)) return;
         if (active.matches('.mes_button, .mes_edit, .mes_edit_cancel, .mes_edit_done, .mes_hide, .mes_copy, .mes_branch, .interactable[role="button"]')) {
             try { active.blur(); } catch (e) { /* ignore */ }
         }
@@ -267,14 +264,6 @@
         updateInputLock();
         if (document.body.classList.contains(HIDE_INPUT_CLASS)) {
             blurForeignFocus();
-        }
-
-        // 待機中は強制的に blur（コマンドボタンの keyboard ネイティブ click 防止）
-        if (isBattleCommandsWaiting()) {
-            const focused = document.activeElement;
-            if (focused?.closest?.('#variable-battle-commands')) {
-                try { focused.blur(); } catch (e) { /* ignore */ }
-            }
         }
 
         const ctx = getKeyboardContext();
@@ -302,18 +291,14 @@
         if (idx < 0) idx = 0;
         _indices[ctx.name] = idx;
 
-        // ★ マウスが navigable の上にある時は keyboard focus を非表示にする
-        //   （キーボード選択とマウスホバーが同時に表示される問題の対策）
-        if (_mouseHoveringNavigable) {
+        // ★ キーボードモードの時だけ .keyconfig-focused を付与する
+        if (document.body.classList.contains(KEYBOARD_MODE_CLASS)) {
             clearFocus();
-            return;
-        }
-
-        document.querySelectorAll('.' + FOCUS_CLASS).forEach(el => {
-            if (!elements.includes(el)) el.classList.remove(FOCUS_CLASS);
-        });
-        if (!elements[idx].classList.contains(FOCUS_CLASS)) {
-            elements[idx].classList.add(FOCUS_CLASS);
+            if (!elements[idx].classList.contains(FOCUS_CLASS)) {
+                elements[idx].classList.add(FOCUS_CLASS);
+            }
+        } else {
+            clearFocus();
         }
     }
 
@@ -323,16 +308,13 @@
         const elements = ctx.elements;
         if (elements.length === 0) return;
 
-        // ★ キーボード操作を開始 → マウスホバーモードからキーボードモードへ
-        _mouseHoveringNavigable = false;
-        document.body.classList.add(KB_MODE_CLASS);
-
         let idx = _indices[ctx.name] ?? 0;
         idx += delta;
         if (idx < 0) idx = elements.length - 1;
         if (idx >= elements.length) idx = 0;
         _indices[ctx.name] = idx;
 
+        switchToKeyboardMode();
         clearFocus();
         elements[idx].classList.add(FOCUS_CLASS);
         try {
@@ -347,12 +329,6 @@
         if (!ctx) return false;
         const elements = ctx.elements;
         if (elements.length === 0) return false;
-
-        // ★ バトルコマンド確認時は念のため待機中チェック
-        if (ctx.name === 'battle-commands' && isBattleCommandsWaiting()) {
-            return false;
-        }
-
         const idx = Math.min(_indices[ctx.name] ?? 0, elements.length - 1);
         const el = elements[idx];
         if (!el) return false;
@@ -360,45 +336,54 @@
     }
 
     // ============================================================
-    // マウス / キーボード の相互排他
-    //   - mouseover navigable → _mouseHoveringNavigable=true, keyboard focus 解除
-    //   - mouseout navigable → _mouseHoveringNavigable=false, focus 復元は次回 ensureFocus
+    // マウス操作の検出（選択肢 / バトルボタン上での hover と click）
     // ============================================================
     document.addEventListener('mouseover', (e) => {
-        const nav = e.target?.closest?.(NAV_SELECTOR);
-        if (!nav) return;
-        _mouseHoveringNavigable = true;
-        document.body.classList.remove(KB_MODE_CLASS);
-        clearFocus();
-    }, true);
+        const target = e.target?.closest?.('.lbe-choice-item, .variable-command-btn');
+        if (!target) {
+            // 選択肢/バトルボタンの外に出た時はターゲット記憶をリセット
+            if (_lastHoverTarget && !_lastHoverTarget.contains(e.target)) {
+                _lastHoverTarget = null;
+            }
+            return;
+        }
+        if (target === _lastHoverTarget) return;
+        _lastHoverTarget = target;
 
-    document.addEventListener('mouseout', (e) => {
-        const from = e.target?.closest?.(NAV_SELECTOR);
-        if (!from) return;
-        const to = e.relatedTarget?.closest?.(NAV_SELECTOR);
-        if (to) return; // navigable 間の移動 → ホバー継続
-        _mouseHoveringNavigable = false;
-        // focus 復元は次の ensureFocus に任せる（mousemove 後の 400ms 以内）
-    }, true);
+        const ctx = getKeyboardContext();
+        if (!ctx) return;
+        const idx = ctx.elements.indexOf(target);
+        if (idx < 0) return;
+
+        _indices[ctx.name] = idx;
+        switchToMouseMode();
+    }, { passive: true, capture: true });
+
+    document.addEventListener('click', (e) => {
+        const target = e.target?.closest?.('.lbe-choice-item, .variable-command-btn');
+        if (!target) return;
+        const ctx = getKeyboardContext();
+        if (!ctx) return;
+        const idx = ctx.elements.indexOf(target);
+        if (idx < 0) return;
+        _indices[ctx.name] = idx;
+        switchToMouseMode();
+    }, { capture: true });
 
     // ============================================================
     // キーイベントハンドラ（capture フェーズ）
     // ============================================================
-    function handleKeydown(e) {
+    document.addEventListener('keydown', (e) => {
         if (e.ctrlKey || e.altKey || e.metaKey) return;
         if (e.isComposing) return;
         if (isTypingTarget(e.target)) return;
 
-        // ★ ←/→ はチャット画面ではスワイプ発動防止のためブロック
-        if (NAV_LR_KEYS.includes(e.key)) {
-            const target = e.target;
-            const inChat = target?.closest?.('#chat, .mes, .swipe_left, .swipe_right, .swipeRightBlock, .swipeRightBlockArrow, .swipeLeftBlock');
-            const isBodyLevel = target === document.body || target === document.documentElement;
-            if (inChat || (isBodyLevel && isChatViewActive())) {
-                e.preventDefault();
-                e.stopImmediatePropagation();
-                return;
-            }
+        // ★ ST のスワイプ操作(←/→)による誤動作防止
+        //    typing target 以外では常にブロックする
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            return;
         }
 
         const isUp = NAV_UP_KEYS.includes(e.key);
@@ -431,55 +416,17 @@
                 return;
             }
             if (!ctx.multi && (isUp || isDown)) {
-                // 単一要素コンテキストでもスクロールは阻止
                 e.preventDefault();
                 e.stopImmediatePropagation();
                 return;
             }
         }
 
-        // ★ コンテキストが無いが入力ロック中
-        //    → バトル待機中の Enter/Space 等による誤爆・誤発音を抑止
         if (!ctx && inputLocked) {
             e.preventDefault();
             e.stopImmediatePropagation();
         }
-    }
-
-    // window と document の両方の capture で受け、
-    // stopImmediatePropagation によって ST 側のデフォルト動作を確実に抑止する
-    window.addEventListener('keydown', handleKeydown, true);
-    document.addEventListener('keydown', handleKeydown, true);
-
-    // ============================================================
-    // バトルコマンド待機状態の監視
-    //   クラス付与の瞬間にボタンからフォーカスを外す
-    // ============================================================
-    function setupBattleWaitingBlurObserver() {
-        const attach = () => {
-            const container = document.getElementById('variable-battle-commands');
-            if (!container) {
-                setTimeout(attach, 500);
-                return;
-            }
-            if (container.dataset.kbcWaitObserved === '1') return;
-            container.dataset.kbcWaitObserved = '1';
-            const obs = new MutationObserver(() => {
-                if (container.classList.contains('variable-battle-commands-waiting')) {
-                    const focused = document.activeElement;
-                    if (focused?.closest?.('#variable-battle-commands')) {
-                        try { focused.blur(); } catch (e) { /* ignore */ }
-                    }
-                    clearFocus();
-                } else {
-                    ensureFocus();
-                }
-            });
-            obs.observe(container, { attributes: true, attributeFilter: ['class'] });
-        };
-        attach();
-        setInterval(attach, 1000);
-    }
+    }, true);
 
     // ============================================================
     // 監視・初期化
@@ -496,8 +443,8 @@
 
     function start() {
         if (!document.body) { setTimeout(start, 200); return; }
+        document.body.classList.add(MOUSE_MODE_CLASS);
         observer.observe(document.body, { childList: true, subtree: true });
-        setupBattleWaitingBlurObserver();
         ensureFocus();
         setInterval(ensureFocus, 400);
         console.log(LOG, '初期化完了');
@@ -521,13 +468,20 @@
             return ctx ? ctx.name : null;
         },
         getIndices: () => ({ ..._indices }),
+        getMode: () => {
+            if (document.body.classList.contains(KEYBOARD_MODE_CLASS)) return 'keyboard';
+            if (document.body.classList.contains(MOUSE_MODE_CLASS)) return 'mouse';
+            return null;
+        },
         _debug: () => {
             const ctx = getKeyboardContext();
             const flags = window.VariableManager?.getCommonRuleFlags?.();
             const charName = getCurrentCharName();
+            const battleContainer = document.getElementById('variable-battle-commands');
             return {
                 context: ctx ? ctx.name : null,
                 indices: { ..._indices },
+                mode: window.KeyConfig.getMode(),
                 elements: ctx ? ctx.elements.map(el => ({
                     tag: el.tagName,
                     class: String(el.className).slice(0, 60),
@@ -537,13 +491,7 @@
                 charName,
                 state: window.ChoiceClick?.getStartState?.(charName) || 'initial',
                 inputLocked: isInputLocked(),
-                hideInputClass: document.body.classList.contains(HIDE_INPUT_CLASS),
-                kbModeClass: document.body.classList.contains(KB_MODE_CLASS),
-                mouseHoveringNavigable: _mouseHoveringNavigable,
-                battleWaiting: isBattleCommandsWaiting(),
-                activeElement: document.activeElement
-                    ? `${document.activeElement.tagName}.${String(document.activeElement.className).slice(0, 40)}`
-                    : null,
+                battleWaiting: battleContainer?.classList.contains('variable-battle-commands-waiting') ?? null,
             };
         },
     };
