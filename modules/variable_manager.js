@@ -87,6 +87,29 @@ import('./sound_effects.js').catch(err => {
     const VAR_NAME_TITLE_SCREEN = 'タイトル画面';
     const VAR_NAME_CHAT_WINDOW = 'チャットウィンドウ';
 
+    // ============================================================
+    // ★ 共通ルールエントリ名のマッチング（モジュールレベル共通関数）
+    //   ST が comment に付加する注釈付き表記にも対応する。
+    //   "00_共通ルール" / "00_共通ルール（常時有効）" / "00_共通ルール (Constant)" など
+    //   - 完全一致 / startsWith / NFKC 正規化 / 括弧注釈の除去 の 4 段階で判定
+    // ============================================================
+    function tryMatchCommonRule(raw) {
+        if (typeof raw !== 'string') return false;
+        const t = raw.trim();
+        if (!t) return false;
+        const target = COMMON_RULE_ENTRY_NAME;
+        if (t === target) return true;
+        if (t.startsWith(target)) return true;
+        try {
+            const nt = t.normalize('NFKC');
+            const ntarget = target.normalize('NFKC');
+            if (nt === ntarget || nt.startsWith(ntarget)) return true;
+        } catch (e) { /* ignore */ }
+        const stripped = t.replace(/\s*[（(].*?[）)]\s*$/, '').trim();
+        if (stripped === target || stripped.startsWith(target)) return true;
+        return false;
+    }
+
     // ★ タイミング定数
     const ENEMY_ATTACK_DELAY_MS = 600;   // （現在未使用）
     const ENTRY_999_DELAY_MS = 800;
@@ -398,23 +421,9 @@ import('./sound_effects.js').catch(err => {
                     return _commonRuleFlags;
                 }
 
-                const tryMatch = (raw) => {
-                    if (typeof raw !== 'string') return false;
-                    const t = raw.trim();
-                    if (!t) return false;
-                    const target = COMMON_RULE_ENTRY_NAME;
-                    if (t === target) return true;
-                    if (t.startsWith(target)) return true;
-                    try {
-                        const nt = t.normalize('NFKC');
-                        const ntarget = target.normalize('NFKC');
-                        if (nt === ntarget || nt.startsWith(ntarget)) return true;
-                    } catch (e) { /* ignore */ }
-                    const stripped = t.replace(/\s*[（(].*?[）)]\s*$/, '').trim();
-                    if (stripped === target || stripped.startsWith(target)) return true;
-                    return false;
-                };
-
+                // ★ モジュールレベルの tryMatchCommonRule() を使用
+                //   （以前はここでローカルに tryMatch を定義していたが、
+                //     setCommonRuleVariable とロジックを共有するために切り出した）
                 for (const worldName of candidates) {
                     let entries = null;
                     try {
@@ -430,11 +439,11 @@ import('./sound_effects.js').catch(err => {
                     let targetEntry = null;
                     for (const e of list) {
                         if (!e) continue;
-                        if (tryMatch(e.comment)) { targetEntry = e; break; }
+                        if (tryMatchCommonRule(e.comment)) { targetEntry = e; break; }
                         const keys = getEntryKeys(e);
                         let keyHit = false;
                         for (const k of keys) {
-                            if (tryMatch(String(k))) { keyHit = true; break; }
+                            if (tryMatchCommonRule(String(k))) { keyHit = true; break; }
                         }
                         if (keyHit) { targetEntry = e; break; }
                     }
@@ -606,10 +615,20 @@ import('./sound_effects.js').catch(err => {
     // ★ 共通ルール変数の書き換え（00_共通ルール エントリを直接対象にする）
     //   バトルモード変数のように「現在の選択肢エントリ」ではなく、
     //   常に 00_共通ルール の変数を書き換える。
+    //
+    //   ★ 修正: エントリ名の照合を tryMatchCommonRule() に統一した。
+    //     以前は c === COMMON_RULE_ENTRY_NAME の完全一致だったため、
+    //     ST が comment に付加する "（常時有効）" 等の注釈付き表記を
+    //     持つエントリが見つからず、更新が失敗していた。
     // ============================================================
     async function setCommonRuleVariable(varName, value) {
         try {
             const candidates = getWorldNameCandidates();
+            console.log(
+                LOG,
+                `setCommonRuleVariable: ${varName}=${value}, candidates=[${candidates.join(', ')}]`
+            );
+
             for (const worldName of candidates) {
                 let entries = null;
                 try {
@@ -618,18 +637,40 @@ import('./sound_effects.js').catch(err => {
                 if (!entries) continue;
 
                 const list = Array.isArray(entries) ? entries : Object.values(entries);
+
+                // ★ tryMatchCommonRule() で注釈付き表記にもマッチ
                 let targetEntry = null;
                 for (const e of list) {
                     if (!e) continue;
-                    const c = typeof e.comment === 'string' ? e.comment.trim() : '';
-                    if (c === COMMON_RULE_ENTRY_NAME) { targetEntry = e; break; }
-                    const keys = getEntryKeys(e).map(k => String(k).trim());
-                    if (keys.includes(COMMON_RULE_ENTRY_NAME)) { targetEntry = e; break; }
+                    if (tryMatchCommonRule(e.comment)) { targetEntry = e; break; }
+                    const keys = getEntryKeys(e);
+                    let keyHit = false;
+                    for (const k of keys) {
+                        if (tryMatchCommonRule(String(k))) { keyHit = true; break; }
+                    }
+                    if (keyHit) { targetEntry = e; break; }
                 }
-                if (!targetEntry) continue;
+
+                if (!targetEntry) {
+                    // ★ 診断ログ: comment の先頭数件を出力
+                    const sampleComments = list
+                        .filter(e => e && typeof e.comment === 'string')
+                        .slice(0, 8)
+                        .map(e => `"${e.comment}"`)
+                        .join(', ');
+                    console.log(
+                        LOG,
+                        `  候補 "${worldName}": ${COMMON_RULE_ENTRY_NAME} に一致するエントリなし ` +
+                        `(entries=${list.length}, comments=[${sampleComments}])`
+                    );
+                    continue;
+                }
 
                 const uid = targetEntry.uid;
-                if (uid === null || uid === undefined) continue;
+                if (uid === null || uid === undefined) {
+                    console.log(LOG, `  候補 "${worldName}": uid なし`);
+                    continue;
+                }
 
                 const data = window.LorebookExpansion.getDataFor(worldName, uid, targetEntry);
                 const vars = Array.isArray(data.variables) ? data.variables.map(v => ({ ...v })) : [];
@@ -637,9 +678,19 @@ import('./sound_effects.js').catch(err => {
                 for (const v of vars) if (v && v.name) varMap[v.name] = v;
 
                 if (varMap[varName]) {
+                    const prev = varMap[varName].value;
                     varMap[varName].value = String(value);
+                    console.log(
+                        LOG,
+                        `  候補 "${worldName}": 既存変数 "${varName}" を更新 ` +
+                        `(${prev} → ${value})`
+                    );
                 } else {
                     vars.push({ type: 'number', name: varName, value: String(value) });
+                    console.log(
+                        LOG,
+                        `  候補 "${worldName}": 新規変数 "${varName}" を追加 (value=${value})`
+                    );
                 }
 
                 data.variables = vars;
@@ -713,7 +764,18 @@ import('./sound_effects.js').catch(err => {
                 console.warn(LOG, 'タイトル画面変数の更新に失敗');
                 return;
             }
+
+            // ★ 進行中の refresh があれば完了を待つ
+            //    （古い値でキャッシュが上書きされるのを防ぐ）
+            if (_commonRuleRefreshInFlight) {
+                try { await _commonRuleRefreshInFlight; } catch (e) { /* ignore */ }
+            }
+
+            // ★ キャッシュを無効化して強制再取得
             _commonRuleFlagsLastRefresh = 0;
+            await refreshCommonRuleFlags(true);
+
+            // ★ 取得済みの最新フラグで再描画
             _lastRenderKey = '';
             await forceRenderAsync();
         } catch (e) {
@@ -724,7 +786,12 @@ import('./sound_effects.js').catch(err => {
     async function setTitleScreenVar(value) {
         const ok = await setCommonRuleVariable(VAR_NAME_TITLE_SCREEN, value);
         if (ok) {
+            // ★ 進行中の refresh があれば完了を待つ
+            if (_commonRuleRefreshInFlight) {
+                try { await _commonRuleRefreshInFlight; } catch (e) { /* ignore */ }
+            }
             _commonRuleFlagsLastRefresh = 0;
+            await refreshCommonRuleFlags(true);
             _lastRenderKey = '';
             await forceRenderAsync();
         }
@@ -1694,6 +1761,7 @@ import('./sound_effects.js').catch(err => {
         getTitleScreenButtons,
         setTitleScreenVar,
         setCommonRuleVariable,
+        tryMatchCommonRule,
         getWorldNameCandidates,
         getWorldName,
         isVisibleForChar,
@@ -1816,7 +1884,7 @@ import('./sound_effects.js').catch(err => {
                             if (!e) return false;
                             const c = typeof e.comment === 'string' ? e.comment.trim() : '';
                             const keys = getEntryKeys(e).map(k => String(k).trim());
-                            return c === COMMON_RULE_ENTRY_NAME || keys.includes(COMMON_RULE_ENTRY_NAME);
+                            return tryMatchCommonRule(c) || keys.some(k => tryMatchCommonRule(k));
                         });
                     }
                 } catch (e) {
