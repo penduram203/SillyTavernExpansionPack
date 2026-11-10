@@ -482,3 +482,102 @@ body.variable-battle-active #half-maximize-button {
 body.varmgr-hide-user-messages .mes[is_user="true"] {
     display: none !important;
 }
+
+/* ============================================================
+ * ★ タイトル画面
+ *   body.varmgr-title-screen が付与されている間、
+ *   右上の場所 / 左下のプレイヤー情報 / チャットウィンドウを非表示にする
+ * ============================================================ */
+
+/* 右上の場所を非表示 */
+body.varmgr-title-screen .variable-location {
+    display: none !important;
+}
+
+/* 左下のプレイヤー情報を非表示（UserStatus） */
+body.varmgr-title-screen #user-status-panel {
+    display: none !important;
+}
+
+/* チャットウィンドウを非表示・クリック不能 */
+body.varmgr-title-screen #sheld {
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
+/* タイトル画面コンテナ（中央に スタート / ロード を横並び） */
+.variable-title-screen {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    display: none; /* JS が flex に切り替える */
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 80px;
+    z-index: 1000;
+    pointer-events: auto;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+/* ボタン本体 */
+.variable-title-btn {
+    min-width: 180px;
+    padding: 20px 40px;
+    font-size: 32px;
+    font-weight: bold;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    color: #ffffff;
+    -webkit-text-stroke: 4px #000000;
+    paint-order: stroke fill;
+    text-shadow:
+        -2px -2px 0 #000,
+         2px -2px 0 #000,
+        -2px  2px 0 #000,
+         2px  2px 0 #000,
+         0 0 8px rgba(0, 0, 0, 0.9);
+    background: rgba(20, 20, 30, 0.85);
+    border: 3px solid #ffffff;
+    border-radius: 12px;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.7);
+    transition: transform 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+    letter-spacing: 0.1em;
+    white-space: nowrap;
+    box-sizing: border-box;
+    line-height: 1.2;
+}
+
+.variable-title-btn:hover {
+    background: rgba(60, 60, 80, 0.95);
+    transform: scale(1.05);
+}
+
+.variable-title-btn:active {
+    transform: scale(0.98);
+}
+
+/* スタート: ホバーで緑系 */
+.variable-title-btn.variable-title-start:hover {
+    background: rgba(20, 140, 40, 0.95) !important;
+    border-color: #88ff88 !important;
+}
+
+/* ロード: ホバーで青系 */
+.variable-title-btn.variable-title-load:hover {
+    background: rgba(20, 60, 180, 0.95) !important;
+    border-color: #88bbff !important;
+}
+
+/* キーボードフォーカス表示 */
+.variable-title-btn.keyconfig-focused {
+    outline: 4px solid #ffd54f !important;
+    outline-offset: 4px !important;
+    box-shadow:
+        0 0 0 2px rgba(255, 213, 79, 0.4),
+        0 0 24px rgba(255, 213, 79, 0.9) !important;
+    transform: scale(1.08) !important;
+}
