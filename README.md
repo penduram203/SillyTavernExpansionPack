@@ -104,7 +104,21 @@ SillyTavern 拡張機能です。出力された JSON は `image-display` およ
 
 `Img_prompt` の直下に **2行のテキストエリア** として表示されます。ここに記載した内容は、GIC が `/sd` コマンドで画像を生成する際の `negative_prompt` として Stable Diffusion 拡張に渡されます。
 
-例：
+例：bad hands, extra fingers, lowres, ugly, blurry, watermark
+
+
+内部動作：
+
+1. 画像生成の直前に `extensionSettings.sd.negative_prompt` を一時的にこの値へ差し替え
+2. 生成完了後（成功・失敗に関わらず）元の値へ復元
+
+> **Note**: この値は ComfyUI ワークフロー内の `{{negative_prompt}}` プレースホルダーに反映されます。SD 拡張のバージョンやワークフロー定義によって挙動が異なる場合があります。ネガティブプロンプト欄が空の場合は、SD 拡張側の既存設定がそのまま使用されます。
+
+#### データ保存先（per-world ストア）
+
+LEX データは `extension_settings.lorebook_expansion.data[worldName][charKey]` に保存されます（`charKey` は `entry.comment` を正規化したもの、なければ `entry.keys[0]`、それも無ければ `uid`）。キャラクターとロアブックが別々でも正しく反映されます。
+
+JSON / PNG エクスポート時には `char.data.extensions.lorebook_expansion` へミラーリングされ、`CharStore` がエクスポート前に per-world ストアの内容をマージします。
 
 
 ### Generate Image Controller (GIC)
