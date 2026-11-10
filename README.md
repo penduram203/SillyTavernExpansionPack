@@ -91,32 +91,28 @@ SillyTavern 拡張機能です。出力された JSON は `image-display` およ
 `public/addchara/default.png` に一度だけ手動で配置してください。
 拡張機能の自動更新ではこのアセットは配置されません。
 
-### Lorebook Expansion
+### ロアブック拡張（Lorebook Expansion）
 
-SillyTavern のロアブック編集画面に **Img_prompt** と **choices** の 2 つのカスタム
-フィールドを追加する拡張機能です。
+ロアブックの各エントリに、以下の拡張フィールドを追加できます。
 
-**機能:**
+| フィールド | UI | 説明 |
+|---|---|---|
+| `img_prompt` | 3行テキストエリア | 画像生成プロンプト。`gic_lorebook.js` が読み取り `/sd` に渡す。 |
+| `negative_prompt` | **2行テキストエリア** | ネガティブプロンプト。`gic_lorebook.js` が `/sd` 実行時に `extensionSettings.sd.negative_prompt` を一時的にこの値へ差し替え、生成完了後に元の値へ復元する。 |
+| `variables` | 行追加式エディタ | 変数（数値 / 文字列）。`variable_manager.js` が読み取る。 |
+| `choices` | 行追加式エディタ | 応答末尾に自動表示される選択肢（番号＋文言）。`choice_click.js` がクリック可能化する。 |
 
-- ロアブックの各エントリに以下を追加:
-  - **Img_prompt** — 画像生成プロンプト (3行分のテキストエリア)
-  - **choices** — 複数の選択肢 (3桁番号 + 文言 のペア、追加/削除可能)
-- ユーザーが選択肢番号を入力して AI が応答すると、
-  その番号に対応するロアブックエントリの choices を
-  **応答本文の末尾に自動で番号と文言を表示**する
-- Img_prompt は別拡張 `generate_image_controller` の `gic_lorebook.js` から
-  読み取られ、画像生成プロンプトとして使用される
+#### 保存先
 
-**データ保存先:**
+- **一次情報源**: `extension_settings.lorebook_expansion.data[worldName][charKey]`
+  - `charKey` は `entry.comment`（ST の `（常時有効）` / `（無効）` 等の注釈を除去したもの）→ `entry.keys[0]` → `uid` の順で決定。
+  - キャラとロアブックが一致しない場合でも、ロアブック本来のデータが正しく参照される。
+- **エクスポート用ミラー**: `character.data.extensions.lorebook_expansion[worldName␟charKey]`
+  - `character_store.js` が JSON / PNG エクスポート時に per-world ストアの内容をマージする。
 
-データは以下の 2 箇所に保存されます:
+#### 旧データからの移行
 
-- **一次**: `extension_settings.lorebook_expansion.data[worldName][uid]`
-  — ST が自動永続化。ワールド情報の保存サイクルに影響されない
-- **二次**: `entry.extensions.lorebook_expansion` (best effort ミラー)
-  — ロアブック JSON の可搬性のため
-
-読込時は一次を優先し、一次が無ければ二次から移行（マイグレーション）します。
+Phase 2〜4 の `character.data.extensions.lorebook_expansion`（旧形式）は、初回起動時に per-world ストアへ自動移行されます（`lexStorageMigratedV1` フラグで制御）。`window.LorebookExpansion.resetMigration()` で再移行できます。
 
 ### Generate Image Controller (GIC)
 
