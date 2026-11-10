@@ -8,10 +8,13 @@
 //   - 攻撃/防御/逃走の動作を実装（道具は未実装）
 //
 // ★ ロアブックの「00_共通ルール」エントリによる制御（v9）:
-//   - RPGモード = 1    → 変数パネル（場所・敵情報）を表示、左下にプレイヤーHPバー表示
-//   - バトル開始 = 1   → RPGモード=1 と併せて「バトル開始」ボタンを表示
-//   - 選択肢モード = 1 → チャット開始時の「ゲーム開始」ボタン表示（choice_click.js）
-//   - タイトル画面 = 1 → RPGモード=1 と併せてタイトル画面（スタート/ロード）を表示
+//   - RPGモード        = 1 → 変数パネル（場所・敵情報）を表示、左下にプレイヤーHPバー表示
+//   - バトル開始       = 1 → RPGモード=1 と併せて「バトル開始」ボタンを表示
+//   - 選択肢モード     = 1 → チャット開始時の「ゲーム開始」ボタン表示（choice_click.js）
+//   - タイトル画面     = 1 → RPGモード=1 と併せてタイトル画面（スタート/ロード）を表示
+//   - チャットウィンドウ = 1 → RPGモード=1 の時のみ #sheld を表示
+//                          = 0 で非表示・クリック不能
+//                          （変数が存在しない場合は表示=true として後方互換）
 //   - バトル中の4ボタン・敵HP表示は RPGモード=1 かつ バトルモード=1 の時のみ
 //   - キャラクター管理メニューの UI設定チェックボックスは全廃。
 //
@@ -32,11 +35,12 @@
 //   - バトル開始ボタン（variable_manager.js）: RPGモード変数 かつ バトル開始変数で制御
 //
 // ★ 変数の役割分担:
-//   - RPGモード    : 変数パネル・プレイヤーHP表示・バトル開始ボタンの前提条件
-//   - バトル開始   : 「バトル開始」ボタンの表示 ON/OFF
-//   - 選択肢モード : 「ゲーム開始」ボタンの表示 ON/OFF（choice_click.js 用）
-//   - タイトル画面 : タイトル画面（スタート/ロード）の表示 ON/OFF
-//   - バトルモード : 実際のバトル進行状態（1=バトル中, 0=非バトル）
+//   - RPGモード        : 変数パネル・プレイヤーHP表示・バトル開始ボタンの前提条件
+//   - バトル開始       : 「バトル開始」ボタンの表示 ON/OFF
+//   - 選択肢モード     : 「ゲーム開始」ボタンの表示 ON/OFF（choice_click.js 用）
+//   - タイトル画面     : タイトル画面（スタート/ロード）の表示 ON/OFF
+//   - チャットウィンドウ: #sheld の表示 ON/OFF（RPGモード=1 時のみ有効）
+//   - バトルモード     : 実際のバトル進行状態（1=バトル中, 0=非バトル）
 //
 // ★ バトルモード遷移:
 //   バトル開始ボタン押下 → バトルモード=1
@@ -81,6 +85,7 @@ import('./sound_effects.js').catch(err => {
     const VAR_NAME_CHOICES_MODE = '選択肢モード';
     const VAR_NAME_BATTLE_START = 'バトル開始';
     const VAR_NAME_TITLE_SCREEN = 'タイトル画面';
+    const VAR_NAME_CHAT_WINDOW = 'チャットウィンドウ';
 
     // ★ タイミング定数
     const ENEMY_ATTACK_DELAY_MS = 600;   // （現在未使用）
@@ -129,9 +134,10 @@ import('./sound_effects.js').catch(err => {
     let _actionInProgress = false;
     let _cachedEnemyName = '敵';
 
-    // ★ 共通ルール（RPGモード / 選択肢モード / タイトル画面）のキャッシュ
+    // ★ 共通ルール（RPGモード / 選択肢モード / タイトル画面 / チャットウィンドウ）のキャッシュ
     //   worldName フィールドには、実際に採用したロアブック名が入る（診断用）
-    let _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, titleScreen: false, worldName: null };
+    //   チャットウィンドウは変数が存在しない場合「表示」= true として扱う（後方互換）
+    let _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, titleScreen: false, chatWindow: true, worldName: null };
     let _commonRuleFlagsLastRefresh = 0;
 
     // ★ バトル開始変数のキャッシュ
@@ -304,10 +310,19 @@ import('./sound_effects.js').catch(err => {
         const rpgRaw = varMap?.[VAR_NAME_RPG_MODE]?.value;
         const choicesRaw = varMap?.[VAR_NAME_CHOICES_MODE]?.value;
         const titleRaw = varMap?.[VAR_NAME_TITLE_SCREEN]?.value;
+        const chatWindowRaw = varMap?.[VAR_NAME_CHAT_WINDOW]?.value;
+
         const rpgMode = String(rpgRaw ?? '').trim() === '1';
         const choicesMode = String(choicesRaw ?? '').trim() === '1';
         const titleScreen = String(titleRaw ?? '').trim() === '1';
-        return { rpgMode, choicesMode, titleScreen };
+
+        // ★ チャットウィンドウ: 変数が存在しない場合は「表示」= true として扱う
+        //   （既存ロアブックとの後方互換のため）
+        const chatWindow = (chatWindowRaw === undefined || chatWindowRaw === null)
+            ? true
+            : String(chatWindowRaw).trim() === '1';
+
+        return { rpgMode, choicesMode, titleScreen, chatWindow };
     }
 
     // ★ 並行呼び出しの重複排除
@@ -319,6 +334,7 @@ import('./sound_effects.js').catch(err => {
         rpg: null,
         choices: null,
         title: null,
+        chatWindow: null,
         world: null,
     };
 
@@ -327,6 +343,7 @@ import('./sound_effects.js').catch(err => {
             _lastLoggedState.rpg === flags.rpgMode &&
             _lastLoggedState.choices === flags.choicesMode &&
             _lastLoggedState.title === flags.titleScreen &&
+            _lastLoggedState.chatWindow === flags.chatWindow &&
             _lastLoggedState.world === flags.worldName) {
             return;
         }
@@ -335,11 +352,13 @@ import('./sound_effects.js').catch(err => {
             rpg: flags.rpgMode,
             choices: flags.choicesMode,
             title: flags.titleScreen,
+            chatWindow: flags.chatWindow,
             world: flags.worldName,
         };
         console.log(
             `[VarManager] 共通ルール: ok=${flags.ok} rpg=${flags.rpgMode} ` +
-            `choices=${flags.choicesMode} title=${flags.titleScreen} world=${flags.worldName || '?'}`
+            `choices=${flags.choicesMode} title=${flags.titleScreen} ` +
+            `chatWindow=${flags.chatWindow} world=${flags.worldName || '?'}`
         );
     }
 
@@ -361,20 +380,20 @@ import('./sound_effects.js').catch(err => {
             try {
                 const charName = getCurrentCharName();
                 if (!charName) {
-                    _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, titleScreen: false, worldName: null };
+                    _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, titleScreen: false, chatWindow: true, worldName: null };
                     _logStateIfChanged(_commonRuleFlags);
                     return _commonRuleFlags;
                 }
 
                 if (!window.LorebookExpansion?.loadWorldInfoEntriesByName) {
-                    _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, titleScreen: false, worldName: null };
+                    _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, titleScreen: false, chatWindow: true, worldName: null };
                     _logStateIfChanged(_commonRuleFlags);
                     return _commonRuleFlags;
                 }
 
                 const candidates = getWorldNameCandidates();
                 if (candidates.length === 0) {
-                    _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, titleScreen: false, worldName: null };
+                    _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, titleScreen: false, chatWindow: true, worldName: null };
                     _logStateIfChanged(_commonRuleFlags);
                     return _commonRuleFlags;
                 }
@@ -429,7 +448,7 @@ import('./sound_effects.js').catch(err => {
                     return _commonRuleFlags;
                 }
 
-                _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, titleScreen: false, worldName: null };
+                _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, titleScreen: false, chatWindow: true, worldName: null };
                 _logStateIfChanged(_commonRuleFlags);
                 return _commonRuleFlags;
             } finally {
@@ -714,6 +733,12 @@ import('./sound_effects.js').catch(err => {
 
     function isTitleScreenActive() {
         return _commonRuleFlags.rpgMode === true && _commonRuleFlags.titleScreen === true;
+    }
+
+    // ★ チャットウィンドウを非表示にすべきか
+    //   RPGモード=1 かつ チャットウィンドウ=0 の時のみ true
+    function shouldHideChatWindow() {
+        return _commonRuleFlags.rpgMode === true && _commonRuleFlags.chatWindow === false;
     }
 
     function getTitleScreenButtons() {
@@ -1555,6 +1580,13 @@ import('./sound_effects.js').catch(err => {
                 updateTitleScreenVisibility(titleActive);
             } catch (e) { /* ignore */ }
 
+            // ★ チャットウィンドウ: RPGモード=1 かつ チャットウィンドウ=0 の時のみ非表示
+            //    （タイトル画面=1 の場合は既に varmgr-title-screen で非表示になっている）
+            try {
+                const hideChat = shouldHideChatWindow();
+                document.body.classList.toggle('varmgr-hide-chat-window', hideChat);
+            } catch (e) { /* ignore */ }
+
             const charName = getCurrentCharName();
             const panel = ensurePanel();
 
@@ -1658,6 +1690,7 @@ import('./sound_effects.js').catch(err => {
         refreshCommonRuleFlags,
         getCommonRuleFlags: () => ({ ..._commonRuleFlags }),
         isTitleScreenActive,
+        shouldHideChatWindow,
         getTitleScreenButtons,
         setTitleScreenVar,
         setCommonRuleVariable,
@@ -1705,6 +1738,7 @@ import('./sound_effects.js').catch(err => {
             lastBattleStartVar: _lastBattleStartVar,
             shouldShowBattleStartButton: shouldShowBattleStartButton(),
             isTitleScreenActive: isTitleScreenActive(),
+            shouldHideChatWindow: shouldHideChatWindow(),
             battleActive: _battleActive,
             battleEndingInProgress: _battleEndingInProgress,
             actionInProgress: _actionInProgress,
@@ -1735,10 +1769,12 @@ import('./sound_effects.js').catch(err => {
                 RPGモード: _commonRuleFlags.rpgMode,
                 選択肢モード: _commonRuleFlags.choicesMode,
                 タイトル画面: _commonRuleFlags.titleScreen,
+                チャットウィンドウ: _commonRuleFlags.chatWindow,
                 バトル開始変数: _lastBattleStartVar,
                 パネル表示: visible,
                 ゲーム開始ボタン有効: choicesEnabled,
                 タイトル画面表示: isTitleScreenActive(),
+                チャットウィンドウ非表示: shouldHideChatWindow(),
                 バトル開始ボタン表示条件: shouldShow,
                 result_ok: result.ok,
                 reason: result.reason,
