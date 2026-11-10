@@ -149,6 +149,21 @@
 
         if (!rpg && !choices) return null;
 
+        // ⓪ タイトル画面 → スタート / ロード ボタン（最優先）
+        //    RPGモード=1 かつ タイトル画面=1 の時のみ。
+        //    他のコンテキスト（バトル・選択肢）より優先される。
+        if (rpg && window.VariableManager?.isTitleScreenActive?.() === true) {
+            const container = document.getElementById('variable-title-screen');
+            if (container && isElementVisible(container)) {
+                const btns = Array.from(container.querySelectorAll('.variable-title-btn')).filter(isElementVisible);
+                if (btns.length > 0) {
+                    return { name: 'title-screen', multi: true, elements: btns, horizontal: true };
+                }
+            }
+            // タイトル画面中だがボタンが見つからない → 他へのフォールスルー禁止
+            return null;
+        }
+
         const battleActive = window.VariableManager?.isBattleActive?.() === true;
         const battleStart = (() => {
             try {
@@ -377,6 +392,35 @@
         if (e.ctrlKey || e.altKey || e.metaKey) return;
         if (e.isComposing) return;
         if (isTypingTarget(e.target)) return;
+
+        // ★ タイトル画面: ←/→ または A/D で選択、E/F/Space/Enter で決定
+        //    タイトル画面が有効な間は、この 6 種のキーだけを扱う。
+        //    それ以外のキー（W/S 等）は無効化して他コンテキストへの漏れを防ぐ。
+        if (window.VariableManager?.isTitleScreenActive?.() === true) {
+            const isPrevKey = e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A';
+            const isNextKey = e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D';
+            const isConfirm = CONFIRM_KEYS.includes(e.key);
+
+            if (isPrevKey || isNextKey) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                navigate(isPrevKey ? -1 : 1);
+                return;
+            }
+            if (isConfirm) {
+                if (e.repeat) return;
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                confirm();
+                return;
+            }
+            // タイトル画面中の他のキー（W/S、↑/↓ 等）は無効化
+            if (['ArrowUp', 'ArrowDown', 'w', 'W', 's', 'S'].includes(e.key)) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+            }
+            return;
+        }
 
         // ★ ST のスワイプ操作(←/→)による誤動作防止
         //    typing target 以外では常にブロックする
