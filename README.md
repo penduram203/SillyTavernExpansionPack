@@ -91,28 +91,21 @@ SillyTavern 拡張機能です。出力された JSON は `image-display` およ
 `public/addchara/default.png` に一度だけ手動で配置してください。
 拡張機能の自動更新ではこのアセットは配置されません。
 
-### ロアブック拡張（Lorebook Expansion）
+### Lorebook Expansion（ロアブック拡張）
 
-ロアブックの各エントリに、以下の拡張フィールドを追加できます。
+ロアブックの各エントリに以下の項目を追加します。
 
-| フィールド | UI | 説明 |
-|---|---|---|
-| `img_prompt` | 3行テキストエリア | 画像生成プロンプト。`gic_lorebook.js` が読み取り `/sd` に渡す。 |
-| `negative_prompt` | **2行テキストエリア** | ネガティブプロンプト。`gic_lorebook.js` が `/sd` 実行時に `extensionSettings.sd.negative_prompt` を一時的にこの値へ差し替え、生成完了後に元の値へ復元する。 |
-| `variables` | 行追加式エディタ | 変数（数値 / 文字列）。`variable_manager.js` が読み取る。 |
-| `choices` | 行追加式エディタ | 応答末尾に自動表示される選択肢（番号＋文言）。`choice_click.js` がクリック可能化する。 |
+- **Img_prompt**：画像生成プロンプト（`gic_lorebook.js` が読み取る）
+- **Negative_prompt**：ネガティブプロンプト（`gic_lorebook.js` が読み取る）
+- **variables**：変数管理（`variable_manager.js` が読み取る）
+- **choices**：応答末尾に自動表示される選択肢群（番号 + 文言）
 
-#### 保存先
+#### Negative_prompt（ネガティブプロンプト）
 
-- **一次情報源**: `extension_settings.lorebook_expansion.data[worldName][charKey]`
-  - `charKey` は `entry.comment`（ST の `（常時有効）` / `（無効）` 等の注釈を除去したもの）→ `entry.keys[0]` → `uid` の順で決定。
-  - キャラとロアブックが一致しない場合でも、ロアブック本来のデータが正しく参照される。
-- **エクスポート用ミラー**: `character.data.extensions.lorebook_expansion[worldName␟charKey]`
-  - `character_store.js` が JSON / PNG エクスポート時に per-world ストアの内容をマージする。
+`Img_prompt` の直下に **2行のテキストエリア** として表示されます。ここに記載した内容は、GIC が `/sd` コマンドで画像を生成する際の `negative_prompt` として Stable Diffusion 拡張に渡されます。
 
-#### 旧データからの移行
+例：
 
-Phase 2〜4 の `character.data.extensions.lorebook_expansion`（旧形式）は、初回起動時に per-world ストアへ自動移行されます（`lexStorageMigratedV1` フラグで制御）。`window.LorebookExpansion.resetMigration()` で再移行できます。
 
 ### Generate Image Controller (GIC)
 
