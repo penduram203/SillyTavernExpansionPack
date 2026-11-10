@@ -969,8 +969,6 @@ import('./sound_effects.js').catch(err => {
 
                     endBattle();
                     await forceRenderAsync();
-
-                    restorePlayerHPFull();
                     await restoreEnemyHPFull();
 
                     // ── ⑤ ターンリセット ──
