@@ -581,3 +581,18 @@ body.varmgr-title-screen #sheld {
         0 0 24px rgba(255, 213, 79, 0.9) !important;
     transform: scale(1.08) !important;
 }
+
+/* ============================================================
+ * ★ チャットウィンドウの表示制御
+ *   body.varmgr-hide-chat-window が付与されている間、
+ *   #sheld を非表示・クリック不能にする。
+ *   条件: RPGモード=1 かつ チャットウィンドウ=0
+ *
+ *   ※ タイトル画面 (body.varmgr-title-screen) が同時に付与されている
+ *     場合も、両方とも display: none !important のため問題ない。
+ * ============================================================ */
+body.varmgr-hide-chat-window #sheld {
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
