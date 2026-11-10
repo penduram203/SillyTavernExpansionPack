@@ -7663,10 +7663,10 @@ function exposeGicApi() {
 //     （640px だとコンテナ/640 = 0.88 → 1列 → 4アイテム/ページになり、
 //       47ページに膨らむ）
 // ============================================================
-(function patchNanogallery2For4Rows() {
+(function patchNanogallery2For3Cols4Rows() {
     if (window.__gicNG2Patched) return;
     if (typeof window.$ === 'undefined' || !window.$.fn || typeof window.$.fn.nanogallery2 !== 'function') {
-        setTimeout(patchNanogallery2For4Rows, 500);
+        setTimeout(patchNanogallery2For3Cols4Rows, 500);
         return;
     }
     window.__gicNG2Patched = true;
