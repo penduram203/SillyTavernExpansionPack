@@ -152,11 +152,14 @@ function getLexStore() {
 
 function normalizeLexData(raw) {
     if (!raw || typeof raw !== 'object') {
-        return { img_prompt: '', negative_prompt: '', choices: [], variables: [] };
+        return { img_prompt: '', negative_prompt: '', resolution: '1024x1024', choices: [], variables: [] };
     }
     return {
         img_prompt: typeof raw.img_prompt === 'string' ? raw.img_prompt : '',
         negative_prompt: typeof raw.negative_prompt === 'string' ? raw.negative_prompt : '',
+        resolution: (typeof raw.resolution === 'string' && raw.resolution.trim())
+            ? raw.resolution.trim()
+            : '1024x1024',
         choices: Array.isArray(raw.choices)
             ? raw.choices
                   .filter(c => c && typeof c === 'object')
@@ -521,11 +524,11 @@ function getCharacterLexData() {
 
 function getDataFor(worldName, uid, entry) {
     if (!worldName || uid === null || uid === undefined) {
-        return { img_prompt: '', negative_prompt: '', choices: [], variables: [] };
+        return { img_prompt: '', negative_prompt: '', resolution: '1024x1024', choices: [], variables: [] };
     }
 
     const charKey = getCharKey(entry, uid);
-    if (!charKey) return { img_prompt: '', negative_prompt: '', choices: [], variables: [] };
+    if (!charKey) return { img_prompt: '', negative_prompt: '', resolution: '1024x1024', choices: [], variables: [] };
 
     const store = getWorldLexStore(worldName);
     const rec = store[charKey];
@@ -616,11 +619,11 @@ function setDataFor(worldName, uid, entry, data) {
 
 function getExpansionData(entry) {
     if (!entry || typeof entry !== 'object') {
-        return { img_prompt: '', negative_prompt: '', choices: [], variables: [] };
+        return { img_prompt: '', negative_prompt: '', resolution: '1024x1024', choices: [], variables: [] };
     }
     const ext = entry.extensions?.[MODULE_NAME];
     if (!ext || typeof ext !== 'object') {
-        return { img_prompt: '', negative_prompt: '', choices: [], variables: [] };
+        return { img_prompt: '', negative_prompt: '', resolution: '1024x1024', choices: [], variables: [] };
     }
     return normalizeLexData(ext);
 }
@@ -1163,11 +1166,48 @@ function buildExpansionSection(uid, worldName, data, onChange) {
     section.className = UI_SECTION_CLASS;
     section.setAttribute(ATTR_UID, String(uid));
 
-    // ── Img_prompt ──
+    // ── Img_prompt ラベル行（ラベル + 解像度ドロップダウン） ──
+    const imgLabelRow = document.createElement('div');
+    imgLabelRow.className = 'lbe-label-row';
+
     const imgLabel = document.createElement('label');
     imgLabel.className = 'lbe-label';
     imgLabel.textContent = 'Img_prompt (画像生成プロンプト)';
-    section.appendChild(imgLabel);
+    imgLabelRow.appendChild(imgLabel);
+
+    // ★ 解像度選択ドロップダウン（6項目のみ）
+    const RESOLUTION_OPTIONS = [
+        { value: '1280x720',  label: '1280×720 (横長)' },
+        { value: '1152x896',  label: '1152×896' },
+        { value: '1024x1024', label: '1024×1024 (正方形)' },
+        { value: '896x1152',  label: '896×1152' },
+        { value: '720x1280',  label: '720×1280 (縦長)' },
+        { value: 'random',    label: '①〜⑤からランダム' },
+    ];
+
+    const resolutionSelect = document.createElement('select');
+    resolutionSelect.className = 'lbe-resolution-select text_pole';
+    resolutionSelect.title = 'このエントリで画像を生成する際の解像度';
+    for (const opt of RESOLUTION_OPTIONS) {
+        const o = document.createElement('option');
+        o.value = opt.value;
+        o.textContent = opt.label;
+        resolutionSelect.appendChild(o);
+    }
+    // ★ 既存データが空 or 不明な値の場合は 1024x1024 にフォールバック
+    const initialResolution = RESOLUTION_OPTIONS.some(o => o.value === data.resolution)
+        ? data.resolution
+        : '1024x1024';
+    resolutionSelect.value = initialResolution;
+    data.resolution = initialResolution;
+    resolutionSelect.addEventListener('change', () => {
+        data.resolution = resolutionSelect.value;
+        onChange(data);
+        debugLog(`uid=${uid}: 解像度を ${data.resolution} に変更`);
+    });
+    imgLabelRow.appendChild(resolutionSelect);
+
+    section.appendChild(imgLabelRow);
 
     const imgTextarea = document.createElement('textarea');
     imgTextarea.className = 'lbe-img-prompt text_pole';
