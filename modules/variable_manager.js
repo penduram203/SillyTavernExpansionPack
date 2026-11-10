@@ -107,6 +107,7 @@ import('./sound_effects.js').catch(err => {
         player_defense: 20,
         enemy_attack: 70,
         enemy_defense: 20,
+        is_defending: false,
     };
 
     let _lastRenderKey = '';
@@ -738,6 +739,7 @@ import('./sound_effects.js').catch(err => {
                 player_defense: BATTLE_DEFAULTS.player_defense,
                 enemy_attack: BATTLE_DEFAULTS.enemy_attack,
                 enemy_defense: BATTLE_DEFAULTS.enemy_defense,
+                is_defending: false,
             };
             saveBattleState();
         }
@@ -920,7 +922,9 @@ import('./sound_effects.js').catch(err => {
 
         try {
             const enemyAtk = Number(bs.enemy_attack) || 70;
-            const playerDef = Number(bs.player_defense) || 20;
+            const baseDef = Number(bs.player_defense) || 20;
+            // ★ 防御中ならこのターンだけ 2 倍
+            const playerDef = bs.is_defending === true ? baseDef * 2 : baseDef;
             const damage = Math.max(1, enemyAtk - playerDef);
 
             const status = window.UserStatus?.getStatus?.();
@@ -969,6 +973,8 @@ import('./sound_effects.js').catch(err => {
                     restorePlayerHPFull();
                     await restoreEnemyHPFull();
 
+                    // ── ⑤ ターンリセット ──
+                    bs.is_defending = false;
                     bs.enemy_turn = 0;
                     bs.player_turn = 1;
                     saveBattleState();
@@ -985,6 +991,9 @@ import('./sound_effects.js').catch(err => {
                     _battleEndingInProgress = false;
                 }
             } else {
+                // 生存：ターン切替（プレイヤーへ戻す）
+                // ★ 防御効果をリセット（1 ターンのみ有効）
+                bs.is_defending = false;
                 bs.enemy_turn = 0;
                 bs.player_turn = 1;
                 saveBattleState();
@@ -1171,15 +1180,17 @@ import('./sound_effects.js').catch(err => {
         updateBattleCommandsState();
 
         try {
-            const before = Number(bs.player_defense) || 20;
-            bs.player_defense = before * 2;
+            const baseDef = Number(bs.player_defense) || 20;
+            // ★ 防御はこのターンだけ有効。player_defense 自体は変更せず、
+            //    is_defending フラグで一時的に防御力を 2 倍にする。
+            bs.is_defending = true;
             bs.player_turn = 0;
             bs.enemy_turn = 1;
             saveBattleState();
 
             console.log(
                 LOG,
-                `🛡️ 防御: player_defense ${before} → ${bs.player_defense} / ` +
+                `🛡️ 防御: player_defense ${baseDef} → ${baseDef * 2}（このターンのみ） / ` +
                 `player_turn=0, enemy_turn=1`
             );
 
