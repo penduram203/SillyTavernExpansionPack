@@ -11,6 +11,7 @@
 //   - RPGモード = 1    → 変数パネル（場所・敵情報）を表示、左下にプレイヤーHPバー表示
 //   - バトル開始 = 1   → RPGモード=1 と併せて「バトル開始」ボタンを表示
 //   - 選択肢モード = 1 → チャット開始時の「ゲーム開始」ボタン表示（choice_click.js）
+//   - タイトル画面 = 1 → RPGモード=1 と併せてタイトル画面（スタート/ロード）を表示
 //   - バトル中の4ボタン・敵HP表示は RPGモード=1 かつ バトルモード=1 の時のみ
 //   - キャラクター管理メニューの UI設定チェックボックスは全廃。
 //
@@ -34,11 +35,14 @@
 //   - RPGモード    : 変数パネル・プレイヤーHP表示・バトル開始ボタンの前提条件
 //   - バトル開始   : 「バトル開始」ボタンの表示 ON/OFF
 //   - 選択肢モード : 「ゲーム開始」ボタンの表示 ON/OFF（choice_click.js 用）
+//   - タイトル画面 : タイトル画面（スタート/ロード）の表示 ON/OFF
 //   - バトルモード : 実際のバトル進行状態（1=バトル中, 0=非バトル）
 //
 // ★ バトルモード遷移:
 //   バトル開始ボタン押下 → バトルモード=1
 //   敵HP≤0 / 逃走      → バトルモード=0 → 敵HPを最大値に全回復
+//   プレイヤーHP≤0     → バトルモード=0 → 敵HPを最大値に全回復
+//                        （プレイヤーHPは維持。リセットボタン押下時のみ全回復）
 //
 // ★ 攻撃アナウンス＆ダメージフロート:
 //   攻撃ボタン押下 → 効果音 → 即座に
@@ -54,7 +58,7 @@
 //
 // ★ バトル終了フロー:
 //   バトル終了フロートが消えるまでバトルモード=0 を書き込まない。
-//   endBattle() → 明示的 render → restorePlayerHPFull() → restoreEnemyHPFull()
+//   endBattle() → 明示的 render → restoreEnemyHPFull()
 
 // ★ 効果音モジュール（window.SoundEffects を公開）を非同期ロード
 import('./sound_effects.js').catch(err => {
@@ -71,10 +75,12 @@ import('./sound_effects.js').catch(err => {
     const EXT_SETTINGS_KEY = 'variable_manager';
     const BATTLE_START_BTN_CLASS = 'variable-battle-start-btn';
     const BATTLE_COMMANDS_ID = 'variable-battle-commands';
+    const TITLE_SCREEN_ID = 'variable-title-screen';
     const COMMON_RULE_ENTRY_NAME = '00_共通ルール';
     const VAR_NAME_RPG_MODE = 'RPGモード';
     const VAR_NAME_CHOICES_MODE = '選択肢モード';
     const VAR_NAME_BATTLE_START = 'バトル開始';
+    const VAR_NAME_TITLE_SCREEN = 'タイトル画面';
 
     // ★ タイミング定数
     const ENEMY_ATTACK_DELAY_MS = 600;   // （現在未使用）
@@ -123,9 +129,9 @@ import('./sound_effects.js').catch(err => {
     let _actionInProgress = false;
     let _cachedEnemyName = '敵';
 
-    // ★ 共通ルール（RPGモード / 選択肢モード）のキャッシュ
+    // ★ 共通ルール（RPGモード / 選択肢モード / タイトル画面）のキャッシュ
     //   worldName フィールドには、実際に採用したロアブック名が入る（診断用）
-    let _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, worldName: null };
+    let _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, titleScreen: false, worldName: null };
     let _commonRuleFlagsLastRefresh = 0;
 
     // ★ バトル開始変数のキャッシュ
@@ -297,9 +303,11 @@ import('./sound_effects.js').catch(err => {
     function extractCommonRuleFlags(varMap) {
         const rpgRaw = varMap?.[VAR_NAME_RPG_MODE]?.value;
         const choicesRaw = varMap?.[VAR_NAME_CHOICES_MODE]?.value;
+        const titleRaw = varMap?.[VAR_NAME_TITLE_SCREEN]?.value;
         const rpgMode = String(rpgRaw ?? '').trim() === '1';
         const choicesMode = String(choicesRaw ?? '').trim() === '1';
-        return { rpgMode, choicesMode };
+        const titleScreen = String(titleRaw ?? '').trim() === '1';
+        return { rpgMode, choicesMode, titleScreen };
     }
 
     // ★ 並行呼び出しの重複排除
@@ -310,6 +318,7 @@ import('./sound_effects.js').catch(err => {
         ok: null,
         rpg: null,
         choices: null,
+        title: null,
         world: null,
     };
 
@@ -317,6 +326,7 @@ import('./sound_effects.js').catch(err => {
         if (_lastLoggedState.ok === flags.ok &&
             _lastLoggedState.rpg === flags.rpgMode &&
             _lastLoggedState.choices === flags.choicesMode &&
+            _lastLoggedState.title === flags.titleScreen &&
             _lastLoggedState.world === flags.worldName) {
             return;
         }
@@ -324,11 +334,12 @@ import('./sound_effects.js').catch(err => {
             ok: flags.ok,
             rpg: flags.rpgMode,
             choices: flags.choicesMode,
+            title: flags.titleScreen,
             world: flags.worldName,
         };
         console.log(
             `[VarManager] 共通ルール: ok=${flags.ok} rpg=${flags.rpgMode} ` +
-            `choices=${flags.choicesMode} world=${flags.worldName || '?'}`
+            `choices=${flags.choicesMode} title=${flags.titleScreen} world=${flags.worldName || '?'}`
         );
     }
 
@@ -350,20 +361,20 @@ import('./sound_effects.js').catch(err => {
             try {
                 const charName = getCurrentCharName();
                 if (!charName) {
-                    _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, worldName: null };
+                    _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, titleScreen: false, worldName: null };
                     _logStateIfChanged(_commonRuleFlags);
                     return _commonRuleFlags;
                 }
 
                 if (!window.LorebookExpansion?.loadWorldInfoEntriesByName) {
-                    _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, worldName: null };
+                    _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, titleScreen: false, worldName: null };
                     _logStateIfChanged(_commonRuleFlags);
                     return _commonRuleFlags;
                 }
 
                 const candidates = getWorldNameCandidates();
                 if (candidates.length === 0) {
-                    _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, worldName: null };
+                    _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, titleScreen: false, worldName: null };
                     _logStateIfChanged(_commonRuleFlags);
                     return _commonRuleFlags;
                 }
@@ -418,7 +429,7 @@ import('./sound_effects.js').catch(err => {
                     return _commonRuleFlags;
                 }
 
-                _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, worldName: null };
+                _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, titleScreen: false, worldName: null };
                 _logStateIfChanged(_commonRuleFlags);
                 return _commonRuleFlags;
             } finally {
@@ -570,6 +581,151 @@ import('./sound_effects.js').catch(err => {
             console.warn(LOG, 'restoreEnemyHPFull error:', e);
             return false;
         }
+    }
+
+    // ============================================================
+    // ★ 共通ルール変数の書き換え（00_共通ルール エントリを直接対象にする）
+    //   バトルモード変数のように「現在の選択肢エントリ」ではなく、
+    //   常に 00_共通ルール の変数を書き換える。
+    // ============================================================
+    async function setCommonRuleVariable(varName, value) {
+        try {
+            const candidates = getWorldNameCandidates();
+            for (const worldName of candidates) {
+                let entries = null;
+                try {
+                    entries = await window.LorebookExpansion?.loadWorldInfoEntriesByName?.(worldName);
+                } catch (e) { continue; }
+                if (!entries) continue;
+
+                const list = Array.isArray(entries) ? entries : Object.values(entries);
+                let targetEntry = null;
+                for (const e of list) {
+                    if (!e) continue;
+                    const c = typeof e.comment === 'string' ? e.comment.trim() : '';
+                    if (c === COMMON_RULE_ENTRY_NAME) { targetEntry = e; break; }
+                    const keys = getEntryKeys(e).map(k => String(k).trim());
+                    if (keys.includes(COMMON_RULE_ENTRY_NAME)) { targetEntry = e; break; }
+                }
+                if (!targetEntry) continue;
+
+                const uid = targetEntry.uid;
+                if (uid === null || uid === undefined) continue;
+
+                const data = window.LorebookExpansion.getDataFor(worldName, uid, targetEntry);
+                const vars = Array.isArray(data.variables) ? data.variables.map(v => ({ ...v })) : [];
+                const varMap = {};
+                for (const v of vars) if (v && v.name) varMap[v.name] = v;
+
+                if (varMap[varName]) {
+                    varMap[varName].value = String(value);
+                } else {
+                    vars.push({ type: 'number', name: varName, value: String(value) });
+                }
+
+                data.variables = vars;
+                window.LorebookExpansion.setDataFor(worldName, uid, targetEntry, data);
+                console.log(LOG, `共通ルール変数を更新: ${varName}=${value} (world="${worldName}")`);
+                return true;
+            }
+            console.warn(LOG, `setCommonRuleVariable: ${COMMON_RULE_ENTRY_NAME} エントリが見つかりません`);
+            return false;
+        } catch (e) {
+            console.warn(LOG, 'setCommonRuleVariable error:', e);
+            return false;
+        }
+    }
+
+    // ============================================================
+    // ★ タイトル画面
+    // ============================================================
+    function ensureTitleScreen() {
+        let container = document.getElementById(TITLE_SCREEN_ID);
+        if (container) return container;
+
+        container = document.createElement('div');
+        container.id = TITLE_SCREEN_ID;
+        container.className = 'variable-title-screen';
+        container.style.display = 'none';
+
+        const startBtn = document.createElement('button');
+        startBtn.type = 'button';
+        startBtn.className = 'variable-title-btn variable-title-start';
+        startBtn.textContent = 'スタート';
+        startBtn.addEventListener('mouseenter', () => {
+            try { window.SoundEffects?.play?.('interface7'); } catch (e) { /* ignore */ }
+        });
+        startBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            Promise.resolve(handleTitleScreenStart()).catch(err => console.warn(LOG, err));
+        });
+        container.appendChild(startBtn);
+
+        const loadBtn = document.createElement('button');
+        loadBtn.type = 'button';
+        loadBtn.className = 'variable-title-btn variable-title-load';
+        loadBtn.textContent = 'ロード';
+        loadBtn.addEventListener('mouseenter', () => {
+            try { window.SoundEffects?.play?.('interface7'); } catch (e) { /* ignore */ }
+        });
+        loadBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            // ★ 現段階では未実装（将来のセーブデータロード用）
+            console.log(LOG, 'ロードボタンは未実装です');
+        });
+        container.appendChild(loadBtn);
+
+        document.body.appendChild(container);
+        return container;
+    }
+
+    function updateTitleScreenVisibility(active) {
+        const container = ensureTitleScreen();
+        container.style.display = active ? 'flex' : 'none';
+    }
+
+    async function handleTitleScreenStart() {
+        console.log(LOG, '▶ スタートボタン押下: タイトル画面を終了');
+        try {
+            const ok = await setCommonRuleVariable(VAR_NAME_TITLE_SCREEN, 0);
+            if (!ok) {
+                console.warn(LOG, 'タイトル画面変数の更新に失敗');
+                return;
+            }
+            _commonRuleFlagsLastRefresh = 0;
+            _lastRenderKey = '';
+            await forceRenderAsync();
+        } catch (e) {
+            console.warn(LOG, 'handleTitleScreenStart error:', e);
+        }
+    }
+
+    async function setTitleScreenVar(value) {
+        const ok = await setCommonRuleVariable(VAR_NAME_TITLE_SCREEN, value);
+        if (ok) {
+            _commonRuleFlagsLastRefresh = 0;
+            _lastRenderKey = '';
+            await forceRenderAsync();
+        }
+        return ok;
+    }
+
+    function isTitleScreenActive() {
+        return _commonRuleFlags.rpgMode === true && _commonRuleFlags.titleScreen === true;
+    }
+
+    function getTitleScreenButtons() {
+        const container = document.getElementById(TITLE_SCREEN_ID);
+        if (!container) return [];
+        return Array.from(container.querySelectorAll('.variable-title-btn'))
+            .filter(el => {
+                const cs = window.getComputedStyle(el);
+                if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+                const rect = el.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+            });
     }
 
     function getCurrentCharName() {
@@ -969,6 +1125,9 @@ import('./sound_effects.js').catch(err => {
 
                     endBattle();
                     await forceRenderAsync();
+
+                    // ★ プレイヤーHPは全回復しない
+                    //   リセットボタン押下時のみ回復する（choice_click.js 側で処理）
                     await restoreEnemyHPFull();
 
                     // ── ⑤ ターンリセット ──
@@ -1387,6 +1546,15 @@ import('./sound_effects.js').catch(err => {
                 document.body.classList.toggle('varmgr-hide-user-messages', hideUserMessages);
             } catch (e) { /* ignore */ }
 
+            // ★ タイトル画面: RPGモード=1 かつ タイトル画面=1 の時のみ表示
+            //    場所・プレイヤー情報・チャットウィンドウを CSS で非表示にし、
+            //    画面中央にスタート / ロードボタンを表示する。
+            try {
+                const titleActive = isTitleScreenActive();
+                document.body.classList.toggle('varmgr-title-screen', titleActive);
+                updateTitleScreenVisibility(titleActive);
+            } catch (e) { /* ignore */ }
+
             const charName = getCurrentCharName();
             const panel = ensurePanel();
 
@@ -1469,6 +1637,7 @@ import('./sound_effects.js').catch(err => {
 
         ensurePanel();
         ensureBattleCommands();
+        ensureTitleScreen();
         setupEventListeners();
         await render();
 
@@ -1488,6 +1657,10 @@ import('./sound_effects.js').catch(err => {
         getCommonRuleVariables,
         refreshCommonRuleFlags,
         getCommonRuleFlags: () => ({ ..._commonRuleFlags }),
+        isTitleScreenActive,
+        getTitleScreenButtons,
+        setTitleScreenVar,
+        setCommonRuleVariable,
         getWorldNameCandidates,
         getWorldName,
         isVisibleForChar,
@@ -1531,6 +1704,7 @@ import('./sound_effects.js').catch(err => {
             commonRuleFlags: { ..._commonRuleFlags },
             lastBattleStartVar: _lastBattleStartVar,
             shouldShowBattleStartButton: shouldShowBattleStartButton(),
+            isTitleScreenActive: isTitleScreenActive(),
             battleActive: _battleActive,
             battleEndingInProgress: _battleEndingInProgress,
             actionInProgress: _actionInProgress,
@@ -1560,9 +1734,11 @@ import('./sound_effects.js').catch(err => {
                 resolvedWorldName: _commonRuleFlags.worldName,
                 RPGモード: _commonRuleFlags.rpgMode,
                 選択肢モード: _commonRuleFlags.choicesMode,
+                タイトル画面: _commonRuleFlags.titleScreen,
                 バトル開始変数: _lastBattleStartVar,
                 パネル表示: visible,
                 ゲーム開始ボタン有効: choicesEnabled,
+                タイトル画面表示: isTitleScreenActive(),
                 バトル開始ボタン表示条件: shouldShow,
                 result_ok: result.ok,
                 reason: result.reason,
@@ -1583,7 +1759,7 @@ import('./sound_effects.js').catch(err => {
             console.log(LOG, 'debugBattleButton:', info);
             return info;
         },
-                // ★ worldbook 解決の診断用 API
+        // ★ worldbook 解決の診断用 API
         debugWorldbookResolution: async () => {
             const charName = getCurrentCharName();
             const candidates = getWorldNameCandidates();
