@@ -123,7 +123,9 @@
     // ============================================================
     // メイン処理
     // ============================================================
-    async function autoSelect(reason) {
+    async function autoSelect(reason, options = {}) {
+        const { force = false } = options;
+
         if (_processInFlight) return;
         _processInFlight = true;
 
@@ -151,9 +153,10 @@
             }
 
             // 既に正しく設定されている場合はスキップ（重複処理防止）
-            if (sameChar && reason !== 'chat-changed') {
+            // ★ force=true の場合は同一キャラでも強制的に再適用する
+            if (!force && sameChar && reason !== 'chat-changed') {
                 // キャラ名が同じで既に処理済み → 何もしない
-                console.debug(LOG, `同一キャラ "${charName}" のためスキップ`);
+                console.debug(LOG, `同一キャラ "${charName}" のためスキップ（force=true で再適用可能）`);
                 return;
             }
 
@@ -167,7 +170,7 @@
             if (editOk || activeOk) {
                 console.log(
                     `${LOG} 🔖 ロアブック "${charName}" を自動選択 ` +
-                    `(編集=${editOk}, アクティブ=${activeOk}, reason=${reason})`
+                    `(編集=${editOk}, アクティブ=${activeOk}, reason=${reason}, force=${force})`
                 );
             } else {
                 console.warn(`${LOG} ロアブック "${charName}" の選択に失敗しました`);
@@ -179,11 +182,11 @@
         }
     }
 
-    function scheduleAutoSelect(reason) {
+    function scheduleAutoSelect(reason, options = {}) {
         if (_scheduleTimer) clearTimeout(_scheduleTimer);
         _scheduleTimer = setTimeout(() => {
             _scheduleTimer = null;
-            autoSelect(reason).catch(e => console.warn(LOG, e));
+            autoSelect(reason, options).catch(e => console.warn(LOG, e));
         }, DEBOUNCE_MS);
     }
 
@@ -245,7 +248,8 @@
 
     // デバッグ用 API
     window.WorldbookAutoSelect = {
-        run: (reason) => autoSelect(reason || 'manual'),
+        run: (reason, options) => autoSelect(reason || 'manual', options || {}),
+        runForce: () => autoSelect('manual-force', { force: true }),
         getCurrentCharName,
         hasWorldBook: _hasWorldBook,
         resetProcessed: () => { _lastProcessedChar = null; },
