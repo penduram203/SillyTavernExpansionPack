@@ -328,6 +328,15 @@
             }
         } catch (e) { /* ignore */ }
 
+        // ★ リセットボタン押下時のみプレイヤーHPを全回復
+        //   バトル中の敗北などでは HP を維持する
+        try {
+            if (window.UserStatus?.fullHeal) {
+                window.UserStatus.fullHeal();
+                console.log(LOG, '💚 リセットボタン押下: プレイヤーHPを全回復');
+            }
+        } catch (e) { /* ignore */ }
+
         // ボタンを一時的に隠す
         btn.style.display = 'none';
 
