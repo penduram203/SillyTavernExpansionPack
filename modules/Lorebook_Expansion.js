@@ -926,13 +926,20 @@ function renderChoicesBlock(msgIdx, choices) {
     const mesEl = document.querySelector(`.mes[mesid="${msgIdx}"]`);
     if (!mesEl) return;
 
-    mesEl.querySelectorAll('.' + CHOICE_BLOCK_CLASS).forEach(el => el.remove());
-
     const mesTextEl = mesEl.querySelector('.mes_text');
     if (!mesTextEl) return;
 
+    // ★ 同じ内容のブロックが既にあれば再描画をスキップ
+    //    (appendChoicesToAllAiMessages が毎回全メッセージを走査するための最適化)
+    const newSig = JSON.stringify(choices);
+    const existing = mesTextEl.querySelector(':scope > .' + CHOICE_BLOCK_CLASS);
+    if (existing && existing.dataset.choiceSig === newSig) return;
+
+    mesEl.querySelectorAll('.' + CHOICE_BLOCK_CLASS).forEach(el => el.remove());
+
     const block = document.createElement('div');
     block.className = CHOICE_BLOCK_CLASS;
+    block.dataset.choiceSig = newSig;
 
     const list = document.createElement('div');
     list.className = 'lbe-choices-list';
@@ -1020,9 +1027,76 @@ async function appendChoicesToLastAiMessage() {
     renderChoicesBlock(lastAiIdx, data.choices);
 }
 
+// ============================================================
+// ★ 全 AI メッセージに対して選択肢ブロックを描画
+//   各 AI メッセージの直前のユーザーメッセージが選択肢番号を
+//   含む場合、対応するエントリの choices をそのメッセージに描画する。
+//   チャット再読み込み (CHAT_CHANGED) で過去の選択肢が失われる
+//   問題を修正するため、最新だけでなく全メッセージを対象とする。
+//   O(n) 走査: pendingUserText を使い、直前のユーザーメッセージを
+//   1 回消費する形で処理する。
+// ============================================================
+async function appendChoicesToAllAiMessages() {
+    if (!settings.enabled || !settings.autoAppendChoices) return;
+
+    const ctx = getContext();
+    if (!ctx?.chat || ctx.chat.length === 0) return;
+
+    // ★ 非同期処理中のキャラ切替を検出するため、開始時のキャラIDを記録
+    const startCharId = ctx?.characterId;
+    const startCharName = ctx?.characters?.[ctx?.characterId]?.name || null;
+
+    // ★ キャラ関連ワールドを最優先
+    const worldName = getChoicesWorldName();
+    if (!worldName) return;
+
+    const entries = await loadWorldInfoEntriesByName(worldName);
+    if (!entries) return;
+
+    // ★ 非同期処理後にキャラが切り替わっていないか確認
+    const ctxAfter = getContext();
+    if (ctxAfter?.characterId !== startCharId) {
+        debugLog(
+            `キャラが切り替わったため選択肢表示をスキップ ` +
+            `(start="${startCharName}", current="${ctxAfter?.characters?.[ctxAfter?.characterId]?.name || '?'}")`
+        );
+        return;
+    }
+
+    let pendingUserText = null;
+    for (let i = 0; i < ctx.chat.length; i++) {
+        const m = ctx.chat[i];
+        if (m.is_system) continue;
+        if (m.is_user) {
+            pendingUserText = m.mes || '';
+            continue;
+        }
+        // AI メッセージ
+        if (pendingUserText === null) continue;
+        const choiceNum = extractChoiceNumber(pendingUserText);
+        pendingUserText = null;
+        if (!choiceNum) continue;
+
+        const entry = findEntryByChoice(entries, choiceNum);
+        if (!entry) continue;
+
+        // ★ エントリのワールド不一致チェック（別キャラのロアブック混入防止）
+        const entryWorld = typeof entry.world === 'string' ? entry.world : '';
+        if (entryWorld && entryWorld !== worldName) continue;
+
+        const uid = entry.uid ?? null;
+        if (uid === null || uid === undefined) continue;
+
+        const data = getDataFor(worldName, uid, entry);
+        if (!data.choices || data.choices.length === 0) continue;
+
+        renderChoicesBlock(i, data.choices);
+    }
+}
+
 function refreshAllChoicesBlocks() {
     removeAllChoicesBlocks();
-    appendChoicesToLastAiMessage().catch(e => console.warn(LOG, e));
+    appendChoicesToAllAiMessages().catch(e => console.warn(LOG, e));
 }
 
 // ============================================================
@@ -1748,7 +1822,7 @@ function setupObserver() {
 // ============================================================
 function onCharacterMessageRendered() {
     setTimeout(() => {
-        appendChoicesToLastAiMessage().catch(e => console.warn(LOG, e));
+        appendChoicesToAllAiMessages().catch(e => console.warn(LOG, e));
     }, 250);
 }
 
@@ -2012,6 +2086,7 @@ window.LorebookExpansion = {
     getEntryKeys,
 
     appendChoicesToLastAiMessage,
+    appendChoicesToAllAiMessages,
     refreshAllChoicesBlocks,
 
     loadWorldInfoEntriesByName,
