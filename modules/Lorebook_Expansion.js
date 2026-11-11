@@ -1278,6 +1278,11 @@ function getAvailableResolutionsFromSD() {
 function getResolutionOptionsForLex() {
     const fromSD = getAvailableResolutionsFromSD();
     if (fromSD.length > 0) {
+        // ★ 1280x720 が SD 拡張の対応リストに無い場合でも必ず含める
+        //   （新規エントリ / 新規テンプレートのデフォルト値として使うため）
+        if (!fromSD.some(o => o.value === '1280x720')) {
+            fromSD.unshift({ value: '1280x720', label: '1280×720 (横長)' });
+        }
         return fromSD;
     }
     // フォールバック（SD 拡張が読み込まれていない場合）
@@ -1376,7 +1381,9 @@ function buildExpansionSection(uid, worldName, data, onChange) {
     // ★ SD 拡張の対応解像度リストの先頭（random 以外）をフォールバックに使う
     //   保存済みの解像度が SD 拡張の対応外（例: 720x1280 が resolutions マップに無い）の場合、
     //   この値に置き換える。SD 拡張が読み込まれていない場合は '1280x720'。
-    const fallbackResolution = RESOLUTION_OPTIONS.find(o => o.value !== 'random')?.value || '1280x720';
+    // ★ 新規テンプレート / 既存データのフォールバック値は必ず 1280x720
+    const LEX_DEFAULT_RESOLUTION = '1280x720';
+    const fallbackResolution = LEX_DEFAULT_RESOLUTION;
 
     // ── Img_prompt ラベル行（ラベル + 解像度ドロップダウン） ──
     const imgLabelRow = document.createElement('div');
@@ -1458,7 +1465,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         const t = data.templates[_currentIndex] || {
             img_prompt: '',
             negative_prompt: '',
-            resolution: fallbackResolution,
+            resolution: LEX_DEFAULT_RESOLUTION,
         };
         imgTextarea.value = t.img_prompt || '';
         negTextarea.value = t.negative_prompt || '';
@@ -1474,10 +1481,10 @@ function buildExpansionSection(uid, worldName, data, onChange) {
             if (t.resolution) {
                 console.warn(
                     `[LBE] 解像度 "${t.resolution}" は SD 拡張の対応リストに無いため ` +
-                    `"${fallbackResolution}" にフォールバックします (uid=${uid}, template=${_currentIndex})`
+                    `"${LEX_DEFAULT_RESOLUTION}" にフォールバックします (uid=${uid}, template=${_currentIndex})`
                 );
             }
-            validRes = fallbackResolution;
+            validRes = LEX_DEFAULT_RESOLUTION;
         }
         resolutionSelect.value = validRes;
         data.resolution = validRes;
@@ -1545,11 +1552,11 @@ function buildExpansionSection(uid, worldName, data, onChange) {
             console.warn(`${LOG} テンプレートは最大99個までです`);
             return;
         }
-        // ★ 新規テンプレートは解像度も SD 拡張の対応先頭値で初期化
+        // ★ 新規テンプレートの解像度は必ず 1280x720
         data.templates.push({
             img_prompt: '',
             negative_prompt: '',
-            resolution: fallbackResolution,
+            resolution: LEX_DEFAULT_RESOLUTION,
         });
         const newIdx = data.templates.length - 1;
         data.selectedTemplate = String(newIdx);
@@ -1558,7 +1565,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         rebuildTemplateOptions(String(newIdx));
         loadPromptIntoTextareas();
         onChange(data);
-        debugLog(`uid=${uid}: テンプレート ${newIdx} を追加`);
+        debugLog(`uid=${uid}: テンプレート ${newIdx} を追加 (解像度=${LEX_DEFAULT_RESOLUTION})`);
     });
 
     // ── イベント: template 削除 ──
