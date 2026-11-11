@@ -466,6 +466,28 @@ function getLexResolution(worldName, uid, entry) {
     return null;
 }
 
+// ============================================================
+// ★ SD 拡張が対応している解像度のリストを取得
+//    #sd_resolution の option から "sd_res_" を剥がして抽出
+// ============================================================
+function getAvailableSDResolutions() {
+    const result = [];
+    try {
+        const sel = document.getElementById('sd_resolution');
+        if (sel && sel.options && sel.options.length > 0) {
+            for (const opt of sel.options) {
+                const v = (opt.value || '').trim();
+                if (!v) continue;
+                const res = v.replace(/^sd_res_/, '');
+                if (/^\d+x\d+$/.test(res) && !result.includes(res)) {
+                    result.push(res);
+                }
+            }
+        }
+    } catch (e) { /* ignore */ }
+    return result;
+}
+
 function extractResolutionFromEntry(entry, worldName) {
     if (!entry) return null;
     return getLexResolution(worldName, entry.uid, entry);
@@ -723,9 +745,12 @@ async function executeSd(prompt, negativePrompt = null, resolution = null) {
     if (resolution && typeof resolution === 'string') {
         const trimmed = resolution.trim();
         if (trimmed === 'random') {
-            const RESOLUTIONS = ['1280x720', '1152x896', '1024x1024', '896x1152', '720x1280'];
+            const pool = getAvailableSDResolutions();
+            const RESOLUTIONS = pool.length > 0
+                ? pool
+                : ['1280x720', '1152x896', '1024x1024', '896x1152', '720x1280'];
             effectiveResolution = RESOLUTIONS[Math.floor(Math.random() * RESOLUTIONS.length)];
-            console.log(`[GIC-Lore] 🎲 解像度をランダム選択: ${effectiveResolution}`);
+            console.log(`[GIC-Lore] 🎲 解像度をランダム選択: ${effectiveResolution} (候補: ${RESOLUTIONS.join(', ')})`);
         } else if (/^\d+x\d+$/.test(trimmed)) {
             effectiveResolution = trimmed;
         }
@@ -768,8 +793,9 @@ async function executeSd(prompt, negativePrompt = null, resolution = null) {
                     console.log(`[GIC-Lore] 🔧 SD解像度を一時設定: "${effectiveResolution}" (元: "${originalResolution}")`);
 
                     // ② #sd_resolution の DOM 要素も変更（DOM 経由）
-                    //    ★ SD 拡張のバージョンによっては DOM から値を読むため、
-                    //      両方を同期させておく必要がある
+                    //    ★ SD 拡張の option value は "sd_res_XXXX" 形式。
+                    //      プレフィックスなしで設定すると getResolution() が解釈できず、
+                    //      デフォルト解像度にフォールバックしてしまう。
                     try {
                         jq = window.$ || window.jQuery || null;
                         if (jq) {
@@ -779,22 +805,21 @@ async function executeSd(prompt, negativePrompt = null, resolution = null) {
                                 originalDomResolution = $sel.val();
                                 console.log(`[GIC-Lore] 🔧 #sd_resolution の現在値: "${originalDomResolution}"`);
 
-                                // 対象の <option> が無ければ追加
-                                //   （SD 拡張標準の選択肢に 16:9 系が含まれない場合がある）
-                                const hasOption = $sel.find(`option[value="${effectiveResolution}"]`).length > 0;
+                                // ★ SD 拡張の option は "sd_res_XXXX" 形式
+                                const prefixedValue = `sd_res_${effectiveResolution}`;
+                                const hasOption = $sel.find(`option[value="${prefixedValue}"]`).length > 0;
                                 if (!hasOption) {
                                     addedOptionEl = jq('<option>', {
-                                        value: effectiveResolution,
+                                        value: prefixedValue,
                                         text: effectiveResolution,
                                     });
                                     $sel.append(addedOptionEl);
-                                    console.log(`[GIC-Lore] 🔧 #sd_resolution に option "${effectiveResolution}" を追加`);
+                                    console.log(`[GIC-Lore] 🔧 #sd_resolution に option "${prefixedValue}" を追加`);
                                 }
 
                                 // 値を変更して change イベントを発火
-                                //   （SD 拡張の change ハンドラが extensionSettings.sd.resolution を同期する）
-                                $sel.val(effectiveResolution).trigger('change');
-                                console.log(`[GIC-Lore] 🔧 #sd_resolution を "${effectiveResolution}" に変更`);
+                                $sel.val(prefixedValue).trigger('change');
+                                console.log(`[GIC-Lore] 🔧 #sd_resolution を "${prefixedValue}" に変更`);
                             } else {
                                 console.log('[GIC-Lore] #sd_resolution が見つかりません（DOM 操作をスキップ、設定経由のみで試行）');
                             }
@@ -1302,6 +1327,7 @@ window.GicLorebook = {
     getLexImgPrompt,
     getLexNegativePrompt,
     getLexResolution,
+    getAvailableSDResolutions,
     extractNegativePromptFromEntry,
     extractResolutionFromEntry,
     pickTemplateForGeneration,
