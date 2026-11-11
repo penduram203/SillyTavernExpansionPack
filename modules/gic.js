@@ -427,10 +427,33 @@ const HIDDEN_MES_CLASS = 'gic-hidden-message';
 
 const COMFY_CACHE_KEY = 'gic_comfyUnavailable';
 
-const COMFYUI_PROBE_URL_CANDIDATES = [
-    'http://127.0.0.1:8188',
-    'http://localhost:8188',
-];
+// ★ SD設定から実際の ComfyUI URL を取得してプローブ候補に含める
+//   Colab + localtunnel 環境では 127.0.0.1:8188 ではアクセスできないため、
+//   ユーザーが SD 設定に登録した URL を最優先でプローブする。
+function getComfyUIProbeCandidates() {
+    const candidates = [];
+    try {
+        const ctx = getContext();
+        const sdSettings = ctx?.extensionSettings?.sd;
+        // SD 設定に登録された URL を最優先
+        const urls = [
+            sdSettings?.comfy_url,
+            sdSettings?.comfyui_url,
+            sdSettings?.url,
+            sdSettings?.server_url,
+        ];
+        for (const u of urls) {
+            if (typeof u === 'string' && /^https?:\/\//i.test(u.trim())) {
+                const trimmed = u.trim().replace(/\/+$/, '');
+                if (!candidates.includes(trimmed)) candidates.push(trimmed);
+            }
+        }
+    } catch (e) { /* ignore */ }
+    // ローカル候補（デスクトップ環境用）
+    if (!candidates.includes('http://127.0.0.1:8188')) candidates.push('http://127.0.0.1:8188');
+    if (!candidates.includes('http://localhost:8188')) candidates.push('http://localhost:8188');
+    return candidates;
+}
 const COMFYUI_PROBE_TIMEOUT_MS = 3000;
 
 const GALLERY_WINDOW_SELECTORS = ['#gallery'];
@@ -663,18 +686,24 @@ function checkImageExists(url) {
 
 async function checkComfyUIAvailable() {
     const originalFetch = window.__gicOriginalFetch || window.fetch;
-    for (const baseUrl of COMFYUI_PROBE_URL_CANDIDATES) {
+    const candidates = getComfyUIProbeCandidates();
+    for (const baseUrl of candidates) {
         try {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), COMFYUI_PROBE_TIMEOUT_MS);
+            // ★ mode: 'cors' を明示し、credentials は same-origin に
             const resp = await originalFetch.call(window, `${baseUrl}/system_stats`, {
                 method: 'GET',
                 signal: controller.signal,
                 mode: 'cors',
+                credentials: 'omit',
                 cache: 'no-store',
             });
             clearTimeout(timeoutId);
-            if (resp.ok) return true;
+            if (resp.ok) {
+                console.info(`[GIC] ComfyUI 検出 OK: ${baseUrl}`);
+                return true;
+            }
         } catch (e) {
             console.debug(`[GIC] ComfyUI probe ${baseUrl} → 例外: ${e.message || e}`);
         }
@@ -701,6 +730,31 @@ async function ensureSdSourceConsistency() {
             return;
         }
 
+        // ★ SD 設定に登録されている ComfyUI URL を取得
+        //   （Colab + localtunnel 環境では 127.0.0.1:8188 に到達できないため、
+        //    ユーザーが明示的に設定した外部 URL を尊重する）
+        const sdUrl = (
+            sdSettings?.comfy_url ||
+            sdSettings?.comfyui_url ||
+            sdSettings?.url ||
+            sdSettings?.server_url ||
+            ''
+        ).trim();
+        const isExternalUrl = /^https?:\/\//i.test(sdUrl) &&
+                              !/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?/i.test(sdUrl);
+
+        if (isExternalUrl) {
+            console.info(
+                `[GIC] 外部 ComfyUI URL が設定されています: "${sdUrl}" → ` +
+                `プローブをスキップし、SDソースを "comfy" のまま維持します`
+            );
+            // ★ 外部 URL 設定時はプローブせず、キャッシュを「利用可能」に
+            //   これにより comfy_boot.js の fetch ブロックも回避される
+            localStorage.setItem(COMFY_CACHE_KEY, 'false');
+            return;
+        }
+
+        // ローカル URL（または URL 未設定）の場合のみプローブを実行
         const comfyAvailable = await checkComfyUIAvailable();
 
         if (comfyAvailable) {
