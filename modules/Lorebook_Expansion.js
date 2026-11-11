@@ -152,14 +152,61 @@ function getLexStore() {
 
 function normalizeLexData(raw) {
     if (!raw || typeof raw !== 'object') {
-        return { img_prompt: '', negative_prompt: '', resolution: '1024x1024', choices: [], variables: [] };
+        return {
+            img_prompt: '',
+            negative_prompt: '',
+            resolution: '1280x720',
+            templates: [{ img_prompt: '', negative_prompt: '' }],
+            selectedTemplate: '0',
+            choices: [],
+            variables: [],
+        };
     }
+
+    // ── templates の正規化 ──
+    let templates = [];
+    if (Array.isArray(raw.templates) && raw.templates.length > 0) {
+        templates = raw.templates
+            .filter(t => t && typeof t === 'object')
+            .map(t => ({
+                img_prompt: typeof t.img_prompt === 'string' ? t.img_prompt : '',
+                negative_prompt: typeof t.negative_prompt === 'string' ? t.negative_prompt : '',
+            }));
+        if (templates.length === 0) {
+            templates = [{ img_prompt: '', negative_prompt: '' }];
+        }
+    } else {
+        // 旧形式（templates 未定義）: img_prompt / negative_prompt を template 0 として取り込む
+        templates = [{
+            img_prompt: typeof raw.img_prompt === 'string' ? raw.img_prompt : '',
+            negative_prompt: typeof raw.negative_prompt === 'string' ? raw.negative_prompt : '',
+        }];
+    }
+
+    // ── selectedTemplate の正規化 ──
+    let selectedTemplate = '0';
+    const rawSel = typeof raw.selectedTemplate === 'string' ? raw.selectedTemplate.trim() : '';
+    if (rawSel === 'random') {
+        selectedTemplate = 'random';
+    } else if (/^\d+$/.test(rawSel) && parseInt(rawSel, 10) < templates.length) {
+        selectedTemplate = rawSel;
+    } else {
+        selectedTemplate = '0';
+    }
+
+    // ── img_prompt / negative_prompt ミラー ──
+    //   selectedTemplate が数値ならその内容、'random' なら template 0 をミラー
+    const mirrorIdx = selectedTemplate === 'random' ? 0 : parseInt(selectedTemplate, 10);
+    const mirror = templates[mirrorIdx] || { img_prompt: '', negative_prompt: '' };
+
     return {
-        img_prompt: typeof raw.img_prompt === 'string' ? raw.img_prompt : '',
-        negative_prompt: typeof raw.negative_prompt === 'string' ? raw.negative_prompt : '',
+        img_prompt: mirror.img_prompt,
+        negative_prompt: mirror.negative_prompt,
         resolution: (typeof raw.resolution === 'string' && raw.resolution.trim())
             ? raw.resolution.trim()
-            : '1024x1024',
+            : '1280x720',
+        templates,
+        selectedTemplate,
         choices: Array.isArray(raw.choices)
             ? raw.choices
                   .filter(c => c && typeof c === 'object')
@@ -524,11 +571,29 @@ function getCharacterLexData() {
 
 function getDataFor(worldName, uid, entry) {
     if (!worldName || uid === null || uid === undefined) {
-        return { img_prompt: '', negative_prompt: '', resolution: '1024x1024', choices: [], variables: [] };
+        return {
+            img_prompt: '',
+            negative_prompt: '',
+            resolution: '1280x720',
+            templates: [{ img_prompt: '', negative_prompt: '' }],
+            selectedTemplate: '0',
+            choices: [],
+            variables: [],
+        };
     }
 
     const charKey = getCharKey(entry, uid);
-    if (!charKey) return { img_prompt: '', negative_prompt: '', resolution: '1024x1024', choices: [], variables: [] };
+    if (!charKey) {
+        return {
+            img_prompt: '',
+            negative_prompt: '',
+            resolution: '1280x720',
+            templates: [{ img_prompt: '', negative_prompt: '' }],
+            selectedTemplate: '0',
+            choices: [],
+            variables: [],
+        };
+    }
 
     const store = getWorldLexStore(worldName);
     const rec = store[charKey];
@@ -564,7 +629,15 @@ function getDataFor(worldName, uid, entry) {
         console.warn(LOG, 'character.data からの移行に失敗:', e);
     }
 
-    return { img_prompt: '', negative_prompt: '', choices: [], variables: [] };
+    return {
+        img_prompt: '',
+        negative_prompt: '',
+        resolution: '1280x720',
+        templates: [{ img_prompt: '', negative_prompt: '' }],
+        selectedTemplate: '0',
+        choices: [],
+        variables: [],
+    };
 }
 
 function setDataFor(worldName, uid, entry, data) {
@@ -619,11 +692,27 @@ function setDataFor(worldName, uid, entry, data) {
 
 function getExpansionData(entry) {
     if (!entry || typeof entry !== 'object') {
-        return { img_prompt: '', negative_prompt: '', resolution: '1024x1024', choices: [], variables: [] };
+        return {
+            img_prompt: '',
+            negative_prompt: '',
+            resolution: '1280x720',
+            templates: [{ img_prompt: '', negative_prompt: '' }],
+            selectedTemplate: '0',
+            choices: [],
+            variables: [],
+        };
     }
     const ext = entry.extensions?.[MODULE_NAME];
     if (!ext || typeof ext !== 'object') {
-        return { img_prompt: '', negative_prompt: '', resolution: '1024x1024', choices: [], variables: [] };
+        return {
+            img_prompt: '',
+            negative_prompt: '',
+            resolution: '1280x720',
+            templates: [{ img_prompt: '', negative_prompt: '' }],
+            selectedTemplate: '0',
+            choices: [],
+            variables: [],
+        };
     }
     return normalizeLexData(ext);
 }
@@ -1166,6 +1255,65 @@ function buildExpansionSection(uid, worldName, data, onChange) {
     section.className = UI_SECTION_CLASS;
     section.setAttribute(ATTR_UID, String(uid));
 
+    // ── data の正規化（念のため） ──
+    if (!Array.isArray(data.templates) || data.templates.length === 0) {
+        data.templates = [{
+            img_prompt: typeof data.img_prompt === 'string' ? data.img_prompt : '',
+            negative_prompt: typeof data.negative_prompt === 'string' ? data.negative_prompt : '',
+        }];
+    }
+    if (typeof data.selectedTemplate !== 'string' || !data.selectedTemplate) {
+        data.selectedTemplate = '0';
+    }
+
+    // ── template state ──
+    let _activeRandomIndex = null;
+
+    function resolveEditIndex() {
+        if (data.selectedTemplate === 'random') {
+            if (_activeRandomIndex === null || _activeRandomIndex >= data.templates.length) {
+                _activeRandomIndex = Math.floor(Math.random() * data.templates.length);
+            }
+            return _activeRandomIndex;
+        }
+        let idx = parseInt(data.selectedTemplate, 10);
+        if (!Number.isFinite(idx) || idx < 0 || idx >= data.templates.length) {
+            idx = 0;
+            data.selectedTemplate = '0';
+        }
+        return idx;
+    }
+
+    // ── template ラベル行（template + 追加 + 削除） ──
+    const templateLabelRow = document.createElement('div');
+    templateLabelRow.className = 'lbe-label-row lbe-template-row';
+
+    const templateLabel = document.createElement('label');
+    templateLabel.className = 'lbe-label';
+    templateLabel.textContent = 'template';
+    templateLabelRow.appendChild(templateLabel);
+
+    const templateSelect = document.createElement('select');
+    templateSelect.className = 'lbe-template-select text_pole';
+    templateSelect.title = 'プロンプトのテンプレートを切り替える';
+    templateLabelRow.appendChild(templateSelect);
+
+    const templateAddBtn = document.createElement('button');
+    templateAddBtn.type = 'button';
+    templateAddBtn.className = 'lbe-template-add menu_button';
+    templateAddBtn.textContent = '追加';
+    templateAddBtn.title = '新しいテンプレートを追加';
+    templateLabelRow.appendChild(templateAddBtn);
+
+    const templateDelBtn = document.createElement('button');
+    templateDelBtn.type = 'button';
+    templateDelBtn.className = 'lbe-template-del menu_button';
+    templateDelBtn.textContent = '削除';
+    templateDelBtn.title = '現在のテンプレートを削除';
+    templateLabelRow.appendChild(templateDelBtn);
+
+    section.appendChild(templateLabelRow);
+
     // ── Img_prompt ラベル行（ラベル + 解像度ドロップダウン） ──
     const imgLabelRow = document.createElement('div');
     imgLabelRow.className = 'lbe-label-row';
@@ -1175,7 +1323,6 @@ function buildExpansionSection(uid, worldName, data, onChange) {
     imgLabel.textContent = 'Img_prompt';
     imgLabelRow.appendChild(imgLabel);
 
-    // ★ 解像度選択ドロップダウン（6項目のみ）
     const RESOLUTION_OPTIONS = [
         { value: '1280x720',  label: '1280×720 (横長)' },
         { value: '1152x896',  label: '1152×896' },
@@ -1194,10 +1341,9 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         o.textContent = opt.label;
         resolutionSelect.appendChild(o);
     }
-    // ★ 既存データが空 or 不明な値の場合は 1024x1024 にフォールバック
     const initialResolution = RESOLUTION_OPTIONS.some(o => o.value === data.resolution)
         ? data.resolution
-        : '1024x1024';
+        : '1280x720';
     resolutionSelect.value = initialResolution;
     data.resolution = initialResolution;
     resolutionSelect.addEventListener('change', () => {
@@ -1209,35 +1355,152 @@ function buildExpansionSection(uid, worldName, data, onChange) {
 
     section.appendChild(imgLabelRow);
 
+    // ── Img_prompt textarea ──
     const imgTextarea = document.createElement('textarea');
     imgTextarea.className = 'lbe-img-prompt text_pole';
     imgTextarea.rows = 3;
     imgTextarea.placeholder = '例: 5girls:1.4, schoo sailor uniform, miniskirt, sitting on chair, looking at viewer, school, classroom, smile, femdom';
-    imgTextarea.value = data.img_prompt || '';
-    imgTextarea.addEventListener('input', () => {
-        data.img_prompt = imgTextarea.value;
-        onChange(data);
-    });
     section.appendChild(imgTextarea);
 
-    // ── Negative_prompt（新規） ──
+    // ── Negative_prompt ラベル ──
     const negLabel = document.createElement('label');
     negLabel.className = 'lbe-label';
-    negLabel.textContent = 'Negative_prompt (ネガティブプロンプト)';
+    negLabel.textContent = 'Negative_prompt';
     section.appendChild(negLabel);
 
+    // ── Negative_prompt textarea ──
     const negTextarea = document.createElement('textarea');
     negTextarea.className = 'lbe-negative-prompt text_pole';
     negTextarea.rows = 2;
     negTextarea.placeholder = '例: bad hands, extra fingers, lowres, ugly, blurry, watermark';
-    negTextarea.value = data.negative_prompt || '';
+    section.appendChild(negTextarea);
+
+    // ── template と textarea の連携 ──
+    let _currentIndex = resolveEditIndex();
+
+    const rebuildTemplateOptions = (selectedValue) => {
+        templateSelect.innerHTML = '';
+        data.templates.forEach((_, i) => {
+            const opt = document.createElement('option');
+            opt.value = String(i);
+            opt.textContent = String(i);
+            templateSelect.appendChild(opt);
+        });
+        const rnd = document.createElement('option');
+        rnd.value = 'random';
+        rnd.textContent = 'ランダム';
+        templateSelect.appendChild(rnd);
+        templateSelect.value = selectedValue;
+    };
+
+    const updateReadOnlyState = () => {
+        const isRandom = data.selectedTemplate === 'random';
+        imgTextarea.readOnly = isRandom;
+        negTextarea.readOnly = isRandom;
+        imgTextarea.classList.toggle('lbe-prompt-readonly', isRandom);
+        negTextarea.classList.toggle('lbe-prompt-readonly', isRandom);
+        imgTextarea.title = isRandom
+            ? 'ランダム選択中は編集できません。具体的なテンプレートを選んでください'
+            : '';
+        negTextarea.title = isRandom
+            ? 'ランダム選択中は編集できません。具体的なテンプレートを選んでください'
+            : '';
+    };
+
+    const loadPromptIntoTextareas = () => {
+        const t = data.templates[_currentIndex] || { img_prompt: '', negative_prompt: '' };
+        imgTextarea.value = t.img_prompt || '';
+        negTextarea.value = t.negative_prompt || '';
+        data.img_prompt = t.img_prompt || '';
+        data.negative_prompt = t.negative_prompt || '';
+        updateReadOnlyState();
+    };
+
+    // ── 初期化 ──
+    rebuildTemplateOptions(data.selectedTemplate);
+    loadPromptIntoTextareas();
+
+    // ── イベント: textarea 編集 ──
+    imgTextarea.addEventListener('input', () => {
+        if (data.selectedTemplate === 'random') return;
+        const t = data.templates[_currentIndex];
+        if (!t) return;
+        t.img_prompt = imgTextarea.value;
+        data.img_prompt = imgTextarea.value;
+        onChange(data);
+    });
+
     negTextarea.addEventListener('input', () => {
+        if (data.selectedTemplate === 'random') return;
+        const t = data.templates[_currentIndex];
+        if (!t) return;
+        t.negative_prompt = negTextarea.value;
         data.negative_prompt = negTextarea.value;
         onChange(data);
     });
-    section.appendChild(negTextarea);
+
+    // ── イベント: template 切替 ──
+    templateSelect.addEventListener('change', () => {
+        data.selectedTemplate = templateSelect.value;
+        if (data.selectedTemplate === 'random') {
+            _activeRandomIndex = null;
+        }
+        _currentIndex = resolveEditIndex();
+        loadPromptIntoTextareas();
+        onChange(data);
+        debugLog(`uid=${uid}: template=${data.selectedTemplate} に切替`);
+    });
+
+    // ── イベント: template 追加 ──
+    templateAddBtn.addEventListener('click', () => {
+        if (data.templates.length >= 99) {
+            console.warn(`${LOG} テンプレートは最大99個までです`);
+            return;
+        }
+        data.templates.push({ img_prompt: '', negative_prompt: '' });
+        const newIdx = data.templates.length - 1;
+        data.selectedTemplate = String(newIdx);
+        _activeRandomIndex = null;
+        _currentIndex = newIdx;
+        rebuildTemplateOptions(String(newIdx));
+        loadPromptIntoTextareas();
+        onChange(data);
+        debugLog(`uid=${uid}: テンプレート ${newIdx} を追加`);
+    });
+
+    // ── イベント: template 削除 ──
+    templateDelBtn.addEventListener('click', () => {
+        if (data.templates.length <= 1) {
+            console.warn(`${LOG} テンプレートは最低1つ必要です`);
+            return;
+        }
+        if (data.selectedTemplate === 'random') {
+            console.warn(`${LOG} ランダム選択中は削除できません`);
+            return;
+        }
+        const idx = parseInt(data.selectedTemplate, 10);
+        if (!Number.isFinite(idx) || idx < 0 || idx >= data.templates.length) return;
+        if (!confirm(`テンプレート「${idx}」を削除しますか？\nこの操作は取り消せません。`)) return;
+        data.templates.splice(idx, 1);
+        data.selectedTemplate = '0';
+        _activeRandomIndex = null;
+        _currentIndex = 0;
+        rebuildTemplateOptions('0');
+        loadPromptIntoTextareas();
+        onChange(data);
+        debugLog(`uid=${uid}: テンプレート ${idx} を削除、テンプレート 0 にフォールバック`);
+    });
 
     // ── variables セクション ──
+    const varsLabel = document.createElement('label');
+    varsLabel.className = 'lbe-label';
+    varsLabel.textContent = 'variables';
+    section.appendChild(varsLabel);
+
+    const varsContainer = document.createElement('div');
+    varsContainer.className = 'lbe-variables-editor';
+    section.appendChild(varsContainer);
+
     const updateValuePlaceholder = (input, type) => {
         if (!input) return;
         if (type === 'number') {
@@ -1248,15 +1511,6 @@ function buildExpansionSection(uid, worldName, data, onChange) {
             input.title = '任意の文字列';
         }
     };
-
-    const varsLabel = document.createElement('label');
-    varsLabel.className = 'lbe-label';
-    varsLabel.textContent = 'variables (変数)';
-    section.appendChild(varsLabel);
-
-    const varsContainer = document.createElement('div');
-    varsContainer.className = 'lbe-variables-editor';
-    section.appendChild(varsContainer);
 
     const renderVariables = () => {
         varsContainer.innerHTML = '';
@@ -1343,7 +1597,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
     // ── choices セクション ──
     const choicesLabel = document.createElement('label');
     choicesLabel.className = 'lbe-label';
-    choicesLabel.textContent = 'choices (選択肢)';
+    choicesLabel.textContent = 'choices';
     section.appendChild(choicesLabel);
 
     const choicesContainer = document.createElement('div');
