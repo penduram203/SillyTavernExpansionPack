@@ -509,33 +509,45 @@ function getCharacterWorldInfoName() {
 }
 
 // ===== ロアブックのエントリ読込 =====
+// ===== ロアブックのエントリ読込 =====
 async function loadWorldInfoEntries(worldName) {
     if (!worldName) return [];
 
-    try {
-        if (typeof window.world_info !== 'undefined' && window.world_info[worldName]) {
-            const wi = window.world_info[worldName];
-            if (wi.entries) return Object.values(wi.entries);
-        }
-    } catch (e) { /* ignore */ }
+    // ★ ① LorebookExpansion の統合キャッシュを最優先
+    //    （worldinfo_updated などのイベントで自動クリアされる）
+    if (window.LorebookExpansion?.loadWorldInfoEntriesByName) {
+        try {
+            const entriesObj = await window.LorebookExpansion.loadWorldInfoEntriesByName(worldName);
+            if (entriesObj && typeof entriesObj === 'object') {
+                const list = Object.values(entriesObj);
+                if (list.length > 0) {
+                    if (settings.verbose) {
+                        console.debug(`[GIC-Lore] LBE統合キャッシュから取得: ${worldName} (${list.length}件)`);
+                    }
+                    return list;
+                }
+            }
+        } catch (e) { /* fall through */ }
+    }
 
-    try {
-        const mod = await import('../../../../world-info.js');
-        if (mod.world_info && mod.world_info[worldName] && mod.world_info[worldName].entries) {
-            return Object.values(mod.world_info[worldName].entries);
-        }
-    } catch (e) { /* ignore */ }
-
+    // ★ ② fetch を必ず実行（cache: no-store でブラウザキャッシュも回避）
     for (let attempt = 1; attempt <= 3; attempt++) {
         try {
             const resp = await fetch('/api/worldinfo/get', {
                 method: 'POST',
                 headers: getRequestHeaders(),
                 body: JSON.stringify({ name: worldName }),
+                cache: 'no-store',
             });
             if (resp.ok) {
                 const data = await resp.json();
-                if (data && data.entries) return Object.values(data.entries);
+                if (data && data.entries) {
+                    const list = Object.values(data.entries);
+                    if (settings.verbose) {
+                        console.debug(`[GIC-Lore] fetch から取得: ${worldName} (${list.length}件)`);
+                    }
+                    return list;
+                }
             }
         } catch (e) {
             if (settings.verbose) {
@@ -544,6 +556,31 @@ async function loadWorldInfoEntries(worldName) {
         }
         if (attempt < 3) await new Promise(r => setTimeout(r, 500 * attempt));
     }
+
+    // ★ ③ 最終フォールバック: window.world_info / mod.world_info
+    try {
+        if (typeof window.world_info !== 'undefined' && window.world_info[worldName]) {
+            const wi = window.world_info[worldName];
+            if (wi.entries) {
+                const list = Object.values(wi.entries);
+                if (settings.verbose) {
+                    console.debug(`[GIC-Lore] window.world_info から取得: ${worldName} (${list.length}件)`);
+                }
+                return list;
+            }
+        }
+    } catch (e) { /* ignore */ }
+
+    try {
+        const mod = await import('../../../../world-info.js');
+        if (mod.world_info && mod.world_info[worldName] && mod.world_info[worldName].entries) {
+            const list = Object.values(mod.world_info[worldName].entries);
+            if (settings.verbose) {
+                console.debug(`[GIC-Lore] mod.world_info から取得: ${worldName} (${list.length}件)`);
+            }
+            return list;
+        }
+    } catch (e) { /* ignore */ }
 
     console.warn('[GIC-Lore] ロアブックのエントリを取得できませんでした:', worldName);
     return [];
