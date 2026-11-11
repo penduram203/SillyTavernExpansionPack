@@ -509,29 +509,15 @@ function getCharacterWorldInfoName() {
 }
 
 // ===== ロアブックのエントリ読込 =====
-// ===== ロアブックのエントリ読込 =====
 async function loadWorldInfoEntries(worldName) {
     if (!worldName) return [];
 
-    // ★ ① LorebookExpansion の統合キャッシュを最優先
-    //    （worldinfo_updated などのイベントで自動クリアされる）
-    if (window.LorebookExpansion?.loadWorldInfoEntriesByName) {
-        try {
-            const entriesObj = await window.LorebookExpansion.loadWorldInfoEntriesByName(worldName);
-            if (entriesObj && typeof entriesObj === 'object') {
-                const list = Object.values(entriesObj);
-                if (list.length > 0) {
-                    if (settings.verbose) {
-                        console.debug(`[GIC-Lore] LBE統合キャッシュから取得: ${worldName} (${list.length}件)`);
-                    }
-                    return list;
-                }
-            }
-        } catch (e) { /* fall through */ }
-    }
-
-    // ★ ② fetch を必ず実行（cache: no-store でブラウザキャッシュも回避）
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    // ★ ① fetch を最優先（cache: no-store で常に最新を取得）
+    //   新規エントリを追加した直後は LBE キャッシュ / mod.world_info が
+    //   古いデータを持っていることがあるため、fetch を最優先する。
+    //   processChoice は画像生成1回につき1度しか呼ばれないので、
+    //   fetch のオーバーヘッドは無視できる。
+    for (let attempt = 1; attempt <= 2; attempt++) {
         try {
             const resp = await fetch('/api/worldinfo/get', {
                 method: 'POST',
@@ -543,18 +529,36 @@ async function loadWorldInfoEntries(worldName) {
                 const data = await resp.json();
                 if (data && data.entries) {
                     const list = Object.values(data.entries);
-                    if (settings.verbose) {
-                        console.debug(`[GIC-Lore] fetch から取得: ${worldName} (${list.length}件)`);
+                    if (list.length > 0) {
+                        if (settings.verbose) {
+                            console.log(`[GIC-Lore] fetch から取得: ${worldName} (${list.length}件)`);
+                        }
+                        return list;
                     }
-                    return list;
                 }
             }
         } catch (e) {
             if (settings.verbose) {
-                console.debug(`[GIC-Lore] /api/worldinfo/get 試行 ${attempt}/3 失敗: ${e.message || e}`);
+                console.debug(`[GIC-Lore] /api/worldinfo/get 試行 ${attempt}/2 失敗: ${e.message || e}`);
             }
         }
-        if (attempt < 3) await new Promise(r => setTimeout(r, 500 * attempt));
+        if (attempt < 2) await new Promise(r => setTimeout(r, 300));
+    }
+
+    // ★ ② fetch 失敗時のみ LBE キャッシュにフォールバック
+    if (window.LorebookExpansion?.loadWorldInfoEntriesByName) {
+        try {
+            const entriesObj = await window.LorebookExpansion.loadWorldInfoEntriesByName(worldName);
+            if (entriesObj && typeof entriesObj === 'object') {
+                const list = Object.values(entriesObj);
+                if (list.length > 0) {
+                    if (settings.verbose) {
+                        console.log(`[GIC-Lore] LBE キャッシュから取得（フォールバック）: ${worldName} (${list.length}件)`);
+                    }
+                    return list;
+                }
+            }
+        } catch (e) { /* fall through */ }
     }
 
     // ★ ③ 最終フォールバック: window.world_info / mod.world_info
@@ -563,10 +567,7 @@ async function loadWorldInfoEntries(worldName) {
             const wi = window.world_info[worldName];
             if (wi.entries) {
                 const list = Object.values(wi.entries);
-                if (settings.verbose) {
-                    console.debug(`[GIC-Lore] window.world_info から取得: ${worldName} (${list.length}件)`);
-                }
-                return list;
+                if (list.length > 0) return list;
             }
         }
     } catch (e) { /* ignore */ }
@@ -575,10 +576,7 @@ async function loadWorldInfoEntries(worldName) {
         const mod = await import('../../../../world-info.js');
         if (mod.world_info && mod.world_info[worldName] && mod.world_info[worldName].entries) {
             const list = Object.values(mod.world_info[worldName].entries);
-            if (settings.verbose) {
-                console.debug(`[GIC-Lore] mod.world_info から取得: ${worldName} (${list.length}件)`);
-            }
-            return list;
+            if (list.length > 0) return list;
         }
     } catch (e) { /* ignore */ }
 
