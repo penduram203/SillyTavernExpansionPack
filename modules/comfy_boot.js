@@ -35,12 +35,28 @@
             if (url && url.indexOf('/api/sd/comfy/') !== -1) {
                 const cached = localStorage.getItem(COMFY_CACHE_KEY);
                 if (cached === 'true') {
-                    console.debug('[GIC-Boot] /api/sd/comfy/* をブロック（ComfyUI未検出キャッシュ）:', url);
-                    return Promise.resolve(new Response('{}', {
-                        status: 200,
-                        statusText: 'OK',
-                        headers: { 'Content-Type': 'application/json' },
-                    }));
+                    // ★ SD設定に外部URL（localtunnel等）が設定されている場合は
+                    //   ブロックしない（Colab + localtunnel 環境対策）
+                    let hasExternalUrl = false;
+                    try {
+                        const ctx = window.SillyTavern?.getContext?.();
+                        const sd = ctx?.extensionSettings?.sd;
+                        const sdUrl = sd?.comfy_url || sd?.comfyui_url || sd?.url || '';
+                        if (/^https?:\/\//i.test(sdUrl) &&
+                            !/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?/i.test(sdUrl)) {
+                            hasExternalUrl = true;
+                        }
+                    } catch (e) { /* ignore */ }
+                    if (!hasExternalUrl) {
+                        console.debug('[GIC-Boot] /api/sd/comfy/* をブロック（ComfyUI未検出キャッシュ）:', url);
+                        return Promise.resolve(new Response('{}', {
+                            status: 200,
+                            statusText: 'OK',
+                            headers: { 'Content-Type': 'application/json' },
+                        }));
+                    } else {
+                        console.debug('[GIC-Boot] 外部URL設定のためブロックをスキップ:', url);
+                    }
                 }
             }
         } catch (e) { /* fall through to original */ }
