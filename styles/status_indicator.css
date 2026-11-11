@@ -62,3 +62,21 @@
     from { opacity: 0; transform: translateY(-4px); }
     to   { opacity: 1; transform: translateY(0); }
 }
+
+/* ============================================================
+ * 事前設定モード表示（応答生成中…の真下）
+ *   - スピナー非表示
+ *   - 黄色系の枠でモード表示であることを強調
+ * ============================================================ */
+.status-indicator-item.status-mode {
+    border-color: #fbbf24;
+    background-color: rgba(60, 40, 0, 0.85);
+    color: #ffffff;
+    font-weight: bold;
+}
+
+/* スピナーを非表示（モード表示は状態を表すだけで進行中ではない） */
+.status-indicator-item.status-mode::before {
+    display: none !important;
+    content: none !important;
+}
