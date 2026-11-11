@@ -23,6 +23,19 @@
 //   - Negative_prompt（ネガティブプロンプト）に対応
 //   - per-world ストアの negative_prompt → /sd の negative_prompt 引数として渡す
 //   - LorebookExpansion.getDataFor 経由での取得を最優先、直接参照をフォールバック
+//
+// ★ v5 修正（解像度）:
+//   - 解像度（resolution）に対応
+//   - エントリ毎に設定された解像度を取得し、/sd 実行前に
+//     extensionSettings.sd.resolution を一時差し替え・生成後に復元
+//   - 'random' が選択されていれば ①〜⑤ からランダムに選択
+//
+// ★ v6 修正（テンプレート）:
+//   - templates / selectedTemplate に対応
+//   - エントリ毎に複数のテンプレート（img_prompt / negative_prompt ペア）を保持
+//   - 'random' 選択時は生成時に一度だけランダム選択し、
+//     img_prompt と negative_prompt が同じテンプレートから取られることを保証
+//   - 生成コンテキストに templateIndex を追加
 
 import { eventSource, event_types, getRequestHeaders } from '../../../../../script.js';
 import { getContext } from '../../../../extensions.js';
@@ -175,9 +188,63 @@ function getEntryCharKey(entry, uid) {
 }
 
 // ============================================================
+// ★ テンプレート選択ヘルパー（v6 追加）
+//    rec（LEX データ）から templates / selectedTemplate を見て
+//    実際に使うプロンプトを 1 つだけ選ぶ。
+//    'random' の場合はここでランダムに選ぶ。
+// ============================================================
+function _pickTemplateFromRecord(rec, logContext = '') {
+    if (!rec || typeof rec !== 'object') return null;
+    const templates = Array.isArray(rec.templates) ? rec.templates : [];
+    if (templates.length === 0) return null;
+
+    const selectedTemplate = typeof rec.selectedTemplate === 'string' ? rec.selectedTemplate : '0';
+
+    let idx;
+    if (selectedTemplate === 'random') {
+        idx = Math.floor(Math.random() * templates.length);
+        console.log(`[GIC-Lore] 🎲${logContext} テンプレートをランダム選択: ${idx}/${templates.length}`);
+    } else {
+        idx = parseInt(selectedTemplate, 10);
+        if (!Number.isFinite(idx) || idx < 0 || idx >= templates.length) idx = 0;
+    }
+
+    const t = templates[idx] || {};
+    return {
+        index: idx,
+        img_prompt: (typeof t.img_prompt === 'string' && t.img_prompt.trim()) ? t.img_prompt.trim() : null,
+        negative_prompt: (typeof t.negative_prompt === 'string' && t.negative_prompt.trim()) ? t.negative_prompt.trim() : null,
+    };
+}
+
+// ============================================================
+// ★ 生成用のテンプレートを 1 回だけ選択する（v6 追加）
+//   - img_prompt と negative_prompt を同一テンプレートから取得するため、
+//     processChoice ではこの関数を優先して呼ぶ
+//   - templates 未定義（旧データ）の場合は null を返し、
+//     従来の extractPromptFromEntry にフォールバックする
+// ============================================================
+function pickTemplateForGeneration(worldName, entry) {
+    if (!entry) return null;
+    const uid = entry.uid;
+    if (uid === null || uid === undefined) return null;
+
+    let data = null;
+    try {
+        if (window.LorebookExpansion?.getDataFor) {
+            data = window.LorebookExpansion.getDataFor(worldName, uid, entry);
+        }
+    } catch (e) { /* ignore */ }
+
+    return _pickTemplateFromRecord(data, `(${worldName}::${uid})`);
+}
+
+// ============================================================
 // ★ Phase 5: LEX データから img_prompt を取得
 //   一次: extension_settings.lorebook_expansion.data[worldName][charKey]
 //   二次: character.data.extensions.lorebook_expansion
+//
+//   v6: templates があればそちらを優先（_pickTemplateFromRecord 経由）
 // ============================================================
 function getLexImgPrompt(worldName, uid, entry) {
     const charKey = getEntryCharKey(entry, uid);
@@ -191,12 +258,22 @@ function getLexImgPrompt(worldName, uid, entry) {
         const lexData = ctx?.extensionSettings?.lorebook_expansion?.data;
         if (lexData && typeof lexData === 'object' && lexData[worldName]) {
             const rec = lexData[worldName][charKey];
-            if (rec && typeof rec === 'object' &&
-                typeof rec.img_prompt === 'string' && rec.img_prompt.trim()) {
-                if (settings.verbose) {
-                    console.log(`[GIC-Lore] per-world store から img_prompt 読込 (${worldName}::${charKey})`);
+            if (rec && typeof rec === 'object') {
+                // templates があれば優先
+                const picked = _pickTemplateFromRecord(rec, `(${worldName}::${charKey})`);
+                if (picked?.img_prompt) {
+                    if (settings.verbose) {
+                        console.log(`[GIC-Lore] per-world store から img_prompt 読込 (template ${picked.index}, ${worldName}::${charKey})`);
+                    }
+                    return cleanPrompt(picked.img_prompt);
                 }
-                return cleanPrompt(rec.img_prompt);
+                // 後方互換: 直接 img_prompt
+                if (typeof rec.img_prompt === 'string' && rec.img_prompt.trim()) {
+                    if (settings.verbose) {
+                        console.log(`[GIC-Lore] per-world store から img_prompt 読込 (${worldName}::${charKey})`);
+                    }
+                    return cleanPrompt(rec.img_prompt);
+                }
             }
         }
     } catch (e) {
@@ -227,11 +304,20 @@ function getLexImgPrompt(worldName, uid, entry) {
                     rec = charLex[charKey];
                 }
             }
-            if (rec && typeof rec.img_prompt === 'string' && rec.img_prompt.trim()) {
-                if (settings.verbose) {
-                    console.log(`[GIC-Lore] character.data から img_prompt 読込 (フォールバック)`);
+            if (rec && typeof rec === 'object') {
+                const picked = _pickTemplateFromRecord(rec, `(${worldName}::${charKey})`);
+                if (picked?.img_prompt) {
+                    if (settings.verbose) {
+                        console.log(`[GIC-Lore] character.data から img_prompt 読込 (template ${picked.index}, フォールバック)`);
+                    }
+                    return cleanPrompt(picked.img_prompt);
                 }
-                return cleanPrompt(rec.img_prompt);
+                if (typeof rec.img_prompt === 'string' && rec.img_prompt.trim()) {
+                    if (settings.verbose) {
+                        console.log(`[GIC-Lore] character.data から img_prompt 読込 (フォールバック)`);
+                    }
+                    return cleanPrompt(rec.img_prompt);
+                }
             }
         }
     } catch (e) {
@@ -276,7 +362,7 @@ function extractPromptFromEntry(entry, worldName) {
 }
 
 // ============================================================
-// ★ ネガティブプロンプトの取得（v4 追加）
+// ★ ネガティブプロンプトの取得（v4 追加 / v6 テンプレート対応）
 //    per-world ストア → character.data の順で参照
 // ============================================================
 function getLexNegativePrompt(worldName, uid, entry) {
@@ -286,8 +372,14 @@ function getLexNegativePrompt(worldName, uid, entry) {
     if (window.LorebookExpansion?.getDataFor) {
         try {
             const data = window.LorebookExpansion.getDataFor(worldName, uid, entry);
-            if (data && typeof data.negative_prompt === 'string' && data.negative_prompt.trim()) {
-                return cleanPrompt(data.negative_prompt);
+            if (data && typeof data === 'object') {
+                const picked = _pickTemplateFromRecord(data, `(${worldName}::${uid})`);
+                if (picked?.negative_prompt) {
+                    return cleanPrompt(picked.negative_prompt);
+                }
+                if (typeof data.negative_prompt === 'string' && data.negative_prompt.trim()) {
+                    return cleanPrompt(data.negative_prompt);
+                }
             }
         } catch (e) { /* ignore */ }
     }
@@ -298,12 +390,23 @@ function getLexNegativePrompt(worldName, uid, entry) {
         const charKey = getEntryCharKey(entry, uid);
         if (!charKey) return null;
         const rec = ctx?.extensionSettings?.lorebook_expansion?.data?.[worldName]?.[charKey];
-        if (rec && typeof rec.negative_prompt === 'string' && rec.negative_prompt.trim()) {
-            return cleanPrompt(rec.negative_prompt);
+        if (rec && typeof rec === 'object') {
+            const picked = _pickTemplateFromRecord(rec, `(${worldName}::${charKey})`);
+            if (picked?.negative_prompt) {
+                return cleanPrompt(picked.negative_prompt);
+            }
+            if (typeof rec.negative_prompt === 'string' && rec.negative_prompt.trim()) {
+                return cleanPrompt(rec.negative_prompt);
+            }
         }
     } catch (e) { /* ignore */ }
 
     return null;
+}
+
+function extractNegativePromptFromEntry(entry, worldName) {
+    if (!entry) return null;
+    return getLexNegativePrompt(worldName, entry.uid, entry);
 }
 
 // ============================================================
@@ -340,11 +443,6 @@ function getLexResolution(worldName, uid, entry) {
 function extractResolutionFromEntry(entry, worldName) {
     if (!entry) return null;
     return getLexResolution(worldName, entry.uid, entry);
-}
-
-function extractNegativePromptFromEntry(entry, worldName) {
-    if (!entry) return null;
-    return getLexNegativePrompt(worldName, entry.uid, entry);
 }
 
 // ===== キャラに紐付くロアブック名 =====
@@ -802,7 +900,39 @@ async function processChoice(force = false) {
             console.log(`[GIC-Lore] エントリ採用: uid=${entry.uid}, comment="${entry.comment || ''}"`);
         }
 
-        const prompt = extractPromptFromEntry(entry, worldName);
+        // ★ テンプレートから生成用プロンプトを選択（v6 追加）
+        //   'random' の場合はここで一度だけランダム選択し、
+        //   img_prompt と negative_prompt が同じテンプレートから取られることを保証する
+        const pickedTemplate = pickTemplateForGeneration(worldName, entry);
+
+        let prompt = null;
+        if (pickedTemplate?.img_prompt) {
+            prompt = cleanPrompt(pickedTemplate.img_prompt);
+            if (settings.verbose) {
+                console.log(`[GIC-Lore] テンプレート ${pickedTemplate.index} の img_prompt を使用`);
+            }
+        }
+        if (!prompt) {
+            prompt = extractPromptFromEntry(entry, worldName);
+        }
+
+        let negativePrompt = null;
+        if (pickedTemplate?.negative_prompt) {
+            negativePrompt = cleanPrompt(pickedTemplate.negative_prompt);
+            if (settings.verbose) {
+                console.log(`[GIC-Lore] テンプレート ${pickedTemplate.index} の negative_prompt を使用`);
+            }
+        }
+        if (!negativePrompt) {
+            negativePrompt = extractNegativePromptFromEntry(entry, worldName);
+        }
+
+        // ★ 解像度を取得（v5 追加）
+        const resolution = extractResolutionFromEntry(entry, worldName);
+        if (settings.verbose && resolution) {
+            console.log(`[GIC-Lore] 解像度: ${resolution}`);
+        }
+
         if (!prompt) {
             console.warn('[GIC-Lore] プロンプトが抽出できませんでした');
             if (settings.verbose) {
@@ -821,18 +951,6 @@ async function processChoice(force = false) {
             return;
         }
 
-        // ★ ネガティブプロンプトを取得（v4 追加）
-        const negativePrompt = extractNegativePromptFromEntry(entry, worldName);
-        if (settings.verbose && negativePrompt) {
-            console.log(`[GIC-Lore] ネガティブプロンプト: ${negativePrompt.slice(0, 80)}${negativePrompt.length > 80 ? '...' : ''}`);
-        }
-
-        // ★ 解像度を取得（v5 追加）
-        const resolution = extractResolutionFromEntry(entry, worldName);
-        if (settings.verbose && resolution) {
-            console.log(`[GIC-Lore] 解像度: ${resolution}`);
-        }
-
         // ★ 生成コンテキストを保存（ファイル名リネーム用）
         _pendingGenerationContext = {
             entryKey: extractEntryKey(entry),
@@ -841,10 +959,11 @@ async function processChoice(force = false) {
             prompt,
             negativePrompt,
             resolution,
+            templateIndex: pickedTemplate?.index ?? null,
             triggeredAt: Date.now(),
         };
         if (settings.verbose) {
-            console.log(`[GIC-Lore] 生成コンテキスト設定: entryKey="${_pendingGenerationContext.entryKey}", resolution=${resolution || '(未設定)'}`);
+            console.log(`[GIC-Lore] 生成コンテキスト設定: entryKey="${_pendingGenerationContext.entryKey}", resolution=${resolution || '(未設定)'}, templateIndex=${pickedTemplate?.index ?? '(旧データ)'}`);
         }
 
         // ★ 画像生成開始を通知（status_indicator.js が「画像生成中…」を表示）
@@ -856,6 +975,7 @@ async function processChoice(force = false) {
                     prompt,
                     negativePrompt,
                     resolution,
+                    templateIndex: _pendingGenerationContext.templateIndex,
                 },
             }));
         } catch (e) { /* ignore */ }
@@ -913,7 +1033,8 @@ async function registerSlashCommand() {
                         console.log('6) 抽出プロンプト:', extractPromptFromEntry(found, wn));
                         console.log('6b) ネガティブプロンプト:', extractNegativePromptFromEntry(found, wn));
                         console.log('6c) 解像度:', extractResolutionFromEntry(found, wn));
-                        console.log('6d) entryKey (ファイル名用):', extractEntryKey(found));
+                        console.log('6d) テンプレート選択:', pickTemplateForGeneration(wn, found));
+                        console.log('6e) entryKey (ファイル名用):', extractEntryKey(found));
                     }
                 }
                 try {
@@ -1060,10 +1181,11 @@ window.GicLorebook = {
     extractPromptFromEntry,
     extractEntryKey,
     getLexImgPrompt,
-    getLexNegativePrompt,                  // ★ v4 追加
-    getLexResolution,                      // ★ v5 追加
-    extractNegativePromptFromEntry,        // ★ v4 追加
-    extractResolutionFromEntry,            // ★ v5 追加
+    getLexNegativePrompt,
+    getLexResolution,
+    extractNegativePromptFromEntry,
+    extractResolutionFromEntry,
+    pickTemplateForGeneration,
     loadWorldInfoEntries,
     findEntryByChoice,
     getEntryKeys,
