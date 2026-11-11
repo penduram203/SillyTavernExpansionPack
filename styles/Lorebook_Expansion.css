@@ -366,3 +366,11 @@ label[for="sd_resolution"] {
     cursor: not-allowed;
     background-color: rgba(255, 255, 255, 0.02);
 }
+
+/* ============================================================
+ * ランダム選択中の解像度ドロップダウン（無効化表示）
+ * ============================================================ */
+.lbe-resolution-select.lbe-prompt-readonly {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
