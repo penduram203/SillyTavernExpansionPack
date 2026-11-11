@@ -336,6 +336,20 @@ function getImageNegativePrompt(charName, fileName) {
             const data = await resp.clone().json();
             if (!Array.isArray(data)) return resp;
 
+            // ★ ギャラリー更新時に該当キャラの画像キャッシュをクリア
+            //   （ファイル名が同じでも中身が更新されていれば再取得させる）
+            try {
+                let __charName = null;
+                const __reqBody = init?.body ? JSON.parse(init.body) : null;
+                __charName = __reqBody?.folder || null;
+                if (__charName) {
+                    const n = await clearImageCacheForChar(__charName);
+                    if (n > 0) {
+                        console.log(`[GIC] 🔄 ギャラリー更新: ${__charName} のキャッシュ ${n} 件をクリア`);
+                    }
+                }
+            } catch (e) { /* ignore */ }
+
             const set = new Set(data.filter(f => typeof f === 'string'));
 
             let replaced = 0;
@@ -2423,6 +2437,51 @@ function ensureThumbCacheVersion() {
     return _cacheVersionReadyPromise;
 }
 
+// ============================================================
+// ★ 特定キャラの画像キャッシュを全クリア（ギャラリー更新用）
+//   ファイル名が同じでも中身が更新された場合に再取得させる
+// ============================================================
+async function clearImageCacheForChar(charName) {
+    if (!charName) return 0;
+    try {
+        const db = await openImgDB();
+        const keys = await new Promise((resolve, reject) => {
+            const tx = db.transaction(IMG_DB_STORE, 'readonly');
+            const req = tx.objectStore(IMG_DB_STORE).getAllKeys();
+            req.onsuccess = () => resolve(req.result || []);
+            req.onerror = () => reject(req.error);
+        });
+        const prefix = `${charName}:`;
+        const toDelete = keys.filter(k => typeof k === 'string' && k.startsWith(prefix));
+        if (toDelete.length === 0) return 0;
+
+        await new Promise((resolve, reject) => {
+            const tx = db.transaction(IMG_DB_STORE, 'readwrite');
+            const store = tx.objectStore(IMG_DB_STORE);
+            for (const k of toDelete) store.delete(k);
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+        });
+
+        for (const k of toDelete) {
+            const url = _imgBlobUrlCache.get(k);
+            if (url) {
+                try { URL.revokeObjectURL(url); } catch (e) { /* ignore */ }
+            }
+            _imgBlobUrlCache.delete(k);
+        }
+
+        // 失敗記録もクリア（同じ名前で再取得できるようにする）
+        _failedThumbs.clear();
+
+        console.log(`[GIC] 🧹 画像キャッシュをクリア: ${charName} (${toDelete.length} 件)`);
+        return toDelete.length;
+    } catch (e) {
+        console.warn('[GIC] clearImageCacheForChar error:', e);
+        return 0;
+    }
+}
+
 async function getImgFromDB(key) {
     try {
         const db = await openImgDB();
@@ -2491,7 +2550,7 @@ async function fetchAndCacheImage(charName, fileName) {
 
     const url = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(fileName);
     try {
-        const resp = await fetch(url);
+        const resp = await fetch(url, { cache: 'no-store' });
         if (!resp.ok) return null;
         const blob = await resp.blob();
         await putImgInDB(cacheKey, blob);
@@ -7547,6 +7606,13 @@ function exposeGicApi() {
 
         // ★ GIC 側の override 状態を外部から参照できるようにする
         isOverrideMode: () => isOverrideLocal,
+        
+        clearImageCacheForChar,
+        clearImageCacheForCharAndReload: async (charName) => {
+            const n = await clearImageCacheForChar(charName);
+            console.log(`[GIC] 🧹 ${charName} の画像キャッシュ ${n} 件をクリア`);
+            return n;
+        },
         
         ensureThumbnailForVideo,
         generateVideoThumbnailBlob,
