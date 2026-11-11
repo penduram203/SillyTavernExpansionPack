@@ -18,7 +18,7 @@
 
 .lbe-label {
     display: block;
-    width: 100%;
+    width: 10%;
     font-size: 0.85em;
     margin-top: 4px;
     margin-bottom: 2px;
@@ -291,8 +291,8 @@
 .lbe-label-row {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 8px;
+    justify-content: flex-start;
+    gap: 4px;
     width: 100%;
     max-width: 100%;
     box-sizing: border-box;
