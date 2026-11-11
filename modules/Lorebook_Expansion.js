@@ -1373,6 +1373,11 @@ function buildExpansionSection(uid, worldName, data, onChange) {
 
     const isResolutionValid = (v) => RESOLUTION_OPTIONS.some(o => o.value === v);
 
+    // ★ SD 拡張の対応解像度リストの先頭（random 以外）をフォールバックに使う
+    //   保存済みの解像度が SD 拡張の対応外（例: 720x1280 が resolutions マップに無い）の場合、
+    //   この値に置き換える。SD 拡張が読み込まれていない場合は '1280x720'。
+    const fallbackResolution = RESOLUTION_OPTIONS.find(o => o.value !== 'random')?.value || '1280x720';
+
     // ── Img_prompt ラベル行（ラベル + 解像度ドロップダウン） ──
     const imgLabelRow = document.createElement('div');
     imgLabelRow.className = 'lbe-label-row';
@@ -1453,7 +1458,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         const t = data.templates[_currentIndex] || {
             img_prompt: '',
             negative_prompt: '',
-            resolution: '1280x720',
+            resolution: fallbackResolution,
         };
         imgTextarea.value = t.img_prompt || '';
         negTextarea.value = t.negative_prompt || '';
@@ -1461,9 +1466,23 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         data.negative_prompt = t.negative_prompt || '';
 
         // ★ 解像度もテンプレートから同期
-        const validRes = isResolutionValid(t.resolution) ? t.resolution : '1280x720';
+        //   保存済み解像度が SD 拡張の対応リストに無い場合は fallbackResolution に置き換える
+        let validRes;
+        if (isResolutionValid(t.resolution)) {
+            validRes = t.resolution;
+        } else {
+            if (t.resolution) {
+                console.warn(
+                    `[LBE] 解像度 "${t.resolution}" は SD 拡張の対応リストに無いため ` +
+                    `"${fallbackResolution}" にフォールバックします (uid=${uid}, template=${_currentIndex})`
+                );
+            }
+            validRes = fallbackResolution;
+        }
         resolutionSelect.value = validRes;
         data.resolution = validRes;
+        // ★ テンプレート自体の解像度も更新しておく（次回保存時に反映）
+        t.resolution = validRes;
 
         updateReadOnlyState();
     };
@@ -1477,7 +1496,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         if (data.selectedTemplate === 'random') {
             // ランダム時は編集不可: 表示を現在の値に戻す
             const t = data.templates[_currentIndex];
-            const validRes = (t && isResolutionValid(t.resolution)) ? t.resolution : '1280x720';
+            const validRes = (t && isResolutionValid(t.resolution)) ? t.resolution : fallbackResolution;
             resolutionSelect.value = validRes;
             return;
         }
@@ -1526,11 +1545,11 @@ function buildExpansionSection(uid, worldName, data, onChange) {
             console.warn(`${LOG} テンプレートは最大99個までです`);
             return;
         }
-        // ★ 新規テンプレートは解像度もデフォルト値で初期化
+        // ★ 新規テンプレートは解像度も SD 拡張の対応先頭値で初期化
         data.templates.push({
             img_prompt: '',
             negative_prompt: '',
-            resolution: '1280x720',
+            resolution: fallbackResolution,
         });
         const newIdx = data.templates.length - 1;
         data.selectedTemplate = String(newIdx);
