@@ -319,23 +319,25 @@ function injectStyle() {
             text-overflow: ellipsis;
         }
 
-        /* ヘルプボタン */
+        /* ヘルプボタン（横長） */
         #${HELP_BTN_ID} {
             flex: 0 0 auto;
-            width: 28px;
             height: 28px;
-            padding: 0;
+            padding: 0 14px;
             background-color: #2c5282;
             color: #ffffff;
             border: 1px solid #63b3ed;
-            border-radius: 50%;
+            border-radius: 4px;
             cursor: pointer;
-            font-size: 15px;
+            font-size: 13px;
             font-weight: bold;
-            display: flex;
+            display: inline-flex;
             align-items: center;
             justify-content: center;
             line-height: 1;
+            white-space: nowrap;
+            box-sizing: border-box;
+            letter-spacing: 0.05em;
         }
         #${HELP_BTN_ID}:hover {
             background-color: #4299e1;
@@ -653,7 +655,7 @@ function ensureModal() {
     const helpBtn = document.createElement('button');
     helpBtn.id = HELP_BTN_ID;
     helpBtn.type = 'button';
-    helpBtn.textContent = '?';
+    helpBtn.textContent = 'ヘルプ';
     helpBtn.title = '使い方（ヘルプ）を表示';
     helpBtn.addEventListener('click', () => openHelpModal());
     headerLeft.appendChild(helpBtn);
