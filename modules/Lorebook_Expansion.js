@@ -156,7 +156,7 @@ function normalizeLexData(raw) {
             img_prompt: '',
             negative_prompt: '',
             resolution: '1280x720',
-            templates: [{ img_prompt: '', negative_prompt: '' }],
+            templates: [{ img_prompt: '', negative_prompt: '', resolution: '1280x720' }],
             selectedTemplate: '0',
             choices: [],
             variables: [],
@@ -171,15 +171,26 @@ function normalizeLexData(raw) {
             .map(t => ({
                 img_prompt: typeof t.img_prompt === 'string' ? t.img_prompt : '',
                 negative_prompt: typeof t.negative_prompt === 'string' ? t.negative_prompt : '',
+                // ★ v7: テンプレート毎の解像度
+                //   未設定なら旧形式の data.resolution を引き継ぎ、
+                //   それも無ければ 1280x720
+                resolution: (typeof t.resolution === 'string' && t.resolution.trim())
+                    ? t.resolution.trim()
+                    : ((typeof raw.resolution === 'string' && raw.resolution.trim())
+                        ? raw.resolution.trim()
+                        : '1280x720'),
             }));
         if (templates.length === 0) {
-            templates = [{ img_prompt: '', negative_prompt: '' }];
+            templates = [{ img_prompt: '', negative_prompt: '', resolution: '1280x720' }];
         }
     } else {
-        // 旧形式（templates 未定義）: img_prompt / negative_prompt を template 0 として取り込む
+        // 旧形式（templates 未定義）: img_prompt / negative_prompt / resolution を template 0 として取り込む
         templates = [{
             img_prompt: typeof raw.img_prompt === 'string' ? raw.img_prompt : '',
             negative_prompt: typeof raw.negative_prompt === 'string' ? raw.negative_prompt : '',
+            resolution: (typeof raw.resolution === 'string' && raw.resolution.trim())
+                ? raw.resolution.trim()
+                : '1280x720',
         }];
     }
 
@@ -194,17 +205,19 @@ function normalizeLexData(raw) {
         selectedTemplate = '0';
     }
 
-    // ── img_prompt / negative_prompt ミラー ──
+    // ── img_prompt / negative_prompt / resolution ミラー ──
     //   selectedTemplate が数値ならその内容、'random' なら template 0 をミラー
     const mirrorIdx = selectedTemplate === 'random' ? 0 : parseInt(selectedTemplate, 10);
-    const mirror = templates[mirrorIdx] || { img_prompt: '', negative_prompt: '' };
+    const mirror = templates[mirrorIdx] || {
+        img_prompt: '',
+        negative_prompt: '',
+        resolution: '1280x720',
+    };
 
     return {
         img_prompt: mirror.img_prompt,
         negative_prompt: mirror.negative_prompt,
-        resolution: (typeof raw.resolution === 'string' && raw.resolution.trim())
-            ? raw.resolution.trim()
-            : '1280x720',
+        resolution: mirror.resolution,
         templates,
         selectedTemplate,
         choices: Array.isArray(raw.choices)
@@ -570,29 +583,23 @@ function getCharacterLexData() {
 }
 
 function getDataFor(worldName, uid, entry) {
+    const empty = {
+        img_prompt: '',
+        negative_prompt: '',
+        resolution: '1280x720',
+        templates: [{ img_prompt: '', negative_prompt: '', resolution: '1280x720' }],
+        selectedTemplate: '0',
+        choices: [],
+        variables: [],
+    };
+
     if (!worldName || uid === null || uid === undefined) {
-        return {
-            img_prompt: '',
-            negative_prompt: '',
-            resolution: '1280x720',
-            templates: [{ img_prompt: '', negative_prompt: '' }],
-            selectedTemplate: '0',
-            choices: [],
-            variables: [],
-        };
+        return empty;
     }
 
     const charKey = getCharKey(entry, uid);
     if (!charKey) {
-        return {
-            img_prompt: '',
-            negative_prompt: '',
-            resolution: '1280x720',
-            templates: [{ img_prompt: '', negative_prompt: '' }],
-            selectedTemplate: '0',
-            choices: [],
-            variables: [],
-        };
+        return empty;
     }
 
     const store = getWorldLexStore(worldName);
@@ -629,15 +636,7 @@ function getDataFor(worldName, uid, entry) {
         console.warn(LOG, 'character.data からの移行に失敗:', e);
     }
 
-    return {
-        img_prompt: '',
-        negative_prompt: '',
-        resolution: '1280x720',
-        templates: [{ img_prompt: '', negative_prompt: '' }],
-        selectedTemplate: '0',
-        choices: [],
-        variables: [],
-    };
+    return empty;
 }
 
 function setDataFor(worldName, uid, entry, data) {
@@ -691,28 +690,22 @@ function setDataFor(worldName, uid, entry, data) {
 }
 
 function getExpansionData(entry) {
+    const empty = {
+        img_prompt: '',
+        negative_prompt: '',
+        resolution: '1280x720',
+        templates: [{ img_prompt: '', negative_prompt: '', resolution: '1280x720' }],
+        selectedTemplate: '0',
+        choices: [],
+        variables: [],
+    };
+
     if (!entry || typeof entry !== 'object') {
-        return {
-            img_prompt: '',
-            negative_prompt: '',
-            resolution: '1280x720',
-            templates: [{ img_prompt: '', negative_prompt: '' }],
-            selectedTemplate: '0',
-            choices: [],
-            variables: [],
-        };
+        return empty;
     }
     const ext = entry.extensions?.[MODULE_NAME];
     if (!ext || typeof ext !== 'object') {
-        return {
-            img_prompt: '',
-            negative_prompt: '',
-            resolution: '1280x720',
-            templates: [{ img_prompt: '', negative_prompt: '' }],
-            selectedTemplate: '0',
-            choices: [],
-            variables: [],
-        };
+        return empty;
     }
     return normalizeLexData(ext);
 }
@@ -1260,7 +1253,19 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         data.templates = [{
             img_prompt: typeof data.img_prompt === 'string' ? data.img_prompt : '',
             negative_prompt: typeof data.negative_prompt === 'string' ? data.negative_prompt : '',
+            resolution: (typeof data.resolution === 'string' && data.resolution.trim())
+                ? data.resolution.trim()
+                : '1280x720',
         }];
+    }
+    // 各テンプレートに resolution が無ければ補完
+    for (const t of data.templates) {
+        if (!t || typeof t !== 'object') continue;
+        if (typeof t.resolution !== 'string' || !t.resolution.trim()) {
+            t.resolution = (typeof data.resolution === 'string' && data.resolution.trim())
+                ? data.resolution.trim()
+                : '1280x720';
+        }
     }
     if (typeof data.selectedTemplate !== 'string' || !data.selectedTemplate) {
         data.selectedTemplate = '0';
@@ -1314,15 +1319,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
 
     section.appendChild(templateLabelRow);
 
-    // ── Img_prompt ラベル行（ラベル + 解像度ドロップダウン） ──
-    const imgLabelRow = document.createElement('div');
-    imgLabelRow.className = 'lbe-label-row';
-
-    const imgLabel = document.createElement('label');
-    imgLabel.className = 'lbe-label';
-    imgLabel.textContent = 'Img_prompt';
-    imgLabelRow.appendChild(imgLabel);
-
+    // ── 解像度オプション（6項目） ──
     const RESOLUTION_OPTIONS = [
         { value: '1280x720',  label: '1280×720 (横長)' },
         { value: '1152x896',  label: '1152×896' },
@@ -1331,6 +1328,17 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         { value: '720x1280',  label: '720×1280 (縦長)' },
         { value: 'random',    label: 'ランダム' },
     ];
+
+    const isResolutionValid = (v) => RESOLUTION_OPTIONS.some(o => o.value === v);
+
+    // ── Img_prompt ラベル行（ラベル + 解像度ドロップダウン） ──
+    const imgLabelRow = document.createElement('div');
+    imgLabelRow.className = 'lbe-label-row';
+
+    const imgLabel = document.createElement('label');
+    imgLabel.className = 'lbe-label';
+    imgLabel.textContent = 'Img_prompt';
+    imgLabelRow.appendChild(imgLabel);
 
     const resolutionSelect = document.createElement('select');
     resolutionSelect.className = 'lbe-resolution-select text_pole';
@@ -1341,16 +1349,6 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         o.textContent = opt.label;
         resolutionSelect.appendChild(o);
     }
-    const initialResolution = RESOLUTION_OPTIONS.some(o => o.value === data.resolution)
-        ? data.resolution
-        : '1280x720';
-    resolutionSelect.value = initialResolution;
-    data.resolution = initialResolution;
-    resolutionSelect.addEventListener('change', () => {
-        data.resolution = resolutionSelect.value;
-        onChange(data);
-        debugLog(`uid=${uid}: 解像度を ${data.resolution} に変更`);
-    });
     imgLabelRow.appendChild(resolutionSelect);
 
     section.appendChild(imgLabelRow);
@@ -1375,7 +1373,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
     negTextarea.placeholder = '例: bad hands, extra fingers, lowres, ugly, blurry, watermark';
     section.appendChild(negTextarea);
 
-    // ── template と textarea の連携 ──
+    // ── template と textarea / 解像度の連携 ──
     let _currentIndex = resolveEditIndex();
 
     const rebuildTemplateOptions = (selectedValue) => {
@@ -1397,28 +1395,57 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         const isRandom = data.selectedTemplate === 'random';
         imgTextarea.readOnly = isRandom;
         negTextarea.readOnly = isRandom;
+        resolutionSelect.disabled = isRandom;
         imgTextarea.classList.toggle('lbe-prompt-readonly', isRandom);
         negTextarea.classList.toggle('lbe-prompt-readonly', isRandom);
-        imgTextarea.title = isRandom
+        resolutionSelect.classList.toggle('lbe-prompt-readonly', isRandom);
+        const msg = isRandom
             ? 'ランダム選択中は編集できません。具体的なテンプレートを選んでください'
             : '';
-        negTextarea.title = isRandom
-            ? 'ランダム選択中は編集できません。具体的なテンプレートを選んでください'
-            : '';
+        imgTextarea.title = msg;
+        negTextarea.title = msg;
+        resolutionSelect.title = msg || 'このエントリで画像を生成する際の解像度';
     };
 
     const loadPromptIntoTextareas = () => {
-        const t = data.templates[_currentIndex] || { img_prompt: '', negative_prompt: '' };
+        const t = data.templates[_currentIndex] || {
+            img_prompt: '',
+            negative_prompt: '',
+            resolution: '1280x720',
+        };
         imgTextarea.value = t.img_prompt || '';
         negTextarea.value = t.negative_prompt || '';
         data.img_prompt = t.img_prompt || '';
         data.negative_prompt = t.negative_prompt || '';
+
+        // ★ 解像度もテンプレートから同期
+        const validRes = isResolutionValid(t.resolution) ? t.resolution : '1280x720';
+        resolutionSelect.value = validRes;
+        data.resolution = validRes;
+
         updateReadOnlyState();
     };
 
     // ── 初期化 ──
     rebuildTemplateOptions(data.selectedTemplate);
     loadPromptIntoTextareas();
+
+    // ── イベント: 解像度変更 ──
+    resolutionSelect.addEventListener('change', () => {
+        if (data.selectedTemplate === 'random') {
+            // ランダム時は編集不可: 表示を現在の値に戻す
+            const t = data.templates[_currentIndex];
+            const validRes = (t && isResolutionValid(t.resolution)) ? t.resolution : '1280x720';
+            resolutionSelect.value = validRes;
+            return;
+        }
+        const t = data.templates[_currentIndex];
+        if (!t) return;
+        t.resolution = resolutionSelect.value;
+        data.resolution = resolutionSelect.value;
+        onChange(data);
+        debugLog(`uid=${uid}: template ${_currentIndex} の解像度を ${t.resolution} に変更`);
+    });
 
     // ── イベント: textarea 編集 ──
     imgTextarea.addEventListener('input', () => {
@@ -1457,7 +1484,12 @@ function buildExpansionSection(uid, worldName, data, onChange) {
             console.warn(`${LOG} テンプレートは最大99個までです`);
             return;
         }
-        data.templates.push({ img_prompt: '', negative_prompt: '' });
+        // ★ 新規テンプレートは解像度もデフォルト値で初期化
+        data.templates.push({
+            img_prompt: '',
+            negative_prompt: '',
+            resolution: '1280x720',
+        });
         const newIdx = data.templates.length - 1;
         data.selectedTemplate = String(newIdx);
         _activeRandomIndex = null;
