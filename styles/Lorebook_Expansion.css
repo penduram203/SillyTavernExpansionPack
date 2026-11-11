@@ -330,3 +330,39 @@
 label[for="sd_resolution"] {
     display: none !important;
 }
+
+/* ============================================================
+ * Template ラベル行（template + 追加 + 削除）
+ * ============================================================ */
+.lbe-template-row {
+    gap: 6px;
+}
+
+.lbe-template-row > .lbe-template-select {
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 100px;
+    max-width: 150px;
+    font-size: 0.82em;
+    padding: 2px 4px;
+    box-sizing: border-box;
+}
+
+.lbe-template-row > .lbe-template-add,
+.lbe-template-row > .lbe-template-del {
+    flex: 0 0 auto;
+    font-size: 0.82em;
+    padding: 2px 10px;
+    box-sizing: border-box;
+    white-space: nowrap;
+}
+
+/* ============================================================
+ * ランダム選択中のプロンプト欄（読み取り専用）
+ * ============================================================ */
+.lbe-img-prompt.lbe-prompt-readonly,
+.lbe-negative-prompt.lbe-prompt-readonly {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background-color: rgba(255, 255, 255, 0.02);
+}
