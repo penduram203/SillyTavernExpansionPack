@@ -2373,6 +2373,21 @@ function registerEventListeners() {
             }, 200);
         });
     }
+    // ★ ST 側のロアブック更新時にキャッシュをクリア
+    //   （新規エントリ追加・編集・削除が LBE キャッシュに反映されるようにする）
+    const worldInfoCacheClearEvents = [
+        'WORLDINFO_UPDATED',
+        'WORLDINFO_SETTINGS_UPDATED',
+        'WORLDINFO_ENTRIES_LOADED',
+    ];
+    for (const evtName of worldInfoCacheClearEvents) {
+        if (event_types[evtName] && typeof eventSource.on === 'function') {
+            eventSource.on(event_types[evtName], () => {
+                clearWorldInfoEntriesCache();
+                debugLog(`[LBE] ${evtName} を受信 → エントリキャッシュをクリア`);
+            });
+        }
+    }
 }
 
 async function init() {
