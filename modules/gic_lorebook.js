@@ -953,10 +953,33 @@ async function processChoice(force = false) {
             negativePrompt = extractNegativePromptFromEntry(entry, worldName);
         }
 
+        // ★ ワイルドカード適用（v8 追加）
+        //   RandomPromptWildcard が利用可能なら、プロンプト中の wildcard を
+        //   ランダムに選ばれた値に置換する。
+        //   ★ applyToPrompt は 1 回の呼び出し内で同じキーは同じ値になるため、
+        //     "color1? hair, color1? eyes" は同じ色になる。
+        try {
+            if (window.RandomPromptWildcard?.applyToPrompt) {
+                if (prompt) {
+                    const before = prompt;
+                    prompt = window.RandomPromptWildcard.applyToPrompt(prompt);
+                    if (settings.verbose && prompt !== before) {
+                        console.log(`[GIC-Lore] 🎲 wildcard 適用: "${before}" → "${prompt}"`);
+                    }
+                }
+                if (negativePrompt) {
+                    const beforeNeg = negativePrompt;
+                    negativePrompt = window.RandomPromptWildcard.applyToPrompt(negativePrompt);
+                    if (settings.verbose && negativePrompt !== beforeNeg) {
+                        console.log(`[GIC-Lore] 🎲 wildcard 適用 (negative): "${beforeNeg}" → "${negativePrompt}"`);
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('[GIC-Lore] wildcard 適用エラー:', e);
+        }
+
         // ★ 解像度を取得（v5 追加 / v7: テンプレート優先）
-        //   ★ pickedTemplate があればそのテンプレートの解像度を優先する
-        //     （'random' 選択時に img_prompt / negative_prompt / resolution が
-        //      同じテンプレートから取られることを保証するため）
         let resolution = pickedTemplate?.resolution || null;
         if (!resolution) {
             resolution = extractResolutionFromEntry(entry, worldName);
