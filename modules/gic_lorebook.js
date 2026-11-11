@@ -731,14 +731,18 @@ async function executeSd(prompt, negativePrompt = null, resolution = null) {
         }
     }
 
-    // ★ SillyTavern の SD 拡張は negative_prompt / resolution を
-    //    extensionSettings.sd から読み取る仕様。
-    //    → 生成直前に一時的に設定を差し替え、生成完了後に元に戻す。
+    // ★ SD設定の一時変更用状態
     let ctx = null;
     let originalNegPrompt = null;
     let originalResolution = null;
     let settingsModified = false;
     let resolutionModified = false;
+
+    // ★ #sd_resolution DOM 操作のための状態
+    let jq = null;
+    let $resolutionSelect = null;
+    let originalDomResolution = null;
+    let addedOptionEl = null;
 
     if (hasNeg || effectiveResolution) {
         try {
@@ -747,17 +751,59 @@ async function executeSd(prompt, negativePrompt = null, resolution = null) {
             if (!sdSettings) {
                 console.warn('[GIC-Lore] SD設定が見つかりません（SD拡張未初期化の可能性）');
             } else {
+                // ── negative_prompt ──
                 if (hasNeg && typeof sdSettings.negative_prompt === 'string') {
                     originalNegPrompt = sdSettings.negative_prompt;
                     sdSettings.negative_prompt = cleanNeg;
                     settingsModified = true;
                     console.log(`[GIC-Lore] 🔧 SDネガティブプロンプトを一時設定: "${cleanNeg.slice(0, 100)}${cleanNeg.length > 100 ? '...' : ''}"`);
                 }
+
+                // ── resolution ──
                 if (effectiveResolution) {
+                    // ① extensionSettings.sd.resolution を変更（設定経由）
                     originalResolution = sdSettings.resolution;
                     sdSettings.resolution = effectiveResolution;
                     resolutionModified = true;
                     console.log(`[GIC-Lore] 🔧 SD解像度を一時設定: "${effectiveResolution}" (元: "${originalResolution}")`);
+
+                    // ② #sd_resolution の DOM 要素も変更（DOM 経由）
+                    //    ★ SD 拡張のバージョンによっては DOM から値を読むため、
+                    //      両方を同期させておく必要がある
+                    try {
+                        jq = window.$ || window.jQuery || null;
+                        if (jq) {
+                            const $sel = jq('#sd_resolution');
+                            if ($sel.length > 0) {
+                                $resolutionSelect = $sel;
+                                originalDomResolution = $sel.val();
+                                console.log(`[GIC-Lore] 🔧 #sd_resolution の現在値: "${originalDomResolution}"`);
+
+                                // 対象の <option> が無ければ追加
+                                //   （SD 拡張標準の選択肢に 16:9 系が含まれない場合がある）
+                                const hasOption = $sel.find(`option[value="${effectiveResolution}"]`).length > 0;
+                                if (!hasOption) {
+                                    addedOptionEl = jq('<option>', {
+                                        value: effectiveResolution,
+                                        text: effectiveResolution,
+                                    });
+                                    $sel.append(addedOptionEl);
+                                    console.log(`[GIC-Lore] 🔧 #sd_resolution に option "${effectiveResolution}" を追加`);
+                                }
+
+                                // 値を変更して change イベントを発火
+                                //   （SD 拡張の change ハンドラが extensionSettings.sd.resolution を同期する）
+                                $sel.val(effectiveResolution).trigger('change');
+                                console.log(`[GIC-Lore] 🔧 #sd_resolution を "${effectiveResolution}" に変更`);
+                            } else {
+                                console.log('[GIC-Lore] #sd_resolution が見つかりません（DOM 操作をスキップ、設定経由のみで試行）');
+                            }
+                        } else {
+                            console.log('[GIC-Lore] jQuery が利用できません（DOM 操作をスキップ、設定経由のみで試行）');
+                        }
+                    } catch (domErr) {
+                        console.warn('[GIC-Lore] #sd_resolution 操作エラー:', domErr);
+                    }
                 }
             }
         } catch (e) {
@@ -822,7 +868,25 @@ async function executeSd(prompt, negativePrompt = null, resolution = null) {
         console.error('[GIC-Lore] ❌ /sd を実行する全ての方式が失敗しました');
         return false;
     } finally {
-        // ★ SD設定を元に戻す
+        // ── ① #sd_resolution の DOM 復元 ──
+        if (jq && $resolutionSelect && originalDomResolution !== null) {
+            try {
+                $resolutionSelect.val(originalDomResolution).trigger('change');
+                console.log(`[GIC-Lore] 🔧 #sd_resolution を "${originalDomResolution}" に復元`);
+            } catch (e) {
+                console.warn('[GIC-Lore] #sd_resolution 復元エラー:', e);
+            }
+            if (addedOptionEl) {
+                try {
+                    addedOptionEl.remove();
+                    console.log(`[GIC-Lore] 🔧 #sd_resolution から追加した option を削除`);
+                } catch (e) {
+                    console.warn('[GIC-Lore] 追加 option 削除エラー:', e);
+                }
+            }
+        }
+
+        // ── ② extensionSettings の復元 ──
         if (ctx?.extensionSettings?.sd) {
             if (settingsModified) {
                 ctx.extensionSettings.sd.negative_prompt = originalNegPrompt;
