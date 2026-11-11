@@ -2384,7 +2384,7 @@ function registerEventListeners() {
         if (event_types[evtName] && typeof eventSource.on === 'function') {
             eventSource.on(event_types[evtName], () => {
                 clearWorldInfoEntriesCache();
-                debugLog(`[LBE] ${evtName} を受信 → エントリキャッシュをクリア`);
+                console.log(`[LBE] ${evtName} を受信 → エントリキャッシュをクリア`);
             });
         }
     }
