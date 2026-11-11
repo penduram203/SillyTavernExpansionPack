@@ -1909,6 +1909,7 @@ async function handleButtonAction() {
     console.log(`[GIC] ボタンアクション: 現在=${isOverrideLocal ? '背景生成' : '事前設定'}, lastUrl=${lastGeneratedImageUrl}`);
 
     if (isOverrideLocal) {
+        // 背景生成 → 事前設定（常に成功）
         if (window.ImageDisplayExtension?.clearOverrideImage) {
             try {
                 window.ImageDisplayExtension.clearOverrideImage();
@@ -1923,23 +1924,26 @@ async function handleButtonAction() {
         return;
     }
 
-    const urlToUse = lastGeneratedImageUrl || '';
+    // 事前設定 → 背景生成
+    let urlToUse = lastGeneratedImageUrl || '';
 
+    // ★ URLが存在しない場合、lastGeneratedImageUrl をクリアして
+    //   デフォルト画像で背景生成モードに切り替える（モード切替は必ず実行する）
+    //   以前はここで return していたため、URLが404だとモードが切り替わらなかった。
     if (urlToUse) {
         const exists = await checkImageExists(urlToUse);
         if (!exists) {
-            console.warn(`[GIC] 保存された画像URLが存在しないため、override設定をスキップ: ${urlToUse}`);
+            console.warn(
+                `[GIC] 保存された画像URLが存在しないため、デフォルト画像で背景生成モードに切り替えます: ${urlToUse}`
+            );
             lastGeneratedImageUrl = null;
-            isOverrideLocal = false;
-            setButtonLabel(LABEL_NORMAL);
-            savePersistedState();
-
-            if (window.ImageDisplayExtension?.clearOverrideImage) {
-                try {
-                    window.ImageDisplayExtension.clearOverrideImage();
-                } catch (e) { /* ignore */ }
-            }
-            return;
+            urlToUse = '';
+            // 古い override 状態をクリアしておく
+            try {
+                if (window.ImageDisplayExtension?.isOverride?.()) {
+                    window.ImageDisplayExtension.clearOverrideImage?.();
+                }
+            } catch (e) { /* ignore */ }
         }
     }
 
@@ -1972,6 +1976,7 @@ async function handleButtonAction() {
     isOverrideLocal = true;
     setButtonLabel(LABEL_OVERRIDE);
     savePersistedState();
+    console.log(`[GIC] モードを背景生成に切り替えました（URL: ${urlToUse || '(デフォルト)'}）`);
 }
 
 function positionGalleryButton() {
