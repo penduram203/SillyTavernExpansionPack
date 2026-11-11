@@ -1172,7 +1172,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
 
     const imgLabel = document.createElement('label');
     imgLabel.className = 'lbe-label';
-    imgLabel.textContent = 'Img_prompt (画像生成プロンプト)';
+    imgLabel.textContent = 'Img_prompt';
     imgLabelRow.appendChild(imgLabel);
 
     // ★ 解像度選択ドロップダウン（6項目のみ）
@@ -1182,7 +1182,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         { value: '1024x1024', label: '1024×1024 (正方形)' },
         { value: '896x1152',  label: '896×1152' },
         { value: '720x1280',  label: '720×1280 (縦長)' },
-        { value: 'random',    label: '①〜⑤からランダム' },
+        { value: 'random',    label: 'ランダム' },
     ];
 
     const resolutionSelect = document.createElement('select');
