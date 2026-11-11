@@ -1243,6 +1243,53 @@ function triggerWorldInfoSave() {
     }, 500);
 }
 
+// ============================================================
+// ★ SD 拡張が対応している解像度のリストを取得
+//    #sd_resolution の option から "sd_res_" を剥がして抽出
+//    SD 拡張がまだ読み込まれていない場合はフォールバックを返す
+// ============================================================
+function getAvailableResolutionsFromSD() {
+    const result = [];
+    try {
+        const sel = document.getElementById('sd_resolution');
+        if (sel && sel.options && sel.options.length > 0) {
+            for (const opt of sel.options) {
+                const v = (opt.value || '').trim();
+                const t = (opt.textContent || '').trim();
+                if (!v) continue;
+                const res = v.replace(/^sd_res_/, '');
+                if (/^\d+x\d+$/.test(res)) {
+                    // 重複排除（同名 value が複数ある場合）
+                    if (!result.some(r => r.value === res)) {
+                        result.push({ value: res, label: t || res });
+                    }
+                }
+            }
+        }
+    } catch (e) { /* ignore */ }
+    return result;
+}
+
+// ============================================================
+// ★ Lorebook Expansion の解像度選択肢を決定
+//    SD 拡張が対応している解像度のみを候補にする。
+//    取得できない場合はフォールバック（旧来の6項目）を返す。
+// ============================================================
+function getResolutionOptionsForLex() {
+    const fromSD = getAvailableResolutionsFromSD();
+    if (fromSD.length > 0) {
+        return fromSD;
+    }
+    // フォールバック（SD 拡張が読み込まれていない場合）
+    return [
+        { value: '1280x720',  label: '1280×720 (横長)' },
+        { value: '1152x896',  label: '1152×896' },
+        { value: '1024x1024', label: '1024×1024 (正方形)' },
+        { value: '896x1152',  label: '896×1152' },
+        { value: '720x1280',  label: '720×1280 (縦長)' },
+    ];
+}
+
 function buildExpansionSection(uid, worldName, data, onChange) {
     const section = document.createElement('div');
     section.className = UI_SECTION_CLASS;
@@ -1319,15 +1366,10 @@ function buildExpansionSection(uid, worldName, data, onChange) {
 
     section.appendChild(templateLabelRow);
 
-    // ── 解像度オプション（6項目） ──
-    const RESOLUTION_OPTIONS = [
-        { value: '1280x720',  label: '1280×720 (横長)' },
-        { value: '1152x896',  label: '1152×896' },
-        { value: '1024x1024', label: '1024×1024 (正方形)' },
-        { value: '896x1152',  label: '896×1152' },
-        { value: '720x1280',  label: '720×1280 (縦長)' },
-        { value: 'random',    label: 'ランダム' },
-    ];
+    // ── 解像度オプション（SD 拡張の対応解像度から動的生成 + ランダム） ──
+    const RESOLUTION_OPTIONS = getResolutionOptionsForLex().concat([
+        { value: 'random', label: 'ランダム' },
+    ]);
 
     const isResolutionValid = (v) => RESOLUTION_OPTIONS.some(o => o.value === v);
 
