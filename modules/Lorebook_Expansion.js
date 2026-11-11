@@ -1889,6 +1889,60 @@ function reorganizeEntryLayout(entryEl) {
     debugLog(`uid=${entryEl.getAttribute('uid')}: レイアウト再編 + 折りたたみトグル挿入`);
 }
 
+// ============================================================
+// ★ 新規エントリ用フォールバック:
+//    entries に未登録の uid について、DOM 上の .world_entry から
+//    comment / keys / content を読み取って仮 entry を構築する。
+//    これにより、サーバー未保存の新規エントリにも LEX UI を注入できる。
+// ============================================================
+function buildFallbackEntryFromDOM(entryEl, uid, worldName) {
+    if (!entryEl) return null;
+    try {
+        // comment を複数パターンで探索
+        let comment = '';
+        const commentInput = entryEl.querySelector(
+            'input[name="comment"], textarea[name="comment"], ' +
+            '.world_entry_comment input, .world_entry_comment textarea'
+        );
+        if (commentInput) {
+            comment = (commentInput.value || '').trim();
+        }
+
+        // keys を探索
+        let keys = [];
+        const keysInput = entryEl.querySelector(
+            'textarea[name="key"], textarea[name="keys"], ' +
+            'input[name="key"], input[name="keys"]'
+        );
+        if (keysInput && keysInput.value) {
+            keys = keysInput.value
+                .split(',')
+                .map(s => s.trim())
+                .filter(Boolean);
+        }
+
+        // content を探索
+        let content = '';
+        const contentTextarea = entryEl.querySelector('textarea[name="content"]');
+        if (contentTextarea) {
+            content = contentTextarea.value || '';
+        }
+
+        const numericUid = /^\d+$/.test(String(uid)) ? Number(uid) : uid;
+        return {
+            uid: numericUid,
+            comment,
+            key: keys,
+            keys,
+            content,
+            world: worldName,
+        };
+    } catch (e) {
+        console.warn(LOG, 'buildFallbackEntryFromDOM error:', e);
+        return null;
+    }
+}
+
 async function injectExpansionSections() {
     if (!settings.enabled) return;
 
@@ -1929,10 +1983,54 @@ async function injectExpansionSections() {
         return;
     }
 
-    const entries = await loadWorldInfoEntriesByName(worldName);
+    let entries = await loadWorldInfoEntriesByName(worldName);
     if (!entries) {
-        debugLog(`inject: world "${worldName}" のエントリ取得失敗（リトライ後）`);
-        return;
+        // ★ entries が取得できなくても DOM フォールバックで続行
+        entries = {};
+        debugLog(`inject: world "${worldName}" のエントリ取得失敗 → DOM フォールバックで続行`);
+    }
+
+    // ★ 新規エントリ（サーバー未保存）のチェック
+    //   DOM 上に存在するが entries に無い uid がある場合、
+    //   ST 内部の world_info から再取得を試みる。
+    //   ST は新規エントリ作成時に world_info[worldName].entries へ登録する場合がある。
+    const domUids = Array.from(entryEls)
+        .map(el => String(el.getAttribute('uid')))
+        .filter(uid => uid && uid !== 'null' && uid !== 'undefined');
+    const missingUids = domUids.filter(uid => !entries[uid]);
+    if (missingUids.length > 0) {
+        debugLog(`DOM 上に存在するが entries に無い uid: [${missingUids.join(', ')}] → 再取得を試行`);
+
+        // ① ST 内部の world_info から再取得
+        try {
+            const mod = await getWorldInfoModule();
+            const liveEntries = mod?.world_info?.[worldName]?.entries;
+            if (liveEntries && typeof liveEntries === 'object') {
+                const liveCount = Object.keys(liveEntries).length;
+                const curCount = Object.keys(entries).length;
+                if (liveCount > curCount) {
+                    entries = liveEntries;
+                    debugLog(`ST 内部の world_info から再取得: ${liveCount} 件 (旧: ${curCount} 件)`);
+                }
+            }
+        } catch (e) {
+            debugLog('ST 内部 world_info 参照エラー:', e);
+        }
+
+        // ② それでも見つからない場合、キャッシュをクリアして fetch 再取得
+        const stillMissing = domUids.filter(uid => !entries[uid]);
+        if (stillMissing.length > 0) {
+            try {
+                clearWorldInfoEntriesCache(worldName);
+                const freshEntries = await loadWorldInfoEntriesByName(worldName);
+                if (freshEntries && typeof freshEntries === 'object') {
+                    entries = freshEntries;
+                    debugLog(`キャッシュクリア後の再取得: ${Object.keys(entries).length} 件`);
+                }
+            } catch (e) {
+                debugLog('キャッシュクリア後の再取得エラー:', e);
+            }
+        }
     }
 
     const scrollSnapshots = [];
@@ -1964,20 +2062,26 @@ async function injectExpansionSections() {
     let skippedCollapsed = 0;
     let skippedAlready = 0;
 
-    entryEls.forEach(entryEl => {
+    // ★ forEach → for...of（await を使うため）
+    for (const entryEl of entryEls) {
         const uid = String(entryEl.getAttribute('uid'));
-        if (uid === null) return;
+        if (uid === null || uid === 'null' || uid === 'undefined') continue;
 
-        const entry = entries[uid];
+        // ★ entries[uid] が無い場合、DOM から仮 entry を構築
+        let entry = entries[uid];
         if (!entry) {
-            skippedNoEntry++;
-            return;
+            entry = buildFallbackEntryFromDOM(entryEl, uid, worldName);
+            if (!entry) {
+                skippedNoEntry++;
+                continue;
+            }
+            debugLog(`uid=${uid}: entries に無いため DOM から仮 entry を構築 (comment="${entry.comment}", keys=[${entry.keys.join(',')}])`);
         }
 
         const contentTextarea = entryEl.querySelector('textarea[name="content"]');
         if (!contentTextarea) {
             skippedCollapsed++;
-            return;
+            continue;
         }
 
         try {
@@ -1996,7 +2100,7 @@ async function injectExpansionSections() {
         if (existing && existing.getAttribute(ATTR_UID) === uid
             && entryEl.querySelector('.lbe-negative-prompt')) {
             skippedAlready++;
-            return;
+            continue;
         }
         if (existing) existing.remove();
 
@@ -2016,7 +2120,7 @@ async function injectExpansionSections() {
         }
         injected++;
         debugLog(`uid=${uid}: LEXセクション注入完了`);
-    });
+    }
 
     if (injected > 0 || settings.debug) {
         debugLog(
