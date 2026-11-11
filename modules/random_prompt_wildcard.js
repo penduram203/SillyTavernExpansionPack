@@ -621,13 +621,6 @@ expression? = 笑顔,無表情,泣き顔</pre>
                 <li>JSON / PNG エクスポートにもこの設定が含まれます。</li>
             </ul>
         </section>
-
-        <section class="rpw-help-section">
-            <h3>サンプル定義</h3>
-            <p>以下の例を消して、自由に編集してください。</p>
-            <pre class="rpw-code-block">color1? = black,brown,orange,yellow,pink
-hair_style? = straight,curly,wavy</pre>
-        </section>
     `;
 }
 
