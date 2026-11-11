@@ -188,9 +188,9 @@ function getEntryCharKey(entry, uid) {
 }
 
 // ============================================================
-// ★ テンプレート選択ヘルパー（v6 追加）
+// ★ テンプレート選択ヘルパー（v6 追加 / v7: 解像度も返す）
 //    rec（LEX データ）から templates / selectedTemplate を見て
-//    実際に使うプロンプトを 1 つだけ選ぶ。
+//    実際に使うプロンプト・解像度を 1 つだけ選ぶ。
 //    'random' の場合はここでランダムに選ぶ。
 // ============================================================
 function _pickTemplateFromRecord(rec, logContext = '') {
@@ -210,10 +210,21 @@ function _pickTemplateFromRecord(rec, logContext = '') {
     }
 
     const t = templates[idx] || {};
+    // ★ テンプレート毎の解像度を返す（未設定時は rec.resolution → 1280x720 にフォールバック）
+    let resolution = null;
+    if (typeof t.resolution === 'string' && t.resolution.trim()) {
+        resolution = t.resolution.trim();
+    } else if (typeof rec.resolution === 'string' && rec.resolution.trim()) {
+        resolution = rec.resolution.trim();
+    } else {
+        resolution = '1280x720';
+    }
+
     return {
         index: idx,
         img_prompt: (typeof t.img_prompt === 'string' && t.img_prompt.trim()) ? t.img_prompt.trim() : null,
         negative_prompt: (typeof t.negative_prompt === 'string' && t.negative_prompt.trim()) ? t.negative_prompt.trim() : null,
+        resolution,
     };
 }
 
@@ -410,8 +421,9 @@ function extractNegativePromptFromEntry(entry, worldName) {
 }
 
 // ============================================================
-// ★ 解像度の取得（v5 追加）
+// ★ 解像度の取得（v5 追加 / v7: テンプレート対応）
 //    per-world ストア → character.data の順で参照
+//    templates があれば選択中テンプレートの解像度を優先
 // ============================================================
 function getLexResolution(worldName, uid, entry) {
     if (!worldName || uid === null || uid === undefined) return null;
@@ -420,8 +432,16 @@ function getLexResolution(worldName, uid, entry) {
     if (window.LorebookExpansion?.getDataFor) {
         try {
             const data = window.LorebookExpansion.getDataFor(worldName, uid, entry);
-            if (data && typeof data.resolution === 'string' && data.resolution.trim()) {
-                return data.resolution.trim();
+            if (data && typeof data === 'object') {
+                // ★ テンプレートの解像度を優先
+                const picked = _pickTemplateFromRecord(data, `(${worldName}::${uid})`);
+                if (picked?.resolution) {
+                    return picked.resolution;
+                }
+                // 後方互換: 直接 resolution
+                if (typeof data.resolution === 'string' && data.resolution.trim()) {
+                    return data.resolution.trim();
+                }
             }
         } catch (e) { /* ignore */ }
     }
@@ -432,8 +452,14 @@ function getLexResolution(worldName, uid, entry) {
         const charKey = getEntryCharKey(entry, uid);
         if (!charKey) return null;
         const rec = ctx?.extensionSettings?.lorebook_expansion?.data?.[worldName]?.[charKey];
-        if (rec && typeof rec.resolution === 'string' && rec.resolution.trim()) {
-            return rec.resolution.trim();
+        if (rec && typeof rec === 'object') {
+            const picked = _pickTemplateFromRecord(rec, `(${worldName}::${charKey})`);
+            if (picked?.resolution) {
+                return picked.resolution;
+            }
+            if (typeof rec.resolution === 'string' && rec.resolution.trim()) {
+                return rec.resolution.trim();
+            }
         }
     } catch (e) { /* ignore */ }
 
@@ -927,10 +953,16 @@ async function processChoice(force = false) {
             negativePrompt = extractNegativePromptFromEntry(entry, worldName);
         }
 
-        // ★ 解像度を取得（v5 追加）
-        const resolution = extractResolutionFromEntry(entry, worldName);
+        // ★ 解像度を取得（v5 追加 / v7: テンプレート優先）
+        //   ★ pickedTemplate があればそのテンプレートの解像度を優先する
+        //     （'random' 選択時に img_prompt / negative_prompt / resolution が
+        //      同じテンプレートから取られることを保証するため）
+        let resolution = pickedTemplate?.resolution || null;
+        if (!resolution) {
+            resolution = extractResolutionFromEntry(entry, worldName);
+        }
         if (settings.verbose && resolution) {
-            console.log(`[GIC-Lore] 解像度: ${resolution}`);
+            console.log(`[GIC-Lore] 解像度: ${resolution}${pickedTemplate ? ` (template ${pickedTemplate.index})` : ''}`);
         }
 
         if (!prompt) {
