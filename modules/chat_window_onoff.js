@@ -417,18 +417,21 @@ function setupBulbHover() {
             x >= rect.left - BULB_HOVER_MARGIN && x <= rect.right + BULB_HOVER_MARGIN &&
             y >= rect.top - BULB_HOVER_MARGIN && y <= rect.bottom + BULB_HOVER_MARGIN;
 
-        // ★ 登録解除ボタンも近接判定に含める
-        //   これにより、登録解除ボタン上でも body.chat-bulb-hover が付与され、
-        //   #toggle-chat-button と同じ opacity 制御が適用される。
+        // ★ 登録解除ボタン / 画像削除ボタンも近接判定に含める
         if (!inside) {
-            const unregBtn = document.getElementById('gic-unregister-button');
-            if (unregBtn && unregBtn.classList.contains('gic-unregister-visible')) {
-                const ur = unregBtn.getBoundingClientRect();
-                if (ur.width > 0 && ur.height > 0) {
-                    if (x >= ur.left - BULB_HOVER_MARGIN && x <= ur.right + BULB_HOVER_MARGIN &&
-                        y >= ur.top - BULB_HOVER_MARGIN && y <= ur.bottom + BULB_HOVER_MARGIN) {
-                        inside = true;
-                    }
+            const extraBtnSelectors = [
+                { id: 'gic-unregister-button', cls: 'gic-unregister-visible' },
+                { id: 'gic-delete-image-button', cls: 'gic-delete-image-visible' },
+            ];
+            for (const { id, cls } of extraBtnSelectors) {
+                const btnEl = document.getElementById(id);
+                if (!btnEl || !btnEl.classList.contains(cls)) continue;
+                const r = btnEl.getBoundingClientRect();
+                if (r.width <= 0 || r.height <= 0) continue;
+                if (x >= r.left - BULB_HOVER_MARGIN && x <= r.right + BULB_HOVER_MARGIN &&
+                    y >= r.top - BULB_HOVER_MARGIN && y <= r.bottom + BULB_HOVER_MARGIN) {
+                    inside = true;
+                    break;
                 }
             }
         }
