@@ -419,6 +419,7 @@ function getImageNegativePrompt(charName, fileName) {
 // ===== 定数 =====
 const MODULE_NAME      = 'generate_image_controller';
 const BUTTON_ID        = 'gic-release-override-button';
+const UNREGISTER_BUTTON_ID = 'gic-unregister-button';
 const GALLERY_BUTTON_ID = 'gic-open-gallery-button';
 const LABEL_OVERRIDE   = '背景生成';
 const LABEL_NORMAL     = '事前設定';
@@ -555,6 +556,9 @@ function resolveOriginalFileName(fileName) {
 
 // ===== 状態 =====
 let lastGeneratedImageUrl = null;
+// ★ 最新の登録済み画像情報（登録解除ボタンの制御用）
+//   { charName, entryKey, fileName } または null
+let _lastRegisteredImage = null;
 let isOverrideLocal = false;
 const processedMessageKeys = new Set();
 
@@ -1104,7 +1108,7 @@ function getCurrentCharacterName() {
             min-width: 180px !important;
         }
 
-/* 変更後（margin の左だけ 22px に変更） */
+        /* 変更後（margin の左だけ 22px に変更） */
         .gic-bulk-delete-button {
             margin: 0 !important;
             flex: 0 0 auto !important;
@@ -1493,6 +1497,69 @@ function getCurrentCharacterName() {
     console.log('[GIC] 🖼️ ギャラリー配置CSSを注入しました');
 })();
 
+(function injectUnregisterButtonStyle() {
+    if (document.getElementById('gic-unregister-button-style')) return;
+    const style = document.createElement('style');
+    style.id = 'gic-unregister-button-style';
+    style.textContent = `
+        #${UNREGISTER_BUTTON_ID} {
+            position: fixed;
+            left: -9999px;
+            top: -9999px;
+            height: 50px;
+            padding: 0 14px;
+            background-color: #c53030;
+            color: #ffffff;
+            border: 1px solid #9b2c2c;
+            border-radius: 4px;
+            cursor: pointer;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            font-weight: bold;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+            z-index: 15000;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.15s ease, background-color 0.15s ease;
+            box-sizing: border-box;
+            white-space: nowrap;
+            user-select: none;
+            line-height: 1;
+        }
+
+        #${UNREGISTER_BUTTON_ID}.gic-unregister-visible {
+            display: flex;
+        }
+
+        /* 💡 近接時: 半透明で表示（#toggle-chat-button と同じ挙動） */
+        body.chat-bulb-hover #${UNREGISTER_BUTTON_ID}.gic-unregister-visible {
+            opacity: 0.3;
+            pointer-events: auto;
+        }
+
+        /* 直接ホバー時: 完全不透明 */
+        html body #${UNREGISTER_BUTTON_ID}.gic-unregister-visible:hover {
+            opacity: 1 !important;
+            background-color: #9b2c2c !important;
+            pointer-events: auto !important;
+        }
+
+        /* パネル・ギャラリー・バトル中は完全非表示 */
+        html body.tsp-open #${UNREGISTER_BUTTON_ID},
+        html body.gallery-open #${UNREGISTER_BUTTON_ID},
+        html body.stj-editor-open #${UNREGISTER_BUTTON_ID},
+        html body.variable-battle-active #${UNREGISTER_BUTTON_ID} {
+            display: none !important;
+            pointer-events: none !important;
+            opacity: 0 !important;
+        }
+    `;
+    document.head.appendChild(style);
+})();
+
 // ============================================================
 // ★ 逆引きマップを再構築
 // ============================================================
@@ -1855,6 +1922,13 @@ async function scanForGeneratedImages() {
                     }
                 }));
                 console.log(`[GIC] 📢 gic-image-generated-for-keyword を発火: entryKey="${genCtx.entryKey}", fileName="${fileName}"`);
+                // ★ 登録解除ボタン用に最新の登録済み画像情報を保持
+                _lastRegisteredImage = {
+                    charName,
+                    entryKey: genCtx.entryKey,
+                    fileName,
+                };
+                updateUnregisterButtonVisibility();
             } catch (e) {
                 console.warn('[GIC] 画像生成完了イベントの発火に失敗:', e);
             }
@@ -7787,6 +7861,190 @@ function createGalleryButton() {
     syncGalleryButtonVisibility();
 }
 
+// ============================================================
+// ★ 画像登録解除ボタン
+// ============================================================
+function createUnregisterButton() {
+    let btn = document.getElementById(UNREGISTER_BUTTON_ID);
+    if (btn) return btn;
+
+    btn = document.createElement('button');
+    btn.id = UNREGISTER_BUTTON_ID;
+    btn.type = 'button';
+    btn.textContent = '登録解除';
+    btn.title = '現在表示中の画像をセルから登録解除する';
+    btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (btn.disabled) return;
+
+        btn.disabled = true;
+        try {
+            const ok = await unregisterCurrentImage();
+            if (ok) {
+                showCopyToast('画像の登録が解除されました');
+            } else {
+                showCopyToast('登録解除に失敗しました');
+            }
+        } catch (err) {
+            console.warn('[GIC] 登録解除エラー:', err);
+            showCopyToast('登録解除に失敗しました');
+        } finally {
+            btn.disabled = false;
+        }
+    });
+
+    document.body.appendChild(btn);
+    return btn;
+}
+
+function positionUnregisterButton() {
+    const unregBtn = document.getElementById(UNREGISTER_BUTTON_ID);
+    if (!unregBtn) return;
+    if (!unregBtn.classList.contains('gic-unregister-visible')) return;
+
+    const toggleBtn = document.getElementById('toggle-chat-button');
+    if (!toggleBtn) return;
+
+    const rect = toggleBtn.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) {
+        unregBtn.style.setProperty('left', '-9999px', 'important');
+        unregBtn.style.setProperty('top', '-9999px', 'important');
+        return;
+    }
+
+    const gap = 5;
+    const btnW = unregBtn.offsetWidth || 90;
+    const btnH = unregBtn.offsetHeight || 50;
+
+    // #toggle-chat-button の左隣、縦中央
+    let left = rect.left - btnW - gap;
+    let top  = rect.top + (rect.height - btnH) / 2;
+
+    const margin = 4;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    if (left < margin) left = margin;
+    if (left + btnW > vw - margin) left = vw - margin - btnW;
+    if (top < margin) top = margin;
+    if (top + btnH > vh - margin) top = vh - margin - btnH;
+
+    unregBtn.style.setProperty('position', 'fixed', 'important');
+    unregBtn.style.setProperty('left', Math.round(left) + 'px', 'important');
+    unregBtn.style.setProperty('top', Math.round(top) + 'px', 'important');
+    unregBtn.style.setProperty('right', 'auto', 'important');
+    unregBtn.style.setProperty('bottom', 'auto', 'important');
+    unregBtn.style.setProperty('transform', 'none', 'important');
+}
+
+function updateUnregisterButtonVisibility() {
+    const unregBtn = document.getElementById(UNREGISTER_BUTTON_ID);
+    if (!unregBtn) return;
+
+    if (_lastRegisteredImage && _lastRegisteredImage.charName) {
+        unregBtn.classList.add('gic-unregister-visible');
+        positionUnregisterButton();
+    } else {
+        unregBtn.classList.remove('gic-unregister-visible');
+        unregBtn.style.setProperty('left', '-9999px', 'important');
+        unregBtn.style.setProperty('top', '-9999px', 'important');
+    }
+}
+
+async function unregisterCurrentImage() {
+    if (!_lastRegisteredImage) {
+        console.warn('[GIC] 登録解除: _lastRegisteredImage なし');
+        return false;
+    }
+    const { charName, entryKey, fileName } = _lastRegisteredImage;
+    if (!charName || !entryKey || !fileName) return false;
+
+    try {
+        const ctx = getContext();
+        const char = ctx?.characters?.[ctx?.characterId];
+        if (!char || char.name !== charName) {
+            console.warn('[GIC] 登録解除: キャラ不一致');
+            return false;
+        }
+
+        const ext = char?.data?.extensions?.image_display_extension;
+        if (!ext || typeof ext !== 'object') {
+            console.warn('[GIC] 登録解除: image_display_extension なし');
+            return false;
+        }
+
+        const val = ext[entryKey];
+        if (val === undefined) {
+            console.warn(`[GIC] 登録解除: キーワード "${entryKey}" のセルなし`);
+            return false;
+        }
+
+        const decodeBase = (p) => {
+            if (typeof p !== 'string') return '';
+            const base = p.split('/').pop().split('?')[0].split('#')[0];
+            try { return decodeURIComponent(base); } catch (e) { return base; }
+        };
+
+        let newVal;
+        let removed = false;
+
+        if (Array.isArray(val)) {
+            newVal = val.filter(p => {
+                if (typeof p !== 'string') return true;
+                if (decodeBase(p) === fileName) {
+                    removed = true;
+                    return false;
+                }
+                return true;
+            });
+            if (!removed) {
+                console.warn(`[GIC] 登録解除: "${fileName}" はセル "${entryKey}" に見つかりません`);
+                return false;
+            }
+            // 空配列はキーを保持（セルとキーワードを残すため）
+            if (newVal.length === 0) newVal = [];
+            else if (newVal.length === 1) newVal = newVal[0];
+        } else if (typeof val === 'string') {
+            if (decodeBase(val) === fileName) {
+                newVal = [];
+                removed = true;
+            } else {
+                console.warn(`[GIC] 登録解除: "${fileName}" はセル "${entryKey}" に見つかりません`);
+                return false;
+            }
+        } else {
+            return false;
+        }
+
+        // ★ 保存
+        const newExt = { ...ext, [entryKey]: newVal };
+        if (!char.data) char.data = {};
+        if (!char.data.extensions) char.data.extensions = {};
+        char.data.extensions.image_display_extension = newExt;
+
+        window.CharStore?.saveCharacterExtension?.(
+            'image_display_extension',
+            newExt,
+            { immediate: true }
+        );
+
+        window.dispatchEvent(new CustomEvent('lbe-image-map-updated', {
+            detail: { charName, imageMap: newExt }
+        }));
+
+        console.log(`[GIC] ✅ 登録解除: "${entryKey}" から "${fileName}" を削除`);
+
+        // ★ 状態クリア
+        _lastRegisteredImage = null;
+        updateUnregisterButtonVisibility();
+
+        return true;
+    } catch (e) {
+        console.warn('[GIC] unregister error:', e);
+        return false;
+    }
+}
+
 function setupListeners() {
     const safeOn = (type, handler) => { if (type && eventSource?.on) eventSource.on(type, handler); };
     safeOn(event_types.MESSAGE_RECEIVED, scanForGeneratedImages);
@@ -7856,6 +8114,9 @@ function exposeGicApi() {
     window.GicApi = {
         // ★ 手動リフレッシュ（ヘッダーの「🔄 更新」ボタンと同じ処理）
         forceRefreshGallery: () => manualRefreshGallery(),
+        
+        unregisterCurrentImage,
+        getLastRegisteredImage: () => _lastRegisteredImage ? { ..._lastRegisteredImage } : null,
         
         openGallery: () => openGalleryFromGic(),
         closeGallery: () => closeGalleryProgrammatically(),
@@ -8151,6 +8412,7 @@ function initializeGIC() {
 
     createReleaseButton();
     createGalleryButton();
+    createUnregisterButton();
     setupListeners();
     setupTextStylingObserver();
     setupGalleryObserverForGic();
@@ -8165,6 +8427,7 @@ function initializeGIC() {
         syncGalleryButtonVisibility();
         markGeneratedMessagesInDom();
         positionGalleryButton();
+        positionUnregisterButton();   // ★ 追加
         positionStatusMessage();
         applyGalleryLayout();
         hideGalleryUploadMessage();
