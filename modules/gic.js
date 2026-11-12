@@ -4572,6 +4572,63 @@ function showCopyToast(message) {
     }, 2000);
 }
 
+// ============================================================
+// ★ 画面下部に大きく表示するトースト
+//   登録解除メッセージなど、ユーザーに確実に気づいてほしい通知用。
+//   画面上部中央の showCopyToast とは別に、下部に大きな文字で表示する。
+// ============================================================
+function showBottomToast(message, options = {}) {
+    const { durationMs = 2500, type = 'success' } = options;
+
+    const existing = document.getElementById('gic-bottom-toast');
+    if (existing) existing.remove();
+
+    const toast = document.createElement('div');
+    toast.id = 'gic-bottom-toast';
+    toast.textContent = message;
+
+    const bgColor = type === 'error'
+        ? '#c53030'
+        : (type === 'warning' ? '#b7791f' : '#38a169');
+
+    Object.assign(toast.style, {
+        position: 'fixed',
+        bottom: '120px',
+        left: '50%',
+        transform: 'translateX(-50%) translateY(20px)',
+        padding: '20px 48px',
+        backgroundColor: bgColor,
+        color: '#ffffff',
+        fontSize: '28px',
+        fontWeight: 'bold',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif',
+        borderRadius: '12px',
+        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.7), 0 0 0 2px rgba(255, 255, 255, 0.3)',
+        zIndex: '2147483647',
+        pointerEvents: 'none',
+        transition: 'opacity 0.3s ease, transform 0.3s ease',
+        opacity: '0',
+        textAlign: 'center',
+        whiteSpace: 'nowrap',
+        letterSpacing: '0.05em',
+        textShadow: '0 2px 4px rgba(0, 0, 0, 0.5)',
+        boxSizing: 'border-box',
+    });
+
+    document.body.appendChild(toast);
+
+    requestAnimationFrame(() => {
+        toast.style.opacity = '1';
+        toast.style.transform = 'translateX(-50%) translateY(0)';
+    });
+
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateX(-50%) translateY(20px)';
+        setTimeout(() => toast.remove(), 350);
+    }, durationMs);
+}
+
 async function copyPromptToClipboard(text) {
     if (!text) return false;
     try {
@@ -7901,13 +7958,13 @@ function createUnregisterButton() {
         try {
             const ok = await unregisterCurrentImage();
             if (ok) {
-                showCopyToast('画像の登録が解除されました');
+                showBottomToast('画像の登録が解除されました');
             } else {
-                showCopyToast('登録解除に失敗しました');
+                showBottomToast('登録解除に失敗しました', { type: 'error' });
             }
         } catch (err) {
             console.warn('[GIC] 登録解除エラー:', err);
-            showCopyToast('登録解除に失敗しました');
+            showBottomToast('登録解除に失敗しました', { type: 'error' });
         } finally {
             btn.disabled = false;
         }
@@ -8278,6 +8335,8 @@ function exposeGicApi() {
         //   現在表示中の画像がセルに登録されていれば、その登録を解除する。
         //   複数キーワードに登録されている場合は全キーから削除する。
         unregisterCurrentImage,
+        // ★ 画面下部トースト（stj_editor.js など他モジュールからも使えるように公開）
+        showBottomToast,
         refreshUnregisterButton: () => refreshUnregisterButtonState(),
         getCurrentlyRegisteredImage: () => _currentRegisteredKeywords
             ? JSON.parse(JSON.stringify(_currentRegisteredKeywords))
