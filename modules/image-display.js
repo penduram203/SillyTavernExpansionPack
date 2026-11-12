@@ -1181,6 +1181,13 @@
             return;
         }
         currentImageUrl = newUrl;
+        // image-display.js の updateImageWithUrl 内、currentImageUrl = newUrl の直後
+        try {
+            window.dispatchEvent(new CustomEvent('gic-image-display-changed', {
+                detail: { url: newUrl }
+            }));
+        } catch (e) { /* ignore */ }
+        
 
         if (isVideoUrl(newUrl)) {
             const videoElement = document.createElement('video');
