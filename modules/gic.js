@@ -7654,40 +7654,38 @@ function createReleaseButton() {
         }, 250);
     };
 
+    // ★ モード切替ボタンの triggerAction
+    //   ★ 重要: ここで openGalleryFromGic() を絶対に呼ばないこと。
+    //     モード切替は handleButtonAction() のみを実行する。
+    //     ギャラリーを開く処理が混入すると、
+    //     「事前設定/背景生成ボタンを押したのにギャラリーが開く」バグになる。
     let lastActionTime = 0;
     const triggerAction = () => {
         const now = Date.now();
         if (now - lastActionTime < 200) return;
         lastActionTime = now;
-
-        // ★ ウォームアップ中なら中断
-        if (warmupState === 'running') {
-            warmupState = 'aborted';
-            clearGalleryOpenInFlight();
-            const hs = document.getElementById('gic-gallery-warmup-hide');
-            if (hs) hs.remove();
-        }
-
-        // ★ ユーザー明示オープンを最優先でマーク
-        //   （auto-close guard 対策。disabled 中でも必ず呼ぶ）
-        if (typeof window.__gicMarkUserOpened === 'function') {
-            window.__gicMarkUserOpened();
-        }
-
-        // ★ disabled / loading を強制解除
-        btn.classList.remove('gic-gallery-loading');
-        btn.disabled = false;
-        setGalleryButtonLoading(false);
-
-        // ★ in-flight ガードをクリアして強制オープン
-        clearGalleryOpenInFlight();
-
         flashBlue();
-        openGalleryFromGic(true);
+        Promise.resolve(handleButtonAction()).catch(e => console.error('[GIC] handleButtonAction エラー:', e));
     };
 
-    btn.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); triggerAction('pointerdown'); }, true);
-    btn.addEventListener('click', (e) => { e.stopPropagation(); e.preventDefault(); triggerAction('click'); }, true);
+    // ★ pointerdown と click の両方で登録するが、200ms ガードで二重実行を防ぐ
+    //   （pointerdown で preventDefault しても、ブラウザによっては click が発火するため）
+    btn.addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        triggerAction();
+    }, true);
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        triggerAction();
+    }, true);
+
+    // ★ 万が一、他の要素からイベントがバブリングしてきてもモード切替だけを実行する
+    //   （capture フェーズで stopPropagation しているので通常は届かないが、防御的）
+    btn.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+    }, true);
 
     document.body.appendChild(btn);
     setButtonLabel(isOverrideLocal ? LABEL_OVERRIDE : LABEL_NORMAL);
