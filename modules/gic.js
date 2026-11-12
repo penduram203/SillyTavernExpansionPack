@@ -1569,9 +1569,9 @@ function getCurrentCharacterName() {
             top: -9999px;
             height: 50px;
             padding: 0 14px;
-            background-color: #7f1d1d;
+            background-color: #d4c11e;
             color: #ffffff;
-            border: 1px solid #991b1b;
+            border: 1px solid #e38d14;
             border-radius: 4px;
             cursor: pointer;
             display: none;
@@ -1602,7 +1602,7 @@ function getCurrentCharacterName() {
 
         html body #${DELETE_IMAGE_BUTTON_ID}.gic-delete-image-visible:hover {
             opacity: 1 !important;
-            background-color: #991b1b !important;
+            background-color: #92400e !important;
             pointer-events: auto !important;
         }
 
@@ -8154,16 +8154,43 @@ function showDeleteConfirmDialog(fileName) {
 
         overlay.appendChild(box);
 
+        let _settled = false;
         const cleanup = (result) => {
-            overlay.remove();
-            document.removeEventListener('keydown', onKey);
+            if (_settled) return;
+            _settled = true;
+
+            // ★ capture: true で登録したリスナーは、removeEventListener にも
+            //   capture: true を渡さないと削除されない。
+            //   これが原因で、ダイアログを閉じた後も keydown が残り、
+            //   Enter キーが stopPropagation されてチャット生成が無反応になっていた。
+            document.removeEventListener('keydown', onKey, true);
+
+            try { overlay.remove(); } catch (e) { /* ignore */ }
+
+            // ★ フォーカスを document.body に戻す
+            //   （ボタンにフォーカスが残っていると、以降のキー入力が阻害される場合がある）
+            setTimeout(() => {
+                try {
+                    if (document.activeElement && overlay.contains(document.activeElement)) {
+                        document.body.focus();
+                    }
+                } catch (e) { /* ignore */ }
+            }, 0);
+
             resolve(result);
         };
 
-        const onKey = (e) => {
-            if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cleanup(false); }
-            else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); cleanup(true); }
-        };
+        function onKey(e) {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                cleanup(false);
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                cleanup(true);
+            }
+        }
 
         yesBtn.addEventListener('click', (e) => {
             e.preventDefault(); e.stopPropagation();
@@ -8176,6 +8203,8 @@ function showDeleteConfirmDialog(fileName) {
         overlay.addEventListener('click', (e) => {
             if (e.target === overlay) cleanup(false);
         });
+
+        // ★ capture: true で登録（他のリスナーより先に処理する）
         document.addEventListener('keydown', onKey, true);
 
         document.body.appendChild(overlay);
