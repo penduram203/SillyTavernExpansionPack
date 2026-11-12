@@ -3615,6 +3615,225 @@
         console.log('[STJ Editor] 📢 gic-image-deleted リスナーを設置しました');
     }
 
+// ============================================================
+// ★ ロアブックエントリ ↔ JSON編集画面 セル 自動同期
+//   - エントリの comment と keys[0] が同じ名前ならセルを自動作成
+//   - 「00_共通ルール」は除外
+//   - エントリ削除時は自動削除しない（手動）
+//   - 画像生成完了時に該当キーワードのセルへ画像を自動登録
+// ============================================================
+const AUTO_SYNC_COMMON_RULE_NAME = '00_共通ルール';
+
+function normalizeCellImages(val) {
+    if (!val) return [];
+    if (Array.isArray(val)) return val.filter(v => typeof v === 'string');
+    if (typeof val === 'string') return [val];
+    return [];
+}
+
+function getCurrentImageMapFromCharData(charName) {
+    try {
+        const ctx = getSTContext();
+        const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
+        if (!char || char.name !== charName) return null;
+        const ext = char?.data?.extensions?.image_display_extension;
+        if (!ext || typeof ext !== 'object') return {};
+        return JSON.parse(JSON.stringify(ext));
+    } catch (e) {
+        console.warn('[STJ Editor] getCurrentImageMapFromCharData error:', e);
+        return null;
+    }
+}
+
+function saveImageMapToCharData(charName, imageMap) {
+    try {
+        const ctx = getSTContext();
+        const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
+        if (!char || char.name !== charName) {
+            console.warn('[STJ Editor] saveImageMapToCharData: char mismatch');
+            return false;
+        }
+        if (!char.data) char.data = {};
+        if (!char.data.extensions) char.data.extensions = {};
+        char.data.extensions.image_display_extension = imageMap;
+
+        window.CharStore?.saveCharacterExtension?.(
+            'image_display_extension',
+            imageMap,
+            { immediate: true }
+        );
+        window.dispatchEvent(new CustomEvent('lbe-image-map-updated', {
+            detail: { charName, imageMap }
+        }));
+        return true;
+    } catch (e) {
+        console.warn('[STJ Editor] saveImageMapToCharData error:', e);
+        return false;
+    }
+}
+
+function isCommonRuleName(name) {
+    if (!name) return false;
+    const trimmed = String(name).trim();
+    if (!trimmed) return false;
+    if (trimmed === AUTO_SYNC_COMMON_RULE_NAME) return true;
+    if (trimmed.startsWith(AUTO_SYNC_COMMON_RULE_NAME)) return true;
+    return false;
+}
+
+async function syncLorebookEntriesToImageMap() {
+    const charName = detectCharacterNameFromDOM();
+    if (!charName) {
+        console.debug('[STJ Editor] syncLorebook: キャラ未選択のためスキップ');
+        return 0;
+    }
+
+    const worldName = getCharacterWorldInfoName();
+    if (!worldName) {
+        console.debug('[STJ Editor] syncLorebook: ロアブック未関連付けのためスキップ');
+        return 0;
+    }
+
+    const entries = await loadWorldInfoEntries(worldName);
+    if (!entries) return 0;
+
+    const list = Array.isArray(entries) ? entries : Object.values(entries);
+    const imageMap = getCurrentImageMapFromCharData(charName);
+    if (!imageMap) return 0;
+
+    let added = 0;
+
+    for (const entry of list) {
+        if (!entry) continue;
+        const comment = (typeof entry.comment === 'string' ? entry.comment.trim() : '');
+        if (!comment) continue;
+        if (isCommonRuleName(comment)) continue;
+
+        const keys = getEntryKeys(entry);
+        const firstKey = keys.length > 0 ? String(keys[0]).trim() : '';
+        if (!firstKey) continue;
+
+        // ★ comment と keys[0] が完全一致している場合のみ対象
+        if (comment !== firstKey) continue;
+
+        const keyword = comment;
+
+        // 既にキーがあればスキップ
+        if (Object.prototype.hasOwnProperty.call(imageMap, keyword)) continue;
+
+        imageMap[keyword] = [];
+        added++;
+        console.log(`[STJ Editor] 🆕 セル自動作成: "${keyword}" (world="${worldName}")`);
+    }
+
+    if (added > 0) {
+        saveImageMapToCharData(charName, imageMap);
+
+        // エディタが開いていれば UI 更新
+        if (stjModalEl && stjModalEl.style.display === 'block') {
+            try {
+                populateFormFromImageMap(imageMap);
+                autoSave({ immediate: true });
+            } catch (e) {
+                console.warn('[STJ Editor] UI 更新エラー:', e);
+            }
+        }
+        console.log(`[STJ Editor] ✅ ${added} 件のセルを自動作成しました`);
+    }
+
+    return added;
+}
+
+function handleImageGeneratedForKeyword(e) {
+    const { charName, entryKey, fileName } = e.detail || {};
+    if (!charName || !entryKey || !fileName) return;
+
+    // 該当キャラチェック
+    const currentCharName = detectCharacterNameFromDOM();
+    if (currentCharName !== charName) {
+        console.debug(`[STJ Editor] 別キャラのためスキップ (${charName} != ${currentCharName})`);
+        return;
+    }
+
+    // 共通ルール除外
+    if (isCommonRuleName(entryKey)) {
+        console.debug(`[STJ Editor] 共通ルールのためスキップ: ${entryKey}`);
+        return;
+    }
+
+    const imageMap = getCurrentImageMapFromCharData(charName);
+    if (!imageMap) return;
+
+    if (!Object.prototype.hasOwnProperty.call(imageMap, entryKey)) {
+        console.log(`[STJ Editor] キーワード "${entryKey}" のセルが無いため画像登録をスキップ`);
+        return;
+    }
+
+    const currentList = normalizeCellImages(imageMap[entryKey]);
+    if (currentList.includes(fileName)) {
+        console.debug(`[STJ Editor] 画像 "${fileName}" は既に登録済み`);
+        return;
+    }
+
+    currentList.push(fileName);
+    imageMap[entryKey] = currentList;
+
+    saveImageMapToCharData(charName, imageMap);
+
+    if (stjModalEl && stjModalEl.style.display === 'block') {
+        try {
+            populateFormFromImageMap(imageMap);
+            autoSave({ immediate: true });
+        } catch (e) {
+            console.warn('[STJ Editor] UI 更新エラー:', e);
+        }
+    }
+
+    console.log(`[STJ Editor] 🖼️ 画像自動登録: "${entryKey}" ← ${fileName}`);
+}
+
+function setupLorebookEntryWatcher() {
+    if (window.__stjLorebookEntryWatcherInstalled) return;
+    window.__stjLorebookEntryWatcherInstalled = true;
+
+    const ctx = getSTContext();
+    if (!ctx?.eventSource || !ctx?.eventTypes) {
+        setTimeout(setupLorebookEntryWatcher, 1000);
+        return;
+    }
+
+    const es = ctx.eventSource;
+    const et = ctx.eventTypes;
+
+    const syncLater = (delay = 500) => {
+        setTimeout(() => {
+            syncLorebookEntriesToImageMap().catch(e => console.warn('[STJ Editor] syncLorebook error:', e));
+        }, delay);
+    };
+
+    // ロアブック更新時
+    ['WORLDINFO_UPDATED', 'WORLDINFO_SETTINGS_UPDATED'].forEach(name => {
+        if (et[name] && typeof es.on === 'function') {
+            es.on(et[name], () => syncLater(600));
+        }
+    });
+
+    // キャラ切替時
+    ['CHAT_CHANGED', 'CHARACTER_SELECTED', 'CHARACTER_PAGE_LOADED'].forEach(name => {
+        if (et[name] && typeof es.on === 'function') {
+            es.on(et[name], () => syncLater(800));
+        }
+    });
+
+    // 画像生成完了イベント
+    window.addEventListener('gic-image-generated-for-keyword', handleImageGeneratedForKeyword);
+
+    // 起動直後にも1回
+    syncLater(1500);
+
+    console.log('[STJ Editor] ロアブックエントリ監視を開始しました');
+}
+    
     function initStjEditor() {
         const context = getSTContext();
         if (!context) { setTimeout(initStjEditor, 500); return; }
@@ -3625,6 +3844,9 @@
 
         // ★ ギャラリーからの画像削除を購読
         setupImageDeletedListener();
+
+        // ★ ロアブックエントリ監視（セル自動作成 / 画像自動登録）
+        setupLorebookEntryWatcher();
 
         window.STJEditor = {
             open: function () {
@@ -3672,6 +3894,8 @@
                     return { ok: false, error: String(e) };
                 }
             },
+            // ★ 手動でロアブック↔セルを同期（デバッグ・復旧用）
+            syncLorebookEntries: () => syncLorebookEntriesToImageMap(),
         };
 
         console.log('[STJ Editor] JSONエディタAPIを公開しました（キャラ編集画面のボタンは廃止）');
