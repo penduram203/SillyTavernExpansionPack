@@ -3743,32 +3743,79 @@ async function syncLorebookEntriesToImageMap() {
     const imageMap = getCurrentImageMapFromCharData(charName);
     if (!imageMap) return 0;
 
-    let added = 0;
+    // ============================================================
+    // ★ ロアブックの全エントリから「存在するキー」を収集
+    //   - comment（共通ルール以外）
+    //   - keys[0]
+    //   どちらか一方でも一致すれば、そのセルは「ロアブックに存在する」とみなす。
+    //   これにより、comment と keys[0] が編集されて不一致になったエントリの
+    //   セルも保持される（以前の要件を尊重）。
+    // ============================================================
+    const existingKeys = new Set();
+    // ★ 自動作成の対象となるキー（comment === keys[0] のエントリのみ）
+    const autoCreateKeys = new Set();
 
     for (const entry of list) {
         if (!entry) continue;
-        const comment = (typeof entry.comment === 'string' ? entry.comment.trim() : '');
-        if (!comment) continue;
-        if (isCommonRuleName(comment)) continue;
 
+        const comment = (typeof entry.comment === 'string' ? entry.comment.trim() : '');
         const keys = getEntryKeys(entry);
         const firstKey = keys.length > 0 ? String(keys[0]).trim() : '';
-        if (!firstKey) continue;
 
-        // ★ comment と keys[0] が完全一致している場合のみ対象
-        if (comment !== firstKey) continue;
+        // comment が存在し、共通ルールでなければ「存在キー」に追加
+        if (comment && !isCommonRuleName(comment)) {
+            existingKeys.add(comment);
+        }
+        // keys[0] が存在すれば「存在キー」に追加
+        if (firstKey) {
+            existingKeys.add(firstKey);
+        }
 
-        const keyword = comment;
+        // comment === keys[0] なら自動作成対象
+        if (comment && firstKey && comment === firstKey && !isCommonRuleName(comment)) {
+            autoCreateKeys.add(comment);
+        }
+    }
 
-        // 既にキーがあればスキップ
+    // ============================================================
+    // ★ 残骸削除: imageMap のキーのうち existingKeys に含まれないものを削除
+    //   default / thumbnail は特殊セルなので除外。
+    //   ★ 以前の自動同期で作られたセル、手動で追加されたセル問わず、
+    //     ロアブックに存在しないキーは削除する（要件：一覧を一致させる）。
+    // ============================================================
+    const removedKeys = [];
+    for (const key of Object.keys(imageMap)) {
+        if (UNREGISTER_EXCLUDED_KEYS.has(key)) continue;
+        if (!existingKeys.has(key)) {
+            delete imageMap[key];
+            removedKeys.push(key);
+        }
+    }
+
+    if (removedKeys.length > 0) {
+        console.log(
+            `[STJ Editor] 🗑️ ロアブックに存在しないセルを削除: [${removedKeys.join(', ')}] ` +
+            `(world="${worldName}")`
+        );
+    }
+
+    // ============================================================
+    // ★ 新規追加: autoCreateKeys のうち imageMap に無いものを追加
+    // ============================================================
+    const addedKeys = [];
+    for (const keyword of autoCreateKeys) {
         if (Object.prototype.hasOwnProperty.call(imageMap, keyword)) continue;
-
         imageMap[keyword] = [];
-        added++;
+        addedKeys.push(keyword);
         console.log(`[STJ Editor] 🆕 セル自動作成: "${keyword}" (world="${worldName}")`);
     }
 
-    if (added > 0) {
+    // ============================================================
+    // ★ 保存（削除または追加があった場合）
+    // ============================================================
+    const changed = removedKeys.length > 0 || addedKeys.length > 0;
+
+    if (changed) {
         saveImageMapToCharData(charName, imageMap);
 
         // エディタが開いていれば UI 更新
@@ -3780,10 +3827,17 @@ async function syncLorebookEntriesToImageMap() {
                 console.warn('[STJ Editor] UI 更新エラー:', e);
             }
         }
-        console.log(`[STJ Editor] ✅ ${added} 件のセルを自動作成しました`);
+
+        if (removedKeys.length > 0 || addedKeys.length > 0) {
+            console.log(
+                `[STJ Editor] ✅ 同期完了: 追加=${addedKeys.length}, 削除=${removedKeys.length}`
+            );
+        }
     }
 
-    return added;
+    // ★ 追加されたキーの件数を返す（更新ボタンのトースト表示用）
+    //   削除件数は別途確認したい場合に備えて imageMap に保持しない
+    return addedKeys.length;
 }
 
 function handleImageGeneratedForKeyword(e) {
