@@ -3332,7 +3332,7 @@
             <div class="stj-button-group">
                 <div class="stj-button-group-main">
                     <button id="stj_cancel_export">終了</button>
-                    <button id="stj_add_keyword">セル追加</button>
+                    <button id="stj_add_keyword" title="ロアブックのエントリと同期してセルを自動作成します（自動削除はしません）">更新</button>
                     <button id="stj_bulk_delete">一括削除</button>
                     <button id="stj_delete_cancel" style="display:none;">戻る</button>
                     <button id="stj_delete_execute" style="display:none;">削除実行</button>
@@ -3372,10 +3372,52 @@
         }
 
         const addBtn = document.getElementById('stj_add_keyword');
-        if (addBtn) addBtn.addEventListener('click', (e) => {
+        if (addBtn) addBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
             if (isBulkDeleteMode || isDialogActive) return;
-            addKeywordRow(modal);
+
+            // ★ 「更新」ボタン: ロアブックのエントリと同期してセルを自動作成
+            //   - comment と keys[0] が一致するエントリのみ対象
+            //   - 「00_共通ルール」は除外
+            //   - 自動削除は行わない（既存セルは保持）
+            try {
+                // 編集中の内容を先に保存
+                autoSave({ immediate: true });
+
+                // 既存セルに影響を与えないよう、ロアブックのエントリのみから
+                // 新規キーを抽出して追加する（syncLorebookEntriesToImageMap は
+                // 既に「無いキーのみ追加」する実装になっている）
+                const added = await syncLorebookEntriesToImageMap();
+
+                const showToast = window.GicApi?.showBottomToast;
+                if (added > 0) {
+                    if (typeof showToast === 'function') {
+                        showToast(`ロアブックと同期しました（${added} 件追加）`);
+                    }
+                    console.log(`[STJ Editor] ✅ 更新ボタンによる同期: ${added} 件追加`);
+                } else {
+                    if (typeof showToast === 'function') {
+                        showToast('同期する新規セルはありませんでした', { type: 'warning' });
+                    }
+                    console.log('[STJ Editor] 更新ボタンによる同期: 追加なし');
+                }
+
+                // UI を最新状態に再描画
+                if (stjModalEl && stjModalEl.style.display === 'block') {
+                    const charName = detectCharacterNameFromDOM();
+                    if (charName) {
+                        const currentMap = getCurrentImageMapFromCharData(charName);
+                        if (currentMap) populateFormFromImageMap(currentMap);
+                    }
+                    runLiveTest();
+                }
+            } catch (err) {
+                console.warn('[STJ Editor] 同期エラー:', err);
+                const showToast = window.GicApi?.showBottomToast;
+                if (typeof showToast === 'function') {
+                    showToast('同期に失敗しました', { type: 'error' });
+                }
+            }
         });
 
         const bulkDeleteBtn = document.getElementById('stj_bulk_delete');
@@ -3764,9 +3806,11 @@ function handleImageGeneratedForKeyword(e) {
     const imageMap = getCurrentImageMapFromCharData(charName);
     if (!imageMap) return;
 
+    // ★ セルが無い場合は自動作成（画像生成時）
+    //   自動削除は行わない（要件通り）
     if (!Object.prototype.hasOwnProperty.call(imageMap, entryKey)) {
-        console.log(`[STJ Editor] キーワード "${entryKey}" のセルが無いため画像登録をスキップ`);
-        return;
+        imageMap[entryKey] = [];
+        console.log(`[STJ Editor] 🆕 セル自動作成（画像生成時）: "${entryKey}"`);
     }
 
     const currentList = normalizeCellImages(imageMap[entryKey]);
