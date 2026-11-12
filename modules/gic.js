@@ -1824,12 +1824,11 @@ async function scanForGeneratedImages() {
     let finalUrl = url;
 
     if (!alreadyProcessed) {
+        // ★ 生成コンテキストを先にキャプチャ
+        //   （maybeRenameGeneratedImage の最後で clearPendingGenerationContext されるため）
+        const genCtx = window.GicLorebook?.getPendingGenerationContext?.() || null;
+
         // ★ リネーム（未処理メッセージのみ）
-        //   キャラ名_YYYY-MM-DD@... → キャラ名_エントリキー_YYYY-MM-DD@...
-        //   gic_lorebook.js が /sd 実行前に保存した共有コンテキストを参照する。
-        //   失敗時は null を返すので、そのままの URL を使う。
-        //   失敗した場合 alreadyProcessed に追加しないことで、次回ポーリングで
-        //   自動リトライされる（次回 scanForGeneratedImages 呼び出し時）。
         try {
             const renamedUrl = await maybeRenameGeneratedImage(newest, url);
             if (renamedUrl) finalUrl = renamedUrl;
@@ -1841,8 +1840,27 @@ async function scanForGeneratedImages() {
         lastGeneratedImageUrl = finalUrl;
         processedMessageKeys.add(key);
 
+        // ★ 画像生成完了イベントを発火（セル自動登録用）
+        if (genCtx?.entryKey) {
+            try {
+                const urlPath = finalUrl.split('?')[0].split('#')[0];
+                let fileName = urlPath.split('/').pop();
+                try { fileName = decodeURIComponent(fileName); } catch (e) { /* ignore */ }
+                const charName = getCurrentCharacterName() || '';
+                window.dispatchEvent(new CustomEvent('gic-image-generated-for-keyword', {
+                    detail: {
+                        charName,
+                        entryKey: genCtx.entryKey,
+                        fileName,
+                    }
+                }));
+                console.log(`[GIC] 📢 gic-image-generated-for-keyword を発火: entryKey="${genCtx.entryKey}", fileName="${fileName}"`);
+            } catch (e) {
+                console.warn('[GIC] 画像生成完了イベントの発火に失敗:', e);
+            }
+        }
+
         // ── 生成画像メッセージをシステム扱いにマーク ──
-        //   （チャット履歴の再描画時に非表示にする）
         if (!newest.is_system) {
             newest.is_system = true;
             try {
@@ -1854,8 +1872,6 @@ async function scanForGeneratedImages() {
         }
 
         // ── 自動表示判定 ──
-        //   事前設定モード（isOverrideLocal=false）では生成画像を自動表示しない。
-        //   背景生成モード（isOverrideLocal=true）のときだけ setOverrideImage を呼ぶ。
         if (!isOverrideLocal) {
             console.log(`[GIC] 事前設定モードのため生成画像の自動表示をスキップ: ${finalUrl}`);
         } else if (window.ImageDisplayExtension?.setOverrideImage) {
@@ -1871,15 +1887,10 @@ async function scanForGeneratedImages() {
         }
     } else {
         // ── 既処理メッセージの追跡 ──
-        //   URL は記録するが、override 状態の自動復元は行わない。
         lastGeneratedImageUrl = url;
-
-        // ★ Image Display 側の状態を参照して isOverrideLocal を自動変更しない。
-        //    （キャラ切替やチャット変更で勝手にモードが切り替わるのを防ぐ）
     }
 
     // ── 最新より古い生成画像メッセージも処理済みとしてマーク ──
-    //   （過去分は既にリネーム済み／リネーム不要とみなす）
     for (let i = 0; i < newestIdx; i++) {
         const msg = context.chat[i];
         if (isGeneratedImageMessage(msg)) {
