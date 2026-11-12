@@ -336,20 +336,6 @@ function getImageNegativePrompt(charName, fileName) {
             const data = await resp.clone().json();
             if (!Array.isArray(data)) return resp;
 
-            // ★ ギャラリー更新時に該当キャラの画像キャッシュをクリア
-            //   ★ スロットル版を使用（15秒に1回のみ）
-            try {
-                let __charName = null;
-                const __reqBody = init?.body ? JSON.parse(init.body) : null;
-                __charName = __reqBody?.folder || null;
-                if (__charName) {
-                    const n = await clearImageCacheForCharThrottled(__charName);
-                    if (n > 0) {
-                        console.log(`[GIC] 🔄 ギャラリー更新: ${__charName} のキャッシュ ${n} 件をクリア`);
-                    }
-                }
-            } catch (e) { /* ignore */ }
-
             const set = new Set(data.filter(f => typeof f === 'string'));
 
             let replaced = 0;
@@ -2492,27 +2478,67 @@ async function clearImageCacheForChar(charName) {
 }
 
 // ============================================================
-// ★ キャッシュクリアのスロットル制御
-//   /api/images/list はギャラリーを開くたびに複数回呼ばれるため、
-//   毎回全キャッシュをクリアすると 172 枚のサムネを毎回再取得して
-//   ギャラリーが 3 秒以上かかったり、サムネが真っ黒になったりする。
-//   → 同一キャラへのクリアは CACHE_CLEAR_THROTTLE_MS に 1 回だけ許可する。
+// ★ ギャラリー手動リフレッシュ
+//   キャッシュを全クリア → ギャラリーを閉じて再オープン → 状態復元
+//   ユーザーがヘッダーの「🔄 更新」ボタンを押した時のみ実行される。
 // ============================================================
-const _lastCacheClearForChar = new Map();
-const CACHE_CLEAR_THROTTLE_MS = 15000;  // 15秒
-
-async function clearImageCacheForCharThrottled(charName, force = false) {
-    if (!charName) return 0;
-    const lastClear = _lastCacheClearForChar.get(charName) || 0;
-    const elapsed = Date.now() - lastClear;
-    if (!force && elapsed < CACHE_CLEAR_THROTTLE_MS) {
-        console.log(
-            `[GIC] ⏭ キャッシュクリアをスキップ (前回から ${Math.round(elapsed / 1000)}秒): ${charName}`
-        );
-        return 0;
+async function manualRefreshGallery() {
+    const charName = getCurrentCharacterName();
+    if (!charName) {
+        console.warn('[GIC] キャラクターが選択されていません');
+        return false;
     }
-    _lastCacheClearForChar.set(charName, Date.now());
-    return await clearImageCacheForChar(charName);
+    console.log(`[GIC] 🔄 手動リフレッシュ開始: ${charName}`);
+
+    // ── 1) 画像キャッシュ全クリア ──
+    const n = await clearImageCacheForChar(charName);
+    console.log(`[GIC] 🧹 ${n} 件のキャッシュをクリア`);
+
+    // ── 2) サムネ関連のメモリ状態もクリア ──
+    try {
+        _failedThumbs.clear();
+        _staticFrameCache.clear();
+        _animatedMediaCache.clear();
+    } catch (e) { /* ignore */ }
+
+    // ── 3) ギャラリーを閉じて再オープン ──
+    const savedState = captureGalleryUiState();
+    closeGalleryProgrammatically();
+    await wait(400);
+
+    if (typeof window.__gicMarkPendingReopen === 'function') {
+        window.__gicMarkPendingReopen();
+    }
+
+    openGalleryFromGic();
+
+    const openStart = Date.now();
+    while (!isGalleryOpen() && Date.now() - openStart < 3000) {
+        await wait(100);
+    }
+
+    if (typeof window.__gicMarkUserOpened === 'function') {
+        window.__gicMarkUserOpened();
+    }
+    if (typeof window.__gicClearPendingReopen === 'function') {
+        window.__gicClearPendingReopen();
+    }
+
+    await wait(900);
+    await restoreGalleryUiState(savedState);
+
+    // ── 4) ページャ・レイアウト再計算 ──
+    _paginationSnapshot = { count: -1, since: 0, stable: false };
+    _lastPagerSignature = '';
+    _galleryTotalPagesCache = 0;
+    applyPageNumbers();
+    applyGalleryLayout();
+
+    // ── 5) バックグラウンド先読み ──
+    preloadGalleryImagesInBackground().catch(() => {});
+
+    console.log(`[GIC] ✅ 手動リフレッシュ完了: ${charName}`);
+    return true;
 }
 
 async function getImgFromDB(key) {
@@ -5828,6 +5854,75 @@ function createBulkDeleteButton() {
     return btn;
 }
 
+// ============================================================
+// ★ ギャラリーヘッダー用「🔄 更新」ボタン
+//   クリックで manualRefreshGallery() を実行する。
+//   ボタンは #gic-header-right-group 内に配置される。
+// ============================================================
+function createRefreshButton() {
+    let btn = document.getElementById('gic-refresh-gallery-button');
+    if (btn) return btn;
+
+    btn = document.createElement('button');
+    btn.id = 'gic-refresh-gallery-button';
+    btn.type = 'button';
+    btn.className = 'gic-refresh-gallery-button menu_button';
+    btn.textContent = '🔄 更新';
+    btn.title = 'ギャラリーを手動で更新（キャッシュをクリアして再読込）';
+
+    btn.style.setProperty('min-width', '90px', 'important');
+    btn.style.setProperty('height', '28px', 'important');
+    btn.style.setProperty('padding', '0 8px', 'important');
+    btn.style.setProperty('margin', '0', 'important');
+    btn.style.setProperty('flex', '0 0 auto', 'important');
+    btn.style.setProperty('display', 'inline-flex', 'important');
+    btn.style.setProperty('align-items', 'center', 'important');
+    btn.style.setProperty('justify-content', 'center', 'important');
+    btn.style.setProperty('font-size', '12px', 'important');
+    btn.style.setProperty('font-weight', 'bold', 'important');
+    btn.style.setProperty('color', '#ffffff', 'important');
+    btn.style.setProperty('background-color', '#2c5282', 'important');
+    btn.style.setProperty('border', '1px solid #63b3ed', 'important');
+    btn.style.setProperty('border-radius', '4px', 'important');
+    btn.style.setProperty('cursor', 'pointer', 'important');
+    btn.style.setProperty('white-space', 'nowrap', 'important');
+    btn.style.setProperty('box-sizing', 'border-box', 'important');
+
+    btn.addEventListener('mouseenter', () => {
+        if (btn.disabled) return;
+        btn.style.setProperty('background-color', '#4299e1', 'important');
+    });
+    btn.addEventListener('mouseleave', () => {
+        if (btn.disabled) return;
+        btn.style.setProperty('background-color', '#2c5282', 'important');
+    });
+
+    btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        if (btn.disabled) return;
+
+        btn.disabled = true;
+        btn.textContent = '更新中…';
+        btn.style.setProperty('opacity', '0.6', 'important');
+        btn.style.setProperty('cursor', 'wait', 'important');
+
+        try {
+            await manualRefreshGallery();
+        } catch (err) {
+            console.warn('[GIC] 手動リフレッシュエラー:', err);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '🔄 更新';
+            btn.style.setProperty('opacity', '1', 'important');
+            btn.style.setProperty('cursor', 'pointer', 'important');
+        }
+    });
+
+    return btn;
+}
+
 function ensureFloatingBulkButton() {
     let btn = document.getElementById('gic-floating-bulk-exit');
     if (btn) return btn;
@@ -6400,12 +6495,22 @@ function restructureGalleryHeader() {
     rightGroup.style.setProperty('margin-right', '50px', 'important');
     rightGroup.style.setProperty('box-sizing', 'border-box', 'important');
 
-    // 要素を右寄せグループへ移動（順序: flexContainer → bulkBtn → trashBtn）
-    [flexContainer, bulkBtn, trashBtn].forEach(el => {
+    // ★ 更新ボタンを用意
+    const refreshBtn = createRefreshButton();
+
+    // 要素を右寄せグループへ移動（順序: flexContainer → refreshBtn → bulkBtn → trashBtn）
+    [flexContainer, refreshBtn, bulkBtn, trashBtn].forEach(el => {
         if (el && el.parentNode !== rightGroup) {
             rightGroup.appendChild(el);
         }
     });
+
+    // ★ 更新ボタンを bulkBtn の左隣に強制配置
+    if (refreshBtn && bulkBtn) {
+        if (refreshBtn.nextElementSibling !== bulkBtn) {
+            rightGroup.insertBefore(refreshBtn, bulkBtn);
+        }
+    }
 
     // ★ 🗑ボタンを一括選択ボタンの直後に強制配置
     //    STが再生成・別の場所へ挿入した場合でも、必ず bulkBtn の右隣にする
@@ -6452,6 +6557,15 @@ function restructureGalleryHeader() {
         bulkBtn.style.setProperty('vertical-align', 'middle', 'important');
     }
 
+    // 更新ボタンのスタイル
+    if (refreshBtn) {
+        refreshBtn.style.setProperty('position', 'relative', 'important');
+        refreshBtn.style.setProperty('z-index', '200', 'important');
+        refreshBtn.style.setProperty('pointer-events', 'auto', 'important');
+        refreshBtn.style.setProperty('margin', '0', 'important');
+        refreshBtn.style.setProperty('flex', '0 0 auto', 'important');
+    }
+    
     // trashBtn のスタイル
     if (trashBtn) {
         trashBtn.style.setProperty('position', 'relative', 'important');
@@ -7633,27 +7747,8 @@ window.GicDumpGallery = function () {
 
 function exposeGicApi() {
     window.GicApi = {
-        // ★ 手動リフレッシュ: キャッシュを強制クリアしてギャラリーを再読込
-        forceRefreshGallery: async () => {
-            const charName = getCurrentCharacterName();
-            if (!charName) {
-                console.warn('[GIC] キャラクターが選択されていません');
-                return false;
-            }
-            console.log(`[GIC] 🔄 手動リフレッシュ: ${charName}`);
-            await clearImageCacheForCharThrottled(charName, true);
-            _lastCacheClearForChar.delete(charName);
-            // ギャラリーが開いていれば再オープン
-            if (isGalleryOpen()) {
-                const savedState = captureGalleryUiState();
-                closeGalleryProgrammatically();
-                await wait(400);
-                openGalleryFromGic();
-                await wait(900);
-                await restoreGalleryUiState(savedState);
-            }
-            return true;
-        },
+        // ★ 手動リフレッシュ（ヘッダーの「🔄 更新」ボタンと同じ処理）
+        forceRefreshGallery: () => manualRefreshGallery(),
         
         openGallery: () => openGalleryFromGic(),
         closeGallery: () => closeGalleryProgrammatically(),
