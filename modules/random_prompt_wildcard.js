@@ -1,5 +1,6 @@
 // random_prompt_wildcard.js
 // キャラクター毎のランダムプロンプトワイルドカード管理
+// ★ 追加: キャラ推奨LoRAボタン + モーダル
 //
 // 使用例:
 //   wildcard 設定画面に以下を入力:
@@ -11,12 +12,9 @@
 //
 // ★ 同一生成内では同じ wildcard は同じ値になる（変数としての一貫性）
 // ★ データ保存先: character.data.extensions.random_prompt_wildcard
-//   {
-//     rawText: "color1? = black,brown,...",
-//     wildcards: { "color1?": ["black", "brown", ...] }
-//   }
+// ★ キャラ推奨LoRAの保存先: character.data.extensions.character_recommended_lora
+//   { recommendedLoras: [{ name, downloadUrl, triggerWords, description }] }
 // ★ JSON / PNG エクスポートに含まれる（CharStore 経由）
-// ★ wildcard はキャラクター毎に個別管理される
 
 import { getContext } from '../../../../extensions.js';
 
@@ -32,10 +30,20 @@ const HELP_CLOSE_BTN_ID = 'rpw-help-close-button';
 const STYLE_ID = 'rpw-style';
 const TARGET_HEADER_ID = 'WIEntryHeaderTitlesPC';
 
+// ★ 追加: キャラ推奨LoRA関連の定数
+const LORA_NAMESPACE = 'character_recommended_lora';
+const LORA_BUTTON_ID = 'crl-open-button';
+const LORA_MODAL_ID = 'crl-modal';
+const LORA_CLOSE_BTN_ID = 'crl-close-button';
+const LORA_LIST_ID = 'crl-lora-list';
+const LORA_ADD_BTN_ID = 'crl-add-button';
+const BUTTON_CONTAINER_ID = 'rpw-button-container';
+
 // ============================================================
 // 状態
 // ============================================================
 let _currentCharName = null;
+let _currentLoraCharName = null;
 
 // ============================================================
 // ユーティリティ
@@ -59,11 +67,6 @@ function getCurrentCharName() {
 
 // ============================================================
 // パーサー: テキスト → wildcards オブジェクト
-//   対応構文:
-//     name? = value1,value2,value3
-//     name? = "value with, comma", another
-//     # コメント行
-//     空行
 // ============================================================
 function parseWildcardText(text) {
     const result = {};
@@ -121,8 +124,6 @@ function splitValues(str) {
 
 // ============================================================
 // プロンプトへの適用
-//   - 長いキーから先に処理（部分一致の事故防止）
-//   - 同一生成内では同じキーは同じ値（変数としての一貫性）
 // ============================================================
 function applyWildcards(prompt, wildcards) {
     if (!prompt || typeof prompt !== 'string') return prompt;
@@ -134,7 +135,6 @@ function applyWildcards(prompt, wildcards) {
 
     if (keys.length === 0) return prompt;
 
-    // ★ 同一生成内で同じキーは同じ値になるよう、先に選択を確定
     const selections = {};
     for (const key of keys) {
         const values = wildcards[key];
@@ -145,14 +145,13 @@ function applyWildcards(prompt, wildcards) {
     for (const key of keys) {
         const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const re = new RegExp(escapedKey, 'g');
-        // 関数リプレーサで $ 特殊文字の誤解釈を回避
         result = result.replace(re, () => selections[key]);
     }
     return result;
 }
 
 // ============================================================
-// 永続化
+// Wildcard 永続化
 // ============================================================
 function loadWildcardsForChar(charName) {
     if (!charName) return { rawText: '', wildcards: {} };
@@ -167,7 +166,6 @@ function loadWildcardsForChar(charName) {
             let rawText = typeof ext.rawText === 'string' ? ext.rawText : '';
             const wildcards = (ext.wildcards && typeof ext.wildcards === 'object') ? ext.wildcards : {};
 
-            // 旧形式（rawText 未保存）からの復元
             if (!rawText && Object.keys(wildcards).length > 0) {
                 rawText = Object.entries(wildcards)
                     .map(([k, v]) => `${k} = ${Array.isArray(v) ? v.join(',') : v}`)
@@ -208,7 +206,7 @@ function saveWildcardsForChar(charName, rawText, wildcards) {
 }
 
 // ============================================================
-// 公開 API（他モジュールから呼ばれる）
+// 公開 API（wildcard）
 // ============================================================
 function applyToPrompt(prompt) {
     if (!prompt || typeof prompt !== 'string') return prompt;
@@ -232,6 +230,70 @@ function getCurrentRawText() {
 }
 
 // ============================================================
+// ★ 追加: キャラ推奨LoRA 永続化
+// ============================================================
+function normalizeLoraEntry(raw) {
+    if (!raw || typeof raw !== 'object') {
+        return { name: '', downloadUrl: '', triggerWords: '', description: '' };
+    }
+    return {
+        name: typeof raw.name === 'string' ? raw.name : '',
+        downloadUrl: typeof raw.downloadUrl === 'string' ? raw.downloadUrl : '',
+        triggerWords: typeof raw.triggerWords === 'string' ? raw.triggerWords : '',
+        description: typeof raw.description === 'string' ? raw.description : '',
+    };
+}
+
+function loadLorasForChar(charName) {
+    if (!charName) return [];
+    try {
+        const ctx = getSTContext();
+        const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
+        if (char?.name !== charName) return [];
+
+        const ext = char?.data?.extensions?.[LORA_NAMESPACE];
+        if (ext && typeof ext === 'object' && Array.isArray(ext.recommendedLoras)) {
+            return ext.recommendedLoras
+                .filter(v => v && typeof v === 'object')
+                .map(normalizeLoraEntry);
+        }
+    } catch (e) {
+        console.warn(LOG, 'loadLorasForChar error:', e);
+    }
+    return [];
+}
+
+function saveLorasForChar(charName, loras) {
+    if (!charName) return false;
+    try {
+        const ctx = getSTContext();
+        const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
+        if (char?.name !== charName) {
+            console.warn(LOG, 'saveLorasForChar: char mismatch');
+            return false;
+        }
+
+        if (!char.data) char.data = {};
+        if (!char.data.extensions) char.data.extensions = {};
+        char.data.extensions[LORA_NAMESPACE] = {
+            recommendedLoras: (Array.isArray(loras) ? loras : []).map(normalizeLoraEntry),
+        };
+
+        if (window.CharStore?.saveCharacterExtension) {
+            window.CharStore.saveCharacterExtension(
+                LORA_NAMESPACE,
+                char.data.extensions[LORA_NAMESPACE],
+                { immediate: true }
+            );
+        }
+        return true;
+    } catch (e) {
+        console.warn(LOG, 'saveLorasForChar error:', e);
+        return false;
+    }
+}
+
+// ============================================================
 // CSS 注入
 // ============================================================
 function injectStyle() {
@@ -239,10 +301,25 @@ function injectStyle() {
     const style = document.createElement('style');
     style.id = STYLE_ID;
     style.textContent = `
+        /* ★ ボタンコンテナ（中央配置） */
+        #${BUTTON_CONTAINER_ID} {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+            margin: 6px 0;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
         /* Random_Prompt_Wildcard ボタン */
-        #${BUTTON_ID} {
-            display: block;
-            margin: 6px auto;
+        #${BUTTON_ID},
+        #${LORA_BUTTON_ID} {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex: 0 0 auto;
+            margin: 0;
             padding: 6px 16px;
             font-size: 13px;
             font-weight: bold;
@@ -253,13 +330,21 @@ function injectStyle() {
             cursor: pointer;
             white-space: nowrap;
             box-sizing: border-box;
+            min-width: max-content;
         }
         #${BUTTON_ID}:hover {
             background-color: #2d3748;
         }
+        #${LORA_BUTTON_ID} {
+            background-color: #6b46c1;
+            border-color: #9f7aea;
+        }
+        #${LORA_BUTTON_ID}:hover {
+            background-color: #553c9a;
+        }
 
         /* モーダル共通 */
-        #${MODAL_ID}, #${HELP_MODAL_ID} {
+        #${MODAL_ID}, #${HELP_MODAL_ID}, #${LORA_MODAL_ID} {
             position: fixed;
             top: 50%;
             left: 50%;
@@ -277,21 +362,19 @@ function injectStyle() {
             overflow: hidden;
             box-sizing: border-box;
         }
-        #${MODAL_ID} {
-            z-index: 25000;
-        }
-        #${HELP_MODAL_ID} {
-            z-index: 25100;
-            border-color: #64b5f6;
-        }
+        #${MODAL_ID} { z-index: 25000; }
+        #${HELP_MODAL_ID} { z-index: 25100; border-color: #64b5f6; }
+        #${LORA_MODAL_ID} { z-index: 25000; border-color: #9f7aea; }
         #${MODAL_ID}.visible,
-        #${HELP_MODAL_ID}.visible {
+        #${HELP_MODAL_ID}.visible,
+        #${LORA_MODAL_ID}.visible {
             display: flex;
         }
 
         /* ヘッダー */
         #${MODAL_ID} .rpw-header,
-        #${HELP_MODAL_ID} .rpw-header {
+        #${HELP_MODAL_ID} .rpw-header,
+        #${LORA_MODAL_ID} .rpw-header {
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -302,7 +385,8 @@ function injectStyle() {
             gap: 12px;
         }
         #${MODAL_ID} .rpw-header-left,
-        #${HELP_MODAL_ID} .rpw-header-left {
+        #${HELP_MODAL_ID} .rpw-header-left,
+        #${LORA_MODAL_ID} .rpw-header-left {
             display: flex;
             align-items: center;
             gap: 8px;
@@ -310,7 +394,8 @@ function injectStyle() {
             flex: 1 1 auto;
         }
         #${MODAL_ID} .rpw-title,
-        #${HELP_MODAL_ID} .rpw-title {
+        #${HELP_MODAL_ID} .rpw-title,
+        #${LORA_MODAL_ID} .rpw-title {
             font-size: 16px;
             font-weight: bold;
             color: #ffffff;
@@ -319,7 +404,7 @@ function injectStyle() {
             text-overflow: ellipsis;
         }
 
-        /* ヘルプボタン（横長） */
+        /* ヘルプボタン */
         #${HELP_BTN_ID} {
             flex: 0 0 auto;
             height: 28px;
@@ -345,7 +430,8 @@ function injectStyle() {
 
         /* 閉じるボタン */
         #${CLOSE_BTN_ID},
-        #${HELP_CLOSE_BTN_ID} {
+        #${HELP_CLOSE_BTN_ID},
+        #${LORA_CLOSE_BTN_ID} {
             flex: 0 0 auto;
             width: 32px;
             height: 32px;
@@ -362,11 +448,12 @@ function injectStyle() {
             justify-content: center;
         }
         #${CLOSE_BTN_ID}:hover,
-        #${HELP_CLOSE_BTN_ID}:hover {
+        #${HELP_CLOSE_BTN_ID}:hover,
+        #${LORA_CLOSE_BTN_ID}:hover {
             background-color: #c53030;
         }
 
-        /* テキストエリア */
+        /* テキストエリア（wildcard用） */
         #${TEXTAREA_ID} {
             flex: 1 1 auto;
             width: 100%;
@@ -390,9 +477,7 @@ function injectStyle() {
             color: #4a5568;
         }
 
-        /* ============================================================
-           ヘルプモーダル本文
-           ============================================================ */
+        /* ヘルプモーダル本文 */
         #${HELP_MODAL_ID} .rpw-help-body {
             flex: 1 1 auto;
             overflow-y: auto;
@@ -436,22 +521,10 @@ function injectStyle() {
             color: #d6bcfa;
             border-bottom-color: #b794f4;
         }
-        .rpw-help-section p {
-            margin: 8px 0;
-            color: #e2e8f0;
-        }
-        .rpw-help-section ul {
-            margin: 8px 0;
-            padding-left: 24px;
-            color: #e2e8f0;
-        }
-        .rpw-help-section li {
-            margin: 4px 0;
-        }
-        .rpw-help-section strong {
-            color: #ffffff;
-            font-weight: bold;
-        }
+        .rpw-help-section p { margin: 8px 0; color: #e2e8f0; }
+        .rpw-help-section ul { margin: 8px 0; padding-left: 24px; color: #e2e8f0; }
+        .rpw-help-section li { margin: 4px 0; }
+        .rpw-help-section strong { color: #ffffff; font-weight: bold; }
         .rpw-help-section code {
             background-color: #0d1117;
             color: #fbd38d;
@@ -503,12 +576,218 @@ function injectStyle() {
             font-size: 13px;
             border-radius: 3px;
         }
+
+        /* ============================================================
+           キャラ推奨LoRA モーダル
+           ============================================================ */
+        #${LORA_MODAL_ID} .crl-body {
+            flex: 1 1 auto;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        #${LORA_MODAL_ID} .crl-top-section {
+            flex: 1 1 55%;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border-bottom: 2px solid #4a5568;
+        }
+        #${LORA_MODAL_ID} .crl-top-header {
+            flex: 0 0 auto;
+            padding: 8px 16px;
+            background-color: #2d3748;
+            color: #d6bcfa;
+            font-size: 14px;
+            font-weight: bold;
+            border-bottom: 1px solid #4a5568;
+        }
+        #${LORA_MODAL_ID} .crl-list {
+            flex: 1 1 auto;
+            overflow-y: auto;
+            padding: 12px 16px;
+            background-color: #1a202c;
+        }
+        #${LORA_MODAL_ID} .crl-list::-webkit-scrollbar { width: 10px; }
+        #${LORA_MODAL_ID} .crl-list::-webkit-scrollbar-track { background: #0d1117; }
+        #${LORA_MODAL_ID} .crl-list::-webkit-scrollbar-thumb { background: #4a5568; border-radius: 5px; }
+
+        #${LORA_MODAL_ID} .crl-entry {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+            padding: 10px;
+            background-color: #2d3748;
+            border: 1px solid #4a5568;
+            border-radius: 6px;
+            align-items: stretch;
+        }
+        #${LORA_MODAL_ID} .crl-entry-fields {
+            flex: 1 1 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-width: 0;
+        }
+        #${LORA_MODAL_ID} .crl-label {
+            display: block;
+            font-size: 12px;
+            font-weight: bold;
+            color: #e2e8f0;
+            margin-bottom: 2px;
+        }
+        #${LORA_MODAL_ID} .crl-label-required {
+            color: #fbd38d;
+        }
+        #${LORA_MODAL_ID} .crl-name,
+        #${LORA_MODAL_ID} .crl-url,
+        #${LORA_MODAL_ID} .crl-trigger {
+            width: 100%;
+            padding: 6px 10px;
+            background-color: #0d1117;
+            color: #ffffff;
+            border: 1px solid #4a5568;
+            border-radius: 4px;
+            font-size: 13px;
+            box-sizing: border-box;
+            outline: none;
+        }
+        #${LORA_MODAL_ID} .crl-name:focus,
+        #${LORA_MODAL_ID} .crl-url:focus,
+        #${LORA_MODAL_ID} .crl-trigger:focus,
+        #${LORA_MODAL_ID} .crl-description:focus {
+            border-color: #9f7aea;
+            box-shadow: 0 0 0 2px rgba(159, 122, 234, 0.3);
+        }
+        #${LORA_MODAL_ID} .crl-name {
+            font-weight: bold;
+            font-size: 14px;
+            color: #fbd38d;
+        }
+        #${LORA_MODAL_ID} .crl-description {
+            width: 100%;
+            min-height: 50px;
+            padding: 6px 10px;
+            background-color: #0d1117;
+            color: #ffffff;
+            border: 1px solid #4a5568;
+            border-radius: 4px;
+            font-size: 13px;
+            box-sizing: border-box;
+            resize: vertical;
+            font-family: inherit;
+            outline: none;
+        }
+        #${LORA_MODAL_ID} .crl-delete {
+            flex: 0 0 auto;
+            width: 48px;
+            padding: 0;
+            background-color: #e53e3e;
+            color: #ffffff;
+            border: 1px solid #c53030;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            align-self: stretch;
+        }
+        #${LORA_MODAL_ID} .crl-delete:hover {
+            background-color: #c53030;
+        }
+
+        #${LORA_MODAL_ID} .crl-add-row {
+            flex: 0 0 auto;
+            padding: 8px 16px;
+            background-color: #2d3748;
+            border-top: 1px solid #4a5568;
+            text-align: center;
+        }
+        #${LORA_ADD_BTN_ID} {
+            padding: 8px 24px;
+            background-color: #38a169;
+            color: #ffffff;
+            border: 1px solid #2f855a;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: bold;
+        }
+        #${LORA_ADD_BTN_ID}:hover {
+            background-color: #2f855a;
+        }
+
+        #${LORA_MODAL_ID} .crl-help-section {
+            flex: 1 1 45%;
+            overflow-y: auto;
+            padding: 14px 20px;
+            background-color: #1a202c;
+            color: #e2e8f0;
+            font-size: 13px;
+            line-height: 1.7;
+        }
+        #${LORA_MODAL_ID} .crl-help-section::-webkit-scrollbar { width: 10px; }
+        #${LORA_MODAL_ID} .crl-help-section::-webkit-scrollbar-track { background: #0d1117; }
+        #${LORA_MODAL_ID} .crl-help-section::-webkit-scrollbar-thumb { background: #4a5568; border-radius: 5px; }
+
+        .crl-help-block {
+            margin-bottom: 14px;
+            padding: 10px 14px;
+            background-color: #2d3748;
+            border-left: 4px solid #9f7aea;
+            border-radius: 4px;
+        }
+        .crl-help-block h4 {
+            margin: 0 0 8px 0;
+            font-size: 14px;
+            color: #d6bcfa;
+            font-weight: bold;
+            border-bottom: 1px solid #4a5568;
+            padding-bottom: 4px;
+        }
+        .crl-help-block p { margin: 6px 0; }
+        .crl-help-block ul { margin: 6px 0; padding-left: 20px; }
+        .crl-help-block li { margin: 3px 0; }
+        .crl-help-block strong { color: #ffffff; }
+        .crl-help-block code {
+            background-color: #0d1117;
+            color: #fbd38d;
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 12px;
+            border: 1px solid #4a5568;
+        }
+        .crl-code-block {
+            margin: 6px 0;
+            padding: 8px 12px;
+            background-color: #0d1117;
+            color: #aed581;
+            border: 1px solid #2d3748;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .crl-warn {
+            margin: 8px 0 0 0;
+            padding: 6px 10px;
+            background-color: #1a202c;
+            border-left: 3px solid #fbd38d;
+            color: #fbd38d;
+            font-size: 12px;
+            border-radius: 3px;
+        }
     `;
     document.head.appendChild(style);
 }
 
 // ============================================================
-// ヘルプ本文 HTML
+// ヘルプ本文 HTML（wildcard）
 // ============================================================
 function getHelpContentHTML() {
     return `
@@ -546,32 +825,12 @@ function getHelpContentHTML() {
                 <div class="rpw-example-label">生成結果の例</div>
                 <pre class="rpw-code-block">1girl,black hair, miniskirt,
 1girl,brown hair, miniskirt,
-1girl,pink hair, miniskirt,
-（他にも orange / yellow など）</pre>
-            </div>
-        </section>
-
-        <section class="rpw-help-section">
-            <h3>例 2: 複数の変数を組み合わせる</h3>
-            <div class="rpw-example-def">
-                <div class="rpw-example-label">定義</div>
-                <pre class="rpw-code-block">hair_style? = straight,curly,wavy
-hair_color? = black,brown,blonde</pre>
-            </div>
-            <div class="rpw-example-usage">
-                <div class="rpw-example-label">プロンプト</div>
-                <pre class="rpw-code-block">1girl,hair_color? hair,hair_style?</pre>
-            </div>
-            <div class="rpw-example-result">
-                <div class="rpw-example-label">生成例</div>
-                <pre class="rpw-code-block">1girl,brown hair,wavy
-1girl,blonde hair,straight
-1girl,black hair,curly</pre>
+1girl,pink hair, miniskirt,</pre>
             </div>
         </section>
 
         <section class="rpw-help-section rpw-help-section-highlight">
-            <h3>例 3: 同じ変数を複数箇所で使う（重要）</h3>
+            <h3>例 2: 同じ変数を複数箇所で使う（重要）</h3>
             <p>1回の画像生成で<strong>同じ変数は同じ値</strong>になります。</p>
             <div class="rpw-example-usage">
                 <div class="rpw-example-label">プロンプト</div>
@@ -588,25 +847,12 @@ brown hair, brown eyes, 1girl</pre>
         </section>
 
         <section class="rpw-help-section">
-            <h3>例 4: スペースや日本語を含む値</h3>
-            <div class="rpw-example-def">
-                <div class="rpw-example-label">定義</div>
-                <pre class="rpw-code-block">pose? = sitting on chair,standing,lying down
-expression? = 笑顔,無表情,泣き顔</pre>
-            </div>
-        </section>
-
-        <section class="rpw-help-section">
-            <h3>例 5: カンマを含む値を使いたい場合</h3>
+            <h3>例 3: カンマを含む値を使いたい場合</h3>
             <p>ダブルクォートまたはシングルクォートで囲ってください。</p>
             <div class="rpw-example-def">
                 <div class="rpw-example-label">定義</div>
                 <pre class="rpw-code-block">style? = "soft, pastel", "sharp, realistic"</pre>
             </div>
-            <p>
-                <code>style?</code> を書くと、<code>"soft, pastel"</code> または
-                <code>"sharp, realistic"</code> のいずれか（カンマ込みの値）が選ばれます。
-            </p>
         </section>
 
         <section class="rpw-help-section">
@@ -618,14 +864,103 @@ expression? = 笑顔,無表情,泣き顔</pre>
                 <li>変数名が同じ場合は、後から書いた定義が優先されます。</li>
                 <li>ロアブックに変数名が含まれていない場合は何も変化しません。</li>
                 <li>入力内容は自動的に保存されます（キャラクター毎に独立管理）。</li>
-                <li>JSON / PNG エクスポートにもこの設定が含まれます。</li>
             </ul>
         </section>
     `;
 }
 
 // ============================================================
-// メインモーダル生成
+// キャラ推奨LoRA ヘルプ本文 HTML
+// ============================================================
+function getLoraHelpHTML() {
+    return `
+        <div class="crl-help-block">
+            <h4>📖 LoRAとは</h4>
+            <p>
+                LoRA（Low-Rank Adaptation）は、ベースモデルの画風やキャラクターを
+                <strong>追加学習</strong>するための軽量な追加ファイルです。
+                ベースモデルを変えずに、特定のスタイル・キャラクター・構図を再現できます。
+            </p>
+        </div>
+
+        <div class="crl-help-block">
+            <h4>📦 LoRAファイルの配置</h4>
+            <p>ダウンロードした <code>.safetensors</code> ファイルを以下に配置してください。</p>
+            <ul>
+                <li><strong>ComfyUI ローカル:</strong> <code>ComfyUI/models/loras/</code></li>
+                <li><strong>Colab + Google Drive:</strong> <code>MyDrive/ComfyUI/models/loras/</code></li>
+                <li><strong>SillyTavern SD拡張:</strong> <code>data/default-user/extensions/sd/models/lora/</code></li>
+            </ul>
+            <p class="crl-warn">
+                ⚠️ ファイル名は<strong>完全一致</strong>が必要です（大文字小文字・拡張子まで）。
+            </p>
+        </div>
+
+        <div class="crl-help-block">
+            <h4>✍️ プロンプトへの記述</h4>
+            <p>Img_prompt に以下のタグを書くと、LoRAが適用されます。</p>
+            <pre class="crl-code-block">&lt;lora:ファイル名:強度&gt;</pre>
+            <p>例:</p>
+            <pre class="crl-code-block">&lt;lora:myCharacterLora.safetensors:0.8&gt; 1girl, school uniform</pre>
+            <p>
+                <strong>強度</strong>は <code>0.0</code> 〜 <code>1.0</code> の範囲で指定します。
+                <code>0.6</code> 〜 <code>0.8</code> が一般的です。
+            </p>
+        </div>
+
+        <div class="crl-help-block">
+            <h4>🔑 トリガーワード</h4>
+            <p>
+                LoRAによっては、効果を発動させるために<strong>特定のキーワード</strong>
+                （トリガーワード）をプロンプトに含める必要があります。
+                Civitai のLoRAページの説明欄に記載されています。
+            </p>
+            <pre class="crl-code-block">&lt;lora:myLora:0.8&gt;, myStyle, 1girl</pre>
+        </div>
+
+        <div class="crl-help-block">
+            <h4>💡 強度の目安</h4>
+            <ul>
+                <li><strong>0.3〜0.5:</strong> 控えめ。ベースモデルの画風を残す</li>
+                <li><strong>0.6〜0.8:</strong> 標準。バランスが良い</li>
+                <li><strong>0.9〜1.0:</strong> 強め。LoRAの特徴を強く出す</li>
+                <li><strong>1.0超:</strong> 過飽和・アーティファクトの原因になる</li>
+            </ul>
+        </div>
+
+        <div class="crl-help-block">
+            <h4>⚠️ SDXL / SD1.5 の互換性</h4>
+            <p>
+                LoRAは<strong>ベースモデルと同じ系統</strong>でなければ動作しません。
+                NovaAnimeXL は <strong>SDXL</strong> ベースなので、
+                <strong>SDXL用LoRA</strong>（Civitaiで「SDXL 1.0」「Pony」「Illustrious」等）を使ってください。
+            </p>
+            <p class="crl-warn">
+                ⚠️ SD1.5用LoRAはSDXLモデルでは効果がほとんど出ません。
+            </p>
+        </div>
+
+        <div class="crl-help-block">
+            <h4>🔄 複数LoRAの併用</h4>
+            <p>1つのプロンプトに複数のLoRAタグを書けます。</p>
+            <pre class="crl-code-block">&lt;lora:styleA:0.7&gt; &lt;lora:styleB:0.5&gt; 1girl, ...</pre>
+            <p>合計強度が <code>1.5</code> を超えると画質劣化の原因になるため注意してください。</p>
+        </div>
+
+        <div class="crl-help-block">
+            <h4>🧪 動作確認のポイント</h4>
+            <ul>
+                <li>ComfyUIのサーバーログに <code>detected lora tag: (...)</code> が出れば認識成功</li>
+                <li><code>patches attached: N</code> の N が 0 より大きければ適用成功</li>
+                <li>LoRAを外して同じプロンプトで生成し、見た目を比較する</li>
+                <li>強度を <code>1.5</code> まで上げて変化が強調されるか確認する</li>
+            </ul>
+        </div>
+    `;
+}
+
+// ============================================================
+// メインモーダル生成（wildcard）
 // ============================================================
 function ensureModal() {
     let modal = document.getElementById(MODAL_ID);
@@ -671,7 +1006,7 @@ function ensureModal() {
     textarea.placeholder = [
         '# 1行1定義: name? = value1,value2,value3',
         '# 例: color1? = black,brown,orange,yellow,pink',
-        '# 詳しくは右上の「?」ボタンを押してください',
+        '# 詳しくは右上の「ヘルプ」ボタンを押してください',
     ].join('\n');
     textarea.addEventListener('input', () => {
         const charName = _currentCharName;
@@ -691,7 +1026,7 @@ function ensureModal() {
 }
 
 // ============================================================
-// ヘルプモーダル生成
+// ヘルプモーダル生成（wildcard）
 // ============================================================
 function ensureHelpModal() {
     let modal = document.getElementById(HELP_MODAL_ID);
@@ -737,10 +1072,275 @@ function ensureHelpModal() {
 }
 
 // ============================================================
+// ★ 追加: キャラ推奨LoRA モーダル
+// ============================================================
+function ensureLoraModal() {
+    let modal = document.getElementById(LORA_MODAL_ID);
+    if (modal) return modal;
+
+    modal = document.createElement('div');
+    modal.id = LORA_MODAL_ID;
+
+    const header = document.createElement('div');
+    header.className = 'rpw-header';
+
+    const headerLeft = document.createElement('div');
+    headerLeft.className = 'rpw-header-left';
+
+    const title = document.createElement('div');
+    title.className = 'rpw-title';
+    title.textContent = 'キャラ推奨 LoRA 設定';
+    headerLeft.appendChild(title);
+
+    header.appendChild(headerLeft);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.id = LORA_CLOSE_BTN_ID;
+    closeBtn.type = 'button';
+    closeBtn.textContent = '✕';
+    closeBtn.title = '閉じる (Escape)';
+    closeBtn.addEventListener('click', () => closeLoraModal());
+    header.appendChild(closeBtn);
+
+    modal.appendChild(header);
+
+    const body = document.createElement('div');
+    body.className = 'crl-body';
+
+    // ── 上部: 推奨LoRA入力エリア ──
+    const topSection = document.createElement('div');
+    topSection.className = 'crl-top-section';
+
+    const topHeader = document.createElement('div');
+    topHeader.className = 'crl-top-header';
+    topHeader.textContent = '推奨 LoRA 入力エリア';
+    topSection.appendChild(topHeader);
+
+    const list = document.createElement('div');
+    list.className = 'crl-list';
+    list.id = LORA_LIST_ID;
+    topSection.appendChild(list);
+
+    const addRow = document.createElement('div');
+    addRow.className = 'crl-add-row';
+
+    const addBtn = document.createElement('button');
+    addBtn.id = LORA_ADD_BTN_ID;
+    addBtn.type = 'button';
+    addBtn.textContent = '＋ LoRAを追加';
+    addBtn.addEventListener('click', () => addLoraEntry());
+    addRow.appendChild(addBtn);
+
+    topSection.appendChild(addRow);
+    body.appendChild(topSection);
+
+    // ── 下部: LoRA使用法ヘルプ ──
+    const helpSection = document.createElement('div');
+    helpSection.className = 'crl-help-section';
+    helpSection.innerHTML = getLoraHelpHTML();
+    body.appendChild(helpSection);
+
+    modal.appendChild(body);
+
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeLoraModal();
+    });
+
+    document.body.appendChild(modal);
+    return modal;
+}
+
+// ============================================================
+// ★ 追加: LoRAエントリ行の生成
+// ============================================================
+function createLoraEntryRow(entry, index) {
+    const row = document.createElement('div');
+    row.className = 'crl-entry';
+    row.dataset.index = String(index);
+
+    const fields = document.createElement('div');
+    fields.className = 'crl-entry-fields';
+
+    // ① Lora名
+    const nameLabel = document.createElement('label');
+    nameLabel.className = 'crl-label crl-label-required';
+    nameLabel.textContent = '① LoRA名（ファイル名）';
+    fields.appendChild(nameLabel);
+
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'crl-name';
+    nameInput.placeholder = '例: myCharacterLora.safetensors';
+    nameInput.value = entry.name || '';
+    nameInput.addEventListener('input', () => {
+        entry.name = nameInput.value;
+        saveCurrentLoras();
+    });
+    fields.appendChild(nameInput);
+
+    // ② ダウンロードURL
+    const urlLabel = document.createElement('label');
+    urlLabel.className = 'crl-label';
+    urlLabel.textContent = '② ダウンロードURL';
+    fields.appendChild(urlLabel);
+
+    const urlInput = document.createElement('input');
+    urlInput.type = 'text';
+    urlInput.className = 'crl-url';
+    urlInput.placeholder = '例: https://civitai.com/models/xxxxx';
+    urlInput.value = entry.downloadUrl || '';
+    urlInput.addEventListener('input', () => {
+        entry.downloadUrl = urlInput.value;
+        saveCurrentLoras();
+    });
+    fields.appendChild(urlInput);
+
+    // ③ トリガーワード
+    const triggerLabel = document.createElement('label');
+    triggerLabel.className = 'crl-label';
+    triggerLabel.textContent = '③ トリガーワード';
+    fields.appendChild(triggerLabel);
+
+    const triggerInput = document.createElement('input');
+    triggerInput.type = 'text';
+    triggerInput.className = 'crl-trigger';
+    triggerInput.placeholder = '例: myStyle, characterName';
+    triggerInput.value = entry.triggerWords || '';
+    triggerInput.addEventListener('input', () => {
+        entry.triggerWords = triggerInput.value;
+        saveCurrentLoras();
+    });
+    fields.appendChild(triggerInput);
+
+    // ④ 説明
+    const descLabel = document.createElement('label');
+    descLabel.className = 'crl-label';
+    descLabel.textContent = '④ 説明';
+    fields.appendChild(descLabel);
+
+    const descInput = document.createElement('textarea');
+    descInput.className = 'crl-description';
+    descInput.placeholder = 'このLoRAの説明、推奨強度、注意点など';
+    descInput.value = entry.description || '';
+    descInput.addEventListener('input', () => {
+        entry.description = descInput.value;
+        saveCurrentLoras();
+    });
+    fields.appendChild(descInput);
+
+    row.appendChild(fields);
+
+    // 削除ボタン（右端）
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'crl-delete';
+    delBtn.textContent = '✕';
+    delBtn.title = 'このLoRAを削除';
+    delBtn.addEventListener('click', () => {
+        if (!confirm('この LoRA を削除しますか？\nこの操作は取り消せません。')) return;
+        const charName = _currentLoraCharName;
+        if (!charName) return;
+
+        const loras = loadLorasForChar(charName);
+        loras.splice(index, 1);
+        saveLorasForChar(charName, loras);
+        renderLoraEntries();
+        console.log(`${LOG} LoRA ${index} を削除`);
+    });
+    row.appendChild(delBtn);
+
+    return row;
+}
+
+function renderLoraEntries() {
+    const modal = document.getElementById(LORA_MODAL_ID);
+    if (!modal) return;
+    const list = modal.querySelector('#' + LORA_LIST_ID);
+    if (!list) return;
+
+    list.innerHTML = '';
+
+    const charName = _currentLoraCharName;
+    if (!charName) {
+        const empty = document.createElement('div');
+        empty.style.cssText = 'color: #a0aec0; text-align: center; padding: 20px;';
+        empty.textContent = 'キャラクターが選択されていません';
+        list.appendChild(empty);
+        return;
+    }
+
+    const loras = loadLorasForChar(charName);
+    if (loras.length === 0) {
+        const empty = document.createElement('div');
+        empty.style.cssText = 'color: #a0aec0; text-align: center; padding: 20px; font-size: 13px;';
+        empty.textContent = 'まだ LoRA が登録されていません。「＋ LoRAを追加」を押してください。';
+        list.appendChild(empty);
+        return;
+    }
+
+    loras.forEach((entry, idx) => {
+        const row = createLoraEntryRow(entry, idx);
+        list.appendChild(row);
+    });
+}
+
+function addLoraEntry() {
+    const charName = _currentLoraCharName;
+    if (!charName) return;
+
+    const loras = loadLorasForChar(charName);
+    loras.push({ name: '', downloadUrl: '', triggerWords: '', description: '' });
+    saveLorasForChar(charName, loras);
+    renderLoraEntries();
+
+    // 追加した行までスクロール
+    const modal = document.getElementById(LORA_MODAL_ID);
+    if (modal) {
+        const list = modal.querySelector('#' + LORA_LIST_ID);
+        if (list) {
+            setTimeout(() => {
+                list.scrollTop = list.scrollHeight;
+            }, 30);
+        }
+    }
+}
+
+function saveCurrentLoras() {
+    const charName = _currentLoraCharName;
+    if (!charName) return;
+
+    const modal = document.getElementById(LORA_MODAL_ID);
+    if (!modal) return;
+    const list = modal.querySelector('#' + LORA_LIST_ID);
+    if (!list) return;
+
+    const rows = list.querySelectorAll('.crl-entry');
+    const loras = [];
+    rows.forEach(row => {
+        const name = row.querySelector('.crl-name')?.value || '';
+        const downloadUrl = row.querySelector('.crl-url')?.value || '';
+        const triggerWords = row.querySelector('.crl-trigger')?.value || '';
+        const description = row.querySelector('.crl-description')?.value || '';
+        loras.push({ name, downloadUrl, triggerWords, description });
+    });
+
+    saveLorasForChar(charName, loras);
+}
+
+// ============================================================
 // Escape キー: 開いているモーダルを上から順に閉じる
 // ============================================================
 document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
+
+    const loraModal = document.getElementById(LORA_MODAL_ID);
+    if (loraModal && loraModal.classList.contains('visible')) {
+        e.preventDefault();
+        e.stopPropagation();
+        closeLoraModal();
+        return;
+    }
+
     const helpModal = document.getElementById(HELP_MODAL_ID);
     if (helpModal && helpModal.classList.contains('visible')) {
         e.preventDefault();
@@ -748,6 +1348,7 @@ document.addEventListener('keydown', (e) => {
         closeHelpModal();
         return;
     }
+
     const modal = document.getElementById(MODAL_ID);
     if (modal && modal.classList.contains('visible')) {
         e.preventDefault();
@@ -757,7 +1358,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ============================================================
-// 開閉
+// wildcard モーダル 開閉
 // ============================================================
 function openModal() {
     const charName = getCurrentCharName();
@@ -785,7 +1386,6 @@ function openModal() {
 }
 
 function closeModal() {
-    // ヘルプモーダルが開いていれば一緒に閉じる
     closeHelpModal();
 
     const modal = document.getElementById(MODAL_ID);
@@ -805,7 +1405,6 @@ function closeModal() {
 function openHelpModal() {
     const helpModal = ensureHelpModal();
     helpModal.classList.add('visible');
-    // 開いた直後は本文の先頭へスクロール
     const body = helpModal.querySelector('.rpw-help-body');
     if (body) body.scrollTop = 0;
 }
@@ -816,10 +1415,45 @@ function closeHelpModal() {
 }
 
 // ============================================================
-// ボタン注入・監視
+// ★ 追加: キャラ推奨LoRA モーダル 開閉
 // ============================================================
-function createButton() {
-    const btn = document.createElement('button');
+function openLoraModal() {
+    const charName = getCurrentCharName();
+    if (!charName) {
+        console.warn(LOG, 'キャラクターが選択されていません');
+        if (typeof window.toastr !== 'undefined' && typeof window.toastr.warning === 'function') {
+            window.toastr.warning('キャラクターを選択してください');
+        } else {
+            alert('キャラクターを選択してください');
+        }
+        return;
+    }
+
+    _currentLoraCharName = charName;
+    ensureLoraModal();
+    renderLoraEntries();
+
+    const modal = document.getElementById(LORA_MODAL_ID);
+    if (modal) modal.classList.add('visible');
+}
+
+function closeLoraModal() {
+    const modal = document.getElementById(LORA_MODAL_ID);
+    if (!modal) return;
+
+    saveCurrentLoras();
+    modal.classList.remove('visible');
+    _currentLoraCharName = null;
+}
+
+// ============================================================
+// ボタン生成・注入
+// ============================================================
+function createWildcardButton() {
+    let btn = document.getElementById(BUTTON_ID);
+    if (btn) return btn;
+
+    btn = document.createElement('button');
     btn.id = BUTTON_ID;
     btn.type = 'button';
     btn.textContent = 'Random_Prompt_Wildcard';
@@ -832,24 +1466,56 @@ function createButton() {
     return btn;
 }
 
+function createLoraButton() {
+    let btn = document.getElementById(LORA_BUTTON_ID);
+    if (btn) return btn;
+
+    btn = document.createElement('button');
+    btn.id = LORA_BUTTON_ID;
+    btn.type = 'button';
+    btn.textContent = 'キャラ推奨LoRA';
+    btn.title = 'キャラクター推奨のLoRA情報を登録する';
+    btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openLoraModal();
+    });
+    return btn;
+}
+
 function syncButton() {
     const target = document.getElementById(TARGET_HEADER_ID);
-    let btn = document.getElementById(BUTTON_ID);
+    let container = document.getElementById(BUTTON_CONTAINER_ID);
 
     if (!target) {
-        if (btn) btn.remove();
+        if (container) container.remove();
         return;
     }
 
-    // 正しい位置に既にある場合は何もしない
-    if (btn && btn.nextElementSibling === target && btn.parentElement === target.parentElement) {
-        return;
+    // 既に正しい位置にある場合は中身だけ確認
+    if (container && container.nextElementSibling === target && container.parentElement === target.parentElement) {
+        const wildcardBtn = container.querySelector('#' + BUTTON_ID);
+        const loraBtn = container.querySelector('#' + LORA_BUTTON_ID);
+        if (wildcardBtn && loraBtn) return;
     }
 
-    if (btn) btn.remove();
-    btn = createButton();
-    target.parentElement.insertBefore(btn, target);
-    console.log(LOG, 'ボタンを #' + TARGET_HEADER_ID + ' の真上に注入しました');
+    // 既存の単独ボタンを削除（旧バージョンからの移行）
+    const oldBtn = document.getElementById(BUTTON_ID);
+    if (oldBtn && !container?.contains(oldBtn)) oldBtn.remove();
+    const oldLoraBtn = document.getElementById(LORA_BUTTON_ID);
+    if (oldLoraBtn && !container?.contains(oldLoraBtn)) oldLoraBtn.remove();
+
+    if (container) container.remove();
+
+    // コンテナ生成
+    container = document.createElement('div');
+    container.id = BUTTON_CONTAINER_ID;
+
+    container.appendChild(createWildcardButton());
+    container.appendChild(createLoraButton());
+
+    target.parentElement.insertBefore(container, target);
+    console.log(LOG, 'ボタンコンテナを #' + TARGET_HEADER_ID + ' の真上に注入しました');
 }
 
 let _observer = null;
@@ -866,7 +1532,6 @@ function setupObserver() {
         subtree: true,
     });
 
-    // 初回注入
     syncButton();
 }
 
@@ -878,6 +1543,7 @@ function init() {
     injectStyle();
     ensureModal();
     ensureHelpModal();
+    ensureLoraModal();
     setupObserver();
 
     try {
@@ -887,6 +1553,7 @@ function init() {
             const es = ctx.eventSource;
             const onCharChange = () => {
                 _currentCharName = null;
+                _currentLoraCharName = null;
             };
             ['CHAT_CHANGED', 'CHARACTER_SELECTED', 'CHARACTER_PAGE_LOADED'].forEach(name => {
                 if (et[name] && typeof es.on === 'function') es.on(et[name], onCharChange);
@@ -913,9 +1580,20 @@ window.RandomPromptWildcard = {
     testApply: (prompt) => applyWildcards(prompt, getCurrentWildcards()),
 };
 
+window.CharacterRecommendedLora = {
+    openModal: openLoraModal,
+    closeModal: closeLoraModal,
+    loadLorasForChar,
+    saveLorasForChar,
+    getCurrentLoras: () => {
+        const charName = getCurrentCharName();
+        return charName ? loadLorasForChar(charName) : [];
+    },
+};
+
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
 } else {
     init();
 }
-console.log(LOG, 'window.RandomPromptWildcard に API を公開しました');
+console.log(LOG, 'window.RandomPromptWildcard / window.CharacterRecommendedLora に API を公開しました');
