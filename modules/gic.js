@@ -577,7 +577,7 @@ let _lastPagerSignature = '';
 
 let _galleryOpenInFlight = false;
 let _galleryOpenInFlightSetAt = 0;
-const GALLERY_OPEN_IN_FLIGHT_MS = 8000;
+const GALLERY_OPEN_IN_FLIGHT_MS = 1500;
 
 function markGalleryOpenInFlight() {
     _galleryOpenInFlight = true;
@@ -2104,17 +2104,53 @@ function setupGalleryDedupeObserver() {
         }
         if (!foundNewGallery) return;
 
-        dedupeGalleryElements();
+        // ★ ユーザー明示オープン時は、重複排除と即時同期を最優先で実行する
+        //   （auto-close guard の hide を回避しつつ、150ms ポーリングを待たずに UI を整える）
+        const userOpened = (typeof window.__gicIsUserOpened === 'function')
+            ? window.__gicIsUserOpened() === true
+            : false;
+
+        // 重複排除は常に即座に実行（重複があるとレイアウトが崩れるため）
         try {
-            applyGalleryWindowLayout();
-            styleGalleryWindowCloseButton();
+            dedupeGalleryElements();
         } catch (e) {
-            console.warn('[GIC] 重複排除後のスタイル再適用でエラー:', e);
+            console.warn('[GIC] 重複排除でエラー:', e);
+        }
+
+        // ★ 次のフレームで即座に UI を同期する
+        //   （ポーリングの 150ms を待たずにギャラリーが正しく表示される）
+        const syncNow = () => {
+            try {
+                applyGalleryWindowLayout();
+                styleGalleryWindowCloseButton();
+            } catch (e) {
+                console.warn('[GIC] 重複排除後のスタイル再適用でエラー:', e);
+            }
+            if (userOpened) {
+                try {
+                    syncGalleryButtonVisibility();
+                    applyGalleryLayout();
+                    applyPageNumbers();
+                } catch (e) {
+                    console.warn('[GIC] ユーザーオープン時の即時同期でエラー:', e);
+                }
+            }
+        };
+
+        if (userOpened) {
+            // ★ ユーザーオープン時は requestAnimationFrame で最速同期
+            requestAnimationFrame(syncNow);
+            // ★ 念のため setTimeout(0) でも再実行（レイアウト計算のタイミング差を吸収）
+            setTimeout(syncNow, 0);
+        } else {
+            // programmatic オープン（warmUpGallery など）は少し遅延させて
+            // 他の初期化処理と競合しないようにする
+            setTimeout(syncNow, 50);
         }
     });
 
     observer.observe(document.body, { childList: true, subtree: true });
-    console.log('[GIC] 🧹 #gallery 重複排除オブザーバを設置しました');
+    console.log('[GIC] 🧹 #gallery 重複排除オブザーバを設置しました（ユーザーオープン即時同期対応）');
 }
 
 // ============================================================
@@ -7091,24 +7127,39 @@ function setupGalleryObserverForGic() {
         applyGalleryLayout();
         hideGalleryUploadMessage();
         if (_bulkDeleteMode) positionFloatingBulkButton();
-    }, 300);
+    }, 150);
 
     syncGalleryButtonVisibility();
     applyGalleryLayout();
     hideGalleryUploadMessage();
 }
 
-function openGalleryFromGic() {
+function openGalleryFromGic(force = false) {
     if (isGalleryOpen()) { clearGalleryOpenInFlight(); return true; }
-    if (isGalleryOpenInFlight()) return false;
+
+    // ★ force=true の場合は in-flight ガードを無視して強制オープン
+    if (!force && isGalleryOpenInFlight()) {
+        console.log('[GIC] openGalleryFromGic: in-flight 中のためスキップ');
+        return false;
+    }
+    if (force) clearGalleryOpenInFlight();
     markGalleryOpenInFlight();
+
+    const afterOpen = () => {
+        // ★ 開いた直後に UI を即座に同期（ポーリングの 150ms を待たない）
+        setTimeout(() => {
+            dedupeGalleryElements();
+            syncGalleryButtonVisibility();
+            applyGalleryLayout();
+        }, 50);
+    };
 
     try {
         const ctx = getContext();
         if (ctx && typeof ctx.openGallery === 'function') {
             ctx.openGallery();
             console.log('[GIC] ギャラリーを開きました (ctx.openGallery)');
-            setTimeout(() => dedupeGalleryElements(), 50);
+            afterOpen();
             return true;
         }
     } catch (e) { /* ignore */ }
@@ -7118,7 +7169,7 @@ function openGalleryFromGic() {
         const el = document.querySelector(sel);
         if (el && typeof el.click === 'function') {
             el.click();
-            setTimeout(() => dedupeGalleryElements(), 50);
+            afterOpen();
             return true;
         }
     }
@@ -7130,7 +7181,7 @@ function openGalleryFromGic() {
             const text = (item.textContent || '').trim().toLowerCase();
             if (text === 'gallery' || text === 'ギャラリー' || text.includes('gallery') || text.includes('ギャラリー')) {
                 item.click();
-                setTimeout(() => dedupeGalleryElements(), 50);
+                afterOpen();
                 return true;
             }
         }
@@ -7141,7 +7192,7 @@ function openGalleryFromGic() {
         const text = (el.textContent || '').trim().toLowerCase();
         if (text === 'gallery' || text === 'ギャラリー') {
             el.click();
-            setTimeout(() => dedupeGalleryElements(), 50);
+            afterOpen();
             return true;
         }
     }
@@ -7593,12 +7644,35 @@ function createReleaseButton() {
     };
 
     let lastActionTime = 0;
-    const triggerAction = (source) => {
+    const triggerAction = () => {
         const now = Date.now();
         if (now - lastActionTime < 200) return;
         lastActionTime = now;
+
+        // ★ ウォームアップ中なら中断
+        if (warmupState === 'running') {
+            warmupState = 'aborted';
+            clearGalleryOpenInFlight();
+            const hs = document.getElementById('gic-gallery-warmup-hide');
+            if (hs) hs.remove();
+        }
+
+        // ★ ユーザー明示オープンを最優先でマーク
+        //   （auto-close guard 対策。disabled 中でも必ず呼ぶ）
+        if (typeof window.__gicMarkUserOpened === 'function') {
+            window.__gicMarkUserOpened();
+        }
+
+        // ★ disabled / loading を強制解除
+        btn.classList.remove('gic-gallery-loading');
+        btn.disabled = false;
+        setGalleryButtonLoading(false);
+
+        // ★ in-flight ガードをクリアして強制オープン
+        clearGalleryOpenInFlight();
+
         flashBlue();
-        Promise.resolve(handleButtonAction()).catch(e => console.error('[GIC] handleButtonAction エラー:', e));
+        openGalleryFromGic(true);
     };
 
     btn.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); triggerAction('pointerdown'); }, true);
@@ -8215,10 +8289,16 @@ function bootstrapGIC() {
     // ---- (A) 新規 #gallery 要素を監視して即 display:none ----
     function forceHideNewGallery(g) {
         if (!g) return;
-        if (_userExplicitlyOpened) return;   // ★ ユーザーが開いた場合は触らない
-        if (isPendingReopen()) return;        // ★ 自前再オープン中は触らない
+
+        // ★ ユーザー明示オープン後は絶対に hide しない
+        if (_userExplicitlyOpened) {
+            console.debug('[GIC] auto-close guard: user-opened のため hide スキップ');
+            return;
+        }
+        if (isPendingReopen()) return;
         const userOpened = (Date.now() - _lastUserOpenTime) < USER_GRACE_MS;
         if (userOpened) return;
+
         g.style.setProperty('display', 'none', 'important');
         g.style.setProperty('visibility', 'hidden', 'important');
     }
