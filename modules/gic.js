@@ -556,9 +556,10 @@ function resolveOriginalFileName(fileName) {
 
 // ===== 状態 =====
 let lastGeneratedImageUrl = null;
-// ★ 最新の登録済み画像情報（登録解除ボタンの制御用）
-//   { charName, entryKey, fileName } または null
-let _lastRegisteredImage = null;
+// ★ 現在表示中の画像の登録情報（登録解除ボタンの制御用）
+//   { charName, fileName, entryKeys: [...] } または null
+//   entryKeys は登録されている全キーワード（複数可）
+let _currentRegisteredKeywords = null;
 let isOverrideLocal = false;
 const processedMessageKeys = new Set();
 
@@ -1922,13 +1923,14 @@ async function scanForGeneratedImages() {
                     }
                 }));
                 console.log(`[GIC] 📢 gic-image-generated-for-keyword を発火: entryKey="${genCtx.entryKey}", fileName="${fileName}"`);
-                // ★ 登録解除ボタン用に最新の登録済み画像情報を保持
-                _lastRegisteredImage = {
-                    charName,
-                    entryKey: genCtx.entryKey,
-                    fileName,
-                };
-                updateUnregisterButtonVisibility();
+                // ★ 登録解除ボタン状態を更新
+                //   （画像が実際に表示されたかどうかで判定するため、
+                //     ここでは setOverrideImage 完了後に refresh を呼ぶ。
+                //     pre-setup モード時は表示が変わらないため、
+                //     次回ポーリングで自動的に判定される）
+                if (isOverrideLocal) {
+                    refreshUnregisterButtonState();
+                }
             } catch (e) {
                 console.warn('[GIC] 画像生成完了イベントの発火に失敗:', e);
             }
@@ -1955,6 +1957,7 @@ async function scanForGeneratedImages() {
                 setButtonLabel(LABEL_OVERRIDE);
                 savePersistedState();
                 console.log(`[GIC] 🖼️ 最新の生成画像を背景に設定: ${finalUrl}`);
+                refreshUnregisterButtonState();   // ★ 追加
             } catch (e) {
                 console.error('[GIC] ImageDisplayExtension エラー:', e);
             }
@@ -7862,6 +7865,22 @@ function createGalleryButton() {
 }
 
 // ============================================================
+// ★ パスからファイル名（ベース名）を抽出
+//   "/user/images/char/foo%20bar.png?v=1" → "foo bar.png"
+// ============================================================
+function extractBasename(path) {
+    if (typeof path !== 'string') return '';
+    const clean = path.split('?')[0].split('#')[0];
+    const base = clean.split('/').pop();
+    try { return decodeURIComponent(base); } catch (e) { return base; }
+}
+
+// ★ 自動登録の対象外とする特殊キー
+//   default / thumbnail は JSON 編集画面の特殊セルで管理されるため、
+//   キーワードセルの登録解除対象からは除外する。
+const UNREGISTER_EXCLUDED_KEYS = new Set(['default', 'thumbnail']);
+
+// ============================================================
 // ★ 画像登録解除ボタン
 // ============================================================
 function createUnregisterButton() {
@@ -7937,27 +7956,86 @@ function positionUnregisterButton() {
     unregBtn.style.setProperty('transform', 'none', 'important');
 }
 
-function updateUnregisterButtonVisibility() {
+// ============================================================
+// ★ 登録解除ボタンの表示状態を更新
+//   現在表示中の画像が image_display_extension のいずれかのキーワードセルに
+//   登録されていればボタンを表示する。登録が無ければ非表示にする。
+// ============================================================
+function refreshUnregisterButtonState() {
     const unregBtn = document.getElementById(UNREGISTER_BUTTON_ID);
     if (!unregBtn) return;
 
-    if (_lastRegisteredImage && _lastRegisteredImage.charName) {
-        unregBtn.classList.add('gic-unregister-visible');
-        positionUnregisterButton();
-    } else {
-        unregBtn.classList.remove('gic-unregister-visible');
-        unregBtn.style.setProperty('left', '-9999px', 'important');
-        unregBtn.style.setProperty('top', '-9999px', 'important');
+    const hide = () => {
+        if (unregBtn.classList.contains('gic-unregister-visible')) {
+            unregBtn.classList.remove('gic-unregister-visible');
+            unregBtn.style.setProperty('left', '-9999px', 'important');
+            unregBtn.style.setProperty('top', '-9999px', 'important');
+        }
+        _currentRegisteredKeywords = null;
+    };
+
+    // キャラ未選択
+    const charName = getCurrentCharacterName();
+    if (!charName) { hide(); return; }
+
+    // 現在表示中の画像 URL を取得
+    let currentUrl = null;
+    try {
+        currentUrl = window.ImageDisplayExtension?.getCurrentImageUrl?.() || null;
+    } catch (e) { /* ignore */ }
+    if (!currentUrl) { hide(); return; }
+
+    const fileName = extractBasename(currentUrl);
+    if (!fileName) { hide(); return; }
+
+    // image_display_extension を走査して該当キーを収集
+    let char = null;
+    try {
+        const ctx = getContext();
+        char = ctx?.characters?.[ctx?.characterId];
+    } catch (e) { /* ignore */ }
+    if (!char || char.name !== charName) { hide(); return; }
+
+    const ext = char?.data?.extensions?.image_display_extension;
+    if (!ext || typeof ext !== 'object') { hide(); return; }
+
+    const matches = [];
+    for (const [key, val] of Object.entries(ext)) {
+        if (UNREGISTER_EXCLUDED_KEYS.has(key)) continue;
+        const list = Array.isArray(val) ? val : (typeof val === 'string' ? [val] : []);
+        for (const p of list) {
+            if (typeof p !== 'string') continue;
+            if (extractBasename(p) === fileName) {
+                if (!matches.includes(key)) matches.push(key);
+                break;
+            }
+        }
     }
+
+    if (matches.length === 0) { hide(); return; }
+
+    _currentRegisteredKeywords = { charName, fileName, entryKeys: matches };
+
+    if (!unregBtn.classList.contains('gic-unregister-visible')) {
+        unregBtn.classList.add('gic-unregister-visible');
+    }
+    positionUnregisterButton();
+}
+
+// 互換用エイリアス（他コードから呼ばれている場合に備える）
+function updateUnregisterButtonVisibility() {
+    refreshUnregisterButtonState();
 }
 
 async function unregisterCurrentImage() {
-    if (!_lastRegisteredImage) {
-        console.warn('[GIC] 登録解除: _lastRegisteredImage なし');
+    if (!_currentRegisteredKeywords) {
+        console.warn('[GIC] 登録解除: 対象画像が登録されていません');
         return false;
     }
-    const { charName, entryKey, fileName } = _lastRegisteredImage;
-    if (!charName || !entryKey || !fileName) return false;
+    const { charName, fileName, entryKeys } = _currentRegisteredKeywords;
+    if (!charName || !fileName || !Array.isArray(entryKeys) || entryKeys.length === 0) {
+        return false;
+    }
 
     try {
         const ctx = getContext();
@@ -7973,51 +8051,42 @@ async function unregisterCurrentImage() {
             return false;
         }
 
-        const val = ext[entryKey];
-        if (val === undefined) {
-            console.warn(`[GIC] 登録解除: キーワード "${entryKey}" のセルなし`);
-            return false;
+        const newExt = { ...ext };
+        let totalRemoved = 0;
+        const removedKeys = [];
+
+        for (const key of entryKeys) {
+            const val = ext[key];
+            if (val === undefined) continue;
+
+            if (Array.isArray(val)) {
+                const filtered = val.filter(p => {
+                    if (typeof p !== 'string') return true;
+                    if (extractBasename(p) === fileName) {
+                        totalRemoved++;
+                        return false;
+                    }
+                    return true;
+                });
+                if (filtered.length === 0) newExt[key] = [];
+                else if (filtered.length === 1) newExt[key] = filtered[0];
+                else newExt[key] = filtered;
+                if (filtered.length < val.length) removedKeys.push(key);
+            } else if (typeof val === 'string') {
+                if (extractBasename(val) === fileName) {
+                    newExt[key] = [];
+                    totalRemoved++;
+                    removedKeys.push(key);
+                }
+            }
         }
 
-        const decodeBase = (p) => {
-            if (typeof p !== 'string') return '';
-            const base = p.split('/').pop().split('?')[0].split('#')[0];
-            try { return decodeURIComponent(base); } catch (e) { return base; }
-        };
-
-        let newVal;
-        let removed = false;
-
-        if (Array.isArray(val)) {
-            newVal = val.filter(p => {
-                if (typeof p !== 'string') return true;
-                if (decodeBase(p) === fileName) {
-                    removed = true;
-                    return false;
-                }
-                return true;
-            });
-            if (!removed) {
-                console.warn(`[GIC] 登録解除: "${fileName}" はセル "${entryKey}" に見つかりません`);
-                return false;
-            }
-            // 空配列はキーを保持（セルとキーワードを残すため）
-            if (newVal.length === 0) newVal = [];
-            else if (newVal.length === 1) newVal = newVal[0];
-        } else if (typeof val === 'string') {
-            if (decodeBase(val) === fileName) {
-                newVal = [];
-                removed = true;
-            } else {
-                console.warn(`[GIC] 登録解除: "${fileName}" はセル "${entryKey}" に見つかりません`);
-                return false;
-            }
-        } else {
+        if (totalRemoved === 0) {
+            console.warn(`[GIC] 登録解除: "${fileName}" は対象セルに見つかりません`);
             return false;
         }
 
         // ★ 保存
-        const newExt = { ...ext, [entryKey]: newVal };
         if (!char.data) char.data = {};
         if (!char.data.extensions) char.data.extensions = {};
         char.data.extensions.image_display_extension = newExt;
@@ -8032,11 +8101,11 @@ async function unregisterCurrentImage() {
             detail: { charName, imageMap: newExt }
         }));
 
-        console.log(`[GIC] ✅ 登録解除: "${entryKey}" から "${fileName}" を削除`);
+        console.log(`[GIC] ✅ 登録解除: "${fileName}" を [${removedKeys.join(', ')}] から削除`);
 
-        // ★ 状態クリア
-        _lastRegisteredImage = null;
-        updateUnregisterButtonVisibility();
+        // ★ 状態更新
+        _currentRegisteredKeywords = null;
+        refreshUnregisterButtonState();
 
         return true;
     } catch (e) {
@@ -8112,26 +8181,13 @@ window.GicDumpGallery = function () {
 
 function exposeGicApi() {
     window.GicApi = {
-        // ★ 手動リフレッシュ（ヘッダーの「🔄 更新」ボタンと同じ処理）
-        forceRefreshGallery: () => manualRefreshGallery(),
-        
-        unregisterCurrentImage,
-        getLastRegisteredImage: () => _lastRegisteredImage ? { ..._lastRegisteredImage } : null,
-        
         openGallery: () => openGalleryFromGic(),
         closeGallery: () => closeGalleryProgrammatically(),
         isOpen: () => isGalleryOpen(),
 
         // ★ GIC 側の override 状態を外部から参照できるようにする
         isOverrideMode: () => isOverrideLocal,
-        
-        clearImageCacheForChar,
-        clearImageCacheForCharAndReload: async (charName) => {
-            const n = await clearImageCacheForChar(charName);
-            console.log(`[GIC] 🧹 ${charName} の画像キャッシュ ${n} 件をクリア`);
-            return n;
-        },
-        
+
         ensureThumbnailForVideo,
         generateVideoThumbnailBlob,
         videoFileToThumbName,
@@ -8206,6 +8262,26 @@ function exposeGicApi() {
             console.log(`[GIC] 🧹 失敗記録を ${n}件クリアしました`);
             return n;
         },
+
+        // ★ 手動リフレッシュ（ヘッダーの「🔄 更新」ボタンと同じ処理）
+        forceRefreshGallery: () => manualRefreshGallery(),
+
+        // ★ 特定キャラの画像キャッシュを全クリア（ギャラリー更新用）
+        clearImageCacheForChar,
+        clearImageCacheForCharAndReload: async (charName) => {
+            const n = await clearImageCacheForChar(charName);
+            console.log(`[GIC] 🧹 ${charName} の画像キャッシュ ${n} 件をクリア`);
+            return n;
+        },
+
+        // ★ 登録解除ボタン関連
+        //   現在表示中の画像がセルに登録されていれば、その登録を解除する。
+        //   複数キーワードに登録されている場合は全キーから削除する。
+        unregisterCurrentImage,
+        refreshUnregisterButton: () => refreshUnregisterButtonState(),
+        getCurrentlyRegisteredImage: () => _currentRegisteredKeywords
+            ? JSON.parse(JSON.stringify(_currentRegisteredKeywords))
+            : null,
 
         forceGridLayout: () => enforceGalleryGridLayout(),
         // ★ 診断: ページネーション状態をダンプ
@@ -8389,6 +8465,20 @@ function initializeGIC() {
     console.log('[GIC] 初期化開始');
     loadPersistedState();
     installBulkDeleteDocumentHandlers();
+
+    // ★ 画像マップ更新時に登録解除ボタン状態を即座に更新
+    //   （JSON 編集画面でのドラッグ＆ドロップ追加や削除を検知）
+    window.addEventListener('lbe-image-map-updated', () => {
+        refreshUnregisterButtonState();
+    });
+
+    // ★ ImageDisplay の背景が切り替わった時に更新
+    //   ImageDisplayExtension には change イベントが無いため、
+    //   ポーリングで補完するが、手動切替時は下記でも検知できる
+    window.addEventListener('gic-image-display-changed', () => {
+        refreshUnregisterButtonState();
+    });
+    
     installGalleryCloseInterceptor();
     setupImmediateThumbCacheInterceptor();
     setupHoverPreload();
@@ -8427,7 +8517,7 @@ function initializeGIC() {
         syncGalleryButtonVisibility();
         markGeneratedMessagesInDom();
         positionGalleryButton();
-        positionUnregisterButton();   // ★ 追加
+        refreshUnregisterButtonState();   // ★ 状態を更新（表示判定 + 位置調整）
         positionStatusMessage();
         applyGalleryLayout();
         hideGalleryUploadMessage();
