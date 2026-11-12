@@ -7368,6 +7368,12 @@ async function warmUpGallery() {
 
     // ★ 開いた瞬間から display: none を強制し続ける（DOM 構築は走る／画面には出ない）
     const forceHideGallery = () => {
+        // ★ aborted なら何もしない（ユーザーが中断した）
+        if (warmupState === 'aborted') return;
+        // ★ ユーザー明示オープン中なら何もしない（開いたギャラリーを閉じない）
+        if (typeof window.__gicIsUserOpened === 'function' && window.__gicIsUserOpened() === true) {
+            return;
+        }
         const g = document.getElementById('gallery');
         if (g) {
             g.style.setProperty('display', 'none', 'important');
@@ -7379,13 +7385,13 @@ async function warmUpGallery() {
     // ★ 完了処理を 1 箇所に集約（aborted / error / success で共通）
     const finalize = (nextState) => {
         warmupState = nextState;
-        // ★ 'aborted' はユーザーが warmup を中断して開いたケース → 隠さない
-        const skipHide = (nextState === 'aborted');
+        // ★ aborted / user-opened 時は hide しない
+        const skipHide = (nextState === 'aborted')
+            || (typeof window.__gicIsUserOpened === 'function' && window.__gicIsUserOpened() === true);
         if (!skipHide) forceHideGallery();
         clearInterval(hideInterval);
-        // 300ms 遅延で hideStyle を外すが、gallery には display:none を残す
         setTimeout(() => {
-            try { hideStyle.remove(); } catch (e) {}
+            try { hideStyle.remove(); } catch (e) { /* ignore */ }
             if (!skipHide) forceHideGallery();
             hideGalleryUploadMessage();
         }, 300);
@@ -7552,10 +7558,15 @@ function setGalleryButtonLoading(loading) {
     if (!btn) return;
     if (loading) {
         btn.classList.add('gic-gallery-loading');
-        btn.disabled = true;
-        btn.title = 'ギャラリーを読み込み中です…';
+        // ★ btn.disabled = true は使わない
+        //   disabled なボタンは pointerdown / click イベントを発火しないため、
+        //   ローディング中にユーザーがクリックしても反応しなくなる。
+        //   代わりに dataset.loading で状態管理し、クリック自体は受け付ける。
+        btn.dataset.loading = '1';
+        btn.title = 'ギャラリーを読み込み中です…（クリックで即時オープン）';
     } else {
         btn.classList.remove('gic-gallery-loading');
+        delete btn.dataset.loading;
         btn.disabled = false;
         btn.title = 'SillyTavern公式ギャラリーを開く';
     }
@@ -7727,23 +7738,36 @@ function createGalleryButton() {
 
     let lastActionTime = 0;
     const triggerAction = () => {
-        if (btn.classList.contains('gic-gallery-loading') || btn.disabled) return;
         const now = Date.now();
         if (now - lastActionTime < 200) return;
         lastActionTime = now;
+
+        // ★ ウォームアップ中なら即座に中断
+        //   （warmUpGallery の forceHideGallery ループを止める）
         if (warmupState === 'running') {
             warmupState = 'aborted';
             clearGalleryOpenInFlight();
             const hs = document.getElementById('gic-gallery-warmup-hide');
             if (hs) hs.remove();
+            console.log('[GIC] warmup を中断してギャラリーを開きます');
         }
-        // ★ warmup中断時もユーザー意図をマーク（warmup の forceHide で閉じられるのを防ぐ）
+
+        // ★ ユーザー明示オープンを最優先でマーク
+        //   （auto-close guard 対策。disabled 中でも必ず呼ぶ）
         if (typeof window.__gicMarkUserOpened === 'function') {
             window.__gicMarkUserOpened();
         }
-        if (!isGalleryOpen() && warmupState !== 'running') clearGalleryOpenInFlight();
+
+        // ★ ローディング状態を強制解除
+        btn.classList.remove('gic-gallery-loading');
+        delete btn.dataset.loading;
+        btn.disabled = false;
+
+        // ★ in-flight ガードをクリアして強制オープン
+        clearGalleryOpenInFlight();
+
         flashBlue();
-        openGalleryFromGic();
+        openGalleryFromGic(true);
     };
 
     btn.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); triggerAction(); }, true);
