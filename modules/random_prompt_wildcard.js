@@ -294,6 +294,23 @@ function saveLorasForChar(charName, loras) {
 }
 
 // ============================================================
+// ★ キャラ名に応じたボタンラベル / モーダルタイトル
+//   キャラ未選択時は「キャラ推奨LoRA」/「キャラ推奨 LoRA 設定」
+//   キャラ選択時は「{キャラ名} 推奨LoRA」/「{キャラ名} 推奨 LoRA 設定」
+// ============================================================
+function getLoraButtonLabel() {
+    const charName = getCurrentCharName();
+    if (!charName || !charName.trim()) return 'キャラ推奨LoRA';
+    return `${charName.trim()} 推奨LoRA`;
+}
+
+function getLoraModalTitle() {
+    const charName = getCurrentCharName();
+    if (!charName || !charName.trim()) return 'キャラ推奨 LoRA 設定';
+    return `${charName.trim()} 推奨 LoRA 設定`;
+}
+
+// ============================================================
 // CSS 注入
 // ============================================================
 function injectStyle() {
@@ -1431,9 +1448,19 @@ function openLoraModal() {
 
     _currentLoraCharName = charName;
     ensureLoraModal();
-    renderLoraEntries();
 
     const modal = document.getElementById(LORA_MODAL_ID);
+
+    // ★ モーダルタイトルをキャラ名に応じて更新
+    if (modal) {
+        const titleEl = modal.querySelector('.rpw-title');
+        if (titleEl) {
+            titleEl.textContent = getLoraModalTitle();
+        }
+    }
+
+    renderLoraEntries();
+
     if (modal) modal.classList.add('visible');
 }
 
@@ -1473,7 +1500,7 @@ function createLoraButton() {
     btn = document.createElement('button');
     btn.id = LORA_BUTTON_ID;
     btn.type = 'button';
-    btn.textContent = 'キャラ推奨LoRA';
+    btn.textContent = getLoraButtonLabel();   // ★ キャラ名に応じたラベル
     btn.title = 'キャラクター推奨のLoRA情報を登録する';
     btn.addEventListener('click', (e) => {
         e.preventDefault();
@@ -1496,7 +1523,14 @@ function syncButton() {
     if (container && container.nextElementSibling === target && container.parentElement === target.parentElement) {
         const wildcardBtn = container.querySelector('#' + BUTTON_ID);
         const loraBtn = container.querySelector('#' + LORA_BUTTON_ID);
-        if (wildcardBtn && loraBtn) return;
+        if (wildcardBtn && loraBtn) {
+            // ★ キャラ名変更に追従してラベルを更新
+            const newLabel = getLoraButtonLabel();
+            if (loraBtn.textContent !== newLabel) {
+                loraBtn.textContent = newLabel;
+            }
+            return;
+        }
     }
 
     // 既存の単独ボタンを削除（旧バージョンからの移行）
@@ -1554,6 +1588,8 @@ function init() {
             const onCharChange = () => {
                 _currentCharName = null;
                 _currentLoraCharName = null;
+                // ★ キャラ切替時にボタンラベルを即座に更新
+                try { syncButton(); } catch (e) { /* ignore */ }
             };
             ['CHAT_CHANGED', 'CHARACTER_SELECTED', 'CHARACTER_PAGE_LOADED'].forEach(name => {
                 if (et[name] && typeof es.on === 'function') es.on(et[name], onCharChange);
