@@ -337,13 +337,13 @@ function getImageNegativePrompt(charName, fileName) {
             if (!Array.isArray(data)) return resp;
 
             // ★ ギャラリー更新時に該当キャラの画像キャッシュをクリア
-            //   （ファイル名が同じでも中身が更新されていれば再取得させる）
+            //   ★ スロットル版を使用（15秒に1回のみ）
             try {
                 let __charName = null;
                 const __reqBody = init?.body ? JSON.parse(init.body) : null;
                 __charName = __reqBody?.folder || null;
                 if (__charName) {
-                    const n = await clearImageCacheForChar(__charName);
+                    const n = await clearImageCacheForCharThrottled(__charName);
                     if (n > 0) {
                         console.log(`[GIC] 🔄 ギャラリー更新: ${__charName} のキャッシュ ${n} 件をクリア`);
                     }
@@ -2471,7 +2471,11 @@ async function clearImageCacheForChar(charName) {
         for (const k of toDelete) {
             const url = _imgBlobUrlCache.get(k);
             if (url) {
-                try { URL.revokeObjectURL(url); } catch (e) { /* ignore */ }
+                // ★ 即座に revoke すると、まだ <img> が参照中の URL が無効化され
+                //    サムネが真っ黒になる。30秒遅延してから revoke する。
+                setTimeout(() => {
+                    try { URL.revokeObjectURL(url); } catch (e) { /* ignore */ }
+                }, 30000);
             }
             _imgBlobUrlCache.delete(k);
         }
@@ -2485,6 +2489,30 @@ async function clearImageCacheForChar(charName) {
         console.warn('[GIC] clearImageCacheForChar error:', e);
         return 0;
     }
+}
+
+// ============================================================
+// ★ キャッシュクリアのスロットル制御
+//   /api/images/list はギャラリーを開くたびに複数回呼ばれるため、
+//   毎回全キャッシュをクリアすると 172 枚のサムネを毎回再取得して
+//   ギャラリーが 3 秒以上かかったり、サムネが真っ黒になったりする。
+//   → 同一キャラへのクリアは CACHE_CLEAR_THROTTLE_MS に 1 回だけ許可する。
+// ============================================================
+const _lastCacheClearForChar = new Map();
+const CACHE_CLEAR_THROTTLE_MS = 15000;  // 15秒
+
+async function clearImageCacheForCharThrottled(charName, force = false) {
+    if (!charName) return 0;
+    const lastClear = _lastCacheClearForChar.get(charName) || 0;
+    const elapsed = Date.now() - lastClear;
+    if (!force && elapsed < CACHE_CLEAR_THROTTLE_MS) {
+        console.log(
+            `[GIC] ⏭ キャッシュクリアをスキップ (前回から ${Math.round(elapsed / 1000)}秒): ${charName}`
+        );
+        return 0;
+    }
+    _lastCacheClearForChar.set(charName, Date.now());
+    return await clearImageCacheForChar(charName);
 }
 
 async function getImgFromDB(key) {
@@ -7605,6 +7633,28 @@ window.GicDumpGallery = function () {
 
 function exposeGicApi() {
     window.GicApi = {
+        // ★ 手動リフレッシュ: キャッシュを強制クリアしてギャラリーを再読込
+        forceRefreshGallery: async () => {
+            const charName = getCurrentCharacterName();
+            if (!charName) {
+                console.warn('[GIC] キャラクターが選択されていません');
+                return false;
+            }
+            console.log(`[GIC] 🔄 手動リフレッシュ: ${charName}`);
+            await clearImageCacheForCharThrottled(charName, true);
+            _lastCacheClearForChar.delete(charName);
+            // ギャラリーが開いていれば再オープン
+            if (isGalleryOpen()) {
+                const savedState = captureGalleryUiState();
+                closeGalleryProgrammatically();
+                await wait(400);
+                openGalleryFromGic();
+                await wait(900);
+                await restoreGalleryUiState(savedState);
+            }
+            return true;
+        },
+        
         openGallery: () => openGalleryFromGic(),
         closeGallery: () => closeGalleryProgrammatically(),
         isOpen: () => isGalleryOpen(),
