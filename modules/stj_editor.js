@@ -416,27 +416,42 @@
 
     async function loadWorldInfoEntries(worldName) {
         if (!worldName) return null;
+
+        // ★ ① fetch を最優先（cache: no-store で常に最新を取得）
+        //   LBE の 2 秒キャッシュを経由すると、削除直後のエントリ一覧が
+        //   古いまま返されることがあるため、fetch を直接呼ぶ。
+        for (let attempt = 1; attempt <= 2; attempt++) {
+            try {
+                const ctx = getSTContext();
+                const headers = (ctx && typeof ctx.getRequestHeaders === 'function')
+                    ? ctx.getRequestHeaders()
+                    : { 'Content-Type': 'application/json' };
+                const resp = await fetch('/api/worldinfo/get', {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({ name: worldName }),
+                    cache: 'no-store',
+                });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    if (data && data.entries) {
+                        return data.entries;
+                    }
+                }
+            } catch (err) {
+                console.debug(`[STJ Editor] fetch 試行 ${attempt}/2 例外: ${err.message || err}`);
+            }
+            if (attempt < 2) await new Promise(r => setTimeout(r, 300));
+        }
+
+        // ② fetch 失敗時のみ LBE にフォールバック
         if (window.LorebookExpansion?.loadWorldInfoEntriesByName) {
             try {
                 const entries = await window.LorebookExpansion.loadWorldInfoEntriesByName(worldName);
                 if (entries) return entries;
-            } catch (e) { /* ignore */ }
+            } catch (err) { /* ignore */ }
         }
-        try {
-            const ctx = getSTContext();
-            const headers = (ctx && typeof ctx.getRequestHeaders === 'function')
-                ? ctx.getRequestHeaders()
-                : { 'Content-Type': 'application/json' };
-            const resp = await fetch('/api/worldinfo/get', {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({ name: worldName }),
-            });
-            if (resp.ok) {
-                const data = await resp.json();
-                if (data && data.entries) return data.entries;
-            }
-        } catch (e) { /* ignore */ }
+
         return null;
     }
 
@@ -3736,6 +3751,13 @@ async function syncLorebookEntriesToImageMap() {
         return 0;
     }
 
+    // ★ キャッシュをクリアして最新のエントリ一覧を取得
+    //   WORLDINFO_UPDATED 発火直後に LBE のキャッシュが古いデータを返し、
+    //   削除済みエントリの残骸が「存在する」と誤判定されるのを防ぐ。
+    try {
+        window.LorebookExpansion?.clearWorldInfoEntriesCache?.(worldName);
+    } catch (err) { /* ignore */ }
+
     const entries = await loadWorldInfoEntries(worldName);
     if (!entries) return 0;
 
@@ -3840,7 +3862,7 @@ async function syncLorebookEntriesToImageMap() {
     return addedKeys.length;
 }
 
-function handleImageGeneratedForKeyword(e) {
+async function handleImageGeneratedForKeyword(e) {
     const { charName, entryKey, fileName } = e.detail || {};
     if (!charName || !entryKey || !fileName) return;
 
@@ -3857,11 +3879,59 @@ function handleImageGeneratedForKeyword(e) {
         return;
     }
 
+    // ★ entryKey が現在のロアブックに存在するか確認
+    //   削除済みエントリや古いキャッシュに基づく entryKey の場合は、
+    //   セル作成も画像登録も行わない。
+    const worldName = getCharacterWorldInfoName();
+    if (!worldName) {
+        console.debug('[STJ Editor] ロアブック未関連付けのためスキップ');
+        return;
+    }
+
+    // ★ キャッシュをクリアして最新のエントリ一覧を取得
+    try {
+        window.LorebookExpansion?.clearWorldInfoEntriesCache?.(worldName);
+    } catch (err) { /* ignore */ }
+
+    let entries = null;
+    try {
+        entries = await loadWorldInfoEntries(worldName);
+    } catch (err) {
+        console.warn('[STJ Editor] ロアブック取得エラー:', err);
+    }
+    if (!entries) {
+        console.debug('[STJ Editor] ロアブック取得失敗のためスキップ');
+        return;
+    }
+
+    const list = Array.isArray(entries) ? entries : Object.values(entries);
+
+    // ★ entryKey に対応するエントリが存在するかチェック
+    //   comment または keys[0] のいずれかに一致すれば存在扱い。
+    let entryExists = false;
+    for (const entry of list) {
+        if (!entry) continue;
+        const comment = (typeof entry.comment === 'string' ? entry.comment.trim() : '');
+        const keys = getEntryKeys(entry);
+        const firstKey = keys.length > 0 ? String(keys[0]).trim() : '';
+        if (comment === entryKey || firstKey === entryKey) {
+            entryExists = true;
+            break;
+        }
+    }
+
+    if (!entryExists) {
+        console.log(
+            `[STJ Editor] ⚠️ entryKey="${entryKey}" は現在のロアブック "${worldName}" に存在しないため、` +
+            `セル作成・画像登録をスキップします`
+        );
+        return;
+    }
+
     const imageMap = getCurrentImageMapFromCharData(charName);
     if (!imageMap) return;
 
-    // ★ セルが無い場合は自動作成（画像生成時）
-    //   自動削除は行わない（要件通り）
+    // セルが無ければ自動作成（entryKey がロアブックに存在する場合のみ）
     if (!Object.prototype.hasOwnProperty.call(imageMap, entryKey)) {
         imageMap[entryKey] = [];
         console.log(`[STJ Editor] 🆕 セル自動作成（画像生成時）: "${entryKey}"`);
@@ -3882,8 +3952,8 @@ function handleImageGeneratedForKeyword(e) {
         try {
             populateFormFromImageMap(imageMap);
             autoSave({ immediate: true });
-        } catch (e) {
-            console.warn('[STJ Editor] UI 更新エラー:', e);
+        } catch (err) {
+            console.warn('[STJ Editor] UI 更新エラー:', err);
         }
     }
 
