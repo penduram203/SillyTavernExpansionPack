@@ -420,6 +420,8 @@ function getImageNegativePrompt(charName, fileName) {
 const MODULE_NAME      = 'generate_image_controller';
 const BUTTON_ID        = 'gic-release-override-button';
 const UNREGISTER_BUTTON_ID = 'gic-unregister-button';
+const DELETE_IMAGE_BUTTON_ID = 'gic-delete-image-button';
+const DELETE_CONFIRM_DIALOG_ID = 'gic-delete-confirm-dialog';
 const GALLERY_BUTTON_ID = 'gic-open-gallery-button';
 const LABEL_OVERRIDE   = '背景生成';
 const LABEL_NORMAL     = '事前設定';
@@ -1553,6 +1555,61 @@ function getCurrentCharacterName() {
         html body.gallery-open #${UNREGISTER_BUTTON_ID},
         html body.stj-editor-open #${UNREGISTER_BUTTON_ID},
         html body.variable-battle-active #${UNREGISTER_BUTTON_ID} {
+            display: none !important;
+            pointer-events: none !important;
+            opacity: 0 !important;
+        }
+        
+        /* ============================================================
+           ★ 画像削除ボタン（登録解除ボタンの左隣）
+           ============================================================ */
+        #${DELETE_IMAGE_BUTTON_ID} {
+            position: fixed;
+            left: -9999px;
+            top: -9999px;
+            height: 50px;
+            padding: 0 14px;
+            background-color: #7f1d1d;
+            color: #ffffff;
+            border: 1px solid #991b1b;
+            border-radius: 4px;
+            cursor: pointer;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            font-weight: bold;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+            z-index: 15000;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.15s ease, background-color 0.15s ease;
+            box-sizing: border-box;
+            white-space: nowrap;
+            user-select: none;
+            line-height: 1;
+        }
+
+        #${DELETE_IMAGE_BUTTON_ID}.gic-delete-image-visible {
+            display: flex;
+        }
+
+        body.chat-bulb-hover #${DELETE_IMAGE_BUTTON_ID}.gic-delete-image-visible {
+            opacity: 0.3;
+            pointer-events: auto;
+        }
+
+        html body #${DELETE_IMAGE_BUTTON_ID}.gic-delete-image-visible:hover {
+            opacity: 1 !important;
+            background-color: #991b1b !important;
+            pointer-events: auto !important;
+        }
+
+        html body.tsp-open #${DELETE_IMAGE_BUTTON_ID},
+        html body.gallery-open #${DELETE_IMAGE_BUTTON_ID},
+        html body.stj-editor-open #${DELETE_IMAGE_BUTTON_ID},
+        html body.variable-battle-active #${DELETE_IMAGE_BUTTON_ID} {
             display: none !important;
             pointer-events: none !important;
             opacity: 0 !important;
@@ -7974,43 +8031,338 @@ function createUnregisterButton() {
     return btn;
 }
 
+// ============================================================
+// ★ 画像削除確認ダイアログ
+//   Promise<boolean> を返す。「はい」→ true、「いいえ」/外側クリック/Esc → false。
+// ============================================================
+function showDeleteConfirmDialog(fileName) {
+    return new Promise((resolve) => {
+        const existing = document.getElementById(DELETE_CONFIRM_DIALOG_ID);
+        if (existing) existing.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = DELETE_CONFIRM_DIALOG_ID;
+        Object.assign(overlay.style, {
+            position: 'fixed',
+            top: '0', left: '0', right: '0', bottom: '0',
+            background: 'rgba(0, 0, 0, 0.75)',
+            zIndex: '2147483647',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px',
+            boxSizing: 'border-box',
+        });
+
+        const box = document.createElement('div');
+        Object.assign(box.style, {
+            background: '#1a202c',
+            border: '3px solid #e53e3e',
+            borderRadius: '12px',
+            padding: '32px 40px',
+            maxWidth: '600px',
+            minWidth: '420px',
+            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.9), 0 0 0 2px rgba(229, 62, 62, 0.4)',
+            textAlign: 'center',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif',
+            color: '#e2e8f0',
+            boxSizing: 'border-box',
+        });
+
+        const title = document.createElement('div');
+        title.textContent = '画像の登録が解除された上にデータ自体も削除されます';
+        Object.assign(title.style, {
+            fontSize: '20px',
+            fontWeight: 'bold',
+            color: '#fc8181',
+            marginBottom: '16px',
+            lineHeight: '1.4',
+        });
+        box.appendChild(title);
+
+        const subtitle = document.createElement('div');
+        subtitle.textContent = '本当に削除しますか？';
+        Object.assign(subtitle.style, {
+            fontSize: '26px',
+            fontWeight: 'bold',
+            color: '#ffffff',
+            marginBottom: '20px',
+        });
+        box.appendChild(subtitle);
+
+        const fileEl = document.createElement('div');
+        fileEl.textContent = fileName || '';
+        Object.assign(fileEl.style, {
+            fontSize: '13px',
+            fontFamily: 'monospace',
+            color: '#a0aec0',
+            background: '#0d1117',
+            padding: '8px 12px',
+            borderRadius: '4px',
+            marginBottom: '24px',
+            wordBreak: 'break-all',
+            border: '1px solid #4a5568',
+        });
+        box.appendChild(fileEl);
+
+        const buttonRow = document.createElement('div');
+        Object.assign(buttonRow.style, {
+            display: 'flex',
+            gap: '16px',
+            justifyContent: 'center',
+        });
+
+        const yesBtn = document.createElement('button');
+        yesBtn.type = 'button';
+        yesBtn.textContent = 'はい';
+        Object.assign(yesBtn.style, {
+            padding: '14px 40px',
+            background: '#e53e3e',
+            color: '#ffffff',
+            border: '2px solid #fc8181',
+            borderRadius: '6px',
+            fontSize: '18px',
+            fontWeight: 'bold',
+            cursor: 'pointer',
+            minWidth: '120px',
+            fontFamily: 'inherit',
+        });
+        yesBtn.addEventListener('mouseenter', () => { yesBtn.style.background = '#c53030'; });
+        yesBtn.addEventListener('mouseleave', () => { yesBtn.style.background = '#e53e3e'; });
+
+        const noBtn = document.createElement('button');
+        noBtn.type = 'button';
+        noBtn.textContent = 'いいえ';
+        Object.assign(noBtn.style, {
+            padding: '14px 40px',
+            background: '#4a5568',
+            color: '#ffffff',
+            border: '2px solid #718096',
+            borderRadius: '6px',
+            fontSize: '18px',
+            fontWeight: 'bold',
+            cursor: 'pointer',
+            minWidth: '120px',
+            fontFamily: 'inherit',
+        });
+        noBtn.addEventListener('mouseenter', () => { noBtn.style.background = '#2d3748'; });
+        noBtn.addEventListener('mouseleave', () => { noBtn.style.background = '#4a5568'; });
+
+        buttonRow.appendChild(yesBtn);
+        buttonRow.appendChild(noBtn);
+        box.appendChild(buttonRow);
+
+        overlay.appendChild(box);
+
+        const cleanup = (result) => {
+            overlay.remove();
+            document.removeEventListener('keydown', onKey);
+            resolve(result);
+        };
+
+        const onKey = (e) => {
+            if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cleanup(false); }
+            else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); cleanup(true); }
+        };
+
+        yesBtn.addEventListener('click', (e) => {
+            e.preventDefault(); e.stopPropagation();
+            cleanup(true);
+        });
+        noBtn.addEventListener('click', (e) => {
+            e.preventDefault(); e.stopPropagation();
+            cleanup(false);
+        });
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) cleanup(false);
+        });
+        document.addEventListener('keydown', onKey, true);
+
+        document.body.appendChild(overlay);
+
+        setTimeout(() => {
+            try { noBtn.focus(); } catch (e) { /* ignore */ }
+        }, 50);
+    });
+}
+
+// ============================================================
+// ★ 現在表示中の画像をローカルディスクから削除 + 登録解除
+// ============================================================
+async function deleteCurrentImage() {
+    if (!_currentRegisteredKeywords) {
+        console.warn('[GIC] 画像削除: 対象画像が登録されていません');
+        return false;
+    }
+    const { charName, fileName } = _currentRegisteredKeywords;
+    if (!charName || !fileName) return false;
+
+    // 確認ダイアログ
+    const confirmed = await showDeleteConfirmDialog(fileName);
+    if (!confirmed) {
+        console.log('[GIC] 画像削除: キャンセルされました');
+        return false;
+    }
+
+    console.log(`[GIC] 画像削除開始: ${charName}/${fileName}`);
+
+    // ── 1) ローカルディスクから削除 ──
+    let deleted = false;
+    try {
+        const path = `user/images/${charName}/${fileName}`;
+        const result = await tryDeleteImage(path);
+        deleted = result.ok === true;
+        if (deleted) {
+            console.log(`[GIC] ✅ ファイル削除成功: ${result.usedPath || path}`);
+        } else {
+            console.warn(`[GIC] ⚠️ ファイル削除失敗: ${path}`);
+        }
+    } catch (e) {
+        console.warn('[GIC] ファイル削除エラー:', e);
+    }
+
+    if (!deleted) {
+        showBottomToast('画像の削除に失敗しました', { type: 'error' });
+        return false;
+    }
+
+    // ── 2) キャッシュ無効化 ──
+    try {
+        _thumbExistCache.delete(`/user/images/${charName}/${fileName}`);
+        _imgBlobUrlCache.delete(`${charName}:${fileName}`);
+        _imgBlobUrlCache.delete(`${charName}:${fileName}:imgthumb`);
+        _imgThumbKnown.delete(`${charName}:${fileName}`);
+        _failedThumbs.delete(fileName);
+    } catch (e) { /* ignore */ }
+
+    // ── 3) 登録解除（image_display_extension から削除） ──
+    try {
+        await unregisterCurrentImage();
+    } catch (e) {
+        console.warn('[GIC] 登録解除エラー:', e);
+    }
+
+    // ── 4) lastGeneratedImageUrl が削除対象と一致すればクリア ──
+    if (lastGeneratedImageUrl) {
+        try {
+            const urlBase = extractBasename(lastGeneratedImageUrl);
+            if (urlBase === fileName) {
+                lastGeneratedImageUrl = null;
+                savePersistedState();
+            }
+        } catch (e) { /* ignore */ }
+    }
+
+    // ── 5) 完了通知 ──
+    showBottomToast('画像が削除されました');
+    console.log(`[GIC] ✅ 画像削除完了: ${charName}/${fileName}`);
+    return true;
+}
+
+// ============================================================
+// ★ 画像削除ボタン
+// ============================================================
+function createDeleteImageButton() {
+    let btn = document.getElementById(DELETE_IMAGE_BUTTON_ID);
+    if (btn) return btn;
+
+    btn = document.createElement('button');
+    btn.id = DELETE_IMAGE_BUTTON_ID;
+    btn.type = 'button';
+    btn.textContent = '画像削除';
+    btn.title = '現在表示中の画像をローカルディスクから削除する';
+    btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (btn.disabled) return;
+
+        btn.disabled = true;
+        try {
+            await deleteCurrentImage();
+        } catch (err) {
+            console.warn('[GIC] 画像削除エラー:', err);
+            showBottomToast('画像の削除に失敗しました', { type: 'error' });
+        } finally {
+            btn.disabled = false;
+        }
+    });
+
+    document.body.appendChild(btn);
+    return btn;
+}
+
 function positionUnregisterButton() {
     const unregBtn = document.getElementById(UNREGISTER_BUTTON_ID);
-    if (!unregBtn) return;
-    if (!unregBtn.classList.contains('gic-unregister-visible')) return;
-
+    const delBtn = document.getElementById(DELETE_IMAGE_BUTTON_ID);
     const toggleBtn = document.getElementById('toggle-chat-button');
     if (!toggleBtn) return;
 
-    const rect = toggleBtn.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) {
-        unregBtn.style.setProperty('left', '-9999px', 'important');
-        unregBtn.style.setProperty('top', '-9999px', 'important');
+    const toggleRect = toggleBtn.getBoundingClientRect();
+    if (toggleRect.width === 0 || toggleRect.height === 0) {
+        if (unregBtn) {
+            unregBtn.style.setProperty('left', '-9999px', 'important');
+            unregBtn.style.setProperty('top', '-9999px', 'important');
+        }
+        if (delBtn) {
+            delBtn.style.setProperty('left', '-9999px', 'important');
+            delBtn.style.setProperty('top', '-9999px', 'important');
+        }
         return;
     }
 
     const gap = 5;
-    const btnW = unregBtn.offsetWidth || 90;
-    const btnH = unregBtn.offsetHeight || 50;
-
-    // #toggle-chat-button の左隣、縦中央
-    let left = rect.left - btnW - gap;
-    let top  = rect.top + (rect.height - btnH) / 2;
-
     const margin = 4;
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    if (left < margin) left = margin;
-    if (left + btnW > vw - margin) left = vw - margin - btnW;
-    if (top < margin) top = margin;
-    if (top + btnH > vh - margin) top = vh - margin - btnH;
 
-    unregBtn.style.setProperty('position', 'fixed', 'important');
-    unregBtn.style.setProperty('left', Math.round(left) + 'px', 'important');
-    unregBtn.style.setProperty('top', Math.round(top) + 'px', 'important');
-    unregBtn.style.setProperty('right', 'auto', 'important');
-    unregBtn.style.setProperty('bottom', 'auto', 'important');
-    unregBtn.style.setProperty('transform', 'none', 'important');
+    // ── 登録解除ボタン: toggle の左隣 ──
+    let unregLeft = null;
+    if (unregBtn && unregBtn.classList.contains('gic-unregister-visible')) {
+        const btnW = unregBtn.offsetWidth || 90;
+        const btnH = unregBtn.offsetHeight || 50;
+
+        unregLeft = toggleRect.left - btnW - gap;
+        let top = toggleRect.top + (toggleRect.height - btnH) / 2;
+
+        if (unregLeft < margin) unregLeft = margin;
+        if (unregLeft + btnW > vw - margin) unregLeft = vw - margin - btnW;
+        if (top < margin) top = margin;
+        if (top + btnH > vh - margin) top = vh - margin - btnH;
+
+        unregBtn.style.setProperty('position', 'fixed', 'important');
+        unregBtn.style.setProperty('left', Math.round(unregLeft) + 'px', 'important');
+        unregBtn.style.setProperty('top', Math.round(top) + 'px', 'important');
+        unregBtn.style.setProperty('right', 'auto', 'important');
+        unregBtn.style.setProperty('bottom', 'auto', 'important');
+        unregBtn.style.setProperty('transform', 'none', 'important');
+    }
+
+    // ── 画像削除ボタン: 登録解除ボタンの左隣 ──
+    if (delBtn && delBtn.classList.contains('gic-delete-image-visible')) {
+        const btnW = delBtn.offsetWidth || 90;
+        const btnH = delBtn.offsetHeight || 50;
+
+        let delLeft;
+        if (unregLeft !== null) {
+            delLeft = unregLeft - btnW - gap;
+        } else {
+            // 登録解除ボタンが非表示でも、toggle の左隣に配置
+            delLeft = toggleRect.left - btnW - gap;
+        }
+        let top = toggleRect.top + (toggleRect.height - btnH) / 2;
+
+        if (delLeft < margin) delLeft = margin;
+        if (delLeft + btnW > vw - margin) delLeft = vw - margin - btnW;
+        if (top < margin) top = margin;
+        if (top + btnH > vh - margin) top = vh - margin - btnH;
+
+        delBtn.style.setProperty('position', 'fixed', 'important');
+        delBtn.style.setProperty('left', Math.round(delLeft) + 'px', 'important');
+        delBtn.style.setProperty('top', Math.round(top) + 'px', 'important');
+        delBtn.style.setProperty('right', 'auto', 'important');
+        delBtn.style.setProperty('bottom', 'auto', 'important');
+        delBtn.style.setProperty('transform', 'none', 'important');
+    }
 }
 
 // ============================================================
@@ -8020,30 +8372,39 @@ function positionUnregisterButton() {
 // ============================================================
 function refreshUnregisterButtonState() {
     const unregBtn = document.getElementById(UNREGISTER_BUTTON_ID);
-    if (!unregBtn) return;
+    const delBtn = document.getElementById(DELETE_IMAGE_BUTTON_ID);
 
-    const hide = () => {
-        if (unregBtn.classList.contains('gic-unregister-visible')) {
-            unregBtn.classList.remove('gic-unregister-visible');
+    const hideAll = () => {
+        if (unregBtn) {
+            if (unregBtn.classList.contains('gic-unregister-visible')) {
+                unregBtn.classList.remove('gic-unregister-visible');
+            }
             unregBtn.style.setProperty('left', '-9999px', 'important');
             unregBtn.style.setProperty('top', '-9999px', 'important');
+        }
+        if (delBtn) {
+            if (delBtn.classList.contains('gic-delete-image-visible')) {
+                delBtn.classList.remove('gic-delete-image-visible');
+            }
+            delBtn.style.setProperty('left', '-9999px', 'important');
+            delBtn.style.setProperty('top', '-9999px', 'important');
         }
         _currentRegisteredKeywords = null;
     };
 
     // キャラ未選択
     const charName = getCurrentCharacterName();
-    if (!charName) { hide(); return; }
+    if (!charName) { hideAll(); return; }
 
     // 現在表示中の画像 URL を取得
     let currentUrl = null;
     try {
         currentUrl = window.ImageDisplayExtension?.getCurrentImageUrl?.() || null;
     } catch (e) { /* ignore */ }
-    if (!currentUrl) { hide(); return; }
+    if (!currentUrl) { hideAll(); return; }
 
     const fileName = extractBasename(currentUrl);
-    if (!fileName) { hide(); return; }
+    if (!fileName) { hideAll(); return; }
 
     // image_display_extension を走査して該当キーを収集
     let char = null;
@@ -8051,10 +8412,10 @@ function refreshUnregisterButtonState() {
         const ctx = getContext();
         char = ctx?.characters?.[ctx?.characterId];
     } catch (e) { /* ignore */ }
-    if (!char || char.name !== charName) { hide(); return; }
+    if (!char || char.name !== charName) { hideAll(); return; }
 
     const ext = char?.data?.extensions?.image_display_extension;
-    if (!ext || typeof ext !== 'object') { hide(); return; }
+    if (!ext || typeof ext !== 'object') { hideAll(); return; }
 
     const matches = [];
     for (const [key, val] of Object.entries(ext)) {
@@ -8069,12 +8430,15 @@ function refreshUnregisterButtonState() {
         }
     }
 
-    if (matches.length === 0) { hide(); return; }
+    if (matches.length === 0) { hideAll(); return; }
 
     _currentRegisteredKeywords = { charName, fileName, entryKeys: matches };
 
-    if (!unregBtn.classList.contains('gic-unregister-visible')) {
+    if (unregBtn && !unregBtn.classList.contains('gic-unregister-visible')) {
         unregBtn.classList.add('gic-unregister-visible');
+    }
+    if (delBtn && !delBtn.classList.contains('gic-delete-image-visible')) {
+        delBtn.classList.add('gic-delete-image-visible');
     }
     positionUnregisterButton();
 }
@@ -8242,6 +8606,10 @@ function exposeGicApi() {
         closeGallery: () => closeGalleryProgrammatically(),
         isOpen: () => isGalleryOpen(),
 
+        // ★ 画像削除関連
+        deleteCurrentImage,
+        showDeleteConfirmDialog,
+        
         // ★ GIC 側の override 状態を外部から参照できるようにする
         isOverrideMode: () => isOverrideLocal,
 
@@ -8562,6 +8930,7 @@ function initializeGIC() {
     createReleaseButton();
     createGalleryButton();
     createUnregisterButton();
+    createDeleteImageButton();   // ★ 追加
     setupListeners();
     setupTextStylingObserver();
     setupGalleryObserverForGic();
