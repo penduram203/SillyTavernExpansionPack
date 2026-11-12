@@ -1511,9 +1511,9 @@ function getCurrentCharacterName() {
             top: -9999px;
             height: 50px;
             padding: 0 14px;
-            background-color: #c53030;
-            color: #ffffff;
-            border: 1px solid #9b2c2c;
+            background-color: #d4c11e;
+            color: #1a202c;
+            border: 1px solid #e38d14;
             border-radius: 4px;
             cursor: pointer;
             display: none;
@@ -1569,9 +1569,9 @@ function getCurrentCharacterName() {
             top: -9999px;
             height: 50px;
             padding: 0 14px;
-            background-color: #d4c11e;
+            background-color: #c53030;
             color: #ffffff;
-            border: 1px solid #e38d14;
+            border: 1px solid #9b2c2c;
             border-radius: 4px;
             cursor: pointer;
             display: none;
