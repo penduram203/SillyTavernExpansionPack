@@ -323,11 +323,12 @@ function applyToggleChatButtonLayout() {
 }
 
 // ============================================================
-// ★ T（#restore-panel-button）と 中央（#window-control-buttons）を
-//   💡/🎨 の並びに配置する。
-//   - 中央: 🎨 の左隣
-//   - T   : 中央の左隣
-//   - 💡 が未配置の時は CSS デフォルト（左下）へフォールバック
+// ★ T（#restore-panel-button）と 中央（#window-control-buttons）の配置
+//   - T は「画像削除」ボタンの左端に合わせる
+//   - 中央は T の右隣
+//   - 🎨 は従来通り 💡 の真上
+//   → 中央と🎨の間に広い間隔が生まれる
+//   → 画像削除/登録解除が非表示の時は固定フォールバック
 // ============================================================
 function applyWindowControlButtonsLayout() {
     const toggleBtn  = document.getElementById('toggle-chat-button');
@@ -338,18 +339,14 @@ function applyWindowControlButtonsLayout() {
     if (!toggleBtn || !wcb || !restoreBtn || !centerBtn) return;
 
     const toggleRect = toggleBtn.getBoundingClientRect();
-    const clearInline = (el) => {
-        if (!el) return;
-        ['left', 'top', 'right', 'bottom', 'transform'].forEach(p =>
-            el.style.removeProperty(p)
-        );
-    };
 
     // 💡 未配置 → CSS デフォルト位置へフォールバック
     if (toggleRect.width <= 0 || toggleRect.height <= 0 ||
         toggleRect.left < 0 || toggleRect.top < 0) {
-        clearInline(wcb);
-        clearInline(restoreBtn);
+        ['left', 'top', 'right', 'bottom', 'transform'].forEach(p => {
+            wcb.style.removeProperty(p);
+            restoreBtn.style.removeProperty(p);
+        });
         return;
     }
 
@@ -357,27 +354,41 @@ function applyWindowControlButtonsLayout() {
     const GALLERY_BTN_H = 50;
 
     // 🎨 の実効位置（💡 の真上）
-    const galleryLeft    = toggleRect.left;
     const galleryTop     = toggleRect.top - GALLERY_BTN_H - GAP;
     const galleryCenterY = galleryTop + GALLERY_BTN_H / 2;
 
-    // ── 中央ボタン（+ コンテナ内の他ボタン） ──
-    const centerW = centerBtn.offsetWidth || 50;
-    const wcbH    = wcb.offsetHeight || (centerBtn.offsetHeight || 28);
-    const wcbLeft = galleryLeft - centerW - GAP;
-    const wcbTop  = galleryCenterY - wcbH / 2;
+    // ★ アンカー: 画像削除ボタンの左端
+    //   画像削除 → 登録解除 → 💡 は横に並んでいるため、
+    //   画像削除の左端に T を揃えると「画像削除」「T」が同じ X になる。
+    let anchorLeft = null;
 
-    wcb.style.setProperty('position', 'fixed', 'important');
-    wcb.style.setProperty('left', Math.round(wcbLeft) + 'px', 'important');
-    wcb.style.setProperty('top', Math.round(wcbTop) + 'px', 'important');
-    wcb.style.setProperty('right', 'auto', 'important');
-    wcb.style.setProperty('bottom', 'auto', 'important');
-    wcb.style.setProperty('transform', 'none', 'important');
+    const delBtn = document.getElementById('gic-delete-image-button');
+    if (delBtn && delBtn.classList.contains('gic-delete-image-visible')) {
+        const r = delBtn.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0 && r.left >= 0 && r.top >= 0) {
+            anchorLeft = r.left;
+        }
+    }
+    if (anchorLeft === null) {
+        const unregBtn = document.getElementById('gic-unregister-button');
+        if (unregBtn && unregBtn.classList.contains('gic-unregister-visible')) {
+            const r = unregBtn.getBoundingClientRect();
+            if (r.width > 0 && r.height > 0 && r.left >= 0 && r.top >= 0) {
+                anchorLeft = r.left;
+            }
+        }
+    }
+    // 画像削除/登録解除が非表示の時:
+    //   「画像削除(≒90px) + gap(5) + 登録解除(≒90px) + gap(5)」分を引いた位置
+    if (anchorLeft === null) {
+        anchorLeft = toggleRect.left - 174;
+        if (anchorLeft < 4) anchorLeft = 4;
+    }
 
-    // ── T ボタン（中央の左隣） ──
+    // ── T ボタン ──
     const restoreW = restoreBtn.offsetWidth || 32;
     const restoreH = restoreBtn.offsetHeight || 32;
-    const restoreLeft = wcbLeft - restoreW - GAP;
+    const restoreLeft = anchorLeft;
     const restoreTop  = galleryCenterY - restoreH / 2;
 
     restoreBtn.style.setProperty('position', 'fixed', 'important');
@@ -386,6 +397,19 @@ function applyWindowControlButtonsLayout() {
     restoreBtn.style.setProperty('right', 'auto', 'important');
     restoreBtn.style.setProperty('bottom', 'auto', 'important');
     restoreBtn.style.setProperty('transform', 'none', 'important');
+
+    // ── 中央ボタン（T の右隣） ──
+    const wcbW = wcb.offsetWidth || centerBtn.offsetWidth || 50;
+    const wcbH = wcb.offsetHeight || (centerBtn.offsetHeight || 28);
+    const wcbLeft = restoreLeft + restoreW + GAP;
+    const wcbTop  = galleryCenterY - wcbH / 2;
+
+    wcb.style.setProperty('position', 'fixed', 'important');
+    wcb.style.setProperty('left', Math.round(wcbLeft) + 'px', 'important');
+    wcb.style.setProperty('top', Math.round(wcbTop) + 'px', 'important');
+    wcb.style.setProperty('right', 'auto', 'important');
+    wcb.style.setProperty('bottom', 'auto', 'important');
+    wcb.style.setProperty('transform', 'none', 'important');
 }
 
 // 【変更後】
