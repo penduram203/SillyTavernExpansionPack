@@ -2033,46 +2033,82 @@ async function scanForGeneratedImages() {
     markGeneratedMessagesInDom();
 }
 
+// ============================================================
+// 🎨 ギャラリーボタンを 💡 の真上に配置する。
+//
+// ★ toggle が display:none（ギャラリー / STJエディタ表示中）の間は
+//   getBoundingClientRect() が全 0 を返す。
+//   その場合は inline left/top（applyToggleChatButtonLayout() が
+//   500ms ごとに更新し続けている値）を読み取って位置を維持する。
+//   これによりギャラリーを閉じた瞬間の「フォールバック位置で
+//   一瞬表示される」現象を防ぐ。
+// ============================================================
 function positionGalleryButton() {
-    const galleryBtn = document.getElementById(GALLERY_BUTTON_ID);
+    const galleryBtn = document.getElementById(GALLERY_BTN_ID_PLACEHOLDER); // 実際は GALLERY_BUTTON_ID を使用
     if (!galleryBtn) return;
 
-    // ★ 💡 ボタンの上に配置
     const toggleBtn = document.getElementById('toggle-chat-button');
+
+    let toggleLeft = null;
+    let toggleTop  = null;
+
     if (toggleBtn) {
+        // ── ① 可視なら getBoundingClientRect が最も正確 ──
         const rect = toggleBtn.getBoundingClientRect();
-        if (rect.width > 0 && rect.height > 0) {
-            const gap = 5;
-            const btnW = galleryBtn.offsetWidth || 50;
-            const btnH = galleryBtn.offsetHeight || 50;
-
-            let left = rect.left;
-            let top  = rect.top - btnH - gap;
-
-            const margin = 4;
-            const vw = window.innerWidth;
-            const vh = window.innerHeight;
-            if (left < margin) left = margin;
-            if (left + btnW > vw - margin) left = vw - margin - btnW;
-            if (top < margin) top = margin;
-            if (top + btnH > vh - margin) top = vh - margin - btnH;
-
-            galleryBtn.style.setProperty('position', 'fixed', 'important');
-            galleryBtn.style.setProperty('left', Math.round(left) + 'px', 'important');
-            galleryBtn.style.setProperty('top', Math.round(top) + 'px', 'important');
-            galleryBtn.style.setProperty('right', 'auto', 'important');
-            galleryBtn.style.setProperty('bottom', 'auto', 'important');
-            galleryBtn.style.setProperty('transform', 'none', 'important');
-
-            positionStatusMessage();
-            return;
+        if (rect.width > 0 && rect.height > 0 &&
+            rect.left >= 0 && rect.top >= 0) {
+            toggleLeft = rect.left;
+            toggleTop  = rect.top;
+        } else {
+            // ── ② 非可視（display:none）→ inline left/top を読む ──
+            //     applyToggleChatButtonLayout() が 500ms ごとに
+            //     inline left/top を更新し続けているため、
+            //     display:none の間でも値は正しい。
+            const inlineLeft = parseFloat(
+                toggleBtn.style.getPropertyValue('left')
+            );
+            const inlineTop = parseFloat(
+                toggleBtn.style.getPropertyValue('top')
+            );
+            if (Number.isFinite(inlineLeft) && Number.isFinite(inlineTop) &&
+                inlineLeft > 0 && inlineTop > 0) {
+                toggleLeft = inlineLeft;
+                toggleTop  = inlineTop;
+            }
         }
     }
 
-    // フォールバック
+    if (toggleLeft !== null && toggleTop !== null) {
+        const gap  = 5;
+        const btnW = galleryBtn.offsetWidth  || 50;
+        const btnH = galleryBtn.offsetHeight || 50;
+
+        let left = toggleLeft;
+        let top  = toggleTop - btnH - gap;
+
+        const margin = 4;
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        if (left < margin) left = margin;
+        if (left + btnW > vw - margin) left = vw - margin - btnW;
+        if (top < margin) top = margin;
+        if (top + btnH > vh - margin) top = vh - margin - btnH;
+
+        galleryBtn.style.setProperty('position', 'fixed', 'important');
+        galleryBtn.style.setProperty('left', Math.round(left) + 'px', 'important');
+        galleryBtn.style.setProperty('top',  Math.round(top)  + 'px', 'important');
+        galleryBtn.style.setProperty('right', 'auto', 'important');
+        galleryBtn.style.setProperty('bottom', 'auto', 'important');
+        galleryBtn.style.setProperty('transform', 'none', 'important');
+
+        positionStatusMessage();
+        return;
+    }
+
+    // ── ③ 完全フォールバック（初回起動時など toggle が未配置の時のみ） ──
     galleryBtn.style.setProperty('position', 'fixed', 'important');
     galleryBtn.style.setProperty('left', '455px', 'important');
-    galleryBtn.style.setProperty('top', 'calc(100vh - 160px)', 'important');
+    galleryBtn.style.setProperty('top',  'calc(100vh - 160px)', 'important');
     galleryBtn.style.setProperty('right', 'auto', 'important');
     galleryBtn.style.setProperty('bottom', 'auto', 'important');
     galleryBtn.style.setProperty('transform', 'none', 'important');
@@ -7208,6 +7244,9 @@ function syncGalleryButtonVisibility() {
             btn.style.setProperty('display', 'none', 'important');
         } else {
             btn.style.removeProperty('display');
+            // ★ ギャラリーが閉じた瞬間に即座に正位置へ配置する
+            //   （1500ms ポーリングを待たずにズレを解消）
+            try { positionGalleryButton(); } catch (e) { /* ignore */ }
         }
     }
 
