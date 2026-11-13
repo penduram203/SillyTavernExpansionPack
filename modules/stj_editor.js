@@ -3956,13 +3956,22 @@ async function handleImageGeneratedForKeyword(e) {
         console.log(`[STJ Editor] 🆕 セル自動作成（画像生成時）: "${entryKey}"`);
     }
 
+    // ★ フルパス形式で保存する（image_display_extension の他エントリと統一）
+    const fullPath = `user/images/${charName}/${fileName}`;
     const currentList = normalizeCellImages(imageMap[entryKey]);
-    if (currentList.includes(fileName)) {
+
+    // ★ 重複チェック: フルパス・ファイル名どちらの形式でも一致判定
+    const isDuplicate = currentList.some(p => {
+        if (typeof p !== 'string') return false;
+        const base = p.split('/').pop().split('?')[0].split('#')[0];
+        try { return decodeURIComponent(base) === fileName; } catch (err) { return base === fileName; }
+    });
+    if (isDuplicate) {
         console.debug(`[STJ Editor] 画像 "${fileName}" は既に登録済み`);
         return;
     }
 
-    currentList.push(fileName);
+    currentList.push(fullPath);
     imageMap[entryKey] = currentList;
 
     saveImageMapToCharData(charName, imageMap);
