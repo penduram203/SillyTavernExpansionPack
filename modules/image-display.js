@@ -1042,6 +1042,18 @@
         } catch (error) { return false; }
     }
 
+    // ★ 合体モードで生成された画像の「未表示マーク」
+    //   _getBagState で新規画像のフラグを 0 で開始するために使う。
+    const _combinedModeGeneratedSrcs = new Set();
+
+    function markGeneratedButNotShown(fullPath) {
+        if (typeof fullPath !== 'string') return;
+        const trimmed = fullPath.trim();
+        if (!trimmed) return;
+        _combinedModeGeneratedSrcs.add(trimmed);
+        console.debug(`[ImageDisplay] 🔖 合体モード生成画像をマーク: ${trimmed.split('/').pop()}`);
+    }
+    
     // ============================================================
     // ★ シャッフルバッグ方式の状態管理
     //   キーワード（または '__default__' などの固定キー）ごとに
@@ -1051,7 +1063,7 @@
     //   - 画像リストが減った場合、消えた画像のフラグは自動的に破棄
     // ============================================================
     const _bagState = new Map();
-
+    
     function _getBagState(key, validSources) {
         const sig = validSources.join('\x1f');
         let state = _bagState.get(key);
@@ -1064,7 +1076,13 @@
                     if (state.flags.has(src)) {
                         newFlags.set(src, state.flags.get(src));
                     } else {
-                        newFlags.set(src, 1);
+                        // ★ 合体モードで生成された画像は「未表示（0）」で開始
+                        //   それ以外（手動追加・背景生成モード）は「既に表示済み（1）」
+                        const wasCombined = _combinedModeGeneratedSrcs.has(src);
+                        if (wasCombined) {
+                            _combinedModeGeneratedSrcs.delete(src);
+                        }
+                        newFlags.set(src, wasCombined ? 0 : 1);
                     }
                 }
             } else {
@@ -1314,6 +1332,11 @@
     }
 
     async function updateImage() {
+        // ★ 合体モード準備中（5秒間）は画像更新をスキップ
+        if (window.GicApi?.isCombinedPreparing?.() === true) {
+            console.debug('[ImageDisplay] 合体モード準備中のため image 更新をスキップ');
+            return;
+        }
         // ★ バトルモード中の背景画像ロック
         if (isBattleModeActive()) {
             // バトルモード中: ロックして同じ画像を維持
@@ -1365,6 +1388,23 @@
 
     const safeUpdateImage = debounce(() => { updateImage(); }, 50);
 
+    // ============================================================
+    // ★ 合体モード: 現在のキーワードに対応する事前登録画像を選んで表示
+    //   - _lastSentKeywordImage をクリアしてから最新メッセージを再スキャン
+    //   - findLastKeywordImage() で該当キーワードの画像を取得（bag state 経由で半ランダム選択）
+    //   - updateImageWithUrl() で即座に表示
+    // ============================================================
+    async function pickAndShowCurrentKeyword() {
+        _lastSentKeywordImage = null;
+        invalidateMatchCache();
+        const matchedUrl = findLastKeywordImage();
+        if (matchedUrl) {
+            _lastSentKeywordImage = matchedUrl;
+            return updateImageWithUrl(matchedUrl);
+        }
+        return Promise.resolve();
+    }
+    
     async function handleMediaError(element, src) {
         if (isOverrideActive && overrideImageUrl && src === overrideImageUrl) {
             clearOverrideState({ save: true, reason: 'override画像の読み込み失敗' });
@@ -1393,6 +1433,8 @@
             const target = e.target;
             if (!target || target.id !== 'send_textarea') return;
             if (currentTextMode !== 'user') return;
+            // ★ 合体モード時は gic_lorebook.js が制御するため介入しない
+            if (window.GicApi?.isCombinedMode?.() === true) return;
             const text = target.value;
             if (!text || !text.trim()) return;
             const matchedUrl = findMatchingImageUrl(text);
@@ -1406,6 +1448,8 @@
             const btn = e.target && e.target.closest ? e.target.closest('#send_but') : null;
             if (!btn) return;
             if (currentTextMode !== 'user') return;
+            // ★ 合体モード時は gic_lorebook.js が制御するため介入しない
+            if (window.GicApi?.isCombinedMode?.() === true) return;
             const textarea = document.querySelector('#send_textarea');
             if (!textarea) return;
             const text = textarea.value;
@@ -2454,6 +2498,8 @@
         lockBattleImage,
         unlockBattleImage,
         isBattleImageLocked: () => !!_battleImageLock,
+        markGeneratedButNotShown,       // ★
+        pickAndShowCurrentKeyword,      // ★
     };
     console.log("✅ Image Display Extension API を window.ImageDisplayExtension に公開しました");
 })();
