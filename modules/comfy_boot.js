@@ -21,78 +21,86 @@
 //      {"type":"execution_success", ...}              → 完了
 //      {"type":"executing","data":{"node":null}}      → プロンプト完了
 //
-//    gic.js / status_indicator.js はこのイベントを購読する。
+//    ★ gic.js は最初の import で comfy_boot.js を読み込むため、
+//      この IIFE が例外を投げると GIC 全体が読み込まれなくなる。
+//      必ず try/catch で保護する。
 // ============================================================
-
 (function installComfyWsProgressInterceptor() {
     if (window.__gicComfyWsPatched) return;
     window.__gicComfyWsPatched = true;
 
-    const OrigWebSocket = window.WebSocket;
-    if (!OrigWebSocket) return;
+    try {
+        const OrigWebSocket = window.WebSocket;
+        if (!OrigWebSocket) return;
 
-    function isComfyWsUrl(wsUrl) {
-        try {
-            const u = new URL(wsUrl, window.location.origin);
-            // 直接接続 (ws://host:port/ws?clientId=...) も
-            // プロキシ (ws://host/api/sd/comfy/ws) も検出
-            return /\/ws(\/|$|\?)/.test(u.pathname);
-        } catch (e) { return false; }
-    }
+        function isComfyWsUrl(wsUrl) {
+            try {
+                const u = new URL(wsUrl, window.location.origin);
+                return /\/ws(\/|$|\?)/.test(u.pathname);
+            } catch (e) { return false; }
+        }
 
-    function dispatch(type, detail) {
-        try {
-            window.dispatchEvent(new CustomEvent(type, { detail }));
-        } catch (e) { /* ignore */ }
-    }
+        function dispatch(type, detail) {
+            try {
+                window.dispatchEvent(new CustomEvent(type, { detail }));
+            } catch (e) { /* ignore */ }
+        }
 
-    function handleMessage(raw, url) {
-        let data;
-        try { data = JSON.parse(raw); } catch (e) { return; }
-        if (!data || typeof data !== 'object') return;
+        function handleMessage(raw, url) {
+            let data;
+            try { data = JSON.parse(raw); } catch (e) { return; }
+            if (!data || typeof data !== 'object') return;
 
-        const t = data.type;
-        const d = data.data || {};
+            const t = data.type;
+            const d = data.data || {};
 
-        if (t === 'progress') {
-            const value = Number(d.value);
-            const max   = Number(d.max);
-            if (Number.isFinite(value) && Number.isFinite(max) && max > 0) {
-                dispatch('comfyui-progress', { value, max, url });
+            if (t === 'progress') {
+                const value = Number(d.value);
+                const max   = Number(d.max);
+                if (Number.isFinite(value) && Number.isFinite(max) && max > 0) {
+                    dispatch('comfyui-progress', { value, max, url });
+                }
+            } else if (t === 'execution_start') {
+                dispatch('comfyui-progress-start', { url });
+            } else if (t === 'execution_success' ||
+                       t === 'execution_error' ||
+                       t === 'execution_interrupted') {
+                dispatch('comfyui-progress-end', { url, reason: t });
+            } else if (t === 'executing' && (d.node === null || d.node === undefined)) {
+                dispatch('comfyui-progress-end', { url, reason: 'executing-null' });
             }
-        } else if (t === 'execution_start') {
-            dispatch('comfyui-progress-start', { url });
-        } else if (t === 'execution_success' ||
-                   t === 'execution_error' ||
-                   t === 'execution_interrupted') {
-            dispatch('comfyui-progress-end', { url, reason: t });
-        } else if (t === 'executing' && (d.node === null || d.node === undefined)) {
-            // ComfyUI はプロンプト完了時に executing/node=null を送る
-            dispatch('comfyui-progress-end', { url, reason: 'executing-null' });
         }
-    }
 
-    function GicWebSocket(url, protocols) {
-        const ws = protocols !== undefined
-            ? new OrigWebSocket(url, protocols)
-            : new OrigWebSocket(url);
+        function GicWebSocket(url, protocols) {
+            const ws = protocols !== undefined
+                ? new OrigWebSocket(url, protocols)
+                : new OrigWebSocket(url);
 
-        if (isComfyWsUrl(url)) {
-            console.log(`[GIC-Boot] ComfyUI WS を検出 → 進捗を監視: ${url}`);
-            ws.addEventListener('message', (e) => handleMessage(e.data, url));
+            if (isComfyWsUrl(url)) {
+                try {
+                    console.log(`[GIC-Boot] ComfyUI WS を検出 → 進捗を監視: ${url}`);
+                    ws.addEventListener('message', (e) => handleMessage(e.data, url));
+                } catch (e) { /* ignore */ }
+            }
+            return ws;
         }
-        return ws;
+
+        // instanceof 互換のため prototype / 継承チェーンを引き継ぐ
+        GicWebSocket.prototype = OrigWebSocket.prototype;
+        Object.setPrototypeOf(GicWebSocket, OrigWebSocket);
+
+        // ★ static constants (CONNECTING/OPEN/CLOSING/CLOSED) は
+        //   Object.setPrototypeOf で OrigWebSocket から継承されるため
+        //   明示的な代入は不要。
+        //   （strict モードでは read-only への代入が TypeError になるので
+        //     代入自体を行わないこと）
+
+        window.WebSocket = GicWebSocket;
+        console.log('[GIC-Boot] ComfyUI WS 進捗インターセプタを設置');
+    } catch (e) {
+        // ★ ここで失敗しても GIC 本体の動作には影響させない
+        console.warn('[GIC-Boot] ComfyUI WS 進捗インターセプタ設置失敗:', e);
     }
-
-    GicWebSocket.prototype = OrigWebSocket.prototype;
-    Object.setPrototypeOf(GicWebSocket, OrigWebSocket);
-    GicWebSocket.CONNECTING = OrigWebSocket.CONNECTING;
-    GicWebSocket.OPEN       = OrigWebSocket.OPEN;
-    GicWebSocket.CLOSING    = OrigWebSocket.CLOSING;
-    GicWebSocket.CLOSED     = OrigWebSocket.CLOSED;
-
-    window.WebSocket = GicWebSocket;
-    console.log('[GIC-Boot] ComfyUI WS 進捗インターセプタを設置');
 })();
 
 (function installComfyBoot() {
