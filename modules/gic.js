@@ -418,14 +418,12 @@ function getImageNegativePrompt(charName, fileName) {
 
 // ===== 定数 =====
 const MODULE_NAME      = 'generate_image_controller';
-const BUTTON_ID        = 'gic-release-override-button';
 const UNREGISTER_BUTTON_ID = 'gic-unregister-button';
 const DELETE_IMAGE_BUTTON_ID = 'gic-delete-image-button';
 const DELETE_CONFIRM_DIALOG_ID = 'gic-delete-confirm-dialog';
 const GALLERY_BUTTON_ID = 'gic-open-gallery-button';
 const INPUT_LOCK_CLASS = 'gic-input-locked';
 const COMBINED_PREP_DELAY_MS = 5000;
-const HIDE_CLASS       = 'gic-hidden-by-text-styling';
 const HIDDEN_MES_CLASS = 'gic-hidden-message';
 
 const COMFY_CACHE_KEY = 'gic_comfyUnavailable';
@@ -860,19 +858,6 @@ function getCurrentCharacterName() {
 
     return null;
 }
-
-// ===== スタイル注入 =====
-(function injectGicStyle() {
-    if (document.getElementById('gic-injected-style')) return;
-    const style = document.createElement('style');
-    style.id = 'gic-injected-style';
-    style.textContent = `
-        #${BUTTON_ID}.${HIDE_CLASS} {
-            display: none !important;
-        }
-    `;
-    document.head.appendChild(style);
-})();
 
 (function injectGalleryLayoutStyle() {
     if (document.getElementById('gic-gallery-layout-style')) return;
