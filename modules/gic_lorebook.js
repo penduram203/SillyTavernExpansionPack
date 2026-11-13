@@ -960,20 +960,128 @@ async function executeSd(prompt, negativePrompt = null, resolution = null) {
     }
 }
 
+// ============================================================
+// ★ 合体モード: 事前登録画像の有無チェック
+// ============================================================
+function checkPreRegisteredImages(worldName, entry) {
+    try {
+        const ctx = getContext();
+        const char = ctx?.characters?.[ctx?.characterId];
+        if (!char) return false;
+
+        const entryKey = extractEntryKey(entry);
+        if (!entryKey) return false;
+
+        const ext = char?.data?.extensions?.image_display_extension;
+        if (!ext || typeof ext !== 'object') return false;
+
+        const val = ext[entryKey];
+        if (!val) return false;
+
+        const list = Array.isArray(val) ? val : [val];
+        return list.some(p => typeof p === 'string' && p.trim());
+    } catch (e) {
+        return false;
+    }
+}
+
+// ============================================================
+// ★ 画像登録完了を待つ（合体モード）
+// ============================================================
+function waitForImageRegistration(entryKey, timeoutMs = 30000) {
+    return new Promise((resolve) => {
+        const timer = setTimeout(() => {
+            window.removeEventListener('gic-image-registration-completed', handler);
+            console.warn(`[GIC-Lore] 画像登録待ちタイムアウト: ${entryKey}`);
+            resolve(false);
+        }, timeoutMs);
+
+        function handler(e) {
+            if (e.detail?.entryKey === entryKey) {
+                clearTimeout(timer);
+                window.removeEventListener('gic-image-registration-completed', handler);
+                resolve(true);
+            }
+        }
+
+        window.addEventListener('gic-image-registration-completed', handler);
+    });
+}
+
+// ============================================================
+// ★ 合体モード: 5秒後に事前登録画像を表示しつつ、裏で生成
+// ============================================================
+async function processChoiceCombined(worldName, entry, prompt, negativePrompt, resolution, hasPreRegistered, entryKey) {
+    if (hasPreRegistered) {
+        console.log(`[GIC-Lore] 🎨 合体モード（事前登録あり）: 5秒後に表示、裏で生成`);
+
+        // 画像表示をロック（5秒間は前の画像を維持）
+        try { window.GicApi?.setCombinedPrepActive?.(true); } catch (e) { /* ignore */ }
+
+        // 生成をバックグラウンド開始
+        const sdPromise = executeSd(prompt, negativePrompt, resolution);
+
+        // 5秒待機
+        await new Promise(r => setTimeout(r, 5000));
+
+        // 準備中フラグ解除 → 事前登録画像を表示
+        try { window.GicApi?.setCombinedPrepActive?.(false); } catch (e) { /* ignore */ }
+        try {
+            await window.ImageDisplayExtension?.pickAndShowCurrentKeyword?.();
+            console.log(`[GIC-Lore] 🖼️ 事前登録画像を表示`);
+        } catch (e) {
+            console.warn('[GIC-Lore] 事前登録画像の表示に失敗:', e);
+        }
+
+        // 入力ロック
+        try { window.GicApi?.lockUserInput?.('combined-wait'); } catch (e) { /* ignore */ }
+
+        // 生成完了待ち
+        try {
+            await sdPromise;
+        } catch (e) {
+            console.warn('[GIC-Lore] SD 生成エラー:', e);
+        }
+
+        // 画像登録完了待ち
+        await waitForImageRegistration(entryKey, 30000);
+
+        // 入力ロック解除
+        try { window.GicApi?.unlockUserInput?.('combined-done'); } catch (e) { /* ignore */ }
+
+        console.log(`[GIC-Lore] ✅ 合体モード完了`);
+    } else {
+        console.log(`[GIC-Lore] 🎨 合体モード（事前登録なし）: 生成を待機`);
+
+        // 入力ロック（生成完了まで）
+        try { window.GicApi?.lockUserInput?.('combined-fallback-wait'); } catch (e) { /* ignore */ }
+
+        try {
+            await executeSd(prompt, negativePrompt, resolution);
+        } finally {
+            // 登録完了を待ってから表示更新
+            await waitForImageRegistration(entryKey, 30000);
+            try {
+                await window.ImageDisplayExtension?.pickAndShowCurrentKeyword?.();
+                console.log(`[GIC-Lore] 🖼️ 生成画像を表示`);
+            } catch (e) { /* ignore */ }
+
+            try { window.GicApi?.unlockUserInput?.('combined-fallback-done'); } catch (e) { /* ignore */ }
+        }
+    }
+}
+
 // ===== メイン処理 =====
 async function processChoice(force = false) {
     if (!settings.enabled) return;
 
-    // ★ 事前設定モードでは /sd を実行しない
+    // ★ 事前設定モードでは /sd を実行しない（合体モードは実行する）
     try {
-        let isOverride = false;
-        if (typeof window.GicApi?.isOverrideMode === 'function') {
-            isOverride = isOverride || window.GicApi.isOverrideMode() === true;
-        }
-        if (typeof window.ImageDisplayExtension?.isOverride === 'function') {
-            isOverride = isOverride || window.ImageDisplayExtension.isOverride() === true;
-        }
-        if (!isOverride) {
+        let shouldGenerate = false;
+        if (window.GicApi?.isOverrideMode?.() === true) shouldGenerate = true;
+        if (window.GicApi?.isCombinedMode?.() === true) shouldGenerate = true;
+        if (window.ImageDisplayExtension?.isOverride?.() === true) shouldGenerate = true;
+        if (!shouldGenerate) {
             if (settings.verbose) console.log('[GIC-Lore] 事前設定モードのため /sd をスキップ');
             return;
         }
@@ -1145,7 +1253,14 @@ async function processChoice(force = false) {
             console.log(`[GIC-Lore] 生成コンテキスト設定: entryKey="${_pendingGenerationContext.entryKey}", resolution=${resolution || '(未設定)'}, templateIndex=${pickedTemplate?.index ?? '(旧データ)'}`);
         }
 
-        // ★ 画像生成開始を通知（status_indicator.js が「画像生成中…」を表示）
+        // ★ 合体モード判定
+        const isCombinedMode = (window.GicApi?.isCombinedMode?.() === true);
+        let hasPreRegistered = false;
+        if (isCombinedMode) {
+            hasPreRegistered = checkPreRegisteredImages(worldName, entry);
+        }
+
+        // 生成開始通知（preparing フラグで 画像準備中/画像生成中 を切替）
         try {
             window.dispatchEvent(new CustomEvent('gic-image-generation-started', {
                 detail: {
@@ -1155,14 +1270,21 @@ async function processChoice(force = false) {
                     negativePrompt,
                     resolution,
                     templateIndex: _pendingGenerationContext.templateIndex,
+                    preparing: isCombinedMode && hasPreRegistered,
                 },
             }));
         } catch (e) { /* ignore */ }
 
         try {
-            await executeSd(prompt, negativePrompt, resolution);
+            if (isCombinedMode) {
+                await processChoiceCombined(
+                    worldName, entry, prompt, negativePrompt, resolution,
+                    hasPreRegistered, _pendingGenerationContext.entryKey
+                );
+            } else {
+                await executeSd(prompt, negativePrompt, resolution);
+            }
         } finally {
-            // ★ 画像生成終了を通知（成功・失敗にかかわらず必ず発火）
             try {
                 window.dispatchEvent(new CustomEvent('gic-image-generation-ended', {
                     detail: { entryKey: _pendingGenerationContext?.entryKey },
