@@ -97,15 +97,6 @@
         sortedKeywordEntriesCacheSource = null;
     }
 
-    function clearOverrideState(options = {}) {
-        const { save = true, reason = '' } = options;
-        const wasActive = isOverrideActive;
-        isOverrideActive = false;
-        overrideImageUrl = null;
-        if (reason) console.warn(`🔄 override状態を解除: ${reason} (旧 active=${wasActive})`);
-        if (save) try { saveDisplayState(); } catch (e) { /* ignore */ }
-    }
-
     function debounce(func, wait) {
         let timeout;
         return function executedFunction(...args) {
@@ -1211,14 +1202,6 @@
             mediaContainer.style.removeProperty('display');
         }
 
-        // override モードブロック
-        if (isOverrideActive && overrideImageUrl) {
-            if (targetUrl !== overrideImageUrl) {
-                console.log(`[ImageDisplay] 🛡️ overrideモード中のため切替をブロック: ${String(targetUrl).slice(0, 120)}`);
-                return;
-            }
-        }
-
         if (!targetUrl || typeof targetUrl !== 'string' || !targetUrl.trim()) {
             const fallback = getRandomImageSource(currentImageMap.default, '__default__') || currentImageMap.default;
             if (fallback && fallback !== targetUrl && typeof fallback === 'string' && fallback.trim()) {
@@ -1342,7 +1325,7 @@
         //   一度 true になると永久に復帰不能になる catch-22 が発生するため。
         //   実際の判定は updateImageWithUrl 内で行う。
 
-        if (currentTextMode === 'user' && _lastSentKeywordImage) {
+        if (_lastSentKeywordImage) {
             if (currentImageUrl !== _lastSentKeywordImage) {
                 await updateImageWithUrl(_lastSentKeywordImage);
             }
@@ -1424,13 +1407,11 @@
         }, true);
     }
 
-    textModeButton.addEventListener('click', toggleTextMode);
-
     function setupChatDomObserver() {
         const chatContainer = document.querySelector('#chat');
         if (!chatContainer) return;
         if (chatDomObserver) chatDomObserver.disconnect();
-        const debouncedUpdate = debounce(() => { handleStreamingUpdate(); safeUpdateImage(); }, 150);
+        const debouncedUpdate = debounce(() => { safeUpdateImage(); }, 150);
         chatDomObserver = new MutationObserver(() => debouncedUpdate());
         chatDomObserver.observe(chatContainer, { childList: true, subtree: true, characterData: true });
     }
@@ -1891,14 +1872,6 @@
         } else { setDefaultDisplayState(); }
     }
 
-    async function validateRestoredOverride() {
-        if (!isOverrideActive || !overrideImageUrl) return;
-        try {
-            const exists = await checkMediaExists(overrideImageUrl);
-            if (!exists) { clearOverrideState({ save: true }); safeUpdateImage(); }
-        } catch (e) { /* ignore */ }
-    }
-
     function setDefaultDisplayState() {
         preNormalState = { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT, left: DEFAULT_LEFT, top: DEFAULT_TOP };
         imageContainer.style.backgroundColor = DEFAULT_BG_COLOR;
@@ -1980,7 +1953,6 @@
     }
 
     restoreDisplayState();
-    validateRestoredOverride();
 
     colorPicker.addEventListener('input', () => {
         imageContainer.style.backgroundColor = colorPicker.value;
@@ -2124,7 +2096,6 @@
                 const safeOn = (eventType, handler) => {
                     if (eventType && typeof eventSource.on === 'function') eventSource.on(eventType, handler);
                 };
-                safeOn(eventTypes.STREAM_TOKEN_RECEIVED, handleStreamingUpdate);
             const immediateUpdate = () => updateImage();
             safeOn(eventTypes.CHARACTER_MESSAGE_RENDERED, immediateUpdate);
             safeOn(eventTypes.USER_MESSAGE_RENDERED, immediateUpdate);
