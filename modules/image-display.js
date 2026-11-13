@@ -1354,6 +1354,17 @@
             _lastSentKeywordImage = matchedUrl;
             return updateImageWithUrl(matchedUrl);
         }
+        // ★ マッチなし → デフォルトへフォールバック（従来は何もしなかった）
+        const fallback = getRandomImageSource(currentImageMap.default, '__default__')
+            || currentImageMap.default;
+        if (fallback && typeof fallback === 'string' && fallback.trim()) {
+            console.log(`[ImageDisplay] 一致なし → デフォルトへフォールバック: ${fallback}`);
+            return updateImageWithUrl(fallback);
+        }
+        // デフォルトも無い → 表示クリア
+        console.log('[ImageDisplay] 一致なし・デフォルトなし → 表示クリア');
+        mediaContainer.innerHTML = '';
+        currentImageUrl = null;
         return Promise.resolve();
     }
     
@@ -2155,6 +2166,80 @@
             });
         });
 
+        // ★ 削除/登録解除された画像を即座に使用中止し、
+        //   キーワードマッピングから次の画像を選んで表示する
+        window.addEventListener('gic-image-removed', (e) => {
+            const { charName, removedFileName, imageMap } = e.detail || {};
+            if (!charName || !imageMap) return;
+            if (charName !== currentCharacter) return;
+
+            // ── ① マップを即時更新（detect を待たない） ──
+            currentImageMap = imageMap;
+            imageMapCache.set(charName, imageMap);
+            invalidateAllCaches();
+
+            // ── ② 現在表示中の画像が削除対象かチェック ──
+            const currentFile = currentImageUrl
+                ? extractFileNameForCleanup(currentImageUrl)
+                : null;
+            const isCurrentRemoved = !!(currentFile && removedFileName &&
+                currentFile === removedFileName);
+
+            if (!isCurrentRemoved) {
+                console.log(
+                    `[ImageDisplay] 🗑️ 別画像の削除を検知（表示継続）: ` +
+                    `表示中="${currentFile}", 削除="${removedFileName}"`
+                );
+            } else {
+                console.log(
+                    `[ImageDisplay] 🗑️ 表示中の画像が削除されました → 次の画像へ切替: ${currentFile}`
+                );
+                // ── ③ 現在画像をクリアし、キーワードマップから次の画像を選ぶ ──
+                pickAndShowCurrentKeyword().catch(err =>
+                    console.warn('[ImageDisplay] 削除後の画像切替エラー:', err)
+                );
+            }
+
+            // ── ④ バックグラウンドで detect（プリロード等） ──
+            detectImageMapExtensions(imageMap).then((detected) => {
+                if (currentCharacter === charName) {
+                    currentImageMap = detected;
+                    imageMapCache.set(charName, detected);
+                    invalidateAllCaches();
+                    preloadCharacterImages(currentImageMap);
+                }
+            }).catch(() => { /* ignore */ });
+        });
+
+        // ★ ギャラリー一括削除（gic-image-deleted）にも対応
+        //    gic.js の executeBulkDelete が発火する。
+        //    stj_editor.js が image_display_extension の更新と
+        //    lbe-image-map-updated の発火を担当するため、ここでは
+        //    _lastSentKeywordImage のクリアだけ行う。
+        window.addEventListener('gic-image-deleted', (e) => {
+            const { charName, fileNames } = e.detail || {};
+            if (!charName || !Array.isArray(fileNames) || fileNames.length === 0) return;
+            if (charName !== currentCharacter) return;
+
+            const currentFile = currentImageUrl
+                ? extractFileNameForCleanup(currentImageUrl)
+                : null;
+            if (!currentFile) return;
+
+            const isCurrentDeleted = fileNames.some(fn => fn === currentFile);
+            if (!isCurrentDeleted) return;
+
+            console.log(
+                `[ImageDisplay] 🗑️ 一括削除で表示中の画像が削除されました → 次の画像へ切替: ${currentFile}`
+            );
+
+            // stj_editor.js が後続で lbe-image-map-updated を発火するので、
+            // ここでは _lastSentKeywordImage をクリアするだけで良い。
+            // safeUpdateImage() が次のポーリングで fresh scan する。
+            _lastSentKeywordImage = null;
+            invalidateMatchCache();
+        });
+        
         // ② ST ネイティブイベント（外部編集・他経路の更新を拾う）
         try {
             const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
