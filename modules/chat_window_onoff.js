@@ -327,9 +327,11 @@ function applyToggleChatButtonLayout() {
 //   - T は「画像削除」ボタンの左端に合わせる
 //   - 中央は T の右隣
 //   - 🎨 は従来通り 💡 の真上
-//   → 中央と🎨の間に広い間隔が生まれる
-//   → 画像削除/登録解除が非表示の時は固定フォールバック
+//   - toggle が display:none の間は inline スタイルを消さない
+//     （ギャラリー / STJエディタ開閉時の一瞬のズレを防ぐ）
 // ============================================================
+let _wcbLayoutApplied = false;
+
 function applyWindowControlButtonsLayout() {
     const toggleBtn  = document.getElementById('toggle-chat-button');
     const wcb        = document.getElementById('window-control-buttons');
@@ -338,15 +340,34 @@ function applyWindowControlButtonsLayout() {
 
     if (!toggleBtn || !wcb || !restoreBtn || !centerBtn) return;
 
-    const toggleRect = toggleBtn.getBoundingClientRect();
-
-    // 💡 未配置 → CSS デフォルト位置へフォールバック
-    if (toggleRect.width <= 0 || toggleRect.height <= 0 ||
-        toggleRect.left < 0 || toggleRect.top < 0) {
+    const clearInline = () => {
         ['left', 'top', 'right', 'bottom', 'transform'].forEach(p => {
             wcb.style.removeProperty(p);
             restoreBtn.style.removeProperty(p);
         });
+    };
+
+    // ── toggle が display:none / visibility:hidden の間は触らない ──
+    //    過去に一度でも正しく配置済み(_wcbLayoutApplied)なら、
+    //    inline スタイルを保持したまま何もしない。
+    //    まだ配置したことがない場合のみ CSS デフォルトへフォールバック。
+    const toggleCs = window.getComputedStyle(toggleBtn);
+    const toggleHidden =
+        toggleCs.display === 'none' ||
+        toggleCs.visibility === 'hidden' ||
+        toggleBtn.offsetWidth === 0 ||
+        toggleBtn.offsetHeight === 0;
+
+    if (toggleHidden) {
+        if (!_wcbLayoutApplied) clearInline();
+        return;
+    }
+
+    const toggleRect = toggleBtn.getBoundingClientRect();
+    // toggle が初期状態 (-9999px 等) で未配置の場合もスキップ
+    if (toggleRect.width <= 0 || toggleRect.height <= 0 ||
+        toggleRect.left < 0 || toggleRect.top < 0) {
+        if (!_wcbLayoutApplied) clearInline();
         return;
     }
 
@@ -358,8 +379,6 @@ function applyWindowControlButtonsLayout() {
     const galleryCenterY = galleryTop + GALLERY_BTN_H / 2;
 
     // ★ アンカー: 画像削除ボタンの左端
-    //   画像削除 → 登録解除 → 💡 は横に並んでいるため、
-    //   画像削除の左端に T を揃えると「画像削除」「T」が同じ X になる。
     let anchorLeft = null;
 
     const delBtn = document.getElementById('gic-delete-image-button');
@@ -378,9 +397,8 @@ function applyWindowControlButtonsLayout() {
             }
         }
     }
-    // 画像削除/登録解除が非表示の時:
-    //   「画像削除(≒90px) + gap(5) + 登録解除(≒90px) + gap(5)」分を引いた位置
     if (anchorLeft === null) {
+        // 画像削除(≒90) + gap(5) + 登録解除(≒90) の近似幅
         anchorLeft = toggleRect.left - 174;
         if (anchorLeft < 4) anchorLeft = 4;
     }
@@ -410,7 +428,36 @@ function applyWindowControlButtonsLayout() {
     wcb.style.setProperty('right', 'auto', 'important');
     wcb.style.setProperty('bottom', 'auto', 'important');
     wcb.style.setProperty('transform', 'none', 'important');
+
+    // ★ 一度でも成功したら以降は removeProperty を呼ばない
+    _wcbLayoutApplied = true;
 }
+
+// ============================================================
+// ★ body のクラス変化（gallery-open / stj-editor-open の解除等）で
+//    即座に T/中央 を再同期する。
+//    inline スタイルは消えていないので通常は何も起きないが、
+//    念のための保険。
+// ============================================================
+(function installWcbClassSync() {
+    if (window.__wcbClassSyncInstalled) return;
+    window.__wcbClassSyncInstalled = true;
+
+    let raf = null;
+    const sync = () => {
+        raf = null;
+        try { applyWindowControlButtonsLayout(); } catch (e) { /* ignore */ }
+    };
+
+    const observer = new MutationObserver(() => {
+        if (raf !== null) return;
+        raf = requestAnimationFrame(sync);
+    });
+    observer.observe(document.body, {
+        attributes: true,
+        attributeFilter: ['class'],
+    });
+})();
 
 // 【変更後】
 setInterval(() => {
