@@ -1,7 +1,10 @@
 // stj_editor.js
 (function() {
     const MODULE_NAME = 'stj_editor';
-
+    // ★ gic.js と共有する定数（gic.js 側は独立して定義しているが、
+    //   stj_editor.js から sync 関数内で参照するためここでも定義する）
+    const UNREGISTER_EXCLUDED_KEYS = new Set(['default', 'thumbnail']);
+    
     const mediaCache = new Map();
     const MEDIA_CACHE_FALSE_TTL_MS = 3000;
     const MEDIA_CHECK_TIMEOUT_MS = 5000;
@@ -2609,15 +2612,20 @@
 
         // ── ③ クリーニング + フォーム反映 ──
         if (imageMap) {
-            // ★ 別キャラの画像エントリを先に除外（過去のバグの残留データ対策）
+            // ★ 別キャラの画像エントリを先に除外
             const cleanedMap = cleanForeignImageEntries(imageMap, charName);
-            // ★ ディスク上に存在しないファイルを除去（ローカル削除対策）
-            const existingMap = await cleanMissingImageFiles(cleanedMap, charName);
+
+            // ★ 自動の missing-file クリーンアップは無効化
+            //   ファイルが一時的に 404 になるケース（サーバー負荷、キャッシュ、
+            //   ユーザーの手動移動など）で誤ってセルから参照が消えるのを防ぐ。
+            //   明示的にクリーンアップしたい場合は window.STJEditor.cleanMissingFiles()
+            //   を手動で呼ぶ。
+            const existingMap = cleanedMap;
+
             populateFormFromImageMap(existingMap);
-            // ★ extensionSettings も同期
-            //    （loadSavedData が後から走るため、旧データで上書きされるのを防ぐ）
+            // extensionSettings も同期
             try { saveData({ silent: true }); } catch (e) { /* ignore */ }
-        } else {
+        }else {
             // ★ 空の image_display_extension が既に保存されている場合は
             //    「新規作成」ではなく「空データ（確認済み）」とログを分ける
             let hasEmptyExt = false;
@@ -2964,6 +2972,15 @@
             const nameEl = document.getElementById('stj_char_name_display');
             const charName = nameEl ? nameEl.textContent : '';
             if (!charName) return;
+
+            // ★ エディタ初期化中は完全スキップ
+            //   openExportModal → resetFormToEmpty → loadExistingJSONData の
+            //   途中で autoSave が走ると、空のフォームが CharStore に保存されて
+            //   既存の image_display_extension が上書き消去されるバグを防ぐ。
+            if (_editorLoading) {
+                console.debug('[STJ Editor] autoSave: エディタ初期化中のためスキップ');
+                return;
+            }
 
             // ★ 現在アクティブなキャラと不一致なら保存しない（別キャラへのデータ混入防止）
             try {
@@ -3841,7 +3858,9 @@ async function syncLorebookEntriesToImageMap() {
         saveImageMapToCharData(charName, imageMap);
 
         // エディタが開いていれば UI 更新
-        if (stjModalEl && stjModalEl.style.display === 'block') {
+        // ★ _editorLoading 中は populateFormFromImageMap も autoSave も実行しない
+        //   （loadExistingJSONData の途中で上書きされるのを防ぐ）
+        if (stjModalEl && stjModalEl.style.display === 'block' && !_editorLoading) {
             try {
                 populateFormFromImageMap(imageMap);
                 autoSave({ immediate: true });
