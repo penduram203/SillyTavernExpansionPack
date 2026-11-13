@@ -75,13 +75,19 @@
             items.set(key, el);
         }
         el.textContent = text;
-        el.classList.toggle('status-image', type === 'image');
-        el.classList.toggle('status-llm', type === 'llm');
-        el.classList.toggle('status-mode', type === 'mode');
+
+        // ★ 'preparing' / 'generating' は base の status-image を付与しつつ、
+        //    それぞれの修飾クラスも付ける（preparing=緑、generating=オレンジ）
+        const isImage = (type === 'image' || type === 'preparing' || type === 'generating');
+        el.classList.toggle('status-image',      isImage);
+        el.classList.toggle('status-preparing',  type === 'preparing');
+        el.classList.toggle('status-generating', type === 'generating');
+        el.classList.toggle('status-llm',        type === 'llm');
+        el.classList.toggle('status-mode',       type === 'mode');
+
         if (!el.parentNode) container.appendChild(el);
 
         resetTimer(key);
-
         container.style.display = 'flex';
     }
 
@@ -133,7 +139,9 @@
     window.addEventListener('gic-image-generation-started', (e) => {
         const preparing = e?.detail?.preparing === true;
         const text = preparing ? '画像準備中…' : '画像生成中…';
-        showStatus('image', text, 'image');
+        // ★ 準備中は 'preparing'、生成中は 'generating' を渡して CSS で差別化
+        const type = preparing ? 'preparing' : 'generating';
+        showStatus('image', text, type);
     });
     window.addEventListener('gic-image-generation-ended', () => {
         hideStatus('image');
