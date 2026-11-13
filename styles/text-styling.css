@@ -295,7 +295,7 @@ html body.no-blur #send_form #nonQRFormItems {
   display: flex !important;
   flex-direction: row !important;
   align-items: center !important;
-  gap: 6px !important;
+  gap: 0px !important;
   z-index: 15000 !important;
   pointer-events: auto !important;
   margin: 0 !important;
