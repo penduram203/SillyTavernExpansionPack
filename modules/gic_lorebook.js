@@ -1075,18 +1075,6 @@ async function processChoiceCombined(worldName, entry, prompt, negativePrompt, r
 async function processChoice(force = false) {
     if (!settings.enabled) return;
 
-    // ★ 事前設定モードでは /sd を実行しない（合体モードは実行する）
-    try {
-        let shouldGenerate = false;
-        if (window.GicApi?.isOverrideMode?.() === true) shouldGenerate = true;
-        if (window.GicApi?.isCombinedMode?.() === true) shouldGenerate = true;
-        if (window.ImageDisplayExtension?.isOverride?.() === true) shouldGenerate = true;
-        if (!shouldGenerate) {
-            if (settings.verbose) console.log('[GIC-Lore] 事前設定モードのため /sd をスキップ');
-            return;
-        }
-    } catch (e) { /* ignore */ }
-
     if (processInFlight) {
         if (settings.verbose) console.log('[GIC-Lore] 処理中のため多重呼び出しをスキップ');
         return;
@@ -1253,12 +1241,8 @@ async function processChoice(force = false) {
             console.log(`[GIC-Lore] 生成コンテキスト設定: entryKey="${_pendingGenerationContext.entryKey}", resolution=${resolution || '(未設定)'}, templateIndex=${pickedTemplate?.index ?? '(旧データ)'}`);
         }
 
-        // ★ 合体モード判定
-        const isCombinedMode = (window.GicApi?.isCombinedMode?.() === true);
-        let hasPreRegistered = false;
-        if (isCombinedMode) {
-            hasPreRegistered = checkPreRegisteredImages(worldName, entry);
-        }
+        // ★ 合体モード固定
+        const hasPreRegistered = checkPreRegisteredImages(worldName, entry);
 
         // 生成開始通知（preparing フラグで 画像準備中/画像生成中 を切替）
         try {
@@ -1270,20 +1254,16 @@ async function processChoice(force = false) {
                     negativePrompt,
                     resolution,
                     templateIndex: _pendingGenerationContext.templateIndex,
-                    preparing: isCombinedMode && hasPreRegistered,
+                    preparing: hasPreRegistered,
                 },
             }));
         } catch (e) { /* ignore */ }
 
         try {
-            if (isCombinedMode) {
-                await processChoiceCombined(
-                    worldName, entry, prompt, negativePrompt, resolution,
-                    hasPreRegistered, _pendingGenerationContext.entryKey
-                );
-            } else {
-                await executeSd(prompt, negativePrompt, resolution);
-            }
+            await processChoiceCombined(
+                worldName, entry, prompt, negativePrompt, resolution,
+                hasPreRegistered, _pendingGenerationContext.entryKey
+            );
         } finally {
             try {
                 window.dispatchEvent(new CustomEvent('gic-image-generation-ended', {
