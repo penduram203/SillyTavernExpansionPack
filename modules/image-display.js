@@ -2182,9 +2182,6 @@
         if (pollCount > 10) clearInterval(initialPoll);
     }, 1000);
 
-    setInterval(positionTextModeButton, 200);
-    window.addEventListener('resize', positionTextModeButton);
-
     function isGalleryOpen() {
         const candidates = document.querySelectorAll([
             '#gallery_container', '.gallery-container', '.gallery_container',
@@ -2210,10 +2207,6 @@
         if (galleryOpen === lastGalleryState) return;
         lastGalleryState = galleryOpen;
         controlContainer.style.display = galleryOpen ? 'none' : 'flex';
-        const textModeBtn = document.getElementById('text-mode-button');
-        if (textModeBtn) textModeBtn.style.display = galleryOpen ? 'none' : '';
-        const gicButton = document.getElementById('gic-release-override-button');
-        if (gicButton) gicButton.style.display = galleryOpen ? 'none' : '';
     }
 
     function setupGalleryObserver() {
@@ -2224,7 +2217,6 @@
     }
 
     setupGalleryObserver();
-    requestAnimationFrame(positionTextModeButton);
 
     setTimeout(() => {
         try {
