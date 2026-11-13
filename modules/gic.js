@@ -8471,6 +8471,17 @@ async function unregisterCurrentImage() {
             detail: { charName, imageMap: newExt }
         }));
 
+        // ★ 削除/登録解除された画像を即座に背景使用中止 → 次の画像へ切替
+        //   （deleteCurrentImage も unregisterCurrentImage を呼ぶため、両方をカバー）
+        window.dispatchEvent(new CustomEvent('gic-image-removed', {
+            detail: {
+                charName,
+                removedFileName: fileName,
+                removedKeys: [...removedKeys],
+                imageMap: newExt,
+            }
+        }));
+
         console.log(`[GIC] ✅ 登録解除: "${fileName}" を [${removedKeys.join(', ')}] から削除`);
 
         // ★ 状態更新
