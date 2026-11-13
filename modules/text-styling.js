@@ -695,7 +695,7 @@ function initTextStyling() {
         const manualSettingsButton = document.createElement('button');
         manualSettingsButton.id = 'manual-settings-button';
         manualSettingsButton.className = 'window-control-button';
-        manualSettingsButton.textContent = '位置・サイズの設定';
+        manualSettingsButton.textContent = 'サイズ設定';
         manualSettingsButton.title = '背景画像ウィンドウの位置とサイズを設定';
         manualSettingsButton.style.display = 'none';
         manualSettingsButton.addEventListener('click', (e) => {
