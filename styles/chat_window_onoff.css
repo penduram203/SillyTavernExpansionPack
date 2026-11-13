@@ -238,3 +238,29 @@ html body.chat-window-is-hidden #sheldheader {
         pointer-events: auto !important;
     }
 }
+
+/* ============================================================ */
+/* (3c) 統合ホバーゾーン: 全ボタン同時表示                       */
+/*      body.gic-all-buttons-visible は chat_window_onoff.js が  */
+/*      全ボタンを内包する矩形領域へのマウス侵入を検知して付与。  */
+/* ============================================================ */
+body.gic-all-buttons-visible #toggle-chat-button,
+body.gic-all-buttons-visible #gic-open-gallery-button,
+body.gic-all-buttons-visible #restore-panel-button,
+body.gic-all-buttons-visible #center-button,
+body.gic-all-buttons-visible #manual-settings-button,
+body.gic-all-buttons-visible #gic-unregister-button.gic-unregister-visible,
+body.gic-all-buttons-visible #gic-delete-image-button.gic-delete-image-visible {
+    opacity: 0.3 !important;
+    pointer-events: auto !important;
+}
+
+body.gic-all-buttons-visible #toggle-chat-button:hover,
+body.gic-all-buttons-visible #gic-open-gallery-button:hover,
+body.gic-all-buttons-visible #restore-panel-button:hover,
+body.gic-all-buttons-visible #center-button:hover,
+body.gic-all-buttons-visible #manual-settings-button:hover,
+body.gic-all-buttons-visible #gic-unregister-button.gic-unregister-visible:hover,
+body.gic-all-buttons-visible #gic-delete-image-button.gic-delete-image-visible:hover {
+    opacity: 1 !important;
+}
