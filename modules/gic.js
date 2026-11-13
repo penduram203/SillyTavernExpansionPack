@@ -1602,7 +1602,7 @@ function getCurrentCharacterName() {
 
         html body #${DELETE_IMAGE_BUTTON_ID}.gic-delete-image-visible:hover {
             opacity: 1 !important;
-            background-color: #92400e !important;
+            background-color: #b81111 !important;
             pointer-events: auto !important;
         }
 
