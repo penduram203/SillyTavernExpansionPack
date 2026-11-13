@@ -61,7 +61,6 @@ function safeSaveSettingsDebounced() {
 const GALLERY_HIDDEN_SELECTORS = [
     '#window-control-buttons',
     '#restore-panel-button',
-    '#text-styling-button',
     '#text-styling-toggle',
     '#toggle-text-styling-button',
     '#text_styling_button',
