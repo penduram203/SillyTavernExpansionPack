@@ -322,14 +322,83 @@ function applyToggleChatButtonLayout() {
     btn.style.setProperty('transform', 'none', 'important');
 }
 
+// ============================================================
+// ★ T（#restore-panel-button）と 中央（#window-control-buttons）を
+//   💡/🎨 の並びに配置する。
+//   - 中央: 🎨 の左隣
+//   - T   : 中央の左隣
+//   - 💡 が未配置の時は CSS デフォルト（左下）へフォールバック
+// ============================================================
+function applyWindowControlButtonsLayout() {
+    const toggleBtn  = document.getElementById('toggle-chat-button');
+    const wcb        = document.getElementById('window-control-buttons');
+    const restoreBtn = document.getElementById('restore-panel-button');
+    const centerBtn  = document.getElementById('center-button');
+
+    if (!toggleBtn || !wcb || !restoreBtn || !centerBtn) return;
+
+    const toggleRect = toggleBtn.getBoundingClientRect();
+    const clearInline = (el) => {
+        if (!el) return;
+        ['left', 'top', 'right', 'bottom', 'transform'].forEach(p =>
+            el.style.removeProperty(p)
+        );
+    };
+
+    // 💡 未配置 → CSS デフォルト位置へフォールバック
+    if (toggleRect.width <= 0 || toggleRect.height <= 0 ||
+        toggleRect.left < 0 || toggleRect.top < 0) {
+        clearInline(wcb);
+        clearInline(restoreBtn);
+        return;
+    }
+
+    const GAP = 5;
+    const GALLERY_BTN_H = 50;
+
+    // 🎨 の実効位置（💡 の真上）
+    const galleryLeft    = toggleRect.left;
+    const galleryTop     = toggleRect.top - GALLERY_BTN_H - GAP;
+    const galleryCenterY = galleryTop + GALLERY_BTN_H / 2;
+
+    // ── 中央ボタン（+ コンテナ内の他ボタン） ──
+    const centerW = centerBtn.offsetWidth || 50;
+    const wcbH    = wcb.offsetHeight || (centerBtn.offsetHeight || 28);
+    const wcbLeft = galleryLeft - centerW - GAP;
+    const wcbTop  = galleryCenterY - wcbH / 2;
+
+    wcb.style.setProperty('position', 'fixed', 'important');
+    wcb.style.setProperty('left', Math.round(wcbLeft) + 'px', 'important');
+    wcb.style.setProperty('top', Math.round(wcbTop) + 'px', 'important');
+    wcb.style.setProperty('right', 'auto', 'important');
+    wcb.style.setProperty('bottom', 'auto', 'important');
+    wcb.style.setProperty('transform', 'none', 'important');
+
+    // ── T ボタン（中央の左隣） ──
+    const restoreW = restoreBtn.offsetWidth || 32;
+    const restoreH = restoreBtn.offsetHeight || 32;
+    const restoreLeft = wcbLeft - restoreW - GAP;
+    const restoreTop  = galleryCenterY - restoreH / 2;
+
+    restoreBtn.style.setProperty('position', 'fixed', 'important');
+    restoreBtn.style.setProperty('left', Math.round(restoreLeft) + 'px', 'important');
+    restoreBtn.style.setProperty('top', Math.round(restoreTop) + 'px', 'important');
+    restoreBtn.style.setProperty('right', 'auto', 'important');
+    restoreBtn.style.setProperty('bottom', 'auto', 'important');
+    restoreBtn.style.setProperty('transform', 'none', 'important');
+}
+
+// 【変更後】
 setInterval(() => {
     applyChatLayout();
     applyToggleChatButtonLayout();
+    applyWindowControlButtonsLayout();   // ★ 追加
 }, 500);
 
 window.addEventListener('resize', () => {
     applyChatLayout();
     applyToggleChatButtonLayout();
+    applyWindowControlButtonsLayout();   // ★ 追加
 });
 
 setTimeout(() => {
@@ -378,92 +447,6 @@ function setupChatPaddingClickThrough() {
 }
 
 setupChatPaddingClickThrough();
-
-// ============================================================
-// ★ 💡 ボタン近接表示（🎨 とは独立、周囲 20px）
-// ============================================================
-function setupBulbHover() {
-    const BULB_HOVER_MARGIN = 20;
-    let _bulbIsInZone = false;
-    let _lastX = -1, _lastY = -1;
-
-    function update(x, y) {
-        const btn = document.getElementById('toggle-chat-button');
-        if (!btn) return;
-
-        if (document.body.classList.contains('tsp-open') ||
-            document.body.classList.contains('gallery-open') ||
-            document.body.classList.contains('stj-editor-open')) {
-            if (_bulbIsInZone) {
-                _bulbIsInZone = false;
-                document.body.classList.remove('chat-bulb-hover');
-            }
-            return;
-        }
-
-        if (x < 0 || y < 0) {
-            if (_bulbIsInZone) {
-                _bulbIsInZone = false;
-                document.body.classList.remove('chat-bulb-hover');
-            }
-            return;
-        }
-
-        const rect = btn.getBoundingClientRect();
-        if (rect.width <= 0 || rect.height <= 0) return;
-
-        let inside =
-            x >= rect.left - BULB_HOVER_MARGIN && x <= rect.right + BULB_HOVER_MARGIN &&
-            y >= rect.top - BULB_HOVER_MARGIN && y <= rect.bottom + BULB_HOVER_MARGIN;
-
-        // ★ 登録解除ボタン / 画像削除ボタンも近接判定に含める
-        if (!inside) {
-            const extraBtnSelectors = [
-                { id: 'gic-unregister-button', cls: 'gic-unregister-visible' },
-                { id: 'gic-delete-image-button', cls: 'gic-delete-image-visible' },
-            ];
-            for (const { id, cls } of extraBtnSelectors) {
-                const btnEl = document.getElementById(id);
-                if (!btnEl || !btnEl.classList.contains(cls)) continue;
-                const r = btnEl.getBoundingClientRect();
-                if (r.width <= 0 || r.height <= 0) continue;
-                if (x >= r.left - BULB_HOVER_MARGIN && x <= r.right + BULB_HOVER_MARGIN &&
-                    y >= r.top - BULB_HOVER_MARGIN && y <= r.bottom + BULB_HOVER_MARGIN) {
-                    inside = true;
-                    break;
-                }
-            }
-        }
-
-        if (inside === _bulbIsInZone) return;
-        _bulbIsInZone = inside;
-        document.body.classList.toggle('chat-bulb-hover', inside);
-    }
-
-    document.addEventListener('mousemove', (e) => {
-        _lastX = e.clientX;
-        _lastY = e.clientY;
-        update(_lastX, _lastY);
-    }, { passive: true });
-
-    document.addEventListener('mouseleave', () => {
-        _lastX = -1; _lastY = -1;
-        update(-1, -1);
-    });
-
-    window.addEventListener('blur', () => {
-        _lastX = -1; _lastY = -1;
-        update(-1, -1);
-    });
-
-    setInterval(() => {
-        if (_lastX >= 0) update(_lastX, _lastY);
-    }, 300);
-
-    console.log(`[Chat Window On/Off] 💡 近接表示を開始しました (margin=${BULB_HOVER_MARGIN}px)`);
-}
-
-setupBulbHover();
 
 // ============================================================
 // ギャラリー連動
@@ -562,68 +545,98 @@ function setupGalleryButtonObserver() {
 setupGalleryButtonObserver();
 
 // ============================================================
-// 左下のボタン起動領域（🎨 用 wake ゾーン）
+// ★ 統合ホバーゾーン: 全ボタンを内包する矩形領域内にマウスが入ると
+//   全ボタンを同時に表示する。
+//   後方互換のため chat-bulb-hover / gic-buttons-wake も同時に付与する。
 // ============================================================
-function setupButtonWakeZone() {
-    const BASE_WAKE_W = BUTTON_WAKE_WIDTH;   // 110
-    const WAKE_H = BUTTON_WAKE_HEIGHT;       // 150
-    const EXTRA_W = MANUAL_SETTINGS_EXTRA_W; // 160
+function setupAllButtonsHover() {
+    const MARGIN = 30;   // ★ 広めの矩形
 
     let isInZone = false;
-    let lastX = -1;
-    let lastY = -1;
+    let lastX = -1, lastY = -1;
 
-    function isManualSettingsVisible() {
-        const btn = document.getElementById('manual-settings-button');
-        if (!btn) return false;
-        const cs = window.getComputedStyle(btn);
-        if (cs.display === 'none') return false;
-        if (cs.visibility === 'hidden') return false;
-        return true;
+    function computeZone() {
+        const ids = [
+            'toggle-chat-button',
+            'gic-open-gallery-button',
+            'gic-unregister-button',
+            'gic-delete-image-button',
+            'restore-panel-button',
+            'window-control-buttons',
+            'center-button',
+        ];
+        let minL = Infinity, minT = Infinity, maxR = -Infinity, maxB = -Infinity;
+        let found = false;
+        for (const id of ids) {
+            const el = document.getElementById(id);
+            if (!el) continue;
+            const cs = window.getComputedStyle(el);
+            if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+            const r = el.getBoundingClientRect();
+            if (r.width <= 0 || r.height <= 0) continue;
+            if (r.left   < minL) minL = r.left;
+            if (r.top    < minT) minT = r.top;
+            if (r.right  > maxR) maxR = r.right;
+            if (r.bottom > maxB) maxB = r.bottom;
+            found = true;
+        }
+        return found ? { left: minL, top: minT, right: maxR, bottom: maxB } : null;
     }
 
-    function getWakeWidth() {
-        return BASE_WAKE_W + (isManualSettingsVisible() ? EXTRA_W : 0);
+    function clearAll() {
+        if (!isInZone) return;
+        isInZone = false;
+        document.body.classList.remove('gic-all-buttons-visible');
+        document.body.classList.remove('chat-bulb-hover');
+        document.body.classList.remove('gic-buttons-wake');
     }
 
-    function isInside(x, y) {
-        const wakeW = getWakeWidth();
-        return x >= 0 && x <= wakeW &&
-               y >= window.innerHeight - WAKE_H && y <= window.innerHeight;
-    }
+    function update(x, y) {
+        if (x < 0 || y < 0) { clearAll(); return; }
 
-    function isAnyOverlayActive() {
-        return document.body.classList.contains('gallery-open') ||
-               document.body.classList.contains('stj-editor-open');
-    }
-
-    function applyState() {
-        if (isAnyOverlayActive()) {
-            if (isInZone) {
-                isInZone = false;
-                document.body.classList.remove('gic-buttons-wake');
-            }
+        // フルスクリーン系オーバーレイ中は抑止
+        // （tsp-open はサイドパネルのため許容: T で閉じる操作が必要）
+        if (document.body.classList.contains('gallery-open') ||
+            document.body.classList.contains('stj-editor-open') ||
+            document.body.classList.contains('variable-battle-active')) {
+            clearAll();
             return;
         }
-        const inside = isInside(lastX, lastY);
+
+        const zone = computeZone();
+        if (!zone) return;
+
+        const inside =
+            x >= zone.left   - MARGIN && x <= zone.right  + MARGIN &&
+            y >= zone.top    - MARGIN && y <= zone.bottom + MARGIN;
+
         if (inside === isInZone) return;
         isInZone = inside;
+        document.body.classList.toggle('gic-all-buttons-visible', inside);
+        document.body.classList.toggle('chat-bulb-hover', inside);
         document.body.classList.toggle('gic-buttons-wake', inside);
     }
 
-    function update(x, y) { lastX = x; lastY = y; applyState(); }
+    document.addEventListener('mousemove', (e) => {
+        lastX = e.clientX; lastY = e.clientY;
+        update(lastX, lastY);
+    }, { passive: true });
 
-    document.addEventListener('mousemove', (e) => update(e.clientX, e.clientY), { passive: true });
-    document.addEventListener('mouseleave', () => update(-1, -1));
-    window.addEventListener('blur', () => update(-1, -1));
+    document.addEventListener('mouseleave', () => {
+        lastX = -1; lastY = -1; update(-1, -1);
+    });
 
-    setInterval(applyState, 200);
+    window.addEventListener('blur', () => {
+        lastX = -1; lastY = -1; update(-1, -1);
+    });
 
-    document.body.classList.remove('gic-buttons-wake');
-    console.log(`[Chat Window On/Off] 🖱 ボタン起動領域を設定: ${BASE_WAKE_W}px × ${WAKE_H}px (左下、手動モード時 +${EXTRA_W}px)`);
+    // ボタン移動・再生成に追従
+    setInterval(() => { if (lastX >= 0) update(lastX, lastY); }, 150);
+
+    console.log('[Chat Window On/Off] 🔍 統合ホバーゾーンを開始しました (margin=30px)');
 }
 
-setupButtonWakeZone();
+setupAllButtonsHover();
 
 // ============================================================
 // 初期化時の残留クラス一掃
