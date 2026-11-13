@@ -7245,9 +7245,14 @@ function syncGalleryButtonVisibility() {
             btn.style.setProperty('display', 'none', 'important');
         } else {
             btn.style.removeProperty('display');
-            // ★ ギャラリーが閉じた瞬間に即座に正位置へ配置する
-            //   （1500ms ポーリングを待たずにズレを解消）
-            try { positionGalleryButton(); } catch (e) { /* ignore */ }
+            // ★ display 解除直後は getBoundingClientRect が古い値を返す場合があるため
+            //   次フレーム+αで再配置する
+            requestAnimationFrame(() => {
+                try { positionGalleryButton(); } catch (e) { /* ignore */ }
+            });
+            setTimeout(() => {
+                try { positionGalleryButton(); } catch (e) { /* ignore */ }
+            }, 50);
         }
     }
 
