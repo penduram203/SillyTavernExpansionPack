@@ -829,27 +829,16 @@ function savePersistedState() {
 }
 
 async function validatePersistedState() {
-    if (!isOverrideLocal) {
-        console.log('[GIC] override状態は未アクティブ（検証スキップ）');
-        return;
-    }
-
-    if (!lastGeneratedImageUrl) {
-        // ★ URL未指定時の ImageDisplay 自動同期も行わない
-        console.log('[GIC] override状態（URL未指定）を確認しました（状態維持）');
-        return;
-    }
+    // ★ 合体モード固定のため override 状態の検証は不要
+    if (!lastGeneratedImageUrl) return;
 
     const exists = await checkImageExists(lastGeneratedImageUrl);
     if (!exists) {
-        // ★ isOverrideLocal は変更しない（ユーザーが明示的にボタンを押した時のみ切替）
-        console.warn(`[GIC] 永続化された画像URLが存在しません（状態は維持）: ${lastGeneratedImageUrl}`);
+        console.warn(`[GIC] 永続化された画像URLが存在しません: ${lastGeneratedImageUrl}`);
         lastGeneratedImageUrl = null;
         savePersistedState();
     } else {
         console.log(`[GIC] 永続化された画像URLの存在を確認: ${lastGeneratedImageUrl}`);
-        // ★ ImageDisplay との自動同期もしない
-        //    （起動時に勝手にモードが切り替わるのを防ぐ）
     }
 }
 
@@ -2009,12 +1998,10 @@ async function scanForGeneratedImages() {
             const charName = getCurrentCharacterName() || '';
 
             // ★ 合体モード: bag state で「未表示」扱いにマーク（flag=0）
-            if (isCombinedMode) {
-                const fullPath = finalUrl.replace(/^\//, '');
-                try {
-                    window.ImageDisplayExtension?.markGeneratedButNotShown?.(fullPath);
-                } catch (e) { /* ignore */ }
-            }
+            const fullPath = finalUrl.replace(/^\//, '');
+            try {
+                window.ImageDisplayExtension?.markGeneratedButNotShown?.(fullPath);
+            } catch (e) { /* ignore */ }
 
             try {
                 window.dispatchEvent(new CustomEvent('gic-image-generated-for-keyword', {
@@ -2042,22 +2029,6 @@ async function scanForGeneratedImages() {
                 printMessages();
             } catch (e) {
                 console.error('[GIC] saveChat/printMessages エラー:', e);
-            }
-        }
-
-        // ── 自動表示判定 ──
-        if (!isOverrideLocal) {
-            console.log(`[GIC] 事前設定モードのため生成画像の自動表示をスキップ: ${finalUrl}`);
-        } else if (window.ImageDisplayExtension?.setOverrideImage) {
-            try {
-                await window.ImageDisplayExtension.setOverrideImage(finalUrl);
-                isOverrideLocal = true;
-                setButtonLabel(LABEL_OVERRIDE);
-                savePersistedState();
-                console.log(`[GIC] 🖼️ 最新の生成画像を背景に設定: ${finalUrl}`);
-                refreshUnregisterButtonState();   // ★ 追加
-            } catch (e) {
-                console.error('[GIC] ImageDisplayExtension エラー:', e);
             }
         }
     } else {
@@ -6388,15 +6359,8 @@ async function executeBulkDelete() {
         }
         if (shouldClear) {
             lastGeneratedImageUrl = null;
-            if (isOverrideLocal) {
-                isOverrideLocal = false;
-                setButtonLabel(LABEL_NORMAL);
-            }
             savePersistedState();
-            if (window.ImageDisplayExtension?.clearOverrideImage) {
-                try { window.ImageDisplayExtension.clearOverrideImage(); } catch (e) { /* ignore */ }
-            }
-            console.log('[GIC] 削除対象が現在表示中の背景画像と一致 → 事前設定モードに切替');
+            console.log('[GIC] 削除対象が現在表示中の背景画像と一致 → lastGeneratedImageUrl をクリア');
         }
     }
 
@@ -8857,7 +8821,6 @@ function initializeGIC() {
     createUnregisterButton();
     createDeleteImageButton();   // ★ 追加
     setupListeners();
-    setupTextStylingObserver();
     setupGalleryObserverForGic();
     exposeGicApi();
 
