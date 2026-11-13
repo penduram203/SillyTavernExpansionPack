@@ -41,7 +41,7 @@
 
     const NAV_UP_KEYS = ['ArrowUp', 'w', 'W'];
     const NAV_DOWN_KEYS = ['ArrowDown', 's', 'S'];
-    const CONFIRM_KEYS = ['Enter', ' ', 'e', 'E', 'f', 'F'];
+    const CONFIRM_KEYS = ['Enter', 'e', 'E', 'f', 'F'];
 
     const _indices = {
         'battle-commands': 0,
@@ -393,8 +393,26 @@
         if (e.isComposing) return;
         if (isTypingTarget(e.target)) return;
 
-        // ★ タイトル画面: ←/→ または A/D で選択、E/F/Space/Enter で決定
-        //    タイトル画面が有効な間は、この 6 種のキーだけを扱う。
+        // ★ スペースキー: モードに関係なくチャットウィンドウの表示/非表示をトグル
+        //    #toggle-chat-button のクリックと同じ動作をさせる。
+        //    - 入力欄フォーカス時は isTypingTarget で既に除外済み
+        //    - IME 変換中は isComposing で除外済み
+        //    - 連続押下（オートリピート）は無視して、押すたびに1回だけ切り替える
+        if (e.key === ' ') {
+            if (e.repeat) return;
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            const toggleBtn = document.getElementById('toggle-chat-button');
+            if (toggleBtn) {
+                try {
+                    toggleBtn.click();
+                } catch (err) { /* ignore */ }
+            }
+            return;
+        }
+
+        // ★ タイトル画面: ←/→ または A/D で選択、E/F/Enter で決定
+        //    タイトル画面が有効な間は、このキーだけを扱う。
         //    それ以外のキー（W/S 等）は無効化して他コンテキストへの漏れを防ぐ。
         if (window.VariableManager?.isTitleScreenActive?.() === true) {
             const isPrevKey = e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A';
