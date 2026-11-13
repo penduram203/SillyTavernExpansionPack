@@ -53,6 +53,19 @@
     border-top-color: transparent;
 }
 
+/* ============================================================
+ * ★ 画像生成中: オレンジ枠で「準備中」と区別する
+ *    （同一要素に status-image と status-generating の両方が付くため、
+ *      同 specificity の後勝ちで上書きする）
+ * ============================================================ */
+.status-indicator-item.status-generating {
+    border-color: #ff9800 !important;
+}
+.status-indicator-item.status-generating::before {
+    border-color: #ff9800 !important;
+    border-top-color: transparent !important;
+}
+
 @keyframes status-spin {
     from { transform: rotate(0deg); }
     to   { transform: rotate(360deg); }
