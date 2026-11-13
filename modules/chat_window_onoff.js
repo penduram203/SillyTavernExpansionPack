@@ -320,6 +320,9 @@ function applyToggleChatButtonLayout() {
     btn.style.setProperty('right', 'auto', 'important');
     btn.style.setProperty('bottom', 'auto', 'important');
     btn.style.setProperty('transform', 'none', 'important');
+    // ★ 追加: グローバル位置キャッシュ（gic.js の positionGalleryButton が参照）
+    window.__cwToggleLastLeft = Math.round(left);
+    window.__cwToggleLastTop  = Math.round(top);
 }
 
 // ============================================================
