@@ -1237,6 +1237,19 @@
             newUrl = resolvedUrl;
         }
 
+        // ★ 最終防衛: パスなし（ファイル名のみ）の場合はキャラフォルダを補完
+        //   findMatchingImageUrl → getRandomImageSource の過程で、
+        //   image_display_extension 内にファイル名のみのエントリが残っていても
+        //   404 にならないよう、ここで最終的に補完する。
+        if (!newUrl.includes('/') && !/^(data:|blob:|https?:)/i.test(newUrl)) {
+            const charName = getCharacterNameFromDOM();
+            if (charName) {
+                const before = newUrl;
+                newUrl = `user/images/${charName}/${newUrl}`;
+                console.log(`[ImageDisplay] 🔧 パスを補完: ${before} → ${newUrl}`);
+            }
+        }
+
         // 拡張子チェック
         if (!newUrl.match(/\.(png|jpg|jpeg|webp|gif|avif|bmp|mp4|webm)$/i)) {
             const detected = await detectImageExtension(newUrl);
@@ -1534,6 +1547,39 @@
             return true;
         } catch (e) { return false; }
     }
+
+    // ============================================================
+    // ★ パスなし（ファイル名のみ）のエントリをフルパスに正規化
+    //   stj_editor.js の旧バージョンで image_display_extension に
+    //   ファイル名のみが保存された場合への防御的対応。
+    //   - 文字列に '/' が含まれない場合は `user/images/{charName}/{file}` を補完
+    //   - data: / blob: / http(s): で始まる場合はそのまま保持
+    // ============================================================
+    function normalizeImageMapPaths(imageMap, charName) {
+        if (!imageMap || typeof imageMap !== 'object' || !charName) return imageMap;
+
+        const processOne = (p) => {
+            if (typeof p !== 'string') return p;
+            const trimmed = p.trim();
+            if (!trimmed) return trimmed;
+            // 既にフルパス or 特殊URL
+            if (trimmed.includes('/')) return trimmed;
+            if (/^(data:|blob:|https?:)/i.test(trimmed)) return trimmed;
+            return `user/images/${charName}/${trimmed}`;
+        };
+
+        const result = {};
+        for (const [key, val] of Object.entries(imageMap)) {
+            if (Array.isArray(val)) {
+                result[key] = val.map(processOne);
+            } else if (typeof val === 'string') {
+                result[key] = processOne(val);
+            } else {
+                result[key] = val;
+            }
+        }
+        return result;
+    }
     
     function cleanForeignImageEntries(imageMap, charName) {
         if (!imageMap || typeof imageMap !== 'object' || !charName) return imageMap;
@@ -1719,7 +1765,12 @@
             //    （detectImageMapExtensions が HEAD リクエストを発行する前に除去することで
             //     無駄な 404 リクエストを抑止する）
             const preCleanedMap = cleanForeignImageEntries(loadedMap, charName);
-            const detectedMap = await detectImageMapExtensions(preCleanedMap);
+
+            // ★ パスなし（ファイル名のみ）のエントリをフルパスに正規化
+            //   stj_editor.js の旧バージョンで保存されたレガシーデータ対策。
+            const normalizedMap = normalizeImageMapPaths(preCleanedMap, charName);
+
+            const detectedMap = await detectImageMapExtensions(normalizedMap);
             currentImageMap = detectedMap;
             imageMapCache.set(charName, detectedMap);
         } else {
