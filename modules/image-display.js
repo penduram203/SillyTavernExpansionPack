@@ -1042,12 +1042,82 @@
         } catch (error) { return false; }
     }
 
-    function getRandomImageSource(imageSource) {
+    // ============================================================
+    // ★ シャッフルバッグ方式の状態管理
+    //   キーワード（または '__default__' などの固定キー）ごとに
+    //   「表示済みフラグ」を保持し、未表示の画像だけを候補にする。
+    //   - 全て表示済みになったらフラグを全リセット
+    //   - 画像リストが増えた場合、新規画像は「表示済み(1)」で開始
+    //   - 画像リストが減った場合、消えた画像のフラグは自動的に破棄
+    // ============================================================
+    const _bagState = new Map();
+
+    function _getBagState(key, validSources) {
+        const sig = validSources.join('\x1f');
+        let state = _bagState.get(key);
+
+        if (!state || state.signature !== sig) {
+            const newFlags = new Map();
+            if (state) {
+                // 配列変更時: 既存画像はフラグを引き継ぎ、新規画像は 1 で開始
+                for (const src of validSources) {
+                    if (state.flags.has(src)) {
+                        newFlags.set(src, state.flags.get(src));
+                    } else {
+                        newFlags.set(src, 1);
+                    }
+                }
+            } else {
+                // 初回: 全て 0 で開始
+                for (const src of validSources) {
+                    newFlags.set(src, 0);
+                }
+            }
+            state = { signature: sig, flags: newFlags };
+            _bagState.set(key, state);
+        }
+        return state;
+    }
+
+    function _resetBagState() {
+        const size = _bagState.size;
+        _bagState.clear();
+        if (size > 0) {
+            console.debug(`[ImageDisplay] 🔄 シャッフルバッグ状態をリセット (${size} キー)`);
+        }
+    }
+    
+    function getRandomImageSource(imageSource, keyHint = null) {
         if (Array.isArray(imageSource)) {
-            if (imageSource.length === 0) return null;
             const valid = imageSource.filter(src => typeof src === 'string' && src.trim() !== '');
             if (valid.length === 0) return null;
-            return valid[Math.floor(Math.random() * valid.length)];
+            if (valid.length === 1) return valid[0];
+
+            const key = keyHint || valid.join('\x1f');
+            const state = _getBagState(key, valid);
+
+            // 未表示（flags=0）の画像を候補に
+            let candidates = valid.filter(src => state.flags.get(src) === 0);
+
+            // 全画像表示済み → フラグをリセットして最初から
+            if (candidates.length === 0) {
+                for (const src of valid) {
+                    state.flags.set(src, 0);
+                }
+                candidates = valid;
+                console.debug(
+                    `[ImageDisplay] 🔄 全画像表示済みのためフラグをリセット ` +
+                    `(key=${String(key).slice(0, 40)}, count=${valid.length})`
+                );
+            }
+
+            const picked = candidates[Math.floor(Math.random() * candidates.length)];
+            state.flags.set(picked, 1);
+            console.debug(
+                `[ImageDisplay] 🎲 半ランダム選択: ${picked.split('/').pop()} ` +
+                `(未表示 ${candidates.length - 1}/${valid.length})`
+            );
+            return picked;
         }
         return (typeof imageSource === 'string' && imageSource.trim() !== '') ? imageSource : null;
     }
@@ -1077,7 +1147,8 @@
         for (const entry of getSortedKeywordEntries()) {
             try {
                 if (evaluateCondition(entry.condition, text)) {
-                    const selected = getRandomImageSource(entry.url);
+                    // ★ キーワードをキーにして独立したバッグを管理
+                    const selected = getRandomImageSource(entry.url, `kw::${entry.condition}`);
                     if (selected) { lastMatchCache = { signature, url: selected, timestamp: now }; return selected; }
                 }
             } catch (error) { /* ignore */ }
@@ -1150,7 +1221,7 @@
         }
 
         if (!targetUrl || typeof targetUrl !== 'string' || !targetUrl.trim()) {
-            const fallback = getRandomImageSource(currentImageMap.default) || currentImageMap.default;
+            const fallback = getRandomImageSource(currentImageMap.default, '__default__') || currentImageMap.default;
             if (fallback && fallback !== targetUrl && typeof fallback === 'string' && fallback.trim()) {
                 await updateImageWithUrl(fallback);
             }
@@ -1258,7 +1329,7 @@
             if (overrideImageUrl) {
                 if (currentImageUrl !== overrideImageUrl) await updateImageWithUrl(overrideImageUrl);
             } else {
-                const fallback = getRandomImageSource(currentImageMap.default) || currentImageMap.default;
+                const fallback = getRandomImageSource(currentImageMap.default, '__default__') || currentImageMap.default;
                 if (fallback && typeof fallback === 'string' && fallback.trim() && currentImageUrl !== fallback) {
                     await updateImageWithUrl(fallback);
                 }
@@ -1295,7 +1366,7 @@
             isDefaultImageFailed = true;
             mediaContainer.style.display = 'none';
         } else {
-            const fallback = getRandomImageSource(currentImageMap.default) || currentImageMap.default;
+            const fallback = getRandomImageSource(currentImageMap.default, '__default__') || currentImageMap.default;
             if (fallback && fallback !== src && typeof fallback === 'string' && fallback.trim()) element.src = fallback.trim();
         }
     }
@@ -2051,6 +2122,11 @@
 
             if (eventTypes.CHAT_LOADED) safeOn(eventTypes.CHAT_LOADED, immediateUpdate);
                 const onCharacterOrChatChanged = () => {
+                    // ★ シャッフルバッグ状態をリセット
+                    //   キャラ切替・チャット切替で画像マップが変わるため、
+                    //   前キャラの表示済みフラグを引き継がないようにする。
+                    _resetBagState();
+
                     // ★ バトルモード中はロックを保持（背景切替を防ぐ）
                     if (!isBattleModeActive() && !_battleImageLock) {
                         _lastSentKeywordImage = null;   // ★ ロック解除
@@ -2222,7 +2298,7 @@
             if (overrideImageUrl) {
                 await updateImageWithUrl(overrideImageUrl);
             } else {
-                const fallback = getRandomImageSource(currentImageMap.default) || currentImageMap.default;
+                const fallback = getRandomImageSource(currentImageMap.default, '__default__') || currentImageMap.default;
                 if (fallback && typeof fallback === 'string' && fallback.trim()) {
                     await updateImageWithUrl(fallback);
                 }
