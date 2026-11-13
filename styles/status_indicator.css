@@ -93,3 +93,47 @@
     display: none !important;
     content: none !important;
 }
+
+/* ============================================================
+ * ★ 画像生成進捗リング（status-indicator-item 内）
+ *    「画像生成中…」の枠内に収まる 26x26 の SVG。
+ *    オレンジ枠と同色で「生成中」状態を表現する。
+ * ============================================================ */
+
+/* 生成中は既存のスピナーを非表示（リングが進捗を示すため） */
+.status-indicator-item.status-generating::before {
+    display: none !important;
+    content: none !important;
+}
+
+/* リング本体 */
+.status-progress-ring {
+    flex: 0 0 auto;
+    width: 26px;
+    height: 26px;
+    margin-right: 10px;
+    display: block;
+    vertical-align: middle;
+}
+
+.status-progress-ring-track {
+    opacity: 0.9;
+}
+
+.status-progress-ring-fill {
+    will-change: stroke-dashoffset;
+}
+
+.status-progress-ring-text {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    font-weight: bold;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+/* テキストラベル（リングの右に並ぶ） */
+.status-text-label {
+    display: inline-block;
+    vertical-align: middle;
+}
