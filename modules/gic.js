@@ -425,6 +425,9 @@ const DELETE_CONFIRM_DIALOG_ID = 'gic-delete-confirm-dialog';
 const GALLERY_BUTTON_ID = 'gic-open-gallery-button';
 const LABEL_OVERRIDE   = '背景生成';
 const LABEL_NORMAL     = '事前設定';
+const LABEL_COMBINED = '合体モード';
+const INPUT_LOCK_CLASS = 'gic-input-locked';
+const COMBINED_PREP_DELAY_MS = 5000;
 const HIDE_CLASS       = 'gic-hidden-by-text-styling';
 const HIDDEN_MES_CLASS = 'gic-hidden-message';
 
@@ -563,6 +566,11 @@ let lastGeneratedImageUrl = null;
 //   entryKeys は登録されている全キーワード（複数可）
 let _currentRegisteredKeywords = null;
 let isOverrideLocal = false;
+let isCombinedMode = false;      // ★ 合体モード
+let _inputLocked = false;        // ★ 入力ロック状態
+let _combinedPrepActive = false; // ★ 合体モード準備中（image-display の更新をスキップ）
+let _inputLockTimeout = null;
+
 const processedMessageKeys = new Set();
 
 let currentPreviewEl = null;
@@ -806,8 +814,11 @@ function loadPersistedState() {
         const st = ctx?.extensionSettings?.[MODULE_NAME];
         if (!st) return;
         if (typeof st.isOverrideLocal === 'boolean') isOverrideLocal = st.isOverrideLocal;
+        if (typeof st.isCombinedMode === 'boolean') isCombinedMode = st.isCombinedMode;
         if (typeof st.lastGeneratedImageUrl === 'string') lastGeneratedImageUrl = st.lastGeneratedImageUrl;
-        console.log(`[GIC] 永続状態を復元: isOverrideLocal=${isOverrideLocal}, lastUrl=${lastGeneratedImageUrl}`);
+        // 排他制御: 両方 true にはさせない
+        if (isOverrideLocal && isCombinedMode) isCombinedMode = false;
+        console.log(`[GIC] 永続状態を復元: override=${isOverrideLocal}, combined=${isCombinedMode}, lastUrl=${lastGeneratedImageUrl}`);
     } catch (e) {
         console.warn('[GIC] 永続状態の読込に失敗:', e);
     }
@@ -819,6 +830,7 @@ function savePersistedState() {
         if (!ctx) return;
         if (!ctx.extensionSettings[MODULE_NAME]) ctx.extensionSettings[MODULE_NAME] = {};
         ctx.extensionSettings[MODULE_NAME].isOverrideLocal = isOverrideLocal;
+        ctx.extensionSettings[MODULE_NAME].isCombinedMode = isCombinedMode;
         ctx.extensionSettings[MODULE_NAME].lastGeneratedImageUrl = lastGeneratedImageUrl;
         if (typeof ctx.saveSettingsDebounced === 'function') ctx.saveSettingsDebounced();
     } catch (e) {
@@ -1618,6 +1630,72 @@ function getCurrentCharacterName() {
     document.head.appendChild(style);
 })();
 
+    (function injectInputLockStyle() {
+        if (document.getElementById('gic-input-lock-style')) return;
+        const style = document.createElement('style');
+        style.id = 'gic-input-lock-style';
+        style.textContent = `
+            body.${INPUT_LOCK_CLASS} #send_but {
+                pointer-events: none !important;
+                opacity: 0.4 !important;
+                cursor: not-allowed !important;
+            }
+            body.${INPUT_LOCK_CLASS} .lbe-choice-item {
+                pointer-events: none !important;
+                opacity: 0.4 !important;
+                cursor: not-allowed !important;
+            }
+            body.${INPUT_LOCK_CLASS} .game-start-choice {
+                pointer-events: none !important;
+                opacity: 0.4 !important;
+                cursor: not-allowed !important;
+            }
+            body.${INPUT_LOCK_CLASS} #send_textarea {
+                opacity: 0.7 !important;
+            }
+        `;
+        document.head.appendChild(style);
+    })();
+
+    function lockUserInput(reason) {
+        if (_inputLocked) return;
+        _inputLocked = true;
+        document.body.classList.add(INPUT_LOCK_CLASS);
+        console.log(`[GIC] 🔒 入力ロック: ${reason || ''}`);
+        if (_inputLockTimeout) clearTimeout(_inputLockTimeout);
+        _inputLockTimeout = setTimeout(() => {
+            if (_inputLocked) {
+                console.warn('[GIC] 入力ロックが60秒経過したため強制解除');
+                unlockUserInput('timeout');
+            }
+        }, 60000);
+    }
+
+    function unlockUserInput(reason) {
+        if (!_inputLocked) return;
+        _inputLocked = false;
+        document.body.classList.remove(INPUT_LOCK_CLASS);
+        if (_inputLockTimeout) {
+            clearTimeout(_inputLockTimeout);
+            _inputLockTimeout = null;
+        }
+        console.log(`[GIC] 🔓 入力ロック解除: ${reason || ''}`);
+    }
+
+    function setCombinedPrepActive(active) {
+        _combinedPrepActive = !!active;
+        console.log(`[GIC] 合体モード準備中: ${_combinedPrepActive}`);
+    }
+
+    // 入力ロック中の Enter をブロック
+    document.addEventListener('keydown', (e) => {
+        if (!_inputLocked) return;
+        if (e.key !== 'Enter') return;
+        if (e.target?.id !== 'send_textarea') return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+    }, true);
+
 // ============================================================
 // ★ 逆引きマップを再構築
 // ============================================================
@@ -1967,32 +2045,51 @@ async function scanForGeneratedImages() {
 
         // ★ 画像生成完了イベントを発火（セル自動登録用）
         if (genCtx?.entryKey) {
+            const urlPath = finalUrl.split('?')[0].split('#')[0];
+            let fileName = urlPath.split('/').pop();
+            try { fileName = decodeURIComponent(fileName); } catch (e) { /* ignore */ }
+            const charName = getCurrentCharacterName() || '';
+
+            // ★ 合体モード: bag state で「未表示」扱いにマーク（flag=0）
+            if (isCombinedMode) {
+                const fullPath = finalUrl.replace(/^\//, '');
+                try {
+                    window.ImageDisplayExtension?.markGeneratedButNotShown?.(fullPath);
+                } catch (e) { /* ignore */ }
+            }
+
             try {
-                const urlPath = finalUrl.split('?')[0].split('#')[0];
-                let fileName = urlPath.split('/').pop();
-                try { fileName = decodeURIComponent(fileName); } catch (e) { /* ignore */ }
-                const charName = getCurrentCharacterName() || '';
                 window.dispatchEvent(new CustomEvent('gic-image-generated-for-keyword', {
-                    detail: {
-                        charName,
-                        entryKey: genCtx.entryKey,
-                        fileName,
-                    }
+                    detail: { charName, entryKey: genCtx.entryKey, fileName }
                 }));
-                console.log(`[GIC] 📢 gic-image-generated-for-keyword を発火: entryKey="${genCtx.entryKey}", fileName="${fileName}"`);
-                // ★ 登録解除ボタン状態を更新
-                //   （画像が実際に表示されたかどうかで判定するため、
-                //     ここでは setOverrideImage 完了後に refresh を呼ぶ。
-                //     pre-setup モード時は表示が変わらないため、
-                //     次回ポーリングで自動的に判定される）
-                if (isOverrideLocal) {
-                    refreshUnregisterButtonState();
-                }
+                console.log(`[GIC] 📢 gic-image-generated-for-keyword: entryKey="${genCtx.entryKey}", fileName="${fileName}"`);
+            } catch (e) { /* ignore */ }
+
+            // ★ 登録完了イベントを発火（合体モードの待ち合わせ用）
+            try {
+                window.dispatchEvent(new CustomEvent('gic-image-registration-completed', {
+                    detail: { charName, entryKey: genCtx.entryKey, fileName }
+                }));
+            } catch (e) { /* ignore */ }
+        }
+        // ── 自動表示判定 ──
+        if (isCombinedMode) {
+            console.log(`[GIC] 合体モードのため生成画像の自動表示をスキップ: ${finalUrl}`);
+        } else if (!isOverrideLocal) {
+            console.log(`[GIC] 事前設定モードのため生成画像の自動表示をスキップ: ${finalUrl}`);
+        } else if (window.ImageDisplayExtension?.setOverrideImage) {
+            try {
+                await window.ImageDisplayExtension.setOverrideImage(finalUrl);
+                isOverrideLocal = true;
+                setButtonLabel(LABEL_OVERRIDE);
+                savePersistedState();
+                console.log(`[GIC] 🖼️ 最新の生成画像を背景に設定: ${finalUrl}`);
+                refreshUnregisterButtonState?.();
             } catch (e) {
-                console.warn('[GIC] 画像生成完了イベントの発火に失敗:', e);
+                console.error('[GIC] ImageDisplayExtension エラー:', e);
             }
         }
-
+        
         // ── 生成画像メッセージをシステム扱いにマーク ──
         if (!newest.is_system) {
             newest.is_system = true;
@@ -2037,77 +2134,55 @@ async function scanForGeneratedImages() {
 }
 
 async function handleButtonAction() {
-    console.log(`[GIC] ボタンアクション: 現在=${isOverrideLocal ? '背景生成' : '事前設定'}, lastUrl=${lastGeneratedImageUrl}`);
+    const prevMode = isCombinedMode ? 'combined'
+                    : (isOverrideLocal ? 'background-generation' : 'pre-set');
+    let nextMode;
+    if (prevMode === 'pre-set') nextMode = 'combined';
+    else if (prevMode === 'combined') nextMode = 'background-generation';
+    else nextMode = 'pre-set';
 
-    if (isOverrideLocal) {
-        // 背景生成 → 事前設定（常に成功）
-        if (window.ImageDisplayExtension?.clearOverrideImage) {
-            try {
-                window.ImageDisplayExtension.clearOverrideImage();
-                console.log('[GIC] clearOverrideImage() 成功（事前設定モードへ切替）');
-            } catch (err) {
-                console.error('[GIC] clearOverrideImage エラー:', err);
-            }
-        }
-        isOverrideLocal = false;
-        setButtonLabel(LABEL_NORMAL);
-        savePersistedState();
-        return;
-    }
+    console.log(`[GIC] モード切替: ${prevMode} → ${nextMode}`);
 
-    // 事前設定 → 背景生成
-    let urlToUse = lastGeneratedImageUrl || '';
-
-    // ★ URLが存在しない場合、lastGeneratedImageUrl をクリアして
-    //   デフォルト画像で背景生成モードに切り替える（モード切替は必ず実行する）
-    //   以前はここで return していたため、URLが404だとモードが切り替わらなかった。
-    if (urlToUse) {
-        const exists = await checkImageExists(urlToUse);
-        if (!exists) {
-            console.warn(
-                `[GIC] 保存された画像URLが存在しないため、デフォルト画像で背景生成モードに切り替えます: ${urlToUse}`
-            );
-            lastGeneratedImageUrl = null;
-            urlToUse = '';
-            // 古い override 状態をクリアしておく
-            try {
-                if (window.ImageDisplayExtension?.isOverride?.()) {
-                    window.ImageDisplayExtension.clearOverrideImage?.();
-                }
-            } catch (e) { /* ignore */ }
-        }
-    }
-
-    if (window.ImageDisplayExtension?.setOverrideImage) {
+    // ── 旧モードのクリーンアップ ──
+    if (prevMode === 'background-generation') {
         try {
-            const result = await window.ImageDisplayExtension.setOverrideImage(urlToUse);
-
-            if (result === false) {
-                console.warn('[GIC] setOverrideImage が失敗を返しました。状態を事前設定のまま維持します');
-                isOverrideLocal = false;
-                setButtonLabel(LABEL_NORMAL);
-                savePersistedState();
-                return;
+            if (window.ImageDisplayExtension?.isOverride?.()) {
+                window.ImageDisplayExtension.clearOverrideImage?.();
             }
+        } catch (e) { /* ignore */ }
+    }
+    if (prevMode === 'combined') {
+        if (_inputLocked) unlockUserInput('mode-change');
+        setCombinedPrepActive(false);
+    }
 
-            if (urlToUse) {
-                console.log(`[GIC] setOverrideImage() 成功（背景生成モード）: ${urlToUse}`);
-            } else {
-                console.log('[GIC] setOverrideImage() 成功（背景生成モード・デフォルト画像）');
+    // ── 新モードのセットアップ ──
+    if (nextMode === 'background-generation') {
+        let urlToUse = lastGeneratedImageUrl || '';
+        if (urlToUse) {
+            const exists = await checkImageExists(urlToUse);
+            if (!exists) {
+                urlToUse = '';
+                lastGeneratedImageUrl = null;
             }
-        } catch (err) {
-            console.error('[GIC] setOverrideImage エラー:', err);
-            isOverrideLocal = false;
-            setButtonLabel(LABEL_NORMAL);
-            savePersistedState();
-            return;
+        }
+        try {
+            await window.ImageDisplayExtension?.setOverrideImage?.(urlToUse);
+            console.log(`[GIC] setOverrideImage() 成功: ${urlToUse || '(デフォルト)'}`);
+        } catch (e) {
+            console.warn('[GIC] setOverrideImage エラー:', e);
         }
     }
 
-    isOverrideLocal = true;
-    setButtonLabel(LABEL_OVERRIDE);
+    isOverrideLocal = (nextMode === 'background-generation');
+    isCombinedMode = (nextMode === 'combined');
+
+      const label = nextMode === 'pre-set' ? LABEL_NORMAL
+                : nextMode === 'combined' ? LABEL_COMBINED
+                : LABEL_OVERRIDE;
+    setButtonLabel(label);
     savePersistedState();
-    console.log(`[GIC] モードを背景生成に切り替えました（URL: ${urlToUse || '(デフォルト)'}）`);
+    console.log(`[GIC] モード切替完了: ${nextMode}`);
 }
 
 function positionGalleryButton() {
@@ -7827,7 +7902,8 @@ function createReleaseButton() {
     btn.id = BUTTON_ID;
     btn.type = 'button';
     btn.title = '事前設定モード（キーワードマッチ）と背景生成モード（生成画像）を切り替える';
-    btn.textContent = isOverrideLocal ? LABEL_OVERRIDE : LABEL_NORMAL;
+    btn.textContent = isCombinedMode ? LABEL_COMBINED
+                    : (isOverrideLocal ? LABEL_OVERRIDE : LABEL_NORMAL);
 
     Object.assign(btn.style, {
         position: 'fixed', left: '0', bottom: '49px', zIndex: '15000',
@@ -8641,6 +8717,12 @@ function exposeGicApi() {
         
         // ★ GIC 側の override 状態を外部から参照できるようにする
         isOverrideMode: () => isOverrideLocal,
+        isCombinedMode: () => isCombinedMode,           // ★
+        isCombinedPreparing: () => _combinedPrepActive, // ★
+        setCombinedPrepActive,                          // ★
+        lockUserInput,                                  // ★
+        unlockUserInput,                                // ★
+        isInputLocked: () => _inputLocked,              // ★
 
         ensureThumbnailForVideo,
         generateVideoThumbnailBlob,
