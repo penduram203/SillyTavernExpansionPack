@@ -2034,17 +2034,16 @@ async function scanForGeneratedImages() {
 }
 
 // ============================================================
-// 🎨 ギャラリーボタンを 💡 の真上に配置する。
+// 🎨 を 💡 の真上に配置する。
 //
-// ★ toggle が display:none（ギャラリー / STJエディタ表示中）の間は
-//   getBoundingClientRect() が全 0 を返す。
-//   その場合は inline left/top（applyToggleChatButtonLayout() が
-//   500ms ごとに更新し続けている値）を読み取って位置を維持する。
-//   これによりギャラリーを閉じた瞬間の「フォールバック位置で
-//   一瞬表示される」現象を防ぐ。
+// 優先順:
+//   ① toggle 可視時: getBoundingClientRect()
+//   ② toggle 非可視時: inline left/top
+//   ③ ②が -9999px 等の未配置値: window.__cwToggleLastLeft/Top
+//   ④ どれも無効: フォールバック（455px / calc(100vh - 160px)）
 // ============================================================
 function positionGalleryButton() {
-    const galleryBtn = document.getElementById(GALLERY_BTN_ID_PLACEHOLDER); // 実際は GALLERY_BUTTON_ID を使用
+    const galleryBtn = document.getElementById(GALLERY_BUTTON_ID);
     if (!galleryBtn) return;
 
     const toggleBtn = document.getElementById('toggle-chat-button');
@@ -2053,65 +2052,67 @@ function positionGalleryButton() {
     let toggleTop  = null;
 
     if (toggleBtn) {
-        // ── ① 可視なら getBoundingClientRect が最も正確 ──
+        // ① 可視時
         const rect = toggleBtn.getBoundingClientRect();
         if (rect.width > 0 && rect.height > 0 &&
-            rect.left >= 0 && rect.top >= 0) {
+            rect.left > 0 && rect.top > 0) {
             toggleLeft = rect.left;
             toggleTop  = rect.top;
         } else {
-            // ── ② 非可視（display:none）→ inline left/top を読む ──
-            //     applyToggleChatButtonLayout() が 500ms ごとに
-            //     inline left/top を更新し続けているため、
-            //     display:none の間でも値は正しい。
-            const inlineLeft = parseFloat(
-                toggleBtn.style.getPropertyValue('left')
-            );
-            const inlineTop = parseFloat(
-                toggleBtn.style.getPropertyValue('top')
-            );
+            // ② 非可視時: inline
+            const inlineLeft = parseFloat(toggleBtn.style.getPropertyValue('left'));
+            const inlineTop  = parseFloat(toggleBtn.style.getPropertyValue('top'));
             if (Number.isFinite(inlineLeft) && Number.isFinite(inlineTop) &&
                 inlineLeft > 0 && inlineTop > 0) {
                 toggleLeft = inlineLeft;
                 toggleTop  = inlineTop;
+            } else {
+                // ③ グローバルキャッシュ
+                const gL = window.__cwToggleLastLeft;
+                const gT = window.__cwToggleLastTop;
+                if (Number.isFinite(gL) && Number.isFinite(gT) &&
+                    gL > 0 && gT > 0) {
+                    toggleLeft = gL;
+                    toggleTop  = gT;
+                }
             }
         }
     }
 
-    if (toggleLeft !== null && toggleTop !== null) {
-        const gap  = 5;
-        const btnW = galleryBtn.offsetWidth  || 50;
-        const btnH = galleryBtn.offsetHeight || 50;
-
-        let left = toggleLeft;
-        let top  = toggleTop - btnH - gap;
-
-        const margin = 4;
-        const vw = window.innerWidth;
-        const vh = window.innerHeight;
-        if (left < margin) left = margin;
-        if (left + btnW > vw - margin) left = vw - margin - btnW;
-        if (top < margin) top = margin;
-        if (top + btnH > vh - margin) top = vh - margin - btnH;
-
+    if (toggleLeft === null || toggleTop === null) {
+        // ④ 完全フォールバック
         galleryBtn.style.setProperty('position', 'fixed', 'important');
-        galleryBtn.style.setProperty('left', Math.round(left) + 'px', 'important');
-        galleryBtn.style.setProperty('top',  Math.round(top)  + 'px', 'important');
+        galleryBtn.style.setProperty('left', '455px', 'important');
+        galleryBtn.style.setProperty('top', 'calc(100vh - 160px)', 'important');
         galleryBtn.style.setProperty('right', 'auto', 'important');
         galleryBtn.style.setProperty('bottom', 'auto', 'important');
         galleryBtn.style.setProperty('transform', 'none', 'important');
-
         positionStatusMessage();
         return;
     }
 
-    // ── ③ 完全フォールバック（初回起動時など toggle が未配置の時のみ） ──
+    const gap  = 5;
+    const btnW = galleryBtn.offsetWidth  || 50;
+    const btnH = galleryBtn.offsetHeight || 50;
+
+    let left = toggleLeft;
+    let top  = toggleTop - btnH - gap;
+
+    const margin = 4;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    if (left < margin) left = margin;
+    if (left + btnW > vw - margin) left = vw - margin - btnW;
+    if (top < margin) top = margin;
+    if (top + btnH > vh - margin) top = vh - margin - btnH;
+
     galleryBtn.style.setProperty('position', 'fixed', 'important');
-    galleryBtn.style.setProperty('left', '455px', 'important');
-    galleryBtn.style.setProperty('top',  'calc(100vh - 160px)', 'important');
+    galleryBtn.style.setProperty('left', Math.round(left) + 'px', 'important');
+    galleryBtn.style.setProperty('top',  Math.round(top)  + 'px', 'important');
     galleryBtn.style.setProperty('right', 'auto', 'important');
     galleryBtn.style.setProperty('bottom', 'auto', 'important');
     galleryBtn.style.setProperty('transform', 'none', 'important');
+
     positionStatusMessage();
 }
 
@@ -7658,25 +7659,59 @@ function getStatusMessageEl() {
     return el;
 }
 
+// ============================================================
+// 「読み込み完了」等のステータスメッセージを 🎨 の左側に配置。
+//
+// 🎨 が display:none 等で rect が全 0 の時は inline left/top を読む。
+// inline が未設定 (-9999px 等) の時は位置更新をスキップし、
+// 次のポーリングで再試行する。
+// ============================================================
 function positionStatusMessage() {
     const el = document.getElementById(STATUS_MESSAGE_ID);
     if (!el) return;
     if (!el.classList.contains('gic-visible')) return;
+
     const btn = document.getElementById(GALLERY_BUTTON_ID);
     if (!btn) return;
+
+    let btnLeft, btnTop, btnW, btnH;
+
+    // ① 可視時
     const bRect = btn.getBoundingClientRect();
-    if (bRect.width === 0 || bRect.height === 0) return;
+    if (bRect.width > 0 && bRect.height > 0 &&
+        bRect.left > 0 && bRect.top > 0) {
+        btnLeft = bRect.left;
+        btnTop  = bRect.top;
+        btnW    = bRect.width;
+        btnH    = bRect.height;
+    } else {
+        // ② inline 値
+        const inlineLeft = parseFloat(btn.style.getPropertyValue('left'));
+        const inlineTop  = parseFloat(btn.style.getPropertyValue('top'));
+        if (!Number.isFinite(inlineLeft) || !Number.isFinite(inlineTop) ||
+            inlineLeft <= 0 || inlineTop <= 0) {
+            // 🎨 位置未確定 → 次回に期待
+            return;
+        }
+        btnLeft = inlineLeft;
+        btnTop  = inlineTop;
+        btnW    = btn.offsetWidth  || 50;
+        btnH    = btn.offsetHeight || 50;
+    }
+
     const margin = 8;
-    const elW = el.offsetWidth || 200;
+    const elW = el.offsetWidth  || 200;
     const elH = el.offsetHeight || 36;
-    let left = bRect.left - elW - margin;
-    let top = bRect.top + (bRect.height - elH) / 2;
+    let left = btnLeft - elW - margin;
+    let top  = btnTop + (btnH - elH) / 2;
+
     const vw = window.innerWidth;
     const vh = window.innerHeight;
     if (left < margin) left = margin;
     if (left + elW > vw - margin) left = vw - margin - elW;
     if (top < margin) top = margin;
     if (top + elH > vh - margin) top = vh - margin - elH;
+
     el.style.setProperty('position', 'fixed', 'important');
     el.style.setProperty('left', Math.round(left) + 'px', 'important');
     el.style.setProperty('top', Math.round(top) + 'px', 'important');
