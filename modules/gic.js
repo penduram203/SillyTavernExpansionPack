@@ -1546,7 +1546,7 @@ function getCurrentCharacterName() {
         /* 直接ホバー時: 完全不透明 */
         html body #${UNREGISTER_BUTTON_ID}.gic-unregister-visible:hover {
             opacity: 1 !important;
-            background-color: #9b2c2c !important;
+            background-color: #fcf526 !important;
             pointer-events: auto !important;
         }
 
