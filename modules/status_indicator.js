@@ -184,13 +184,15 @@
         on('GENERATION_ENDED', hideLLM);
         on('CHARACTER_MESSAGE_RENDERED', hideLLM);
 
-        // 画像生成（カスタムイベント）
-        window.addEventListener('gic-image-generation-started', () => {
-            showStatus('image', '画像生成中…', 'image');
-        });
-        window.addEventListener('gic-image-generation-ended', () => {
-            hideStatus('image');
-        });
+    // 画像生成（カスタムイベント）
+    window.addEventListener('gic-image-generation-started', (e) => {
+        const preparing = e?.detail?.preparing === true;
+        const text = preparing ? '画像準備中…' : '画像生成中…';
+        showStatus('image', text, 'image');
+    });
+    window.addEventListener('gic-image-generation-ended', () => {
+        hideStatus('image');
+    });
 
         // ★ モード切替時に即座に反映
         //   応答生成中にモードが切り替わった場合の保険
