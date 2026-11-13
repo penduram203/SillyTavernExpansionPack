@@ -3,9 +3,7 @@
     console.log("Image Display: 初期化を開始します。");
     const MODULE_NAME = 'image_display';
     const OLD_STORAGE_KEY = 'imageDisplayState';
-
     const mediaExistsCache = new Map();
-
     const DEFAULT_WIDTH = 300, DEFAULT_HEIGHT = 200, DEFAULT_LEFT = 100, DEFAULT_TOP = 100, DEFAULT_BG_COLOR = '#000000';
     const defaultImageMap = { "default": "user/images/default" };
     let currentCharacter = null;
@@ -16,26 +14,15 @@
     let isDragging = false, isResizing = false, offsetX, offsetY, isCustomWindowOpen = false;
     const imageMapCache = new Map();
     let isDefaultImageFailed = false;
-    let currentTextMode = 'user';
-    let streamingTimer = null;
-    let lastStreamingText = '';
-    const STREAMING_DELAY = 500;
     let chatDomObserver = null;
-
-    let isOverrideActive = false;
-    let overrideImageUrl = null;
-
     // ★ 送信時に確定したキーワード画像をロック（事前設定モード用）
     let _lastSentKeywordImage = null;
-
     // ★ バトルモード中の背景画像ロック
     //   VariableManager がバトルモード変数=1 を検知した時にロックし、
     //   バトル終了時に解除する。ロック中は updateImage() が同じ画像を維持する。
     let _battleImageLock = null;
-
     let lastMatchCache = { signature: null, url: null, timestamp: 0 };
     const MATCH_CACHE_TTL = 1500;
-
     const parsedConditionCache = new Map();
     let sortedKeywordEntriesCache = null;
     let sortedKeywordEntriesCacheSource = null;
@@ -471,12 +458,6 @@
     const controlContainer = document.createElement('div');
     controlContainer.id = 'image-control-container';
     document.body.appendChild(controlContainer);
-
-    const textModeButton = document.createElement('button');
-    textModeButton.id = 'text-mode-button';
-    textModeButton.textContent = 'UT';
-    textModeButton.title = 'クリックでテキストモード切り替え（現在: ユーザー）';
-    document.body.appendChild(textModeButton);
 
     const customButton = document.createElement('button');
     customButton.id = 'custom-button';
@@ -1176,8 +1157,8 @@
     }
 
     function findLastKeywordImage() {
-        const isUserMode = currentTextMode === 'user';
-        const selector = `.mes[is_user="${isUserMode}"] .mes_text`;
+        // ★ 常にユーザー発言を監視（合体モード固定）
+        const selector = `.mes[is_user="true"] .mes_text`;
         const messages = Array.from(document.querySelectorAll(selector));
         const start = Math.max(0, messages.length - MAX_MESSAGE_SCAN);
         for (let i = messages.length - 1; i >= start; i--) {
@@ -1361,18 +1342,6 @@
         //   一度 true になると永久に復帰不能になる catch-22 が発生するため。
         //   実際の判定は updateImageWithUrl 内で行う。
 
-        if (isOverrideActive) {
-            if (overrideImageUrl) {
-                if (currentImageUrl !== overrideImageUrl) await updateImageWithUrl(overrideImageUrl);
-            } else {
-                const fallback = getRandomImageSource(currentImageMap.default, '__default__') || currentImageMap.default;
-                if (fallback && typeof fallback === 'string' && fallback.trim() && currentImageUrl !== fallback) {
-                    await updateImageWithUrl(fallback);
-                }
-            }
-            return;
-        }
-
         if (currentTextMode === 'user' && _lastSentKeywordImage) {
             if (currentImageUrl !== _lastSentKeywordImage) {
                 await updateImageWithUrl(_lastSentKeywordImage);
@@ -1406,11 +1375,6 @@
     }
     
     async function handleMediaError(element, src) {
-        if (isOverrideActive && overrideImageUrl && src === overrideImageUrl) {
-            clearOverrideState({ save: true, reason: 'override画像の読み込み失敗' });
-            setTimeout(() => safeUpdateImage(), 100);
-            return;
-        }
         if (src && typeof src === 'string' && !src.match(/\.(png|jpg|jpeg|webp|gif|avif|bmp|mp4|webm)$/i)) {
             const detectedPath = await detectImageExtension(src);
             if (detectedPath) { element.src = detectedPath; return; }
@@ -1432,7 +1396,6 @@
             if (e.key !== 'Enter' || e.shiftKey) return;
             const target = e.target;
             if (!target || target.id !== 'send_textarea') return;
-            if (currentTextMode !== 'user') return;
             // ★ 合体モード時は gic_lorebook.js が制御するため介入しない
             if (window.GicApi?.isCombinedMode?.() === true) return;
             const text = target.value;
@@ -1447,7 +1410,6 @@
         document.addEventListener('click', (e) => {
             const btn = e.target && e.target.closest ? e.target.closest('#send_but') : null;
             if (!btn) return;
-            if (currentTextMode !== 'user') return;
             // ★ 合体モード時は gic_lorebook.js が制御するため介入しない
             if (window.GicApi?.isCombinedMode?.() === true) return;
             const textarea = document.querySelector('#send_textarea');
@@ -1462,27 +1424,7 @@
         }, true);
     }
 
-    function toggleTextMode() {
-        currentTextMode = currentTextMode === 'user' ? 'ai' : 'user';
-        textModeButton.textContent = currentTextMode === 'user' ? 'UT' : 'AI';
-        _lastSentKeywordImage = null;   // ★ ロック解除
-        invalidateMatchCache();
-        saveDisplayState();
-        safeUpdateImage();
-    }
-    
     textModeButton.addEventListener('click', toggleTextMode);
-
-    function handleStreamingUpdate() {
-        if (currentTextMode !== 'ai') return;
-        const lastAiMessage = document.querySelector('.mes[is_user="false"]:last-child .mes_text');
-        if (!lastAiMessage) return;
-        const currentText = lastAiMessage.textContent;
-        if (currentText === lastStreamingText) return;
-        lastStreamingText = currentText;
-        if (streamingTimer) clearTimeout(streamingTimer);
-        streamingTimer = setTimeout(() => safeUpdateImage(), STREAMING_DELAY);
-    }
 
     function setupChatDomObserver() {
         const chatContainer = document.querySelector('#chat');
@@ -1886,9 +1828,6 @@
             preNormalState,
             bgColor: colorPicker.value,
             currentMode,
-            textMode: currentTextMode,
-            isOverrideActive,
-            overrideImageUrl,
             chatBgColor: chatColorPicker.value,
             imageManualMode,
             chatCurrentMode,
@@ -1933,7 +1872,6 @@
                 }
                 if (state.bgColor) { imageContainer.style.backgroundColor = state.bgColor; colorPicker.value = state.bgColor; }
                 currentMode = state.currentMode || 'normal';
-                if (state.textMode) { currentTextMode = state.textMode; textModeButton.textContent = currentTextMode === 'user' ? 'UT' : 'AI'; }
                 if (state.chatBgColor) {
                     chatColorPicker.value = state.chatBgColor;
                     const rgb = hexToRgbString(state.chatBgColor);
@@ -1944,12 +1882,6 @@
                 if (state.chatPreState) chatPreState = { ...state.chatPreState };
                 if (typeof state.isCustomWindowOpen === 'boolean') savedCustomWindowOpen = state.isCustomWindowOpen;
 
-                if (state.isOverrideActive) {
-                    isOverrideActive = true;
-                    overrideImageUrl = (typeof state.overrideImageUrl === 'string' && state.overrideImageUrl.trim()) ? state.overrideImageUrl.trim() : null;
-                } else {
-                    isOverrideActive = false; overrideImageUrl = null;
-                }
                 switch (currentMode) {
                     case 'maximized': applyMaximizeMode(); break;
                     case 'halfMaximized': applyHalfMaximizeMode(); break;
@@ -2279,36 +2211,6 @@
         if (pollCount > 10) clearInterval(initialPoll);
     }, 1000);
 
-    function positionTextModeButton() {
-        const textModeBtn = document.getElementById('text-mode-button');
-        if (!textModeBtn) return;
-        if (isOverrideActive) { textModeBtn.style.display = 'none'; textModeBtn.style.pointerEvents = 'none'; return; }
-        const gicBtn = document.getElementById('gic-release-override-button');
-        if (!gicBtn) { textModeBtn.style.display = 'none'; return; }
-        if (window.getComputedStyle(gicBtn).display === 'none') { textModeBtn.style.display = 'none'; return; }
-        const gicRect = gicBtn.getBoundingClientRect();
-        if (gicRect.width === 0 || gicRect.height === 0) { textModeBtn.style.display = 'none'; return; }
-        if (textModeBtn.style.display === 'none') textModeBtn.style.display = '';
-        textModeBtn.style.pointerEvents = '';
-        const gap = 5;
-        const btnW = textModeBtn.offsetWidth || 40;
-        const btnH = textModeBtn.offsetHeight || 30;
-        let left = gicRect.right + gap;
-        let top = gicRect.top + (gicRect.height - btnH) / 2;
-        const margin = 4, vw = window.innerWidth, vh = window.innerHeight;
-        if (left < margin) left = margin;
-        if (left + btnW > vw - margin) left = vw - margin - btnW;
-        if (top < margin) top = margin;
-        if (top + btnH > vh - margin) top = vh - margin - btnH;
-        textModeBtn.style.setProperty('z-index', '15000', 'important');
-        textModeBtn.style.setProperty('position', 'fixed', 'important');
-        textModeBtn.style.setProperty('left', Math.round(left) + 'px', 'important');
-        textModeBtn.style.setProperty('top', Math.round(top) + 'px', 'important');
-        textModeBtn.style.setProperty('right', 'auto', 'important');
-        textModeBtn.style.setProperty('bottom', 'auto', 'important');
-        textModeBtn.style.setProperty('transform', 'none', 'important');
-    }
-
     setInterval(positionTextModeButton, 200);
     window.addEventListener('resize', positionTextModeButton);
 
@@ -2373,46 +2275,11 @@
     }, 1500);
 
     window.ImageDisplayExtension = {
-        setOverrideImage: async function (url) {
-            const cleanUrl = (url && typeof url === 'string') ? url.trim() : '';
-            if (cleanUrl) {
-                const exists = await checkMediaExists(cleanUrl);
-                if (!exists) {
-                    clearOverrideState({ save: true });
-                    safeUpdateImage();
-                    return false;
-                }
-            }
-
-            // ★ 事前設定モード用ロックをクリア（override へ切替）
-            _lastSentKeywordImage = null;
-
-            overrideImageUrl = cleanUrl || null;
-            isOverrideActive = true;
-
-            if (overrideImageUrl) {
-                await updateImageWithUrl(overrideImageUrl);
-            } else {
-                const fallback = getRandomImageSource(currentImageMap.default, '__default__') || currentImageMap.default;
-                if (fallback && typeof fallback === 'string' && fallback.trim()) {
-                    await updateImageWithUrl(fallback);
-                }
-            }
-            saveDisplayState();
-            return true;
-        },
-        
-        clearOverrideImage: function () {
-            // ★ 事前設定モードへ戻る際、送信ロックもクリア
-            _lastSentKeywordImage = null;
-            clearOverrideState({ save: true });
-            safeUpdateImage();
-        },
-        
         getCurrentImageUrl: function () { return currentImageUrl; },
-        isOverride: function () { return isOverrideActive; },
-        getOverrideImageUrl: function () { return overrideImageUrl; },
-
+        // ★ 互換用: 背景生成モード廃止に伴い常に false を返す
+        //   他モジュール（gic_lorebook.js / gic.js / stj_editor.js など）が
+        //   isOverride() を参照しても、合体モード固定であることを正しく示す。
+        isOverride: () => false,
         applyNormalMode: function () {
             if (imageManualMode === 'maximized') applyMaximizeMode();
             else if (imageManualMode === 'halfMaximized') applyHalfMaximizeMode();
