@@ -8470,6 +8470,31 @@ window.GicDumpGallery = function () {
     console.log('[GicDumpGallery] ギャラリーDOM構造:\n' + lines.join('\n'));
 };
 
+// ============================================================
+// ★ チャットウィンドウ移動に追従（resize 連動）
+//   image-display.js の handleChatDragMove() が毎フレーム
+//   window.dispatchEvent(new Event('resize')) を発火するため、
+//   ドラッグ中もボタンが同期して動く。
+// ============================================================
+(function installGicResizeSync() {
+    if (window.__gicResizeSyncInstalled) return;
+    window.__gicResizeSyncInstalled = true;
+
+    let raf = null;
+    const sync = () => {
+        raf = null;
+        try { positionGalleryButton(); } catch (e) { /* ignore */ }
+        try { positionUnregisterButton(); } catch (e) { /* ignore */ }
+    };
+
+    window.addEventListener('resize', () => {
+        if (raf !== null) return;
+        raf = requestAnimationFrame(sync);
+    });
+
+    console.log('[GIC] 🔄 チャットウィンドウ移動へのボタン追従を有効化しました');
+})();
+
 function exposeGicApi() {
     window.GicApi = {
         openGallery: () => openGalleryFromGic(),
