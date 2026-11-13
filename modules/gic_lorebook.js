@@ -986,25 +986,67 @@ function checkPreRegisteredImages(worldName, entry) {
 }
 
 // ============================================================
-// ★ 画像登録完了を待つ（合体モード）
+// ★ 指定エントリに登録されているファイル一覧を取得
 // ============================================================
-function waitForImageRegistration(entryKey, timeoutMs = 30000) {
-    return new Promise((resolve) => {
-        const timer = setTimeout(() => {
-            window.removeEventListener('gic-image-registration-completed', handler);
-            console.warn(`[GIC-Lore] 画像登録待ちタイムアウト: ${entryKey}`);
-            resolve(false);
-        }, timeoutMs);
+function getRegisteredFilesForEntry(entryKey) {
+    if (!entryKey) return [];
+    try {
+        const ctx = getContext();
+        const char = ctx?.characters?.[ctx?.characterId];
+        const ext = char?.data?.extensions?.image_display_extension;
+        if (!ext || typeof ext !== 'object') return [];
+        const val = ext[entryKey];
+        if (!val) return [];
+        const list = Array.isArray(val) ? val : [val];
+        return list.filter(p => typeof p === 'string' && p.trim());
+    } catch (e) { return []; }
+}
 
-        function handler(e) {
-            if (e.detail?.entryKey === entryKey) {
-                clearTimeout(timer);
-                window.removeEventListener('gic-image-registration-completed', handler);
-                resolve(true);
-            }
+// ============================================================
+// ★ 画像登録完了を待つ（イベント + ポーリング併用）
+//   - initialCount より多く登録されたら解決
+//   - イベント取りこぼし対策として 500ms ポーリングを併走
+//   - 呼び出し側で Promise.race([..., timeout]) を併用する想定
+// ============================================================
+function waitForImageRegistration(entryKey, initialCount, timeoutMs = 60000) {
+    return new Promise((resolve) => {
+        // ★ 事前チェック: 既に新しい画像が登録済みなら即解決
+        if (getRegisteredFilesForEntry(entryKey).length > initialCount) {
+            console.log(`[GIC-Lore] 画像登録待ち: 事前チェックで解決済み (${entryKey})`);
+            resolve(true);
+            return;
         }
 
+        let settled = false;
+        let pollTimer = null;
+        let timeoutTimer = null;
+
+        const finish = (ok, reason) => {
+            if (settled) return;
+            settled = true;
+            if (pollTimer) clearInterval(pollTimer);
+            if (timeoutTimer) clearTimeout(timeoutTimer);
+            window.removeEventListener('gic-image-registration-completed', handler);
+            console.log(`[GIC-Lore] 画像登録待ち終了 (${reason}): ${entryKey}`);
+            resolve(ok);
+        };
+
+        function handler(e) {
+            if (e.detail?.entryKey === entryKey) finish(true, 'event');
+        }
         window.addEventListener('gic-image-registration-completed', handler);
+
+        // ★ 500ms ポーリングで取りこぼし対策
+        pollTimer = setInterval(() => {
+            if (getRegisteredFilesForEntry(entryKey).length > initialCount) {
+                finish(true, 'poll');
+            }
+        }, 500);
+
+        timeoutTimer = setTimeout(() => {
+            console.warn(`[GIC-Lore] 画像登録待ちタイムアウト (${timeoutMs}ms): ${entryKey}`);
+            finish(false, 'timeout');
+        }, timeoutMs);
     });
 }
 
@@ -1012,20 +1054,53 @@ function waitForImageRegistration(entryKey, timeoutMs = 30000) {
 // ★ 合体モード: 5秒後に事前登録画像を表示しつつ、裏で生成
 // ============================================================
 async function processChoiceCombined(worldName, entry, prompt, negativePrompt, resolution, hasPreRegistered, entryKey) {
+    // ★ 事前登録画像の数を記録（新画像検出の基準）
+    const initialRegisteredCount = getRegisteredFilesForEntry(entryKey).length;
+
     if (hasPreRegistered) {
         console.log(`[GIC-Lore] 🎨 合体モード（事前登録あり）: 5秒後に表示、裏で生成`);
 
         // 画像表示をロック（5秒間は前の画像を維持）
         try { window.GicApi?.setCombinedPrepActive?.(true); } catch (e) { /* ignore */ }
 
-        // 生成をバックグラウンド開始
+        // ★ SD 生成をバックグラウンド開始
         const sdPromise = executeSd(prompt, negativePrompt, resolution);
+        // ★ 未処理の rejection を握りつぶす（下で明示的に await するため）
+        sdPromise.catch((e) => console.warn('[GIC-Lore] SD 生成エラー:', e));
+
+        // ★ 登録完了待ちを sdPromise より先に開始
+        //   → /sd 内部で登録イベントが先に発火しても取りこぼさない
+        const registrationPromise = waitForImageRegistration(
+            entryKey,
+            initialRegisteredCount,
+            60000
+        );
 
         // 5秒待機
         await new Promise(r => setTimeout(r, 5000));
 
-        // 準備中フラグ解除 → 事前登録画像を表示
+        // 準備中フラグ解除（画像表示ロックを解除）
         try { window.GicApi?.setCombinedPrepActive?.(false); } catch (e) { /* ignore */ }
+
+        // ★ 状態表示を「画像準備中…」→「画像生成中…」に更新
+        try {
+            window.dispatchEvent(new CustomEvent('gic-image-generation-started', {
+                detail: {
+                    entryKey,
+                    worldName,
+                    prompt,
+                    negativePrompt,
+                    resolution,
+                    templateIndex: _pendingGenerationContext?.templateIndex,
+                    preparing: false,
+                },
+            }));
+        } catch (e) { /* ignore */ }
+
+        // ★ ユーザー操作ロック
+        try { window.GicApi?.lockUserInput?.('combined-wait'); } catch (e) { /* ignore */ }
+
+        // 事前登録画像を表示
         try {
             await window.ImageDisplayExtension?.pickAndShowCurrentKeyword?.();
             console.log(`[GIC-Lore] 🖼️ 事前登録画像を表示`);
@@ -1033,20 +1108,16 @@ async function processChoiceCombined(worldName, entry, prompt, negativePrompt, r
             console.warn('[GIC-Lore] 事前登録画像の表示に失敗:', e);
         }
 
-        // 入力ロック
-        try { window.GicApi?.lockUserInput?.('combined-wait'); } catch (e) { /* ignore */ }
+        // 生成完了待ち（/sd の promise 解決 = 画像ファイルがチャットに反映済み）
+        try { await sdPromise; } catch (e) { /* ignore */ }
 
-        // 生成完了待ち
-        try {
-            await sdPromise;
-        } catch (e) {
-            console.warn('[GIC-Lore] SD 生成エラー:', e);
-        }
+        // ★ 登録待ちは最大 5 秒だけ猶予
+        //   sdPromise が解決した時点で大抵は登録も完了しているため、
+        //   ここで長く待たない（ユーザーロックの不要な延長を防ぐ）
+        const gracePromise = new Promise(r => setTimeout(() => r(false), 5000));
+        await Promise.race([registrationPromise, gracePromise]);
 
-        // 画像登録完了待ち
-        await waitForImageRegistration(entryKey, 30000);
-
-        // 入力ロック解除
+        // ★ ユーザー操作ロック解除
         try { window.GicApi?.unlockUserInput?.('combined-done'); } catch (e) { /* ignore */ }
 
         console.log(`[GIC-Lore] ✅ 合体モード完了`);
@@ -1056,11 +1127,21 @@ async function processChoiceCombined(worldName, entry, prompt, negativePrompt, r
         // 入力ロック（生成完了まで）
         try { window.GicApi?.lockUserInput?.('combined-fallback-wait'); } catch (e) { /* ignore */ }
 
+        const sdPromise = executeSd(prompt, negativePrompt, resolution);
+        sdPromise.catch((e) => console.warn('[GIC-Lore] SD 生成エラー:', e));
+
+        const registrationPromise = waitForImageRegistration(
+            entryKey,
+            initialRegisteredCount,
+            60000
+        );
+
         try {
-            await executeSd(prompt, negativePrompt, resolution);
+            await sdPromise;
         } finally {
-            // 登録完了を待ってから表示更新
-            await waitForImageRegistration(entryKey, 30000);
+            const gracePromise = new Promise(r => setTimeout(() => r(false), 5000));
+            await Promise.race([registrationPromise, gracePromise]);
+
             try {
                 await window.ImageDisplayExtension?.pickAndShowCurrentKeyword?.();
                 console.log(`[GIC-Lore] 🖼️ 生成画像を表示`);
