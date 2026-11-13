@@ -12,6 +12,82 @@
     const STYLE_ID = 'status-indicator-style';
     const MAX_SHOW_MS = 180000; // 3分でタイムアウト（暴走防止）
 
+    // ============================================================
+    // ★ 画像生成進捗リング
+    // ============================================================
+    const PROGRESS_RING_R = 10;
+    const PROGRESS_RING_CIRCUMFERENCE = 2 * Math.PI * PROGRESS_RING_R; // ≈ 62.83
+    const PROGRESS_RING_COLOR = '#ff9800';  // 生成中の枠色と一致
+
+    function createProgressRing() {
+        const NS = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(NS, 'svg');
+        svg.setAttribute('class', 'status-progress-ring');
+        svg.setAttribute('width', '26');
+        svg.setAttribute('height', '26');
+        svg.setAttribute('viewBox', '0 0 26 26');
+
+        // 背景トラック（暗い円）
+        const track = document.createElementNS(NS, 'circle');
+        track.setAttribute('class', 'status-progress-ring-track');
+        track.setAttribute('cx', '13');
+        track.setAttribute('cy', '13');
+        track.setAttribute('r', String(PROGRESS_RING_R));
+        track.setAttribute('fill', 'none');
+        track.setAttribute('stroke', 'rgba(255, 255, 255, 0.15)');
+        track.setAttribute('stroke-width', '3');
+        svg.appendChild(track);
+
+        // 進捗リング（オレンジ）
+        const fill = document.createElementNS(NS, 'circle');
+        fill.setAttribute('class', 'status-progress-ring-fill');
+        fill.setAttribute('cx', '13');
+        fill.setAttribute('cy', '13');
+        fill.setAttribute('r', String(PROGRESS_RING_R));
+        fill.setAttribute('fill', 'none');
+        fill.setAttribute('stroke', PROGRESS_RING_COLOR);
+        fill.setAttribute('stroke-width', '3');
+        fill.setAttribute('stroke-linecap', 'round');
+        fill.setAttribute('stroke-dasharray', String(PROGRESS_RING_CIRCUMFERENCE));
+        fill.setAttribute('stroke-dashoffset', String(PROGRESS_RING_CIRCUMFERENCE));
+        fill.setAttribute('transform', 'rotate(-90 13 13)');
+        fill.style.transition = 'stroke-dashoffset 0.2s ease-out';
+        svg.appendChild(fill);
+
+        // 中央のパーセント表示
+        const text = document.createElementNS(NS, 'text');
+        text.setAttribute('class', 'status-progress-ring-text');
+        text.setAttribute('x', '13');
+        text.setAttribute('y', '13');
+        text.setAttribute('text-anchor', 'middle');
+        text.setAttribute('dominant-baseline', 'central');
+        text.setAttribute('font-size', '7');
+        text.setAttribute('font-weight', 'bold');
+        text.setAttribute('fill', PROGRESS_RING_COLOR);
+        text.textContent = '0%';
+        svg.appendChild(text);
+
+        return svg;
+    }
+
+function updateProgressRing(el, value, max) {
+    if (!el) return;
+    const ring = el.querySelector('.status-progress-ring');
+    if (!ring) return;
+    const fill = ring.querySelector('.status-progress-ring-fill');
+    const text = ring.querySelector('.status-progress-ring-text');
+    const ratio = (Number.isFinite(max) && max > 0)
+        ? Math.max(0, Math.min(1, value / max))
+        : 0;
+    const offset = PROGRESS_RING_CIRCUMFERENCE * (1 - ratio);
+    if (fill) fill.setAttribute('stroke-dashoffset', String(offset));
+    if (text) text.textContent = `${Math.round(ratio * 100)}%`;
+}
+
+function resetProgressRing(el) {
+    updateProgressRing(el, 0, 1);
+}
+    
     const timers = new Map();  // key -> timeout id
     const items = new Map();   // key -> element
 
@@ -74,10 +150,22 @@
             el.dataset.key = key;
             items.set(key, el);
         }
-        el.textContent = text;
 
-        // ★ 'preparing' / 'generating' は base の status-image を付与しつつ、
-        //    それぞれの修飾クラスも付ける（preparing=緑、generating=オレンジ）
+        // ── 中身を組み立て ──
+        el.innerHTML = '';
+        if (type === 'generating') {
+            // ★ 画像生成中: SVG 円形リング + テキスト
+            el.appendChild(createProgressRing());
+            const span = document.createElement('span');
+            span.className = 'status-text-label';
+            span.textContent = text;
+            el.appendChild(span);
+        } else {
+            // 準備中 / LLM / モード: テキストのみ（スピナーは CSS ::before）
+            el.textContent = text;
+        }
+
+        // ── クラス切り替え ──
         const isImage = (type === 'image' || type === 'preparing' || type === 'generating');
         el.classList.toggle('status-image',      isImage);
         el.classList.toggle('status-preparing',  type === 'preparing');
@@ -86,7 +174,6 @@
         el.classList.toggle('status-mode',       type === 'mode');
 
         if (!el.parentNode) container.appendChild(el);
-
         resetTimer(key);
         container.style.display = 'flex';
     }
@@ -146,21 +233,43 @@
     window.addEventListener('gic-image-generation-ended', () => {
         hideStatus('image');
     });
+    // ============================================================
+    // ★ ComfyUI 進捗イベント（comfy_boot.js の WS インターセプタ由来）
+    // ============================================================
+    window.addEventListener('comfyui-progress-start', () => {
+        const el = items.get('image');
+        if (!el || !el.classList.contains('status-generating')) return;
+        resetProgressRing(el);
+    });
 
-        // ★ モード切替時に即座に反映
-        //   応答生成中にモードが切り替わった場合の保険
-        window.addEventListener('gic-mode-changed', () => {
-            const llmEl = items.get('llm');
-            if (!llmEl) return; // 応答生成中のみ反映
-            if (isPreSetupMode()) {
-                showPreSetupModeUnderLLM();
-            } else {
-                hideStatus('mode');
-            }
-        });
+    window.addEventListener('comfyui-progress', (e) => {
+        const el = items.get('image');
+        if (!el || !el.classList.contains('status-generating')) return;
+        const { value, max } = e.detail || {};
+        updateProgressRing(el, value, max);
+    });
 
-        console.log(LOG, 'イベントリスナーを登録しました');
-    }
+    window.addEventListener('comfyui-progress-end', () => {
+        const el = items.get('image');
+        if (!el || !el.classList.contains('status-generating')) return;
+        // 完了時は 100% を表示（gic-image-generation-ended が来るまで）
+        updateProgressRing(el, 1, 1);
+    });
+
+    // ★ モード切替時に即座に反映
+    //   応答生成中にモードが切り替わった場合の保険
+    window.addEventListener('gic-mode-changed', () => {
+        const llmEl = items.get('llm');
+        if (!llmEl) return; // 応答生成中のみ反映
+        if (isPreSetupMode()) {
+            showPreSetupModeUnderLLM();
+        } else {
+            hideStatus('mode');
+        }
+    });
+
+    console.log(LOG, 'イベントリスナーを登録しました');
+}
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => {
