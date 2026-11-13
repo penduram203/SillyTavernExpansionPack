@@ -47,24 +47,6 @@
         return container;
     }
 
-    // ============================================================
-    // ★ 事前設定モード判定
-    //   GicApi.isOverrideMode() もしくは ImageDisplayExtension.isOverride() が
-    //   true なら背景生成モード。両方 false なら事前設定モード。
-    // ============================================================
-    function isPreSetupMode() {
-        try {
-            let isOverride = false;
-            if (typeof window.GicApi?.isOverrideMode === 'function') {
-                isOverride = isOverride || window.GicApi.isOverrideMode() === true;
-            }
-            if (typeof window.ImageDisplayExtension?.isOverride === 'function') {
-                isOverride = isOverride || window.ImageDisplayExtension.isOverride() === true;
-            }
-            return !isOverride;
-        } catch (e) { return false; }
-    }
-
     function resetTimer(key) {
         if (timers.has(key)) {
             clearTimeout(timers.get(key));
@@ -103,39 +85,6 @@
         container.style.display = 'flex';
     }
 
-    // ============================================================
-    // ★ 事前設定モード表示（「応答生成中…」の直下に配置）
-    //   - llm 要素が表示されていない場合は何もしない
-    //   - 既に mode 要素があれば位置だけ保証する
-    //   - 順序: llm → mode になるよう llm の nextSibling に挿入
-    // ============================================================
-    function showPreSetupModeUnderLLM() {
-        const container = ensureContainer();
-        const llmEl = items.get('llm');
-        if (!llmEl || !llmEl.parentNode) return;
-
-        let modeEl = items.get('mode');
-        if (!modeEl || modeEl.parentNode !== container) {
-            if (modeEl && modeEl.parentNode) modeEl.parentNode.removeChild(modeEl);
-            modeEl = document.createElement('div');
-            modeEl.className = 'status-indicator-item status-mode';
-            modeEl.dataset.key = 'mode';
-            modeEl.textContent = '事前設定モード';
-            items.set('mode', modeEl);
-        } else {
-            modeEl.textContent = '事前設定モード';
-        }
-
-        // llm の直後に配置（順序保証）
-        if (llmEl.nextSibling !== modeEl) {
-            if (modeEl.parentNode) modeEl.parentNode.removeChild(modeEl);
-            llmEl.insertAdjacentElement('afterend', modeEl);
-        }
-
-        resetTimer('mode');
-        container.style.display = 'flex';
-    }
-
     function hideStatus(key) {
         if (!key) return;
         const el = items.get(key);
@@ -165,10 +114,6 @@
 
         const showLLM = () => {
             showStatus('llm', '応答生成中…', 'llm');
-            // ★ 事前設定モード時のみ、応答生成中…の真下に表示
-            if (isPreSetupMode()) {
-                showPreSetupModeUnderLLM();
-            }
         };
         const hideLLM = () => {
             hideStatus('llm');
