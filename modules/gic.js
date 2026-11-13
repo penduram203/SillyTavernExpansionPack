@@ -423,9 +423,6 @@ const UNREGISTER_BUTTON_ID = 'gic-unregister-button';
 const DELETE_IMAGE_BUTTON_ID = 'gic-delete-image-button';
 const DELETE_CONFIRM_DIALOG_ID = 'gic-delete-confirm-dialog';
 const GALLERY_BUTTON_ID = 'gic-open-gallery-button';
-const LABEL_OVERRIDE   = '背景生成';
-const LABEL_NORMAL     = '事前設定';
-const LABEL_COMBINED = '合体モード';
 const INPUT_LOCK_CLASS = 'gic-input-locked';
 const COMBINED_PREP_DELAY_MS = 5000;
 const HIDE_CLASS       = 'gic-hidden-by-text-styling';
@@ -565,10 +562,9 @@ let lastGeneratedImageUrl = null;
 //   { charName, fileName, entryKeys: [...] } または null
 //   entryKeys は登録されている全キーワード（複数可）
 let _currentRegisteredKeywords = null;
-let isOverrideLocal = false;
-let isCombinedMode = false;      // ★ 合体モード
-let _inputLocked = false;        // ★ 入力ロック状態
-let _combinedPrepActive = false; // ★ 合体モード準備中（image-display の更新をスキップ）
+// 合体モード固定（背景生成・事前設定モードは廃止）
+let _inputLocked = false;
+let _combinedPrepActive = false;
 let _inputLockTimeout = null;
 
 const processedMessageKeys = new Set();
@@ -813,12 +809,8 @@ function loadPersistedState() {
         const ctx = getContext();
         const st = ctx?.extensionSettings?.[MODULE_NAME];
         if (!st) return;
-        if (typeof st.isOverrideLocal === 'boolean') isOverrideLocal = st.isOverrideLocal;
-        if (typeof st.isCombinedMode === 'boolean') isCombinedMode = st.isCombinedMode;
         if (typeof st.lastGeneratedImageUrl === 'string') lastGeneratedImageUrl = st.lastGeneratedImageUrl;
-        // 排他制御: 両方 true にはさせない
-        if (isOverrideLocal && isCombinedMode) isCombinedMode = false;
-        console.log(`[GIC] 永続状態を復元: override=${isOverrideLocal}, combined=${isCombinedMode}, lastUrl=${lastGeneratedImageUrl}`);
+        console.log(`[GIC] 永続状態を復元（合体モード固定）: lastUrl=${lastGeneratedImageUrl}`);
     } catch (e) {
         console.warn('[GIC] 永続状態の読込に失敗:', e);
     }
@@ -829,8 +821,6 @@ function savePersistedState() {
         const ctx = getContext();
         if (!ctx) return;
         if (!ctx.extensionSettings[MODULE_NAME]) ctx.extensionSettings[MODULE_NAME] = {};
-        ctx.extensionSettings[MODULE_NAME].isOverrideLocal = isOverrideLocal;
-        ctx.extensionSettings[MODULE_NAME].isCombinedMode = isCombinedMode;
         ctx.extensionSettings[MODULE_NAME].lastGeneratedImageUrl = lastGeneratedImageUrl;
         if (typeof ctx.saveSettingsDebounced === 'function') ctx.saveSettingsDebounced();
     } catch (e) {
@@ -1785,15 +1775,6 @@ function getMessageKey(message) {
     return `${message?.name || 'unknown'}_${(message?.mes || '').slice(0, 80)}`;
 }
 
-function setButtonLabel(label) {
-    const btn = document.getElementById(BUTTON_ID);
-    if (!btn) return;
-    if (btn.textContent !== label) {
-        btn.textContent = label;
-        console.log(`[GIC] ラベル設定: ${label}`);
-    }
-}
-
 function markGeneratedMessagesInDom() {
     const context = getContext();
     if (!context?.chat) return;
@@ -1814,29 +1795,6 @@ function isTextStylingPanelOpen() {
     const cs = getComputedStyle(panel);
     if (cs.display === 'none' || cs.visibility === 'hidden') return false;
     return true;
-}
-
-let lastTextStylingState = null;
-
-function syncButtonVisibilityForTextStyling() {
-    const btn = document.getElementById(BUTTON_ID);
-    if (!btn) return;
-    const isOpen = isTextStylingPanelOpen();
-    if (isOpen === lastTextStylingState) return;
-    lastTextStylingState = isOpen;
-
-    if (isOpen) {
-        btn.classList.add(HIDE_CLASS);
-        console.log('[GIC] 📝 Text_stylingパネル表示中 → GICボタンを非表示');
-    } else {
-        btn.classList.remove(HIDE_CLASS);
-        console.log('[GIC] 📝 Text_stylingパネル閉じた → GICボタンを再表示');
-    }
-}
-
-function setupTextStylingObserver() {
-    setInterval(syncButtonVisibilityForTextStyling, 300);
-    console.log('[GIC] 📝 Text_stylingパネル監視を開始しました（ポーリング方式）');
 }
 
 // ============================================================
@@ -2072,23 +2030,9 @@ async function scanForGeneratedImages() {
                 }));
             } catch (e) { /* ignore */ }
         }
-        // ── 自動表示判定 ──
-        if (isCombinedMode) {
-            console.log(`[GIC] 合体モードのため生成画像の自動表示をスキップ: ${finalUrl}`);
-        } else if (!isOverrideLocal) {
-            console.log(`[GIC] 事前設定モードのため生成画像の自動表示をスキップ: ${finalUrl}`);
-        } else if (window.ImageDisplayExtension?.setOverrideImage) {
-            try {
-                await window.ImageDisplayExtension.setOverrideImage(finalUrl);
-                isOverrideLocal = true;
-                setButtonLabel(LABEL_OVERRIDE);
-                savePersistedState();
-                console.log(`[GIC] 🖼️ 最新の生成画像を背景に設定: ${finalUrl}`);
-                refreshUnregisterButtonState?.();
-            } catch (e) {
-                console.error('[GIC] ImageDisplayExtension エラー:', e);
-            }
-        }
+        // ── 合体モード: 生成画像の自動表示は行わない ──
+        //     （image-display.js の pickAndShowCurrentKeyword が表示を担当）
+        console.log(`[GIC] 合体モードのため生成画像の自動表示をスキップ: ${finalUrl}`);
         
         // ── 生成画像メッセージをシステム扱いにマーク ──
         if (!newest.is_system) {
@@ -2133,78 +2077,26 @@ async function scanForGeneratedImages() {
     markGeneratedMessagesInDom();
 }
 
-async function handleButtonAction() {
-    const prevMode = isCombinedMode ? 'combined'
-                    : (isOverrideLocal ? 'background-generation' : 'pre-set');
-    let nextMode;
-    if (prevMode === 'pre-set') nextMode = 'combined';
-    else if (prevMode === 'combined') nextMode = 'background-generation';
-    else nextMode = 'pre-set';
-
-    console.log(`[GIC] モード切替: ${prevMode} → ${nextMode}`);
-
-    // ── 旧モードのクリーンアップ ──
-    if (prevMode === 'background-generation') {
-        try {
-            if (window.ImageDisplayExtension?.isOverride?.()) {
-                window.ImageDisplayExtension.clearOverrideImage?.();
-            }
-        } catch (e) { /* ignore */ }
-    }
-    if (prevMode === 'combined') {
-        if (_inputLocked) unlockUserInput('mode-change');
-        setCombinedPrepActive(false);
-    }
-
-    // ── 新モードのセットアップ ──
-    if (nextMode === 'background-generation') {
-        let urlToUse = lastGeneratedImageUrl || '';
-        if (urlToUse) {
-            const exists = await checkImageExists(urlToUse);
-            if (!exists) {
-                urlToUse = '';
-                lastGeneratedImageUrl = null;
-            }
-        }
-        try {
-            await window.ImageDisplayExtension?.setOverrideImage?.(urlToUse);
-            console.log(`[GIC] setOverrideImage() 成功: ${urlToUse || '(デフォルト)'}`);
-        } catch (e) {
-            console.warn('[GIC] setOverrideImage エラー:', e);
-        }
-    }
-
-    isOverrideLocal = (nextMode === 'background-generation');
-    isCombinedMode = (nextMode === 'combined');
-
-      const label = nextMode === 'pre-set' ? LABEL_NORMAL
-                : nextMode === 'combined' ? LABEL_COMBINED
-                : LABEL_OVERRIDE;
-    setButtonLabel(label);
-    savePersistedState();
-    console.log(`[GIC] モード切替完了: ${nextMode}`);
-}
-
 function positionGalleryButton() {
     const galleryBtn = document.getElementById(GALLERY_BUTTON_ID);
     if (!galleryBtn) return;
 
-    const gicBtn = document.getElementById('gic-release-override-button');
-    if (gicBtn) {
-        const gicRect = gicBtn.getBoundingClientRect();
-        if (gicRect.width > 0 && gicRect.height > 0) {
+    // ★ 💡 ボタンの上に配置
+    const toggleBtn = document.getElementById('toggle-chat-button');
+    if (toggleBtn) {
+        const rect = toggleBtn.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
             const gap = 5;
             const btnW = galleryBtn.offsetWidth || 50;
             const btnH = galleryBtn.offsetHeight || 50;
 
-            let left = gicRect.left - 5;
-            let top  = gicRect.top - btnH - gap;
+            let left = rect.left;
+            let top  = rect.top - btnH - gap;
 
             const margin = 4;
-            const minLeft = -10;
             const vw = window.innerWidth;
             const vh = window.innerHeight;
-            if (left < minLeft) left = minLeft;
+            if (left < margin) left = margin;
             if (left + btnW > vw - margin) left = vw - margin - btnW;
             if (top < margin) top = margin;
             if (top + btnH > vh - margin) top = vh - margin - btnH;
@@ -2221,12 +2113,13 @@ function positionGalleryButton() {
         }
     }
 
-    const gicBtn2 = document.getElementById(BUTTON_ID);
-    if (!gicBtn2) return;
-    const w = gicBtn2.offsetWidth;
-    if (!w) return;
-    galleryBtn.style.left = (w + 4) + 'px';
-
+    // フォールバック
+    galleryBtn.style.setProperty('position', 'fixed', 'important');
+    galleryBtn.style.setProperty('left', '455px', 'important');
+    galleryBtn.style.setProperty('top', 'calc(100vh - 160px)', 'important');
+    galleryBtn.style.setProperty('right', 'auto', 'important');
+    galleryBtn.style.setProperty('bottom', 'auto', 'important');
+    galleryBtn.style.setProperty('transform', 'none', 'important');
     positionStatusMessage();
 }
 
@@ -7894,83 +7787,6 @@ async function prepareGalleryForCharacter() {
     }
 }
 
-function createReleaseButton() {
-    const existing = document.getElementById(BUTTON_ID);
-    if (existing) existing.remove();
-
-    const btn = document.createElement('button');
-    btn.id = BUTTON_ID;
-    btn.type = 'button';
-    btn.title = '事前設定モード（キーワードマッチ）と背景生成モード（生成画像）を切り替える';
-    btn.textContent = isCombinedMode ? LABEL_COMBINED
-                    : (isOverrideLocal ? LABEL_OVERRIDE : LABEL_NORMAL);
-
-    Object.assign(btn.style, {
-        position: 'fixed', left: '0', bottom: '49px', zIndex: '15000',
-        padding: '6px 12px', fontSize: '12px', color: '#ffffff',
-        backgroundColor: '#444', border: '1px solid #666',
-        borderLeft: 'none', borderTopRightRadius: '6px', borderBottomRightRadius: '6px',
-        cursor: 'pointer', opacity: '0.12',
-        transition: 'opacity 0.15s ease, background-color 0.15s ease',
-        userSelect: 'none', outline: 'none', whiteSpace: 'nowrap',
-        pointerEvents: 'auto', touchAction: 'manipulation',
-    });
-
-    btn.addEventListener('mouseenter', () => { btn.style.opacity = '1'; btn.style.backgroundColor = '#666'; });
-    btn.addEventListener('mouseleave', () => { btn.style.opacity = '0.12'; btn.style.backgroundColor = '#444'; });
-
-    let flashTimer = null;
-    const flashBlue = () => {
-        if (flashTimer) clearTimeout(flashTimer);
-        btn.style.backgroundColor = '#0a84ff';
-        btn.style.opacity = '1';
-        flashTimer = setTimeout(() => {
-            const hovering = btn.matches(':hover');
-            btn.style.backgroundColor = hovering ? '#666' : '#444';
-            btn.style.opacity = hovering ? '1' : '0.12';
-            flashTimer = null;
-        }, 250);
-    };
-
-    // ★ モード切替ボタンの triggerAction
-    //   ★ 重要: ここで openGalleryFromGic() を絶対に呼ばないこと。
-    //     モード切替は handleButtonAction() のみを実行する。
-    //     ギャラリーを開く処理が混入すると、
-    //     「事前設定/背景生成ボタンを押したのにギャラリーが開く」バグになる。
-    let lastActionTime = 0;
-    const triggerAction = () => {
-        const now = Date.now();
-        if (now - lastActionTime < 200) return;
-        lastActionTime = now;
-        flashBlue();
-        Promise.resolve(handleButtonAction()).catch(e => console.error('[GIC] handleButtonAction エラー:', e));
-    };
-
-    // ★ pointerdown と click の両方で登録するが、200ms ガードで二重実行を防ぐ
-    //   （pointerdown で preventDefault しても、ブラウザによっては click が発火するため）
-    btn.addEventListener('pointerdown', (e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        triggerAction();
-    }, true);
-    btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        triggerAction();
-    }, true);
-
-    // ★ 万が一、他の要素からイベントがバブリングしてきてもモード切替だけを実行する
-    //   （capture フェーズで stopPropagation しているので通常は届かないが、防御的）
-    btn.addEventListener('mousedown', (e) => {
-        e.stopPropagation();
-    }, true);
-
-    document.body.appendChild(btn);
-    setButtonLabel(isOverrideLocal ? LABEL_OVERRIDE : LABEL_NORMAL);
-    syncButtonVisibilityForTextStyling();
-    requestAnimationFrame(positionGalleryButton);
-}
-
 function createGalleryButton() {
     const existing = document.getElementById(GALLERY_BUTTON_ID);
     if (existing) existing.remove();
@@ -8716,8 +8532,8 @@ function exposeGicApi() {
         showDeleteConfirmDialog,
         
         // ★ GIC 側の override 状態を外部から参照できるようにする
-        isOverrideMode: () => isOverrideLocal,
-        isCombinedMode: () => isCombinedMode,           // ★
+        isOverrideMode: () => false,   // 背景生成モード廃止（互換用）
+        isCombinedMode: () => true,    // 合体モード固定
         isCombinedPreparing: () => _combinedPrepActive, // ★
         setCombinedPrepActive,                          // ★
         lockUserInput,                                  // ★
@@ -9037,8 +8853,6 @@ function initializeGIC() {
 
     setupGalleryDedupeObserver();
     setupGalleryDragToJson();
-
-    createReleaseButton();
     createGalleryButton();
     createUnregisterButton();
     createDeleteImageButton();   // ★ 追加
@@ -9052,7 +8866,6 @@ function initializeGIC() {
 
     setInterval(() => {
         scanForGeneratedImages();
-        syncButtonVisibilityForTextStyling();
         syncGalleryButtonVisibility();
         markGeneratedMessagesInDom();
         positionGalleryButton();
@@ -9080,7 +8893,6 @@ function initializeGIC() {
     }, 100);
 
     scanForGeneratedImages();
-    syncButtonVisibilityForTextStyling();
     syncGalleryButtonVisibility();
     applyGalleryLayout();
     try { setupGalleryVideoThumbs(); } catch (e) { /* ignore */ }
@@ -9312,7 +9124,6 @@ export async function activate() {
     setupImmediateThumbCacheInterceptor();
     setupGalleryDedupeObserver();
     setupGalleryDragToJson();
-    createReleaseButton();
     createGalleryButton();
     setupGalleryObserverForGic();
     applyGalleryLayout();
