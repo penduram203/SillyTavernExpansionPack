@@ -326,7 +326,6 @@ html body.no-blur #send_form #nonQRFormItems {
 }
 
 /* ベース状態: 完全非表示 */
-#text-mode-button,
 #custom-button,
 #maximize-button,
 #half-maximize-button,
@@ -340,7 +339,6 @@ html body.no-blur #send_form #nonQRFormItems {
 }
 
 /* 外観統一 */
-#text-mode-button,
 #custom-button,
 #maximize-button,
 #half-maximize-button,
@@ -372,7 +370,6 @@ html body.no-blur #send_form #nonQRFormItems {
 }
 
 /* 起動領域で hover した時の背景色 */
-body.gic-buttons-wake #text-mode-button:hover,
 body.gic-buttons-wake #custom-button:hover,
 body.gic-buttons-wake #maximize-button:hover,
 body.gic-buttons-wake #half-maximize-button:hover,
