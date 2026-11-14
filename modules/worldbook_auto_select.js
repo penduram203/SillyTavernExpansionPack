@@ -3,28 +3,19 @@
 // ロアブックが存在しない場合はキャラ名と同じロアブックを自動作成し、
 // キャラクターとバインド（char.data.extensions.world）する。
 //
+// ★ v8.4:
+//   comment→key 自動同期を「パネル開閉状態に完全非依存」にする。
+//   パネル閉時は textarea[name="key"] が DOM に存在しないため、
+//   内部データ (ctx.world_info[worldName].entries[uid]) を直接更新し、
+//   明示的に saveWorldInfo を呼んで確定させる（debounce 300ms）。
+//
 // ★ v8.3:
-//   comment→key 自動同期を「パネル展開状態に依存しない」よう修正。
-//   - DOM 上に textarea[name="key"] があれば従来通り value セット
-//   - 無い場合（パネル閉時など）は ST 内部データ
-//     ctx.world_info[worldName].entries[uid].key を直接更新
-//   - inline-drawer-toggle のクリックを検知し、パネルを開いた直後に
-//     comment の値を key textarea へ再反映（ST が textarea を
-//     再生成しない場合の保険）
+//   comment→key 同期を追加（DOM に key textarea がある場合のみ）。
 //
-// ★ v8.2:
-//   ロアブック編集画面で「エントリータイトル/メモ」を編集すると
-//   「カンマ区切りリスト」に同じ内容を自動コピーする機能を追加。
-//
-// ★ v8.1:
-//   「New Entry」ボタンから新規エントリを作成した時、
-//   WI Entry Status=Normal / position=@D System / depth=0 を自動設定。
-//
-// ★ v8:
-//   v7 の location.reload() を撤去し、ST 公式 API で
-//   キャッシュ・ワールド一覧・エディタを正規手順で更新する。
+// ★ v8.2〜v8:
+//   ロアブック自動作成 / 新規エントリ初期値 / soft-refresh 方式。
 
-console.log('[WBAutoSelect] 📦 v8.3 module loading (comment→key sync panel-independent)...');
+console.log('[WBAutoSelect] 📦 v8.4 module loading (comment→key sync via internal data + save)...');
 
 (function () {
     'use strict';
@@ -57,8 +48,9 @@ console.log('[WBAutoSelect] 📦 v8.3 module loading (comment→key sync panel-i
     const RELOAD_SCROLL_KEY = 'wbAutoSelect_scroll';
     const RELOAD_COUNT_KEY = 'wbAutoSelect_reloadCount';
 
-    // ★ v8.3: パネル開閉時の同期遅延
     const PANEL_SYNC_DELAY_MS = 200;
+    // ★ v8.4: comment→key 同期の保存 debounce
+    const COMMENT_SYNC_SAVE_DEBOUNCE_MS = 300;
 
     const COMMON_RULE_NAME = '00_共通ルール';
     const COMMON_RULE_CONTENT =
@@ -85,6 +77,9 @@ console.log('[WBAutoSelect] 📦 v8.3 module loading (comment→key sync panel-i
     let _lastFailure = { char: null, at: 0 };
     const _emptySaveGuards = new Map();
     const _creating = new Map();
+
+    // ★ v8.4: comment→key 同期用タイマー
+    let _commentSyncSaveTimer = null;
 
     // ============================================================
     // 基本ヘルパー
@@ -228,7 +223,7 @@ console.log('[WBAutoSelect] 📦 v8.3 module loading (comment→key sync panel-i
     }
 
     // ============================================================
-    // 空保存ガード + 削除検知（fetch インターセプタ）
+    // 空保存ガード + 削除検知
     // ============================================================
     function _protectFromEmptySave(name, entries, durationMs = EMPTY_SAVE_GUARD_MS) {
         if (!name || !entries || Object.keys(entries).length === 0) return;
@@ -579,7 +574,7 @@ console.log('[WBAutoSelect] 📦 v8.3 module loading (comment→key sync panel-i
     }
 
     // ============================================================
-    // 新規エントリ初期値（v8.1 から変更なし）
+    // 新規エントリ初期値
     // ============================================================
     let _newEntryWatch = null;
     const _appliedNewEntryUids = new Set();
@@ -766,88 +761,132 @@ console.log('[WBAutoSelect] 📦 v8.3 module loading (comment→key sync panel-i
     }
 
     // ============================================================
-    // ★ v8.3: comment→key 自動同期（パネル展開状態に非依存）
+    // ★ v8.4: comment→key 自動同期（内部データ更新 + saveWorldInfo）
+    //
+    //   パネル閉時は textarea[name="key"] が DOM から消えるため、
+    //   DOM 更新だけでは不十分。内部データを直接書き換えて、
+    //   明示的に saveWorldInfo を呼ぶことで ST に正しい値を確定させる。
     // ============================================================
     let _commentToKeyInstalled = false;
 
-    // エディタで現在選択中のワールド名を取得（value はインデックスなので text 優先）
     function _getCurrentEditorWorldName() {
         const ed = document.querySelector('#world_editor_select');
-        if (!ed) return null;
-        const opt = ed.options?.[ed.selectedIndex];
-        if (!opt) return null;
-        const t = (opt.textContent || '').trim();
-        const v = (opt.value || '').trim();
-        if (t && t !== '--- Pick to Edit ---' && t !== '--- 編集するものを選択 ---') return t;
-        if (v && !/^\d+$/.test(v)) return v;
+        if (ed) {
+            const opt = ed.options?.[ed.selectedIndex];
+            if (opt) {
+                const t = (opt.textContent || '').trim();
+                const v = (opt.value || '').trim();
+                if (t && t !== '--- Pick to Edit ---' && t !== '--- 編集するものを選択 ---') return t;
+                if (v && !/^\d+$/.test(v)) return v;
+            }
+        }
+        // フォールバック1: #world_info の選択値
+        const wi = document.querySelector('#world_info');
+        if (wi) {
+            const opt = wi.options?.[wi.selectedIndex];
+            if (opt) {
+                const t = (opt.textContent || '').trim();
+                const v = (opt.value || '').trim();
+                if (t && t !== '--- Pick to Edit ---') return t;
+                if (v && !/^\d+$/.test(v)) return v;
+            }
+        }
+        // フォールバック2: 現在のキャラの world
+        const char = getCurrentChar();
+        if (char?.data?.extensions?.world) return char.data.extensions.world;
         return null;
     }
 
-    // ST 内部データからエントリを取得（文字列キー/数値キー両対応）
+    // ★ v8.4: ctx.world_info と window.world_info の両方を探索
     function _getSTEntry(worldName, uid) {
-        const ctx = getSTContext();
-        const entries = ctx?.world_info?.[worldName]?.entries;
-        if (!entries) return null;
-        let target = entries[uid] || entries[Number(uid)];
-        if (target) return target;
-        for (const k of Object.keys(entries)) {
-            const e = entries[k];
-            if (e && String(e.uid) === String(uid)) return e;
+        const candidates = [];
+        try {
+            const ctx = getSTContext();
+            if (ctx?.world_info) candidates.push(ctx.world_info);
+        } catch (e) { /* ignore */ }
+        try {
+            if (window.world_info) candidates.push(window.world_info);
+        } catch (e) { /* ignore */ }
+
+        for (const wi of candidates) {
+            if (!wi || typeof wi !== 'object') continue;
+            const entries = wi[worldName]?.entries;
+            if (!entries) continue;
+            const direct = entries[uid] || entries[Number(uid)];
+            if (direct) return direct;
+            for (const k of Object.keys(entries)) {
+                const e = entries[k];
+                if (e && String(e.uid) === String(uid)) return e;
+            }
         }
         return null;
     }
 
-    // ST 内部データの key を直接更新
-    //   ST の内部表現は key: string[] （カンマ区切りの配列）
-    function _updateKeyInSTData(uid, rawText) {
-        try {
-            const worldName = _getCurrentEditorWorldName();
-            if (!worldName) return false;
-            const target = _getSTEntry(worldName, uid);
-            if (!target) return false;
+    // 内部データの comment と key を直接更新
+    function _updateCommentAndKeyInSTData(uid, rawText) {
+        const worldName = _getCurrentEditorWorldName();
+        if (!worldName) return false;
+        const target = _getSTEntry(worldName, uid);
+        if (!target) return false;
 
-            const newKeyArr = rawText
-                ? rawText.split(',').map(s => s.trim()).filter(Boolean)
-                : [];
-            target.key = newKeyArr;
-            return true;
-        } catch (e) { return false; }
+        const newKeyArr = rawText
+            ? rawText.split(',').map(s => s.trim()).filter(Boolean)
+            : [];
+        target.key = newKeyArr;
+        target.comment = rawText;
+        return true;
     }
 
-    // ST 内部データの comment を直接更新
-    function _updateCommentInSTData(uid, rawText) {
-        try {
-            const worldName = _getCurrentEditorWorldName();
-            if (!worldName) return false;
-            const target = _getSTEntry(worldName, uid);
-            if (!target) return false;
-            target.comment = rawText;
-            return true;
-        } catch (e) { return false; }
+    // 現在のエディタ world を明示的に saveWorldInfo で保存
+    async function _saveCurrentEditorWorld() {
+        const worldName = _getCurrentEditorWorldName();
+        if (!worldName) return false;
+        const ctx = getSTContext();
+        const worldData = ctx?.world_info?.[worldName] || window.world_info?.[worldName];
+        if (!worldData?.entries) return false;
+
+        const api = await _getWIApi();
+        if (api.save) {
+            try {
+                await api.save(worldName, { entries: clone(worldData.entries) }, true);
+                return true;
+            } catch (e) {
+                console.warn(`${LOG} saveWorldInfo (comment→key) failed:`, e?.message || e);
+            }
+        }
+        return false;
     }
 
-    // comment → key を反映。DOM 有無を自動判定
-    function _applyCommentToKey(entryEl, uid, newValue) {
-        if (!entryEl || newValue === undefined) return false;
+    // comment → key 同期（メイン）
+    //   1. 内部データ更新（即時）
+    //   2. DOM の key textarea があれば value セット（パネル開時）
+    //   3. saveWorldInfo を debounce で呼ぶ
+    function _syncCommentToKey(entryEl, uid, newValue) {
+        // ① 内部データ更新（パネル開閉に関係なく必須）
+        const dataUpdated = _updateCommentAndKeyInSTData(uid, newValue);
 
-        // ① DOM 上の key textarea があればセット（パネル開時など）
-        const keyEl = entryEl.querySelector('textarea[name="key"]');
+        // ② DOM の key textarea があれば視覚反映（パネル開時）
         let domUpdated = false;
-        if (keyEl && keyEl.value !== newValue) {
-            keyEl.value = newValue;
-            _triggerInputAndChange(keyEl);
-            domUpdated = true;
+        if (entryEl) {
+            const keyEl = entryEl.querySelector('textarea[name="key"]');
+            if (keyEl && keyEl.value !== newValue) {
+                keyEl.value = newValue;
+                _triggerInputAndChange(keyEl);
+                domUpdated = true;
+            }
         }
 
-        // ② ST 内部データも更新（パネル閉時は DOM が無いので必須）
-        const dataUpdated = _updateKeyInSTData(uid, newValue);
-        const commentUpdated = _updateCommentInSTData(uid, newValue);
+        // ③ 明示 save を debounce
+        if (_commentSyncSaveTimer) clearTimeout(_commentSyncSaveTimer);
+        _commentSyncSaveTimer = setTimeout(async () => {
+            _commentSyncSaveTimer = null;
+            await _saveCurrentEditorWorld();
+        }, COMMENT_SYNC_SAVE_DEBOUNCE_MS);
 
-        return domUpdated || dataUpdated || commentUpdated;
+        return dataUpdated || domUpdated;
     }
 
-    // パネルを開いた直後、comment の値で key textarea を再反映
-    //   ST が textarea を再生成しない、または初期値が古い場合の保険
+    // パネル開時の保険: 内部データと comment が一致していれば UI を再同期
     function _resyncKeyUIToComment(entryEl, uid) {
         if (!entryEl) return false;
         const keyEl = entryEl.querySelector('textarea[name="key"]');
@@ -856,8 +895,7 @@ console.log('[WBAutoSelect] 📦 v8.3 module loading (comment→key sync panel-i
         if (!commentEl) return false;
         if (keyEl.value === commentEl.value) return false;
 
-        // ユーザーが key を直接編集していた場合は上書きを避ける。
-        // → ST 内部データの key と comment が一致している時のみ上書きする。
+        // ユーザーが key を直接編集していた場合は上書きを避ける
         const worldName = _getCurrentEditorWorldName();
         if (!worldName) return false;
         const target = _getSTEntry(worldName, uid);
@@ -866,7 +904,7 @@ console.log('[WBAutoSelect] 📦 v8.3 module loading (comment→key sync panel-i
             ? target.key.join(',')
             : String(target.key || '');
         const dataCmt = String(target.comment || '');
-        if (dataKeyStr !== dataCmt) return false; // ユーザーが別々に編集済み → 尊重
+        if (dataKeyStr !== dataCmt) return false;
 
         keyEl.value = commentEl.value;
         return true;
@@ -890,10 +928,10 @@ console.log('[WBAutoSelect] 📦 v8.3 module loading (comment→key sync panel-i
             const uid = entryEl.getAttribute('uid');
             if (!uid) return;
 
-            _applyCommentToKey(entryEl, uid, el.value);
+            _syncCommentToKey(entryEl, uid, el.value);
         }, true);
 
-        // ── パネル開閉検知: 開いた直後に comment の値で key UI を再同期 ──
+        // ── パネル開閉検知: 開いた直後に comment 値で key UI を再同期 ──
         document.addEventListener('click', (e) => {
             if (_getSettings().commentToKeySync === false) return;
             if (_creating.size > 0) return;
@@ -905,17 +943,16 @@ console.log('[WBAutoSelect] 📦 v8.3 module loading (comment→key sync panel-i
             const uid = entryEl.getAttribute('uid');
             if (!uid) return;
 
-            // ST の drawer 開閉アニメーション完了を待つ
             setTimeout(() => {
                 _resyncKeyUIToComment(entryEl, uid);
             }, PANEL_SYNC_DELAY_MS);
         }, true);
 
-        console.log(`${LOG} 📝 comment→key sync installed (panel-independent)`);
+        console.log(`${LOG} 📝 comment→key sync installed (panel-independent, internal data + save)`);
     }
 
     // ============================================================
-    // 最終手段のリロード（既定で無効）
+    // 最終手段のリロード
     // ============================================================
     function _checkReloadLoop() {
         try {
@@ -1232,8 +1269,8 @@ console.log('[WBAutoSelect] 📦 v8.3 module loading (comment→key sync panel-i
             console.log(`${LOG} commentToKeySync = ${settings.commentToKeySync}`);
             return settings.commentToKeySync;
         },
-        // ★ v8.3: 現在の comment 値で key を手動同期（デバッグ用）
-        syncCommentToKeyNow: (uid) => {
+        // ★ v8.4: 現在の comment 値で key を手動同期 + 即時保存
+        syncCommentToKeyNow: async (uid) => {
             const els = _getEntryElements();
             if (els.length === 0) return false;
             const target = uid !== undefined && uid !== null
@@ -1243,9 +1280,32 @@ console.log('[WBAutoSelect] 📦 v8.3 module loading (comment→key sync panel-i
             const c = target.querySelector('textarea[name="comment"]');
             if (!c) return false;
             const tid = target.getAttribute('uid');
-            const ok = _applyCommentToKey(target, tid, c.value);
-            if (ok) console.log(`${LOG} 📝 comment→key synced manually (uid=${tid})`);
+            _syncCommentToKey(target, tid, c.value);
+            // 即時 save
+            if (_commentSyncSaveTimer) {
+                clearTimeout(_commentSyncSaveTimer);
+                _commentSyncSaveTimer = null;
+            }
+            await _saveCurrentEditorWorld();
+            console.log(`${LOG} 📝 comment→key synced manually + saved (uid=${tid})`);
+            return true;
+        },
+        // ★ v8.4: 内部データを直接更新して保存（デバッグ用）
+        writeKeyToInternalData: async (uid, value) => {
+            const targetUid = uid !== undefined && uid !== null
+                ? String(uid)
+                : (() => {
+                    const els = _getEntryElements();
+                    return els.length > 0 ? els[els.length - 1].getAttribute('uid') : null;
+                })();
+            if (!targetUid) return false;
+            const ok = _updateCommentAndKeyInSTData(targetUid, value);
+            if (ok) await _saveCurrentEditorWorld();
             return ok;
+        },
+        getSTEntry: (uid) => {
+            const w = _getCurrentEditorWorldName();
+            return w ? _getSTEntry(w, uid) : null;
         },
         applyNewEntryDefaults: async (uid) => {
             let target = uid;
@@ -1279,7 +1339,7 @@ console.log('[WBAutoSelect] 📦 v8.3 module loading (comment→key sync panel-i
         diagnose: async () => {
             const api = await _getWIApi();
             return {
-                version: 'v8.3',
+                version: 'v8.4',
                 settings: { ...settings },
                 currentChar: getCurrentCharName(),
                 editorWorld: _getCurrentEditorWorldName(),
@@ -1295,6 +1355,7 @@ console.log('[WBAutoSelect] 📦 v8.3 module loading (comment→key sync panel-i
                 newEntryButtonFound: !!document.querySelector('#world_popup_new'),
                 newEntryWatching: !!_newEntryWatch,
                 commentToKeyInstalled: _commentToKeyInstalled,
+                commentSyncSaveTimerActive: !!_commentSyncSaveTimer,
                 emptySaveGuards: Array.from(_emptySaveGuards.keys()),
                 creating: Array.from(_creating.keys()),
             };
@@ -1306,5 +1367,5 @@ console.log('[WBAutoSelect] 📦 v8.3 module loading (comment→key sync panel-i
         },
     };
 
-    console.log(LOG, 'window.WorldbookAutoSelect API exposed (v8.3)');
+    console.log(LOG, 'window.WorldbookAutoSelect API exposed (v8.4)');
 })();
