@@ -3,17 +3,15 @@
 // ロアブックが存在しない場合はキャラ名と同じロアブックを自動作成し、
 // キャラクターとバインド（char.data.extensions.world）する。
 //
-// ★ v8.5:
-//   comment→key 自動同期を「保存層（fetch インターセプタ）」で確実に行う。
-//   パネル閉時は textarea[name="key"] が DOM から消えるため、内部データ
-//   更新だけでは ST 自身の debounce saveWorldInfo に負ける。
-//   そこで /api/worldinfo/edit の payload を捕捉し、
-//   「直近に comment が編集された uid」の key を comment から自動補完する。
-//   これにより、ST がいつ saveWorldInfo を呼んでも正しい key が送られる。
-//
-// ★ v8.4〜v8: soft-refresh 方式（リロード不要）。
+// ★ v8.6:
+//   comment→key 自動同期の最終解。
+//   これまでの `_recentlyEditedUids` 依存を撤去し、
+//   payload の内容そのものから「comment 非空 && key 空」を検出して
+//   自動補正する方式に変更。これにより、どの保存経路（ST本体 / 他拡張）
+//   から /api/worldinfo/edit が呼ばれても確実に補正される。
+//   さらに worldinfo_updated 発火後に server を再検証する self-heal を追加。
 
-console.log('[WBAutoSelect] 📦 v8.5 module loading (comment→key via edit payload interceptor)...');
+console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no tracking)...');
 
 (function () {
     'use strict';
@@ -47,9 +45,7 @@ console.log('[WBAutoSelect] 📦 v8.5 module loading (comment→key via edit pay
     const RELOAD_COUNT_KEY = 'wbAutoSelect_reloadCount';
 
     const PANEL_SYNC_DELAY_MS = 200;
-    const COMMENT_SYNC_SAVE_DEBOUNCE_MS = 300;
-    // ★ v8.5: 直近編集された uid を保持する期間
-    const RECENT_EDIT_TTL_MS = 10000;
+    const SELF_HEAL_AFTER_UPDATE_DELAY_MS = 500;
 
     const COMMON_RULE_NAME = '00_共通ルール';
     const COMMON_RULE_CONTENT =
@@ -77,11 +73,8 @@ console.log('[WBAutoSelect] 📦 v8.5 module loading (comment→key via edit pay
     const _emptySaveGuards = new Map();
     const _creating = new Map();
 
-    let _commentSyncSaveTimer = null;
-
-    // ★ v8.5: 直近に comment が編集された uid → { at, value } を保持
-    //   fetch インターセプタで payload 補正に使う
-    const _recentlyEditedUids = new Map();  // uid -> { at, commentValue }
+    // ★ v8.6: 二重補正防止用のセッションID
+    let _lastHealAt = 0;
 
     // ============================================================
     // 基本ヘルパー
@@ -162,7 +155,7 @@ console.log('[WBAutoSelect] 📦 v8.5 module loading (comment→key via edit pay
     }
 
     // ============================================================
-    // ST 公式 ワールドインフォ API の取得
+    // ST 公式 ワールドインフォ API
     // ============================================================
     let _modPromise = null;
     function _loadWIModule() {
@@ -225,7 +218,7 @@ console.log('[WBAutoSelect] 📦 v8.5 module loading (comment→key via edit pay
     }
 
     // ============================================================
-    // 空保存ガード + 削除検知 + comment→key 補正（fetch インターセプタ）
+    // 空保存ガード + 削除検知 + ★ v8.6 payload auto-sync
     // ============================================================
     function _protectFromEmptySave(name, entries, durationMs = EMPTY_SAVE_GUARD_MS) {
         if (!name || !entries || Object.keys(entries).length === 0) return;
@@ -244,44 +237,44 @@ console.log('[WBAutoSelect] 📦 v8.5 module loading (comment→key via edit pay
         console.log(`${LOG} 🗑 world deleted detected → state cleared: "${name}"`);
     }
 
-    // ★ v8.5: 直近編集された uid の key を comment から補正
-    //   ST が saveWorldInfo を debounce で呼んだ瞬間に、内部データの key が
-    //   空でも、ここで payload を書き換えて正しい key を保存させる
-    function _applyRecentEditsToPayload(entries) {
+    // ★ v8.6: payload 内容ベースの自動補正
+    //   「comment 非空 && key 空」のエントリは無条件で key=comment に補正する。
+    //   _recentlyEditedUids に依存しないため、どの保存経路でも確実に動作。
+    //   ただし 00_共通ルール は対象外（key=[] が正常）。
+    function _applyPayloadAutoSync(entries) {
         if (!entries || typeof entries !== 'object') return 0;
-        const now = Date.now();
-        let modified = 0;
-
-        // 期限切れエントリを削除
-        for (const [uid, info] of Array.from(_recentlyEditedUids.entries())) {
-            if (now - info.at > RECENT_EDIT_TTL_MS) {
-                _recentlyEditedUids.delete(uid);
-            }
-        }
-
         if (_getSettings().commentToKeySync === false) return 0;
-        if (_recentlyEditedUids.size === 0) return 0;
 
+        let modified = 0;
         for (const k of Object.keys(entries)) {
             const e = entries[k];
             if (!e || typeof e !== 'object') continue;
-            const uidStr = String(e.uid);
-            if (uidStr === 'undefined' || uidStr === 'null') continue;
-            if (!_recentlyEditedUids.has(uidStr)) continue;
 
-            const comment = String(e.comment || '');
-            const newKeyArr = comment
-                ? comment.split(',').map(s => s.trim()).filter(Boolean)
-                : [];
-            const oldKeyStr = Array.isArray(e.key) ? e.key.join(',') : '';
-            const newKeyStr = newKeyArr.join(',');
-            if (oldKeyStr !== newKeyStr) {
-                e.key = newKeyArr;
-                modified++;
-                console.log(
-                    `${LOG} 📝 payload補正: uid=${uidStr} key=[${newKeyStr}] (comment="${comment.slice(0, 40)}...")`
-                );
+            const comment = String(e.comment || '').trim();
+            if (!comment) continue;
+
+            // 00_共通ルールは対象外（key=[] が正当）
+            if (comment === COMMON_RULE_NAME) continue;
+
+            // 既存の key を正規化
+            let oldKeyArr = [];
+            if (Array.isArray(e.key)) {
+                oldKeyArr = e.key.map(x => String(x).trim()).filter(Boolean);
+            } else if (typeof e.key === 'string') {
+                oldKeyArr = e.key.split(',').map(s => s.trim()).filter(Boolean);
             }
+
+            // key が既に何か入っているなら尊重（ユーザーが別途編集した可能性）
+            if (oldKeyArr.length > 0) continue;
+
+            // key が空で comment が存在 → comment から生成
+            const newKeyArr = comment.split(',').map(s => s.trim()).filter(Boolean);
+            e.key = newKeyArr;
+            modified++;
+            console.log(
+                `${LOG} 📝 payload auto-sync: uid=${e.uid} key=[] → ` +
+                `[${newKeyArr.join(',').slice(0, 60)}] (comment="${comment.slice(0, 40)}")`
+            );
         }
         return modified;
     }
@@ -313,13 +306,13 @@ console.log('[WBAutoSelect] 📦 v8.5 module loading (comment→key via edit pay
                 return p;
             }
 
-            // ---- ★ v8.5: comment→key 補正 ----
+            // ★ v8.6: payload auto-sync（無条件）
             let payloadModified = 0;
             if (body?.data?.entries) {
-                payloadModified = _applyRecentEditsToPayload(body.data.entries);
+                payloadModified = _applyPayloadAutoSync(body.data.entries);
             }
 
-            // ---- 空保存ガード ----
+            // 空保存ガード
             const guard = _emptySaveGuards.get(name);
             let blockedByGuard = false;
             if (guard && Date.now() <= guard.until) {
@@ -329,19 +322,18 @@ console.log('[WBAutoSelect] 📦 v8.5 module loading (comment→key via edit pay
                 if (incomingIsEmpty && guard.entries && Object.keys(guard.entries).length > 0) {
                     body.data = { ...(body.data || {}), entries: clone(guard.entries) };
                     blockedByGuard = true;
-                    console.warn(`${LOG} 🛡️ empty save BLOCKED for "${name}" (restored from guard)`);
+                    console.warn(`${LOG} 🛡️ empty save BLOCKED for "${name}"`);
                 } else if (!incomingIsEmpty) {
                     guard.entries = clone(incoming);
                 }
             }
 
-            // 変更があった場合のみ body を書き換えて送信
             if (payloadModified > 0 || blockedByGuard) {
                 return originalFetch.call(this, input, { ...init, body: JSON.stringify(body) });
             }
             return originalFetch.apply(this, arguments);
         };
-        console.log('[WBAutoSelect] 🛡️ worldinfo fetch interceptor installed (edit guard + delete hook + comment→key payload fix)');
+        console.log('[WBAutoSelect] 🛡️ worldinfo fetch interceptor installed (payload auto-sync + guard + delete)');
     })();
 
     window.addEventListener('unhandledrejection', (e) => {
@@ -354,6 +346,57 @@ console.log('[WBAutoSelect] 📦 v8.5 module loading (comment→key via edit pay
             (msg.includes('displayWorldEntries') && msg.includes('world-info.js'));
         if (stBug) e.preventDefault();
     });
+
+    // ============================================================
+    // ★ v8.6: worldinfo_updated 発火後の自己修復
+    //   ST が worldinfo_updated を発火した直後に、サーバーの各エントリを
+    //   チェックし「comment 非空 && key 空」のエントリがあれば
+    //   直接 /api/worldinfo/edit で修正する。
+    // ============================================================
+    async function _selfHealAfterUpdate() {
+        if (_getSettings().commentToKeySync === false) return;
+        if (_creating.size > 0) return;
+
+        const worldName = _getCurrentEditorWorldName();
+        if (!worldName) return;
+
+        const now = Date.now();
+        if (now - _lastHealAt < SELF_HEAL_AFTER_UPDATE_DELAY_MS) return;
+        _lastHealAt = now;
+
+        const server = await fetchWorldbookFromServer(worldName);
+        if (!server?.entries) return;
+
+        let needsFix = 0;
+        const newEntries = clone(server.entries);
+        for (const k of Object.keys(newEntries)) {
+            const e = newEntries[k];
+            if (!e || typeof e !== 'object') continue;
+            const comment = String(e.comment || '').trim();
+            if (!comment) continue;
+            if (comment === COMMON_RULE_NAME) continue;
+
+            let oldKeyArr = [];
+            if (Array.isArray(e.key)) {
+                oldKeyArr = e.key.map(x => String(x).trim()).filter(Boolean);
+            } else if (typeof e.key === 'string') {
+                oldKeyArr = e.key.split(',').map(s => s.trim()).filter(Boolean);
+            }
+            if (oldKeyArr.length > 0) continue;
+
+            const newKeyArr = comment.split(',').map(s => s.trim()).filter(Boolean);
+            e.key = newKeyArr;
+            needsFix++;
+            console.log(
+                `${LOG} 🩹 self-heal: uid=${e.uid} key=[] → [${newKeyArr.join(',').slice(0, 40)}]`
+            );
+        }
+
+        if (needsFix > 0) {
+            await _directEditWorldbook(worldName, newEntries);
+            console.log(`${LOG} 🩹 self-heal: ${needsFix} 件を修正して保存`);
+        }
+    }
 
     // ============================================================
     // DOM ヘルパー
@@ -654,23 +697,6 @@ console.log('[WBAutoSelect] 📦 v8.5 module loading (comment→key via edit pay
             try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch (e2) { /* ignore */ }
         }
     }
-    function _triggerInputAndChange(el) {
-        const $ = getJQuery();
-        try {
-            if ($) {
-                $(el).trigger('input');
-                $(el).trigger('change');
-            } else {
-                el.dispatchEvent(new Event('input', { bubbles: true }));
-                el.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-        } catch (e) {
-            try {
-                el.dispatchEvent(new Event('input', { bubbles: true }));
-                el.dispatchEvent(new Event('change', { bubbles: true }));
-            } catch (e2) { /* ignore */ }
-        }
-    }
 
     function _applyNewEntryDefaults(entryEl) {
         if (!entryEl) return false;
@@ -741,7 +767,7 @@ console.log('[WBAutoSelect] 📦 v8.5 module loading (comment→key via edit pay
         for (let i = 0; i < NEW_ENTRY_APPLY_RETRY_MAX; i++) {
             const el = document.querySelector(`.world_entry[uid="${CSS.escape(String(uid))}"]`);
             if (el && _applyNewEntryDefaults(el)) {
-                console.log(`${LOG} 🆕 new entry defaults applied: uid=${uid} (Normal / @D system / depth=${NEW_ENTRY_DEPTH})`);
+                console.log(`${LOG} 🆕 new entry defaults applied: uid=${uid}`);
                 return true;
             }
             await wait(NEW_ENTRY_APPLY_RETRY_MS);
@@ -809,11 +835,14 @@ console.log('[WBAutoSelect] 📦 v8.5 module loading (comment→key via edit pay
             _startNewEntryWatch();
         }, true);
 
-        console.log(`${LOG} 🆕 new-entry defaults installed (Normal / @D system / depth=${NEW_ENTRY_DEPTH})`);
+        console.log(`${LOG} 🆕 new-entry defaults installed`);
     }
 
     // ============================================================
-    // ★ v8.5: comment→key 自動同期
+    // comment→key 自動同期（v8.6）
+    //   - 内部データ更新（DOM 有無に関係なく）
+    //   - DOM 更新（あれば）
+    //   - 明示 save はせず、payload auto-sync に任せる
     // ============================================================
     let _commentToKeyInstalled = false;
 
@@ -881,92 +910,39 @@ console.log('[WBAutoSelect] 📦 v8.5 module loading (comment→key via edit pay
         return true;
     }
 
-    // ★ v8.5: 直近編集の記録（fetch インターセプタの payload 補正で使う）
-    function _recordRecentEdit(uid, commentValue) {
-        _recentlyEditedUids.set(String(uid), {
-            at: Date.now(),
-            commentValue: String(commentValue || ''),
-        });
-    }
-
-    // 現在のエディタ world を明示的に saveWorldInfo で保存
-    async function _saveCurrentEditorWorld() {
-        const worldName = _getCurrentEditorWorldName();
-        if (!worldName) {
-            console.warn(`${LOG} _saveCurrentEditorWorld: no world name`);
-            return false;
-        }
-        const ctx = getSTContext();
-        const worldData = ctx?.world_info?.[worldName] || window.world_info?.[worldName];
-        if (!worldData?.entries) {
-            console.warn(`${LOG} _saveCurrentEditorWorld: no entries for "${worldName}"`);
-            return false;
-        }
-
-        // payload 補正を経由して保存
-        const api = await _getWIApi();
-        if (api.save) {
-            try {
-                await api.save(worldName, { entries: clone(worldData.entries) }, true);
-                console.log(`${LOG} 💾 saveWorldInfo via API: "${worldName}"`);
-                return true;
-            } catch (e) {
-                console.warn(`${LOG} saveWorldInfo (comment→key) failed:`, e?.message || e);
+    function _triggerInputAndChange(el) {
+        const $ = getJQuery();
+        try {
+            if ($) {
+                $(el).trigger('input');
+                $(el).trigger('change');
+            } else {
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
             }
-        } else {
-            console.warn(`${LOG} _saveCurrentEditorWorld: api.save not available, trying direct edit`);
-            return await _directEditWorldbook(worldName, clone(worldData.entries));
+        } catch (e) {
+            try {
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            } catch (e2) { /* ignore */ }
         }
-        return false;
     }
 
-    // comment → key 同期（メイン）
     function _syncCommentToKey(entryEl, uid, newValue) {
-        // ① 直近編集の記録（payload 補正のトリガー）
-        _recordRecentEdit(uid, newValue);
+        // ① 内部データ更新（必須）
+        _updateCommentAndKeyInSTData(uid, newValue);
 
-        // ② 内部データ更新
-        const dataUpdated = _updateCommentAndKeyInSTData(uid, newValue);
-
-        // ③ DOM の key textarea があれば視覚反映（パネル開時）
-        let domUpdated = false;
+        // ② DOM の key textarea があれば視覚反映
         if (entryEl) {
             const keyEl = entryEl.querySelector('textarea[name="key"]');
             if (keyEl && keyEl.value !== newValue) {
                 keyEl.value = newValue;
                 _triggerInputAndChange(keyEl);
-                domUpdated = true;
             }
         }
 
-        // ④ ST の saveWorldInfo より前に payload 補正を効かせるため、
-        //    明示 save はせず ST の debounce save に任せる（payload が補正される）
-        //    ただし、ST が save を発火しないケースの保険として、
-        //    300ms 後に保存確認する（既に保存済みなら no-op）
-        if (_commentSyncSaveTimer) clearTimeout(_commentSyncSaveTimer);
-        _commentSyncSaveTimer = setTimeout(async () => {
-            _commentSyncSaveTimer = null;
-            // サーバー上の値を確認
-            const worldName = _getCurrentEditorWorldName();
-            if (!worldName) return;
-            const server = await fetchWorldbookFromServer(worldName);
-            if (!server?.entries) return;
-            const entry = _getSTEntry(worldName, uid);
-            if (!entry) return;
-            const serverUid = Object.values(server.entries).find(e => String(e.uid) === String(uid));
-            if (!serverUid) return;
-            const serverKeyStr = Array.isArray(serverUid.key) ? serverUid.key.join(',') : '';
-            const expectKeyStr = String(newValue || '');
-            if (serverKeyStr !== expectKeyStr) {
-                console.warn(
-                    `${LOG} ⚠️ key not persisted yet for uid=${uid} ` +
-                    `(server="${serverKeyStr}", expected="${expectKeyStr}") → force save`
-                );
-                await _saveCurrentEditorWorld();
-            }
-        }, COMMENT_SYNC_SAVE_DEBOUNCE_MS);
-
-        return dataUpdated || domUpdated;
+        // ③ 保存は payload auto-sync に任せる
+        //    （ST の debounce save が走った時点で自動補正される）
     }
 
     function _resyncKeyUIToComment(entryEl, uid) {
@@ -976,17 +952,6 @@ console.log('[WBAutoSelect] 📦 v8.5 module loading (comment→key via edit pay
         const commentEl = entryEl.querySelector('textarea[name="comment"]');
         if (!commentEl) return false;
         if (keyEl.value === commentEl.value) return false;
-
-        const worldName = _getCurrentEditorWorldName();
-        if (!worldName) return false;
-        const target = _getSTEntry(worldName, uid);
-        if (!target) return false;
-        const dataKeyStr = Array.isArray(target.key)
-            ? target.key.join(',')
-            : String(target.key || '');
-        const dataCmt = String(target.comment || '');
-        if (dataKeyStr !== dataCmt) return false;
-
         keyEl.value = commentEl.value;
         return true;
     }
@@ -995,7 +960,6 @@ console.log('[WBAutoSelect] 📦 v8.5 module loading (comment→key via edit pay
         if (_commentToKeyInstalled) return;
         _commentToKeyInstalled = true;
 
-        // input 監視
         document.addEventListener('input', (e) => {
             if (_getSettings().commentToKeySync === false) return;
             if (_creating.size > 0) return;
@@ -1012,7 +976,6 @@ console.log('[WBAutoSelect] 📦 v8.5 module loading (comment→key via edit pay
             _syncCommentToKey(entryEl, uid, el.value);
         }, true);
 
-        // パネル開時
         document.addEventListener('click', (e) => {
             if (_getSettings().commentToKeySync === false) return;
             if (_creating.size > 0) return;
@@ -1029,7 +992,44 @@ console.log('[WBAutoSelect] 📦 v8.5 module loading (comment→key via edit pay
             }, PANEL_SYNC_DELAY_MS);
         }, true);
 
-        console.log(`${LOG} 📝 comment→key sync installed (payload interceptor + internal data)`);
+        console.log(`${LOG} 📝 comment→key sync installed (payload auto-sync)`);
+    }
+
+    // ============================================================
+    // ★ v8.6: worldinfo_updated 監視
+    // ============================================================
+    function installWorldInfoUpdatedHealer() {
+        const ctx = getSTContext();
+        if (!ctx?.eventSource) return false;
+
+        const et = ctx.eventTypes;
+        const es = ctx.eventSource;
+        if (!es || typeof es.on !== 'function') return false;
+
+        const candidates = [
+            et.WORLDINFO_UPDATED,
+            et.worldinfo_updated,
+            'worldinfo_updated',
+        ].filter(Boolean);
+
+        let installed = 0;
+        for (const evt of candidates) {
+            try {
+                es.on(evt, () => {
+                    setTimeout(() => {
+                        _selfHealAfterUpdate().catch((e) => {
+                            console.warn(`${LOG} self-heal after update error:`, e);
+                        });
+                    }, 300);
+                });
+                installed++;
+            } catch (e) { /* ignore */ }
+        }
+
+        if (installed > 0) {
+            console.log(`${LOG} 🩹 worldinfo_updated healer installed (${installed} events)`);
+        }
+        return installed > 0;
     }
 
     // ============================================================
@@ -1297,6 +1297,7 @@ console.log('[WBAutoSelect] 📦 v8.5 module loading (comment→key via edit pay
         setupEventListeners();
         installNewEntryDefaults();
         installCommentToKeySync();
+        installWorldInfoUpdatedHealer();
 
         setTimeout(() => scheduleAutoSelect('initial'), reloadState ? 1000 : 1500);
         console.log(LOG, 'init complete');
@@ -1350,7 +1351,13 @@ console.log('[WBAutoSelect] 📦 v8.5 module loading (comment→key via edit pay
             console.log(`${LOG} commentToKeySync = ${settings.commentToKeySync}`);
             return settings.commentToKeySync;
         },
-        syncCommentToKeyNow: async (uid) => {
+        // ★ v8.6: 手動 self-heal
+        selfHealNow: async () => {
+            _lastHealAt = 0;
+            await _selfHealAfterUpdate();
+            return true;
+        },
+        syncCommentToKeyNow: (uid) => {
             const els = _getEntryElements();
             if (els.length === 0) return false;
             const target = uid !== undefined && uid !== null
@@ -1361,39 +1368,8 @@ console.log('[WBAutoSelect] 📦 v8.5 module loading (comment→key via edit pay
             if (!c) return false;
             const tid = target.getAttribute('uid');
             _syncCommentToKey(target, tid, c.value);
-            // 即時 save は debounce に任せる（payload 補正が効く）
-            await wait(COMMENT_SYNC_SAVE_DEBOUNCE_MS + 100);
-            console.log(`${LOG} 📝 comment→key synced manually (uid=${tid})`);
+            console.log(`${LOG} 📝 comment→key synced (uid=${tid})`);
             return true;
-        },
-        // ★ v8.5: 直近編集マップの状態（デバッグ用）
-        getRecentlyEditedUids: () => {
-            const out = {};
-            const now = Date.now();
-            for (const [uid, info] of _recentlyEditedUids.entries()) {
-                out[uid] = {
-                    age: now - info.at,
-                    comment: String(info.commentValue || '').slice(0, 60),
-                };
-            }
-            return out;
-        },
-        // ★ v8.5: 手動で payload 補正を発動（デバッグ用）
-        forceCommentToKeySave: async (uid) => {
-            const targetUid = uid !== undefined && uid !== null
-                ? String(uid)
-                : (() => {
-                    const els = _getEntryElements();
-                    return els.length > 0 ? els[els.length - 1].getAttribute('uid') : null;
-                })();
-            if (!targetUid) return false;
-            const worldName = _getCurrentEditorWorldName();
-            if (!worldName) return false;
-            const entry = _getSTEntry(worldName, targetUid);
-            if (!entry) return false;
-            _recordRecentEdit(targetUid, entry.comment || '');
-            const ok = await _saveCurrentEditorWorld();
-            return ok;
         },
         applyNewEntryDefaults: async (uid) => {
             let target = uid;
@@ -1431,7 +1407,7 @@ console.log('[WBAutoSelect] 📦 v8.5 module loading (comment→key via edit pay
         diagnose: async () => {
             const api = await _getWIApi();
             return {
-                version: 'v8.5',
+                version: 'v8.6',
                 settings: { ...settings },
                 currentChar: getCurrentCharName(),
                 editorWorld: _getCurrentEditorWorldName(),
@@ -1442,23 +1418,18 @@ console.log('[WBAutoSelect] 📦 v8.5 module loading (comment→key via edit pay
                     importWI: !!api.importWI,
                 },
                 editorEntryCount: _countEditorEntries(),
-                editorSelected: document.querySelector('#world_editor_select')
-                    ?.selectedOptions?.[0]?.textContent?.trim() || null,
-                newEntryButtonFound: !!document.querySelector('#world_popup_new'),
-                newEntryWatching: !!_newEntryWatch,
                 commentToKeyInstalled: _commentToKeyInstalled,
-                recentlyEditedUids: Array.from(_recentlyEditedUids.keys()),
                 emptySaveGuards: Array.from(_emptySaveGuards.keys()),
                 creating: Array.from(_creating.keys()),
+                lastHealAt: _lastHealAt,
             };
         },
         resetProcessed: () => {
             _lastProcessedChar = null;
             _lastFailure = { char: null, at: 0 };
             if (_retryTimer) { clearTimeout(_retryTimer); _retryTimer = null; }
-            _recentlyEditedUids.clear();
         },
     };
 
-    console.log(LOG, 'window.WorldbookAutoSelect API exposed (v8.5)');
+    console.log(LOG, 'window.WorldbookAutoSelect API exposed (v8.6)');
 })();
