@@ -8,6 +8,9 @@
 //   自動作成されるロアブックには「00_共通ルール」エントリが1つだけ
 //   Constant / at Depth System / depth=1 で事前作成される。
 //
+// ★ サーバー上の実在確認を一次情報源とする。
+//   メモリ上の world_info に残骸があっても、サーバーに無ければ強制上書きする。
+//
 // ★ 新規キャラ作成直後（ロアブック未存在）でも同じ処理が走る。
 
 (function () {
@@ -71,6 +74,19 @@
         } catch (e) { return ''; }
     }
 
+    function getHeaders() {
+        try {
+            const ctx = getSTContext();
+            if (ctx && typeof ctx.getRequestHeaders === 'function') {
+                return ctx.getRequestHeaders();
+            }
+        } catch (e) { /* ignore */ }
+        return {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': getCsrfToken(),
+        };
+    }
+
     async function getWorldInfoModule() {
         try {
             return await import('../../../../world-info.js');
@@ -81,7 +97,7 @@
     }
 
     // ============================================================
-    // ロアブックの存在確認（option の value / text で照合）
+    // ロアブックの存在確認（DOM セレクト）
     // ============================================================
     function _findOptionValue(selectEl, name) {
         if (!selectEl || !name) return null;
@@ -101,6 +117,27 @@
         const wi = document.querySelector('#world_info');
         if (_findOptionValue(wi, name) !== null) return true;
         return false;
+    }
+
+    // ============================================================
+    // ★ サーバー上の実在確認（一次情報源）
+    //   /api/worldinfo/get で entries が1件以上あれば true
+    // ============================================================
+    async function _verifyWorldbookOnServer(worldName) {
+        if (!worldName) return false;
+        try {
+            const resp = await fetch('/api/worldinfo/get', {
+                method: 'POST',
+                headers: getHeaders(),
+                body: JSON.stringify({ name: worldName }),
+                cache: 'no-store',
+            });
+            if (!resp.ok) return false;
+            const data = await resp.json();
+            return !!(data?.entries && Object.keys(data.entries).length > 0);
+        } catch (e) {
+            return false;
+        }
     }
 
     // ============================================================
@@ -137,7 +174,7 @@
     }
 
     // ============================================================
-    // ★ 自動作成するエントリのテンプレート
+    // 自動作成するエントリのテンプレート
     //   - constant: true (WI Entry Status: Constant)
     //   - position: 4 (at Depth)
     //   - depth: 1
@@ -181,77 +218,95 @@
     }
 
     // ============================================================
-    // ★ ロアブックの自動作成
-    //   新規の場合は world_info[worldName] = { entries: { 0: entry } }
-    //   として保存する。既に存在する場合は何もしない。
+    // ★ ロアブックの自動作成（サーバー実在確認ベース）
+    //   1) サーバー上に存在 → true を返す（作成スキップ）
+    //   2) サーバー上に無い → メモリを強制上書きして保存
+    //   3) 保存後サーバー再確認 → 成否を返す
     // ============================================================
     async function _createWorldbookIfMissing(worldName) {
         if (!worldName) return false;
 
+        // ── 1. サーバー上の実在確認 ──
+        if (await _verifyWorldbookOnServer(worldName)) {
+            console.debug(LOG, `"${worldName}" はサーバー上に既存 → 作成スキップ`);
+            return true;
+        }
+
+        // ── 2. world-info モジュール取得 ──
         const mod = await getWorldInfoModule();
         if (!mod) {
             console.warn(LOG, 'world-info.js が読み込めないため自動作成をスキップ');
             return false;
         }
 
+        // ── 3. メモリを強制上書き（残骸 stub を除去） ──
         if (!mod.world_info) mod.world_info = {};
-        if (!mod.world_info[worldName]) {
-            mod.world_info[worldName] = { entries: {} };
-        }
+        mod.world_info[worldName] = {
+            entries: {
+                0: _createCommonRuleEntry(0),
+            },
+        };
 
-        const entries = mod.world_info[worldName].entries;
+        // window.world_info と mod.world_info が別オブジェクトの場合に同期
+        try {
+            if (window.world_info && window.world_info !== mod.world_info) {
+                window.world_info[worldName] = mod.world_info[worldName];
+            }
+        } catch (e) { /* ignore */ }
 
-        // ★ 既に 00_共通ルール (または何らかのエントリ) があれば何もしない
-        const hasAnyEntry = Object.keys(entries).length > 0;
-        if (hasAnyEntry) {
-            console.debug(LOG, `world_info["${worldName}"] は既にエントリあり → 作成スキップ`);
-            return false;
-        }
-
-        entries[0] = _createCommonRuleEntry(0);
-
-        // ★ 保存（saveWorldInfo が利用可能なら使用。フォールバックで fetch 直叩き）
+        // ── 4. 保存 ──
         let saved = false;
         if (typeof mod.saveWorldInfo === 'function') {
             try {
-                await mod.saveWorldInfo(worldName, true, true);
+                await mod.saveWorldInfo(worldName, true);
                 saved = true;
+                console.log(`${LOG} 💾 saveWorldInfo("${worldName}", true) 完了`);
             } catch (e) {
                 console.warn(LOG, 'saveWorldInfo 失敗:', e);
             }
         }
+
         if (!saved) {
+            // フォールバック: /api/worldinfo/edit 直叩き
             try {
                 const resp = await fetch('/api/worldinfo/edit', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-Token': getCsrfToken(),
-                    },
+                    headers: getHeaders(),
                     body: JSON.stringify({
                         name: worldName,
                         data: mod.world_info[worldName],
                     }),
                 });
-                if (resp.ok) saved = true;
-                else console.warn(LOG, `/api/worldinfo/edit 失敗: ${resp.status}`);
+                if (resp.ok) {
+                    saved = true;
+                    console.log(`${LOG} 💾 /api/worldinfo/edit 完了`);
+                } else {
+                    console.warn(`${LOG} /api/worldinfo/edit HTTP ${resp.status}`);
+                }
             } catch (e) {
                 console.warn(LOG, '/api/worldinfo/edit 例外:', e);
             }
         }
 
-        if (saved) {
+        if (!saved) return false;
+
+        // ── 5. サーバー保存の最終確認 ──
+        const verified = await _verifyWorldbookOnServer(worldName);
+        if (verified) {
             console.log(
                 `${LOG} 🆕 ロアブック "${worldName}" を自動作成しました ` +
                 `(00_共通ルール: Constant / at Depth System / depth=1)`
             );
-            return true;
+        } else {
+            console.warn(
+                `${LOG} ロアブック "${worldName}" のサーバー保存を確認できませんでした`
+            );
         }
-        return false;
+        return verified;
     }
 
     // ============================================================
-    // ★ キャラクターへのバインド（char.data.extensions.world を設定）
+    // キャラクターへのバインド（char.data.extensions.world を設定）
     // ============================================================
     async function _bindCharacterToWorld(char, worldName) {
         if (!char || !worldName) return false;
@@ -278,10 +333,7 @@
                 : `${char.name}.png`;
             const resp = await fetch('/api/characters/merge-attributes', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-Token': getCsrfToken(),
-                },
+                headers: getHeaders(),
                 body: JSON.stringify({
                     avatar: avatar,
                     avatar_url: avatar,
@@ -370,7 +422,7 @@
             // ── 1. 候補名を取得 ──
             const candidates = _getCharacterWorldCandidates();
 
-            // ── 2. 存在するロアブックを探す（リトライ付き） ──
+            // ── 2. 存在するロアブックを探す（DOM セレクト） ──
             let targetName = null;
             for (let i = 0; i < FIND_RETRY_MAX; i++) {
                 for (const name of candidates) {
@@ -391,15 +443,20 @@
                     `(候補=[${candidates.join(', ')}])`
                 );
 
-                const created = await _createWorldbookIfMissing(worldToCreate);
-                if (created) {
-                    await _bindCharacterToWorld(char, worldToCreate);
+                const ok = await _createWorldbookIfMissing(worldToCreate);
+                if (!ok) {
+                    console.warn(`${LOG} ロアブック "${worldToCreate}" の作成に失敗しました`);
+                    _lastProcessedChar = charName;
+                    return;
                 }
+
+                // キャラクターをロアブックにバインド
+                await _bindCharacterToWorld(char, worldToCreate);
 
                 // ST のワールドリストが再読込されるのを待つ
                 await wait(POST_CREATE_WAIT_MS);
 
-                // もう一度存在確認
+                // DOM セレクトへの反映を確認
                 for (let i = 0; i < FIND_RETRY_MAX; i++) {
                     if (_hasWorldBook(worldToCreate)) {
                         targetName = worldToCreate;
@@ -410,15 +467,15 @@
 
                 if (!targetName) {
                     console.warn(
-                        `${LOG} ロアブック "${worldToCreate}" の作成に成功しましたが、` +
-                        `選択肢への反映を確認できませんでした`
+                        `${LOG} ロアブック "${worldToCreate}" はサーバーに保存されましたが、` +
+                        `UI への反映を確認できませんでした`
                     );
                     _lastProcessedChar = charName;
                     return;
                 }
             }
 
-            // ── 4. 同一キャラで既に正しく設定されている場合はスキップ ──
+            // ── 4. 同一キャラで既に設定済みならスキップ ──
             if (!force && sameChar && reason !== 'chat-changed') {
                 console.debug(LOG, `同一キャラ "${charName}" のためスキップ（force=true で再適用可能）`);
                 return;
@@ -516,6 +573,7 @@
         hasWorldBook: _hasWorldBook,
         getCharacterWorldCandidates: _getCharacterWorldCandidates,
         createWorldbook: (name) => _createWorldbookIfMissing(name || getCurrentCharName()),
+        verifyWorldbookOnServer: (name) => _verifyWorldbookOnServer(name || getCurrentCharName()),
         bindCharacter: async (worldName) => {
             const char = getCurrentChar();
             return _bindCharacterToWorld(char, worldName || getCurrentCharName());
