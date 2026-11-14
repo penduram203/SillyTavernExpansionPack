@@ -3,7 +3,7 @@
 //   - LLM応答生成: MESSAGE_SENT/MESSAGE_SWIPED で表示、GENERATION_ENDED で非表示
 //   - 画像生成: gic-image-generation-started/ended カスタムイベントで表示制御
 //     preparing:true → 📷 スピナー（画像準備中…）
-//     preparing:false → 🖼 スピナー（画像生成中…）
+//     preparing:false → 📷 スピナー（画像生成中…）
 //   - LLM応答生成は 📃 スピナー
 //   - ホバー時に data-tooltip を即座に表示（独自ツールチップ）
 
@@ -16,15 +16,18 @@
 
     // ============================================================
     // ★ 旧「事前設定モード」用のスタブ
-    //   背景生成モードは合体モード固定化に伴い廃止されたが、
-    //   gic-mode-changed ハンドラと window.StatusIndicator 代入部に
-    //   参照が残っているため no-op として定義する。
     // ============================================================
     function isPreSetupMode() { return false; }
     function showPreSetupModeUnderLLM() { /* no-op */ }
 
     const timers = new Map();  // key -> timeout id
     const items = new Map();   // key -> element
+
+    // ============================================================
+    // ★ ツールチップ制御用（setupImmediateTooltip IIFE から設定される）
+    //    hideStatus から呼べるよう、モジュールスコープで参照を保持する。
+    // ============================================================
+    let _hideTooltipIfTarget = null;
 
     (function injectStyle() {
         if (document.getElementById(STYLE_ID)) return;
@@ -78,7 +81,6 @@
     //      'generating' … 📷 スピナー（画像生成中…）
     //      'mode'       … ⚙️ スピナーなし（モード表示）
     //    'image' は後方互換（preparing 相当として扱う）
-    //    絵文字にホバーすると data-tooltip の詳細テキストを即座に表示する。
     // ============================================================
     function showStatus(key, text, type) {
         if (!key || !text) return;
@@ -95,6 +97,7 @@
             el.dataset.key = key;
             items.set(key, el);
         }
+
         // ★ 絵文字とツールチップテキストの決定
         let emoji = '';
         let tooltip = '';
@@ -105,7 +108,7 @@
             emoji = '📷';
             tooltip = '画像準備中…';
         } else if (type === 'generating') {
-            emoji = '📷';              // ★ 🖼 → 📷（文字化け対策）
+            emoji = '📷';
             tooltip = '画像生成中…';
         } else if (type === 'mode') {
             emoji = '⚙️';
@@ -117,8 +120,8 @@
 
         el.textContent = emoji;
         el.dataset.tooltip = tooltip;
-        el.setAttribute('aria-label', tooltip);  // アクセシビリティ用
-        el.removeAttribute('title');              // native title は無効化（二重表示防止）
+        el.setAttribute('aria-label', tooltip);
+        el.removeAttribute('title');
 
         // ── クラス切り替え ──
         const isImage = (type === 'image' || type === 'preparing' || type === 'generating');
@@ -131,16 +134,23 @@
         if (!el.parentNode) container.appendChild(el);
 
         resetTimer(key);
+
         container.style.display = 'flex';
 
-        // ★ 表示直後に位置を同期（💡 がまだ配置されていなければ
-        //   次の 300ms ポーリングで追いつく）
+        // ★ 表示直後に位置を同期
         syncStatusContainerPosition();
     }
 
     function hideStatus(key) {
         if (!key) return;
         const el = items.get(key);
+
+        // ★ 削除対象がツールチップ表示中の要素なら、ツールチップも非表示にする
+        //    （mouseout が要素削除時に発火しない環境対策）
+        if (el && _hideTooltipIfTarget) {
+            try { _hideTooltipIfTarget(el); } catch (e) { /* ignore */ }
+        }
+
         if (el && el.parentNode) el.parentNode.removeChild(el);
         items.delete(key);
 
@@ -184,8 +194,6 @@
 
         // ============================================================
         // 画像生成（カスタムイベント）
-        //   preparing=true  → 📷 スピナー（緑枠）
-        //   preparing=false → 🖼 スピナー（オレンジ枠）
         // ============================================================
         window.addEventListener('gic-image-generation-started', (e) => {
             const preparing = e?.detail?.preparing === true;
@@ -198,10 +206,9 @@
         });
 
         // ★ モード切替時に即座に反映
-        //   応答生成中にモードが切り替わった場合の保険
         window.addEventListener('gic-mode-changed', () => {
             const llmEl = items.get('llm');
-            if (!llmEl) return; // 応答生成中のみ反映
+            if (!llmEl) return;
             if (isPreSetupMode()) {
                 showPreSetupModeUnderLLM();
             } else {
@@ -214,12 +221,12 @@
 
     // ============================================================
     // ★ 即座表示ツールチップ
-    //    status-indicator-item にマウスが乗ったら、data-tooltip の
-    //    内容を即座にツールチップとして表示する。
-    //    （native title は 1秒前後の遅延があるため独自実装）
+    //    mousemove ベースの追跡で、確実に「マウスが離れたら消える」ようにする。
+    //    さらに hideStatus からも _hideTooltipIfTarget 経由で強制非表示可能。
     // ============================================================
     (function setupImmediateTooltip() {
         let tooltipEl = null;
+        let currentTarget = null;
 
         function ensureTooltip() {
             if (tooltipEl && document.body.contains(tooltipEl)) return tooltipEl;
@@ -234,18 +241,15 @@
             if (!text) return;
             const tip = ensureTooltip();
             tip.textContent = text;
-            // ★ opacity: 0 の状態で一旦レイアウト確定させてから visible を付与
             tip.classList.add('visible');
 
-            // 位置計算: 対象の上に表示
             const rect = target.getBoundingClientRect();
             const tipRect = tip.getBoundingClientRect();
 
             let top = rect.top - tipRect.height - 8;
             let left = rect.left + rect.width / 2 - tipRect.width / 2;
 
-            // 画面外にはみ出さないよう補正
-            if (top < 4) top = rect.bottom + 8;   // 上に収まらなければ下へ
+            if (top < 4) top = rect.bottom + 8;
             if (left < 4) left = 4;
             if (left + tipRect.width > window.innerWidth - 4) {
                 left = window.innerWidth - tipRect.width - 4;
@@ -256,38 +260,37 @@
         }
 
         function hideTooltip() {
+            currentTarget = null;
             if (tooltipEl) tooltipEl.classList.remove('visible');
         }
 
-        // ── イベント委譲（document 全体で監視） ──
-        document.addEventListener('mouseover', (e) => {
+        // ★ hideStatus から「その要素が表示中なら消す」を呼べるようにする
+        _hideTooltipIfTarget = (el) => {
+            if (currentTarget === el) hideTooltip();
+        };
+
+        // ── mousemove で追跡（mouseout より確実） ──
+        document.addEventListener('mousemove', (e) => {
             const target = e.target && e.target.closest
                 ? e.target.closest('.status-indicator-item')
                 : null;
-            if (!target) return;
-            showTooltip(target);
-        }, true);
+            if (target === currentTarget) return;
+            currentTarget = target;
+            if (target) showTooltip(target);
+            else hideTooltip();
+        }, { passive: true });
 
-        document.addEventListener('mouseout', (e) => {
-            const target = e.target && e.target.closest
-                ? e.target.closest('.status-indicator-item')
-                : null;
-            if (!target) return;
-            // relatedTarget が同じ target 内なら無視（内部の子要素移動）
-            if (e.relatedTarget && target.contains(e.relatedTarget)) return;
-            hideTooltip();
-        }, true);
+        // ── マウスがウィンドウ外に出た時 ──
+        document.addEventListener('mouseleave', hideTooltip);
 
-        // スクロールやウィンドウリサイズ時に位置がずれないよう非表示
+        // ── ウィンドウブラー・スクロール・リサイズ ──
+        window.addEventListener('blur', hideTooltip);
         window.addEventListener('scroll', hideTooltip, true);
         window.addEventListener('resize', hideTooltip);
-        window.addEventListener('blur', hideTooltip);
     })();
 
     // ============================================================
     // ★ ステータスコンテナの位置を 💡 ボタンに追従させる
-    //   - left: 💡 の左端 - padding-left 分（絵文字の左端を 💡 の左端に揃える）
-    //   - bottom: 🎨 の上端 + 8px 上（📷 の下端が 🎨 の直上に来る）
     // ============================================================
     let _statusPosSyncTimer = null;
 
@@ -303,28 +306,24 @@
         const rect = toggleBtn.getBoundingClientRect();
         if (rect.width <= 0 || rect.height <= 0 || rect.left < 0) return;
 
-        // ── left: 絵文字の左端を 💡 の左端に揃える ──
-        //    status-indicator-item の padding-left(10px) 分だけ左にずらす
         const ITEM_PADDING_LEFT = 10;
         const left = rect.left - ITEM_PADDING_LEFT;
         container.style.setProperty('left', Math.round(left) + 'px', 'important');
 
-        // ── bottom: 🎨 の上端 + 8px 上にコンテナ下端を置く ──
-        const GALLERY_H = 50;    // 🎨 の高さ
-        const GALLERY_GAP = 5;   // 💡 と 🎨 の縦間隔
-        const STATUS_GAP = 8;    // 📷 と 🎨 の間隔
+        const GALLERY_H = 50;
+        const GALLERY_GAP = 5;
+        const STATUS_GAP = 8;
         const galleryTop = rect.top - GALLERY_H - GALLERY_GAP;
         const bottomFromViewportBottom = window.innerHeight - galleryTop + STATUS_GAP;
         container.style.setProperty('bottom', Math.round(bottomFromViewportBottom) + 'px', 'important');
     }
 
-    // ポーリング + リサイズ + blur で追従
     if (!_statusPosSyncTimer) {
         _statusPosSyncTimer = setInterval(syncStatusContainerPosition, 300);
     }
     window.addEventListener('resize', syncStatusContainerPosition);
     window.addEventListener('blur', syncStatusContainerPosition);
-    
+
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => {
             ensureContainer();
