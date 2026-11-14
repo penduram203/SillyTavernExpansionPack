@@ -2,11 +2,8 @@
 // 画面上部に「応答生成中…」「画像生成中…」のステータスを表示する。
 //   - LLM応答生成: MESSAGE_SENT/MESSAGE_SWIPED で表示、GENERATION_ENDED で非表示
 //   - 画像生成: gic-image-generation-started/ended カスタムイベントで表示制御
-//     ★ 準備中 (preparing:true) と 生成中 (preparing:false) を枠色で差別化
-//       - preparing  : 緑枠（従来どおり）
-//       - generating : オレンジ枠 + SVG 円形進捗リング
-//   - 事前設定モード: 応答生成中のみ「応答生成中…」の真下に表示
-//     （背景生成モードから勝手に切り替わったことにユーザーが気づけるようにする）
+//     preparing:true → 緑枠スピナー（画像準備中…）
+//     preparing:false → オレンジ枠スピナー（画像生成中…）
 
 (function () {
     'use strict';
@@ -14,10 +11,14 @@
     const CONTAINER_ID = 'status-indicator-container';
     const STYLE_ID = 'status-indicator-style';
     const MAX_SHOW_MS = 180000; // 3分でタイムアウト（暴走防止）
+
     // ============================================================
     // ★ 旧「事前設定モード」用のスタブ
     //   背景生成モードは合体モード固定化に伴い廃止されたが、
-    //   既存コードに参照が残っているため no-op として定義する。
+    //   gic-mode-changed ハンドラと window.StatusIndicator 代入部に
+    //   参照が残っているため no-op として定義する。
+    //   （未定義だと ReferenceError で window.StatusIndicator の代入が
+    //     中断され、モジュール末尾の評価が失敗する）
     // ============================================================
     function isPreSetupMode() { return false; }
     function showPreSetupModeUnderLLM() { /* no-op */ }
@@ -68,12 +69,13 @@
         }, MAX_SHOW_MS);
         timers.set(key, timer);
     }
+
     // ============================================================
     // ★ ステータス表示
     //    type:
     //      'llm'        … 応答生成中…（青枠・スピナー）
     //      'preparing'  … 画像準備中…（緑枠・スピナー）
-    //      'generating' … 画像生成中…（オレンジ枠・SVG 進捗リング）
+    //      'generating' … 画像生成中…（オレンジ枠・スピナー）
     //      'mode'       … モード表示（黄枠・スピナーなし）
     //    'image' は後方互換（preparing 相当として扱う）
     // ============================================================
@@ -93,11 +95,8 @@
             items.set(key, el);
         }
 
-        // ★ 実進捗（ComfyUI WS）が取得できない環境ではプログレスリングの
-        //   意味がないため、generating も preparing と同じ
-        //   「スピナー + テキスト」表示に統一する。
-        //   色（緑 / オレンジ）は CSS 側の .status-preparing /
-        //   .status-generating で差別化する。
+        // ★ Option A: テキストのみ（スピナーは CSS ::before）。
+        //   generating も preparing と同じ表示形式で、枠色のみで差別化する。
         el.textContent = text;
 
         // ── クラス切り替え ──
@@ -162,7 +161,7 @@
         // ============================================================
         // 画像生成（カスタムイベント）
         //   preparing=true  → 画像準備中…（緑枠）
-        //   preparing=false → 画像生成中…（オレンジ枠 + 進捗リング）
+        //   preparing=false → 画像生成中…（オレンジ枠）
         // ============================================================
         window.addEventListener('gic-image-generation-started', (e) => {
             const preparing = e?.detail?.preparing === true;
