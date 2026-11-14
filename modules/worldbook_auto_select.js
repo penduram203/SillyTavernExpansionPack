@@ -5,19 +5,24 @@
 //
 // ★ 設計方針: ロアブック名 = キャラ名 / [char.name, ext.world, data.world]
 //
-// ★ 真因と対策:
-//   (1) /api/worldinfo/edit はファイルを書くだけで、ST の設定 world_names には
-//       登録されない。ST の getSettings() が呼ばれると world_names がサーバー
-//       設定から再読込され、world_info[name] が消える。
-//       → /api/settings/get + /api/settings/save で world_names をサーバー設定に
-//         確実に保存する。これを change 発火前に実行。
-//   (2) world_info に jQuery/Sizzle expando (0, 1, 2, jQuery..., sizzle...) が
-//       混入すると displayWorldEntries / getGlobalLore がクラッシュ。
-//       → getWorldInfoInstance で jQuery を拒否、_shouldSkipValidateKey で
-//         スキップ、_sanitizeWorldInfoObject で除去。
-//   (3) importWorldInfo は内部 saveWorldInfo が 400 で失敗することがある。
-//       → /api/worldinfo/import を直接叩き、失敗時は /api/worldinfo/edit へ
-//         フォールバック。
+// ★ 自動作成の第一手段は ST 本体の importWorldInfo:
+//   - importWorldInfo は内部で /api/worldinfo/import を叩き、
+//     成功後に getSettings() を実行して world_names を更新し、
+//     UI のドロップダウンも再構築する。
+//   - これが world_names を正しく更新する唯一の確実な経路。
+//   - 自前で ctx.world_names.push しても実体配列は更新されないため、
+//     直接操作は行わない。
+//   - importWorldInfo が失敗した場合のみ createNewWorldInfo + edit へ
+//     フォールバックする。
+//
+// ★ world_info 保護:
+//   - Object.defineProperty で setter を上書きし、boolean/null/空オブジェクト
+//     の書き込みを拒否する。jQuery/Sizzle expando キーも sanitize で除去。
+//   - これにより ST の displayWorldEntries / getGlobalLore の
+//     "right-hand side of 'in' should be an object, got boolean" クラッシュを回避。
+//
+// ★ unhandledrejection ハンドラ:
+//   - ST 内部エラーを抑止し、対象 world のみ復元する。
 
 (function () {
     'use strict';
@@ -115,12 +120,12 @@
     }
 
     // ============================================================
-    // ★ world_info インスタンス取得（jQuery / 配列を拒否）
+    // world_info インスタンス取得（jQuery / 配列を拒否）
     // ============================================================
     function isPlainWorldInfoObject(x) {
         if (!x || typeof x !== 'object') return false;
-        if (x.jquery) return false;        // jQuery オブジェクト
-        if (Array.isArray(x)) return false; // 配列
+        if (x.jquery) return false;         // jQuery オブジェクト
+        if (Array.isArray(x)) return false;  // 配列
         return true;
     }
 
@@ -139,7 +144,7 @@
     }
 
     // ============================================================
-    // ★ world_info から jQuery/Sizzle の汚染キーを除去
+    // world_info から jQuery/Sizzle の汚染キーを除去
     // ============================================================
     function _shouldSkipValidateKey(name) {
         if (!name) return true;
@@ -173,91 +178,7 @@
     }
 
     // ============================================================
-    // ★ world_names をサーバー設定に永続化
-    //   ST の getSettings() で world_names がサーバー値に上書きされ、
-    //   world_info[name] が消えるのを防ぐための最重要処理。
-    // ============================================================
-    async function _persistWorldNameToServerSettings(worldName) {
-        if (!worldName) return false;
-        try {
-            const headers = await getRequestHeadersSafe();
-
-            // 現在の設定を取得
-            const getResp = await fetch('/api/settings/get', {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({}),
-            });
-            if (!getResp.ok) {
-                console.warn(`${LOG} /api/settings/get HTTP ${getResp.status}`);
-                return false;
-            }
-            const settings = await getResp.json();
-            if (!settings || typeof settings !== 'object') return false;
-
-            // world_names を配列として確保
-            if (!Array.isArray(settings.world_names)) {
-                settings.world_names = [];
-            }
-            if (settings.world_names.includes(worldName)) {
-                console.debug(`${LOG} サーバー設定の world_names に "${worldName}" は既に存在`);
-                return true;
-            }
-            settings.world_names.push(worldName);
-
-            // 保存
-            const saveResp = await fetch('/api/settings/save', {
-                method: 'POST',
-                headers,
-                body: JSON.stringify(settings),
-            });
-            if (!saveResp.ok) {
-                console.warn(`${LOG} /api/settings/save HTTP ${saveResp.status}`);
-                return false;
-            }
-            console.log(`${LOG} 💾 サーバー設定の world_names に "${worldName}" を追加`);
-            return true;
-        } catch (e) {
-            console.warn(`${LOG} _persistWorldNameToServerSettings error:`, e);
-            return false;
-        }
-    }
-
-    // ============================================================
-    // ★ /api/worldinfo/import を直接叩く（world_names が ST 内で更新される）
-    // ============================================================
-    async function _importWorldInfoViaAPI(worldName, entries) {
-        try {
-            const headers = await getRequestHeadersSafe();
-            delete headers['Content-Type'];
-
-            const jsonContent = JSON.stringify({ entries }, null, 2);
-            const blob = new Blob([jsonContent], { type: 'application/json' });
-            const file = new File([blob], `${worldName}.json`, { type: 'application/json' });
-
-            const formData = new FormData();
-            formData.append('avatar', file);
-
-            const resp = await fetch('/api/worldinfo/import', {
-                method: 'POST',
-                headers,
-                body: formData,
-            });
-
-            if (resp.ok) {
-                console.log(`${LOG} 📥 /api/worldinfo/import 成功: "${worldName}"`);
-                return true;
-            }
-            console.warn(`${LOG} /api/worldinfo/import HTTP ${resp.status}`);
-            return false;
-        } catch (e) {
-            console.warn(`${LOG} _importWorldInfoViaAPI error:`, e);
-            return false;
-        }
-    }
-
-    // ============================================================
-    // サーバーからロアブック取得
+    // サーバー通信ヘルパー
     // ============================================================
     async function fetchWorldbookFromServer(worldName) {
         if (!worldName) return null;
@@ -368,7 +289,7 @@
     }
 
     // ============================================================
-    // ★ world_info[name] を Object.defineProperty で保護
+    // world_info[name] を Object.defineProperty で保護
     // ============================================================
     function _ensureWorldInfoProtected(worldName, entries) {
         if (!worldName || !entries) return false;
@@ -437,63 +358,12 @@
     }
 
     // ============================================================
-    // ★ world_names に確実に登録（メモリ + サーバー設定 + ST 強制反映）
-    // ============================================================
-    async function _ensureWorldInSTWorldNames(worldName) {
-        if (!worldName) return false;
-
-        // 1. 既にメモリにある？
-        const inCtx = (() => {
-            try {
-                const ctx = getSTContext();
-                return Array.isArray(ctx?.world_names) && ctx.world_names.includes(worldName);
-            } catch (e) { return false; }
-        })();
-        if (inCtx) return true;
-
-        // 2. メモリ配列へ push
-        try {
-            const mod = await import('../../../../world-info.js');
-            if (Array.isArray(mod.world_names) && !mod.world_names.includes(worldName)) {
-                mod.world_names.push(worldName);
-                console.log(`${LOG} 📋 mod.world_names に "${worldName}" を追加`);
-            }
-        } catch (e) { /* ignore */ }
-        try {
-            const ctx = getSTContext();
-            if (Array.isArray(ctx?.world_names) && !ctx.world_names.includes(worldName)) {
-                ctx.world_names.push(worldName);
-                console.log(`${LOG} 📋 ctx.world_names に "${worldName}" を追加`);
-            }
-        } catch (e) { /* ignore */ }
-
-        // 3. ★ サーバー設定に永続化（最重要）
-        await _persistWorldNameToServerSettings(worldName);
-
-        // 4. ST の saveSettings でも永続化
-        try {
-            const scriptMod = await import('../../../../../script.js');
-            if (typeof scriptMod.saveSettings === 'function') {
-                await scriptMod.saveSettings();
-                console.log(`${LOG} 💾 saveSettings 完了`);
-            }
-        } catch (e) { /* ignore */ }
-
-        // 5. ST に再読み込みさせる
-        await refreshWorldSelects();
-        await wait(200);
-
-        return true;
-    }
-
-    // ============================================================
     // 一括検証（unhandledrejection 専用）
     // ============================================================
     async function _validateAllWorldInfoEntries() {
         const worldInfo = getWorldInfoInstance();
         if (!worldInfo) return;
 
-        // まず汚染キーを除去
         _sanitizeWorldInfoObject();
 
         const names = Object.keys(worldInfo);
@@ -568,87 +438,155 @@
     }
 
     // ============================================================
-    // ★ 自動作成（import API 優先 + サーバー設定永続化）
+    // ★ 自動作成:
+    //   1) importWorldInfo（正規経路・world_names も更新される）
+    //   2) createNewWorldInfo + /api/worldinfo/edit（フォールバック）
     // ============================================================
     async function _createWorldbookIfMissing(worldName) {
         if (!worldName) return false;
 
-        // 1. 既存チェック
+        // 既存チェック（entries 付き）
         const existing = await fetchWorldbookFromServer(worldName);
         if (existing && existing.entries && Object.keys(existing.entries).length > 0) {
             _ensureWorldInfoProtected(worldName, existing.entries);
-            await _ensureWorldInSTWorldNames(worldName);
             return true;
         }
 
         const newEntries = { 0: _createCommonRuleEntry(0) };
 
-        // 2. import API で作成（world_names も ST 内で更新される）
-        let saved = await _importWorldInfoViaAPI(worldName, newEntries);
+        // ── パターン A: importWorldInfo ──
+        try {
+            const mod = await import('../../../../world-info.js');
+            if (typeof mod.importWorldInfo === 'function') {
+                const jsonContent = JSON.stringify({ entries: newEntries }, null, 2);
+                const blob = new Blob([jsonContent], { type: 'application/json' });
+                const file = new File([blob], `${worldName}.json`, { type: 'application/json' });
 
-        // 3. 失敗時は /api/worldinfo/edit で直接作成
-        if (!saved) {
-            for (let attempt = 1; attempt <= SAVE_RETRY_MAX; attempt++) {
-                try {
-                    const headers = await getRequestHeadersSafe();
-                    const resp = await fetch('/api/worldinfo/edit', {
-                        method: 'POST',
-                        headers,
-                        body: JSON.stringify({ name: worldName, data: { entries: newEntries } }),
-                    });
-                    if (resp.ok) {
-                        console.log(`${LOG} 💾 /api/worldinfo/edit 成功 (attempt ${attempt})`);
-                        saved = true;
-                        break;
+                // importWorldInfo は内部で /api/worldinfo/import を叩き、
+                // 成功後に getSettings() を実行して world_names も更新する。
+                await mod.importWorldInfo(file, false);
+                console.log(`${LOG} 📥 importWorldInfo で "${worldName}" を作成`);
+
+                // world_names 更新と UI 同期を待つ
+                await wait(500);
+
+                // サーバー検証
+                let verified = null;
+                for (let i = 0; i < VERIFY_RETRY_MAX; i++) {
+                    const fetched = await fetchWorldbookFromServer(worldName);
+                    if (fetched && fetched.entries && Object.keys(fetched.entries).length > 0) {
+                        const firstEntry = Object.values(fetched.entries)[0];
+                        if (firstEntry && firstEntry.comment === '00_共通ルール') {
+                            verified = fetched.entries;
+                            break;
+                        }
                     }
-                    let errText = '';
-                    try { errText = await resp.text(); } catch (e) { /* ignore */ }
-                    console.warn(
-                        `${LOG} /api/worldinfo/edit HTTP ${resp.status} (attempt ${attempt}) ` +
-                        `body="${errText.slice(0, 200)}"`
+                    await wait(VERIFY_RETRY_DELAY_MS);
+                }
+
+                if (verified) {
+                    _ensureWorldInfoProtected(worldName, verified);
+                    await refreshWorldSelects();
+                    _addOptionToSelectsIfMissing(worldName);
+                    console.log(
+                        `${LOG} 🆕 ロアブック "${worldName}" を importWorldInfo 経由で作成完了 ` +
+                        `(entries ${Object.keys(verified).length}件)`
                     );
-                } catch (e) {
-                    console.warn(`${LOG} /api/worldinfo/edit 例外 (attempt ${attempt}):`, e);
+                    return true;
                 }
-                if (attempt < SAVE_RETRY_MAX) await wait(SAVE_RETRY_DELAY_MS);
+                console.warn(`${LOG} importWorldInfo 後のサーバー検証に失敗`);
             }
+        } catch (e) {
+            console.warn(`${LOG} importWorldInfo 失敗:`, e?.message || e);
         }
 
-        if (!saved) return false;
+        // ── パターン B: createNewWorldInfo + /api/worldinfo/edit ──
+        try {
+            const mod = await import('../../../../world-info.js');
+            if (typeof mod.createNewWorldInfo === 'function') {
+                await mod.createNewWorldInfo(worldName);
+                console.log(`${LOG} 📥 createNewWorldInfo で空の "${worldName}" を作成`);
+                await wait(300);
 
-        // 4. サーバー検証
-        let verified = null;
-        for (let i = 0; i < VERIFY_RETRY_MAX; i++) {
-            const fetched = await fetchWorldbookFromServer(worldName);
-            if (fetched && fetched.entries && Object.keys(fetched.entries).length > 0) {
-                const firstEntry = Object.values(fetched.entries)[0];
-                if (firstEntry && firstEntry.comment === '00_共通ルール') {
-                    verified = fetched.entries;
-                    break;
+                // エントリを書き込む
+                let editOk = false;
+                for (let attempt = 1; attempt <= SAVE_RETRY_MAX; attempt++) {
+                    try {
+                        const headers = await getRequestHeadersSafe();
+                        const resp = await fetch('/api/worldinfo/edit', {
+                            method: 'POST',
+                            headers,
+                            body: JSON.stringify({ name: worldName, data: { entries: newEntries } }),
+                        });
+                        if (resp.ok) {
+                            editOk = true;
+                            console.log(`${LOG} 💾 /api/worldinfo/edit 成功 (attempt ${attempt})`);
+                            break;
+                        }
+                    } catch (e) {
+                        console.warn(`${LOG} /api/worldinfo/edit 例外 (attempt ${attempt}):`, e);
+                    }
+                    if (attempt < SAVE_RETRY_MAX) await wait(SAVE_RETRY_DELAY_MS);
+                }
+
+                if (editOk) {
+                    let verified = null;
+                    for (let i = 0; i < VERIFY_RETRY_MAX; i++) {
+                        const fetched = await fetchWorldbookFromServer(worldName);
+                        if (fetched && fetched.entries && Object.keys(fetched.entries).length > 0) {
+                            const firstEntry = Object.values(fetched.entries)[0];
+                            if (firstEntry && firstEntry.comment === '00_共通ルール') {
+                                verified = fetched.entries;
+                                break;
+                            }
+                        }
+                        await wait(VERIFY_RETRY_DELAY_MS);
+                    }
+
+                    if (verified) {
+                        _ensureWorldInfoProtected(worldName, verified);
+                        await refreshWorldSelects();
+                        _addOptionToSelectsIfMissing(worldName);
+                        console.log(
+                            `${LOG} 🆕 ロアブック "${worldName}" を createNewWorldInfo + edit で作成完了 ` +
+                            `(entries ${Object.keys(verified).length}件)`
+                        );
+                        return true;
+                    }
                 }
             }
-            await wait(VERIFY_RETRY_DELAY_MS);
+        } catch (e) {
+            console.warn(`${LOG} createNewWorldInfo フォールバック失敗:`, e?.message || e);
         }
 
-        if (!verified) {
-            console.warn(`${LOG} ロアブック "${worldName}" のサーバー保存を確認できませんでした`);
-            return false;
+        // ── パターン C: 最終手段 /api/worldinfo/edit のみ ──
+        console.warn(`${LOG} importWorldInfo / createNewWorldInfo 共に失敗 → /api/worldinfo/edit のみで試行`);
+        for (let attempt = 1; attempt <= SAVE_RETRY_MAX; attempt++) {
+            try {
+                const headers = await getRequestHeadersSafe();
+                const resp = await fetch('/api/worldinfo/edit', {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({ name: worldName, data: { entries: newEntries } }),
+                });
+                if (resp.ok) {
+                    const fetched = await fetchWorldbookFromServer(worldName);
+                    if (fetched && fetched.entries && Object.keys(fetched.entries).length > 0) {
+                        _ensureWorldInfoProtected(worldName, fetched.entries);
+                        await refreshWorldSelects();
+                        _addOptionToSelectsIfMissing(worldName);
+                        console.log(`${LOG} 🆕 ロアブック "${worldName}" を edit のみで作成完了`);
+                        return true;
+                    }
+                }
+            } catch (e) {
+                console.warn(`${LOG} 最終手段 /api/worldinfo/edit 例外 (attempt ${attempt}):`, e);
+            }
+            if (attempt < SAVE_RETRY_MAX) await wait(SAVE_RETRY_DELAY_MS);
         }
 
-        // 5. ★ サーバー設定に world_names を永続化（これが最重要）
-        await _persistWorldNameToServerSettings(worldName);
-
-        // 6. 保護 + メモリ反映
-        _ensureWorldInfoProtected(worldName, verified);
-        await _ensureWorldInSTWorldNames(worldName);
-        await refreshWorldSelects();
-        _addOptionToSelectsIfMissing(worldName);
-
-        console.log(
-            `${LOG} 🆕 ロアブック "${worldName}" を自動作成しました ` +
-            `(entries ${Object.keys(verified).length}件, 保護済み, 設定永続化済み)`
-        );
-        return true;
+        console.warn(`${LOG} ロアブック "${worldName}" の作成に失敗しました`);
+        return false;
     }
 
     async function _bindCharacterToWorld(char, worldName, force = false) {
@@ -726,7 +664,6 @@
             return false;
         }
 
-        // 事後復元
         const restore = () => {
             const wi = getWorldInfoInstance();
             if (!wi) return;
@@ -734,9 +671,7 @@
             const valid = cur && typeof cur === 'object'
                 && cur.entries && Object.keys(cur.entries).length > 0;
             if (!valid && _protectedWorlds.has(name)) {
-                // 保護済みなら setter で拒否されているはず
-                const fromServer = fetchWorldbookFromServer(name);
-                fromServer.then(d => {
+                fetchWorldbookFromServer(name).then(d => {
                     if (d?.entries) _ensureWorldInfoProtected(name, d.entries);
                 }).catch(() => {});
             }
@@ -781,7 +716,6 @@
             console.warn(LOG, '_setActive error:', e);
         }
 
-        // 選択状態の確認
         setTimeout(() => {
             try {
                 const sel = Array.from(wi.selectedOptions || [])
@@ -1029,9 +963,6 @@
                 return;
             }
 
-            // ★ 最重要: change 発火前に world_names をサーバー設定に永続化
-            await _persistWorldNameToServerSettings(targetName);
-
             const editOk = await _setEditTarget(targetName);
             await wait(APPLY_DELAY_MS);
             if (isStale()) return;
@@ -1170,8 +1101,6 @@
         verifyWorldbookOnServer: (name) => _verifyWorldbookOnServer(name || getCurrentCharName()),
         fetchWorldbook: (name) => fetchWorldbookFromServer(name || getCurrentCharName()),
         refreshWorldSelects,
-        persistWorldNameToServerSettings: (name) => _persistWorldNameToServerSettings(name || getCurrentCharName()),
-        ensureWorldInSTWorldNames: (name) => _ensureWorldInSTWorldNames(name || getCurrentCharName()),
         validateAllWorldInfoEntries: _validateAllWorldInfoEntries,
         sanitizeWorldInfo: _sanitizeWorldInfoObject,
         bindCharacter: async (worldName, force) => {
@@ -1189,7 +1118,6 @@
 
             let ctxWorldNames = null;
             let modWorldNames = null;
-            let serverWorldNames = null;
             try {
                 const ctx = getSTContext();
                 ctxWorldNames = Array.isArray(ctx?.world_names) ? ctx.world_names.slice() : null;
@@ -1197,16 +1125,6 @@
             try {
                 const mod = await import('../../../../world-info.js');
                 modWorldNames = Array.isArray(mod.world_names) ? mod.world_names.slice() : null;
-            } catch (e) { /* ignore */ }
-            try {
-                const headers = await getRequestHeadersSafe();
-                const r = await fetch('/api/settings/get', {
-                    method: 'POST', headers, body: JSON.stringify({}),
-                });
-                if (r.ok) {
-                    const s = await r.json();
-                    serverWorldNames = Array.isArray(s?.world_names) ? s.world_names.slice() : null;
-                }
             } catch (e) { /* ignore */ }
 
             return {
@@ -1226,7 +1144,6 @@
                 ) !== null,
                 inCtxWorldNames: ctxWorldNames?.includes(name) ?? null,
                 inModWorldNames: modWorldNames?.includes(name) ?? null,
-                inServerWorldNames: serverWorldNames?.includes(name) ?? null,
             };
         },
         repairEmptyWorldbook: async (worldName) => {
