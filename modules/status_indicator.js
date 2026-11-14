@@ -75,7 +75,7 @@
     //    type:
     //      'llm'        … 📃 スピナー（応答生成中…）
     //      'preparing'  … 📷 スピナー（画像準備中…）
-    //      'generating' … 🖼 スピナー（画像生成中…）
+    //      'generating' … 📷 スピナー（画像生成中…）
     //      'mode'       … ⚙️ スピナーなし（モード表示）
     //    'image' は後方互換（preparing 相当として扱う）
     //    絵文字にホバーすると data-tooltip の詳細テキストを即座に表示する。
@@ -95,7 +95,6 @@
             el.dataset.key = key;
             items.set(key, el);
         }
-
         // ★ 絵文字とツールチップテキストの決定
         let emoji = '';
         let tooltip = '';
@@ -106,7 +105,7 @@
             emoji = '📷';
             tooltip = '画像準備中…';
         } else if (type === 'generating') {
-            emoji = '🖼';
+            emoji = '📷';              // ★ 🖼 → 📷（文字化け対策）
             tooltip = '画像生成中…';
         } else if (type === 'mode') {
             emoji = '⚙️';
@@ -132,8 +131,11 @@
         if (!el.parentNode) container.appendChild(el);
 
         resetTimer(key);
-
         container.style.display = 'flex';
+
+        // ★ 表示直後に位置を同期（💡 がまだ配置されていなければ
+        //   次の 300ms ポーリングで追いつく）
+        syncStatusContainerPosition();
     }
 
     function hideStatus(key) {
@@ -282,6 +284,47 @@
         window.addEventListener('blur', hideTooltip);
     })();
 
+    // ============================================================
+    // ★ ステータスコンテナの位置を 💡 ボタンに追従させる
+    //   - left: 💡 の左端 - padding-left 分（絵文字の左端を 💡 の左端に揃える）
+    //   - bottom: 🎨 の上端 + 8px 上（📷 の下端が 🎨 の直上に来る）
+    // ============================================================
+    let _statusPosSyncTimer = null;
+
+    function syncStatusContainerPosition() {
+        const container = document.getElementById(CONTAINER_ID);
+        if (!container) return;
+        if (container.style.display === 'none') return;
+        if (container.children.length === 0) return;
+
+        const toggleBtn = document.getElementById('toggle-chat-button');
+        if (!toggleBtn) return;
+
+        const rect = toggleBtn.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0 || rect.left < 0) return;
+
+        // ── left: 絵文字の左端を 💡 の左端に揃える ──
+        //    status-indicator-item の padding-left(10px) 分だけ左にずらす
+        const ITEM_PADDING_LEFT = 10;
+        const left = rect.left - ITEM_PADDING_LEFT;
+        container.style.setProperty('left', Math.round(left) + 'px', 'important');
+
+        // ── bottom: 🎨 の上端 + 8px 上にコンテナ下端を置く ──
+        const GALLERY_H = 50;    // 🎨 の高さ
+        const GALLERY_GAP = 5;   // 💡 と 🎨 の縦間隔
+        const STATUS_GAP = 8;    // 📷 と 🎨 の間隔
+        const galleryTop = rect.top - GALLERY_H - GALLERY_GAP;
+        const bottomFromViewportBottom = window.innerHeight - galleryTop + STATUS_GAP;
+        container.style.setProperty('bottom', Math.round(bottomFromViewportBottom) + 'px', 'important');
+    }
+
+    // ポーリング + リサイズ + blur で追従
+    if (!_statusPosSyncTimer) {
+        _statusPosSyncTimer = setInterval(syncStatusContainerPosition, 300);
+    }
+    window.addEventListener('resize', syncStatusContainerPosition);
+    window.addEventListener('blur', syncStatusContainerPosition);
+    
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => {
             ensureContainer();
