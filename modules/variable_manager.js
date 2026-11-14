@@ -165,6 +165,10 @@ import('./sound_effects.js').catch(err => {
 
     // ★ バトル開始変数のキャッシュ
     let _lastBattleStartVar = false;
+    // ★ 共通ルールフラグが計算されたキャラ名（キャラ変更検出用）
+    let _commonRuleFlagsCharName = null;
+    // ★ resetOnChange で直近に検出したキャラ名（UI リセットの発火判定用）
+    let _lastResetCharName = null;
 
     (function injectStyle() {
         if (document.getElementById(STYLE_ID)) return;
@@ -212,12 +216,14 @@ import('./sound_effects.js').catch(err => {
     //   3. char.name
     //   4. #world_info の選択値
     //   5. #world_editor_select の選択値（editor dropdown）
-    //   重複排除して返す。
+    //
+    //   includeGlobals=false の場合、4-5 は含めない。
+    //   → キャラ切替直後の stale な #world_info を参照しないために使う
     // ============================================================
-    function getWorldNameCandidates() {
+    function getWorldNameCandidates(includeGlobals = true) {
         const candidates = [];
 
-        // 1〜3. キャラクタのデータから
+        // 1〜3. キャラクタ固有のロアブック名
         try {
             const ctx = getSTContext();
             const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
@@ -236,26 +242,28 @@ import('./sound_effects.js').catch(err => {
             }
         } catch (e) { /* ignore */ }
 
-        // 4. #world_info（グローバルにアクティブなロアブック、複数選択可）
-        try {
-            const wi = document.querySelector('#world_info');
-            if (wi) {
-                const selected = Array.from(wi.selectedOptions || []);
-                for (const opt of selected) {
-                    const v = (opt.value || '').trim();
-                    const t = (opt.textContent || '').trim();
-                    if (v && !/^\d+$/.test(v)) candidates.push(v);
-                    else if (t) candidates.push(t);
-                }
-            }
-        } catch (e) { /* ignore */ }
-
-        // 5. #world_editor_select（編集ドロップダウン）
-        if (window.LorebookExpansion?.getCurrentWorldName) {
+        if (includeGlobals) {
+            // 4. #world_info（グローバルにアクティブなロアブック、複数選択可）
             try {
-                const n = window.LorebookExpansion.getCurrentWorldName();
-                if (n) candidates.push(n);
+                const wi = document.querySelector('#world_info');
+                if (wi) {
+                    const selected = Array.from(wi.selectedOptions || []);
+                    for (const opt of selected) {
+                        const v = (opt.value || '').trim();
+                        const t = (opt.textContent || '').trim();
+                        if (v && !/^\d+$/.test(v)) candidates.push(v);
+                        else if (t) candidates.push(t);
+                    }
+                }
             } catch (e) { /* ignore */ }
+
+            // 5. #world_editor_select（編集ドロップダウン）
+            if (window.LorebookExpansion?.getCurrentWorldName) {
+                try {
+                    const n = window.LorebookExpansion.getCurrentWorldName();
+                    if (n) candidates.push(n);
+                } catch (e) { /* ignore */ }
+            }
         }
 
         // 重複排除
@@ -386,9 +394,17 @@ import('./sound_effects.js').catch(err => {
     }
 
     // ============================================================
-    // ★ 共通ルール変数の取得（v13: ログ抑制版）
+    // ★ 共通ルール変数の取得（キャラ変更自動検出 + globals除外対応）
     // ============================================================
     async function refreshCommonRuleFlags(force = false) {
+        const currentCharName = getCurrentCharName();
+        const charChanged = (_commonRuleFlagsCharName !== currentCharName);
+
+        // ★ キャラが変わった場合は強制リフレッシュ（キャッシュを無視）
+        if (charChanged) {
+            force = true;
+        }
+
         if (!force &&
             _commonRuleFlagsLastRefresh > 0 &&
             Date.now() - _commonRuleFlagsLastRefresh < COMMON_RULE_FLAGS_CACHE_MS) {
@@ -401,29 +417,33 @@ import('./sound_effects.js').catch(err => {
 
         _commonRuleRefreshInFlight = (async () => {
             try {
-                const charName = getCurrentCharName();
-                if (!charName) {
+                if (!currentCharName) {
                     _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, titleScreen: false, chatWindow: true, worldName: null };
+                    _commonRuleFlagsCharName = null;
                     _logStateIfChanged(_commonRuleFlags);
                     return _commonRuleFlags;
                 }
 
                 if (!window.LorebookExpansion?.loadWorldInfoEntriesByName) {
                     _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, titleScreen: false, chatWindow: true, worldName: null };
+                    _commonRuleFlagsCharName = currentCharName;
                     _logStateIfChanged(_commonRuleFlags);
                     return _commonRuleFlags;
                 }
 
-                const candidates = getWorldNameCandidates();
+                // ★ キャラ変更直後は globals を信用しない
+                //   （worldbook_auto_select.js の 700ms デバウンス中は
+                //    #world_info / #world_editor_select が旧キャラのままで、
+                //    旧キャラの 00_共通ルール を誤って読み込むのを防ぐ）
+                const includeGlobals = !charChanged;
+                const candidates = getWorldNameCandidates(includeGlobals);
                 if (candidates.length === 0) {
                     _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, titleScreen: false, chatWindow: true, worldName: null };
+                    _commonRuleFlagsCharName = currentCharName;
                     _logStateIfChanged(_commonRuleFlags);
                     return _commonRuleFlags;
                 }
 
-                // ★ モジュールレベルの tryMatchCommonRule() を使用
-                //   （以前はここでローカルに tryMatch を定義していたが、
-                //     setCommonRuleVariable とロジックを共有するために切り出した）
                 for (const worldName of candidates) {
                     let entries = null;
                     try {
@@ -453,11 +473,16 @@ import('./sound_effects.js').catch(err => {
                     const varMap = buildVarMapFromEntry(worldName, targetEntry);
                     const flags = extractCommonRuleFlags(varMap);
                     _commonRuleFlags = { ok: true, ...flags, worldName };
+                    _commonRuleFlagsCharName = currentCharName;
                     _logStateIfChanged(_commonRuleFlags);
                     return _commonRuleFlags;
                 }
 
+                // ★ どの候補にも 00_共通ルール が無い → デフォルト（UI 表示）
+                //   キャラ変更時は globals にフォールバックしないので、
+                //   旧キャラの変数を誤って引き継ぐことがない
                 _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, titleScreen: false, chatWindow: true, worldName: null };
+                _commonRuleFlagsCharName = currentCharName;
                 _logStateIfChanged(_commonRuleFlags);
                 return _commonRuleFlags;
             } finally {
@@ -1698,8 +1723,51 @@ import('./sound_effects.js').catch(err => {
                 const es = ctx.eventSource;
 
                 const resetOnChange = () => {
+                    const currentCharName = getCurrentCharName();
+                    const charChanged = (_lastResetCharName !== currentCharName);
+                    const prevCharName = _lastResetCharName;
+                    _lastResetCharName = currentCharName;
+
                     if (_battleActive && !_battleEndingInProgress && !_actionInProgress) endBattle();
-                    // ★ キャラ切替時は共通ルールフラグを強制再取得
+
+                    // ★ キャラが変わった場合は即座にフラグと UI をリセット
+                    //   （旧キャラの変数で UI が非表示のまま引き継がれるのを防ぐ）
+                    if (charChanged) {
+                        if (prevCharName !== null || currentCharName !== null) {
+                            console.log(
+                                `${LOG} 🔄 キャラ変更を検知 → 共通ルールフラグと UI をリセット ` +
+                                `(旧="${prevCharName || '(none)'}", 新="${currentCharName || '(none)'}")`
+                            );
+                        }
+
+                        // 1) フラグを即座にデフォルトへ（UI 表示状態）
+                        _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, titleScreen: false, chatWindow: true, worldName: null };
+                        _commonRuleFlagsLastRefresh = 0;
+                        _commonRuleFlagsCharName = null;
+                        _lastBattleStartVar = false;
+
+                        // 2) body の UI 制御クラスをすべて解除
+                        //    （これがないと旧キャラの hide 設定が残る）
+                        document.body.classList.remove(
+                            'varmgr-hide-user-messages',
+                            'varmgr-title-screen',
+                            'varmgr-hide-chat-window'
+                        );
+
+                        // 3) タイトル画面・バトル UI も非表示
+                        try { updateTitleScreenVisibility(false); } catch (e) { /* ignore */ }
+                        const battleCommands = document.getElementById(BATTLE_COMMANDS_ID);
+                        if (battleCommands) {
+                            battleCommands.style.display = 'none';
+                            battleCommands.classList.remove('variable-battle-commands-waiting');
+                        }
+                        removeBattleStartButton();
+
+                        // 4) パネル内容もクリア（次回 render で再構築）
+                        _lastRenderKey = '';
+                    }
+
+                    // 新キャラのフラグを非同期で再計算
                     refreshCommonRuleFlags(true).catch(e => console.warn(LOG, e));
                     scheduleRender();
                 };
