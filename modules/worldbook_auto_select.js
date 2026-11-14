@@ -5,17 +5,13 @@
 //
 // ★ 設計方針: ロアブック名 = キャラ名
 //   候補の順序は [char.name, extensions.world, data.world]。
-//   char.name のロアブックが存在すれば必ずそれを優先する。
 //
 // ★ 競合状態対策:
-//   - 世代トークンで古い処理を無効化（UI 選択のみ）
-//   - 自動作成・バインドは捕捉済みの charAtStart に対して完遂する
-//     （キャラ切替で中断しない）
-//   - バインドは merge-attributes に avatar / ch_name を明示
-//
-// ★ 自己修復:
-//   - UI 選択後、targetName == char.name なら extensions.world を強制同期
-//   - これにより過去のバグで蓄積した汚染が次の選択時に解消される
+//   - ST の saveWorldInfo に依存せず、自前で /api/worldinfo/edit を叩く
+//   - 保存は 3 リトライ + 5 検証
+//   - バインド前に world_info[name] の存在を必ず確認（TypeError 防止）
+//   - _setEditTarget を try/catch で保護（ST 内部エラーで連鎖しない）
+//   - 保存直後は getSettings() で UI を強制同期
 
 (function () {
     'use strict';
@@ -24,8 +20,11 @@
     const RETRY_AFTER_FAILURE_MS = 1500;
     const FIND_RETRY_MAX = 5;
     const FIND_RETRY_DELAY_MS = 300;
+    const SAVE_RETRY_MAX = 3;
+    const SAVE_RETRY_DELAY_MS = 500;
+    const VERIFY_RETRY_MAX = 5;
+    const VERIFY_RETRY_DELAY_MS = 300;
     const APPLY_DELAY_MS = 200;
-    const POST_CREATE_WAIT_MS = 500;
 
     const COMMON_RULE_CONTENT =
         '【絶対厳守ルール】\n' +
@@ -42,7 +41,7 @@
     let _retryTimer = null;
     let _lastProcessedChar = null;
     let _lastFailure = { char: null, at: 0 };
-    const _warnedMismatch = new Set();  // 不整合警告の一度きり制御
+    const _warnedMismatch = new Set();
 
     function getSTContext() {
         try {
@@ -73,6 +72,9 @@
         return window.$ || window.jQuery || null;
     }
 
+    // ============================================================
+    // 確実な getRequestHeaders（CSRF トークン付き）
+    // ============================================================
     async function getRequestHeadersSafe() {
         try {
             const mod = await import('../../../../../script.js');
@@ -118,6 +120,10 @@
         return null;
     }
 
+    // ============================================================
+    // ST 本体の getSettings を呼んで UI セレクトを更新
+    //   内部で saveWorldInfo を呼ばないよう、ctx.getSettings を優先。
+    // ============================================================
     async function refreshWorldSelects() {
         try {
             const ctx = getSTContext();
@@ -135,6 +141,30 @@
             }
         } catch (e) { /* ignore */ }
         return false;
+    }
+
+    // ============================================================
+    // サーバーからロアブックを取得（メモリ復元用）
+    // ============================================================
+    async function fetchWorldbookFromServer(worldName) {
+        if (!worldName) return null;
+        try {
+            const headers = await getRequestHeadersSafe();
+            const resp = await fetch('/api/worldinfo/get', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ name: worldName }),
+                cache: 'no-store',
+            });
+            if (!resp.ok) return null;
+            const data = await resp.json();
+            if (data?.entries && Object.keys(data.entries).length > 0) {
+                return data;
+            }
+            return null;
+        } catch (e) {
+            return null;
+        }
     }
 
     function _findOptionValue(selectEl, name) {
@@ -159,46 +189,24 @@
 
     async function _verifyWorldbookOnServer(worldName) {
         if (!worldName) return false;
-        try {
-            const headers = await getRequestHeadersSafe();
-            const resp = await fetch('/api/worldinfo/get', {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({ name: worldName }),
-                cache: 'no-store',
-            });
-            if (!resp.ok) return false;
-            const data = await resp.json();
-            return !!(data?.entries && Object.keys(data.entries).length > 0);
-        } catch (e) {
-            return false;
-        }
+        const data = await fetchWorldbookFromServer(worldName);
+        return !!data;
     }
 
-    // ============================================================
-    // ★ 候補の順序: char.name を最優先
-    //   設計方針「ロアブック名 = キャラ名」を強制する。
-    //   char.name のロアブックが存在すれば必ずそれが選ばれる。
-    //   これにより過去のバグで蓄積した extensions.world の汚染を
-    //   自己修復できる。
-    // ============================================================
     function _getCharacterWorldCandidates(char) {
         const candidates = [];
         if (!char) return candidates;
 
-        // 1. char.name（最優先）
         if (char.name && typeof char.name === 'string' && char.name.trim()) {
             candidates.push(char.name.trim());
         }
 
-        // 2. extensions.world（char.name と異なる場合のみ）
         const fromExt = char.data?.extensions?.world;
         if (fromExt && typeof fromExt === 'string' && fromExt.trim()) {
             const w = fromExt.trim();
             if (!candidates.includes(w)) candidates.push(w);
         }
 
-        // 3. data.world (legacy)
         const fromData = char.data?.world;
         if (fromData && typeof fromData === 'string' && fromData.trim()) {
             const w = fromData.trim();
@@ -246,57 +254,39 @@
     }
 
     // ============================================================
-    // ★ ロアブックの自動作成（isStale チェックなし）
-    //   捕捉済みの charAtStart に対する処理なので、
-    //   現在のキャラが切り替わっていても完遂させる。
-    //   → キャラを素早く切り替えても、直前キャラのロアブックが確実に作成される。
+    // ロアブックの自動作成
+    //   ST の saveWorldInfo に頼らず、自前で /api/worldinfo/edit を直接叩く。
+    //   保存は 3 リトライ、検証は 5 回。
     // ============================================================
     async function _createWorldbookIfMissing(worldName) {
         if (!worldName) return false;
 
         // 1. サーバー上の実在確認
-        if (await _verifyWorldbookOnServer(worldName)) {
+        const existing = await fetchWorldbookFromServer(worldName);
+        if (existing) {
+            // メモリにも反映（ST が reload していて消えている場合の保険）
+            const worldInfo = getWorldInfoInstance();
+            if (worldInfo && !worldInfo[worldName]) {
+                worldInfo[worldName] = { entries: existing.entries };
+                console.debug(LOG, `既存ロアブック "${worldName}" をメモリに復元`);
+            }
             return true;
         }
 
-        // 2. ST 本体の world_info インスタンス
+        // 2. world_info インスタンス取得
         const worldInfo = getWorldInfoInstance();
         if (!worldInfo) {
             console.warn(LOG, 'world_info インスタンスを取得できません');
             return false;
         }
 
-        // 3. 強制上書き
-        worldInfo[worldName] = {
-            entries: {
-                0: _createCommonRuleEntry(0),
-            },
-        };
+        // 3. メモリに書き込み
+        const newWorldData = { entries: { 0: _createCommonRuleEntry(0) } };
+        worldInfo[worldName] = newWorldData;
 
-        // 4. 保存: saveWorldInfo を試す
-        let saved = false;
-        try {
-            const ctx = getSTContext();
-            let saveFn = null;
-            if (ctx && typeof ctx.saveWorldInfo === 'function') {
-                saveFn = ctx.saveWorldInfo.bind(ctx);
-            } else {
-                const mod = await import('../../../../world-info.js');
-                if (typeof mod.saveWorldInfo === 'function') {
-                    saveFn = mod.saveWorldInfo;
-                }
-            }
-            if (saveFn) {
-                await saveFn(worldName, true, false);
-                saved = true;
-                console.log(`${LOG} 💾 saveWorldInfo("${worldName}") 実行`);
-            }
-        } catch (e) {
-            console.warn(LOG, 'saveWorldInfo 失敗:', e);
-        }
-
-        // 5. サーバー確認
-        if (!(await _verifyWorldbookOnServer(worldName))) {
+        // 4. サーバー保存（3 リトライ）
+        let saveSucceeded = false;
+        for (let attempt = 1; attempt <= SAVE_RETRY_MAX; attempt++) {
             try {
                 const headers = await getRequestHeadersSafe();
                 const resp = await fetch('/api/worldinfo/edit', {
@@ -304,43 +294,80 @@
                     headers,
                     body: JSON.stringify({
                         name: worldName,
-                        data: worldInfo[worldName],
+                        data: newWorldData,
                     }),
                 });
                 if (resp.ok) {
-                    saved = true;
-                    console.log(`${LOG} 💾 /api/worldinfo/edit 成功`);
-                } else {
-                    let errText = '';
-                    try { errText = await resp.text(); } catch (e) { /* ignore */ }
-                    console.warn(`${LOG} /api/worldinfo/edit HTTP ${resp.status} body="${errText.slice(0, 200)}"`);
+                    console.log(`${LOG} 💾 /api/worldinfo/edit 成功 (attempt ${attempt})`);
+                    saveSucceeded = true;
+                    break;
                 }
+                let errText = '';
+                try { errText = await resp.text(); } catch (e) { /* ignore */ }
+                console.warn(
+                    `${LOG} /api/worldinfo/edit HTTP ${resp.status} (attempt ${attempt}) ` +
+                    `body="${errText.slice(0, 200)}"`
+                );
             } catch (e) {
-                console.warn(LOG, '/api/worldinfo/edit 例外:', e);
+                console.warn(LOG, `/api/worldinfo/edit 例外 (attempt ${attempt}):`, e);
             }
-        } else {
-            saved = true;
+            if (attempt < SAVE_RETRY_MAX) await wait(SAVE_RETRY_DELAY_MS);
         }
 
-        if (!saved) return false;
+        if (!saveSucceeded) return false;
 
-        const verified = await _verifyWorldbookOnServer(worldName);
-        if (verified) {
-            console.log(`${LOG} 🆕 ロアブック "${worldName}" を自動作成しました`);
+        // 5. 検証（5 リトライ）
+        for (let i = 0; i < VERIFY_RETRY_MAX; i++) {
+            if (await _verifyWorldbookOnServer(worldName)) {
+                console.log(`${LOG} 🆕 ロアブック "${worldName}" を自動作成しました`);
+
+                // メモリに再設定（ST が reload していて消えている場合の保険）
+                const worldInfo2 = getWorldInfoInstance();
+                if (worldInfo2 && !worldInfo2[worldName]) {
+                    worldInfo2[worldName] = newWorldData;
+                    console.debug(LOG, `"${worldName}" をメモリに再設定`);
+                }
+                return true;
+            }
+            await wait(VERIFY_RETRY_DELAY_MS);
         }
-        return verified;
+
+        console.warn(`${LOG} ロアブック "${worldName}" のサーバー保存を確認できませんでした`);
+        return false;
     }
 
     // ============================================================
-    // ★ キャラクターへのバインド（isStale チェックなし）
-    //   charAtStart を明示的に指定するので、await 中にキャラが
-    //   切り替わっても正しいキャラに保存される。
+    // キャラクターへのバインド
+    //   ★ バインド前に world_info[name] の存在を必ず確認する。
+    //     存在しなければ ST の getCharacterLore がクラッシュするため。
     // ============================================================
     async function _bindCharacterToWorld(char, worldName, force = false) {
         if (!char || !worldName) return false;
 
         if (!force && char.data?.extensions?.world === worldName) {
             return true;
+        }
+
+        // ★ 最重要: world_info[name] のメモリ存在を確認
+        let worldInfo = getWorldInfoInstance();
+        if (worldInfo && !worldInfo[worldName]) {
+            // メモリに無い → サーバーから復元を試みる
+            console.log(`${LOG} ⚠️ world_info["${worldName}"] がメモリに無い → サーバーから復元を試行`);
+            const fromServer = await fetchWorldbookFromServer(worldName);
+            if (fromServer) {
+                worldInfo[worldName] = { entries: fromServer.entries };
+                console.log(`${LOG} ✅ world_info["${worldName}"] をメモリに復元`);
+            }
+        }
+
+        // 再チェック
+        worldInfo = getWorldInfoInstance();
+        if (!worldInfo || !worldInfo[worldName]) {
+            console.warn(
+                `${LOG} world_info["${worldName}"] がメモリにもサーバーにも存在しないため、` +
+                `バインドを中止します（TypeError 防止）`
+            );
+            return false;
         }
 
         // メモリは同期的に更新
@@ -378,6 +405,11 @@
         }
     }
 
+    // ============================================================
+    // UI 反映（try/catch で保護）
+    //   ST の onWorldEditorSelectChange が内部で saveWorldInfo(currentWorld) を
+    //   呼ぶが、これが 400 で失敗しても連鎖クラッシュしないようにする。
+    // ============================================================
     function _setEditTarget(name) {
         const $ = getJQuery();
         if (!$) return false;
@@ -385,11 +417,14 @@
         if (!ed) return false;
         const value = _findOptionValue(ed, name);
         if (value === null) return false;
+
+        // ★ change 発火前に、#world_info で既に選択中ならスキップ
+        //    （冗長な saveWorldInfo(currentWorld) 呼び出しを抑制）
         try {
             $(ed).val(value).trigger('change');
             return true;
         } catch (e) {
-            console.warn(LOG, '_setEditTarget error:', e);
+            console.warn(LOG, '_setEditTarget error (ST 内部の saveWorldInfo 失敗の可能性):', e);
             return false;
         }
     }
@@ -427,7 +462,6 @@
             return;
         }
 
-        // ★ 不整合の警告（1 回だけ）
         const extW = charAtStart.data?.extensions?.world;
         if (extW && extW !== charNameAtStart) {
             const key = `${charNameAtStart}::${extW}`;
@@ -435,7 +469,7 @@
                 _warnedMismatch.add(key);
                 console.warn(
                     `${LOG} ⚠️ char="${charNameAtStart}" に異なる world="${extW}" が設定されています。` +
-                    `意図的でない場合は要確認（UI 選択後に自動同期されます）。`
+                    `UI 選択後に自動同期されます。`
                 );
             }
         }
@@ -444,7 +478,7 @@
         console.log(`${LOG} 開始: char="${charNameAtStart}", reason=${reason}, 候補=[${candidates.join(', ')}]`);
 
         try {
-            // ── 1. 既存ロアブックを探す（DOM セレクト） ──
+            // ── 1. 既存ロアブックを探す ──
             let targetName = null;
             for (let i = 0; i < FIND_RETRY_MAX; i++) {
                 if (isStale()) {
@@ -461,46 +495,53 @@
                 await wait(FIND_RETRY_DELAY_MS);
             }
 
-            // ── 2. 見つからない場合は自動作成 + バインド ──
-            //   ★ isStale() に関わらず完遂する（charAtStart に対する処理）
+            // ── 2. 無ければ自動作成 + バインド ──
             if (!targetName) {
-                const worldToCreate = charNameAtStart;  // 設計方針: ロアブック名 = キャラ名
+                const worldToCreate = charNameAtStart;
                 console.log(`${LOG} 🆕 ロアブック "${worldToCreate}" が存在しないため自動作成します`);
 
-                const ok = await _createWorldbookIfMissing(worldToCreate);
-                if (!ok) {
+                const created = await _createWorldbookIfMissing(worldToCreate);
+                if (!created) {
                     console.warn(`${LOG} ロアブック "${worldToCreate}" の作成に失敗しました`);
                     _recordFailure(charNameAtStart);
                     return;
                 }
 
-                await _bindCharacterToWorld(charAtStart, worldToCreate);
+                // ★ バインド（world_info[name] が無ければ内部で中止される）
+                const bound = await _bindCharacterToWorld(charAtStart, worldToCreate);
+                if (!bound) {
+                    console.warn(`${LOG} ロアブック "${worldToCreate}" へのバインドに失敗しました`);
+                    _recordFailure(charNameAtStart);
+                    return;
+                }
 
-                // 作成後、DOM 更新を待つ
+                // ★ getSettings で UI 更新を強制
                 await refreshWorldSelects();
-                await wait(POST_CREATE_WAIT_MS);
+                await wait(300);
 
+                // DOM セレクト反映確認
                 for (let i = 0; i < FIND_RETRY_MAX; i++) {
                     if (_hasWorldBook(worldToCreate)) {
                         targetName = worldToCreate;
                         break;
                     }
-                    if (i === 1) {
-                        await refreshWorldSelects();
-                    }
+                    if (i === 1) await refreshWorldSelects();
                     await wait(FIND_RETRY_DELAY_MS);
                 }
 
                 if (!targetName) {
-                    console.warn(`${LOG} ロアブック "${worldToCreate}" はサーバーに保存されましたが、UI への反映を確認できませんでした`);
+                    console.warn(
+                        `${LOG} ロアブック "${worldToCreate}" はサーバーに保存されましたが、` +
+                        `UI への反映を確認できませんでした`
+                    );
                     _recordFailure(charNameAtStart);
                     return;
                 }
             }
 
-            // ── 3. UI 選択（ここで stale チェック） ──
+            // ── 3. UI 選択 ──
             if (isStale()) {
-                console.log(`${LOG} キャラ切替検出のため UI 反映スキップ (char="${charNameAtStart}", 選択予定="${targetName}")`);
+                console.log(`${LOG} キャラ切替検出のため UI 反映スキップ (選択予定="${targetName}")`);
                 return;
             }
 
@@ -518,10 +559,12 @@
             if (isStale()) return;
 
             if (editOk || activeOk) {
-                console.log(`${LOG} 🔖 ロアブック "${targetName}" を自動選択 (編集=${editOk}, アクティブ=${activeOk}, reason=${reason}, force=${!!options.force})`);
+                console.log(
+                    `${LOG} 🔖 ロアブック "${targetName}" を自動選択 ` +
+                    `(編集=${editOk}, アクティブ=${activeOk}, reason=${reason}, force=${!!options.force})`
+                );
 
-                // ★ 自己修復: targetName == char.name の場合、
-                //   extensions.world の汚染を強制同期する
+                // ★ 自己修復: targetName == char.name なら extensions.world を同期
                 if (targetName === charNameAtStart) {
                     const currentExt = charAtStart.data?.extensions?.world;
                     if (currentExt !== targetName) {
@@ -637,11 +680,12 @@
         getCharacterWorldCandidates: () => _getCharacterWorldCandidates(getCurrentChar()),
         createWorldbook: (name) => _createWorldbookIfMissing(name || getCurrentCharName()),
         verifyWorldbookOnServer: (name) => _verifyWorldbookOnServer(name || getCurrentCharName()),
+        fetchWorldbook: (name) => fetchWorldbookFromServer(name || getCurrentCharName()),
         bindCharacter: async (worldName, force) => {
             const char = getCurrentChar();
             return _bindCharacterToWorld(char, worldName || getCurrentCharName(), !!force);
         },
-        // ★ 累積した extensions.world の汚染を全キャラ一括修復
+        // ★ 汚染された extensions.world を全キャラ一括修復
         fixCorruptedBindings: async () => {
             const ctx = getSTContext();
             const chars = ctx?.characters || [];
@@ -649,7 +693,6 @@
             for (const char of chars) {
                 const extW = char.data?.extensions?.world;
                 if (extW && extW !== char.name) {
-                    // char.name のロアブックが存在する場合のみ修復
                     const hasNameWorld = await _verifyWorldbookOnServer(char.name);
                     if (hasNameWorld) {
                         const ok = await _bindCharacterToWorld(char, char.name, true);
@@ -672,6 +715,30 @@
             }
             console.log(`${LOG} 🧹 汚染修復結果:`, results);
             return results;
+        },
+        // ★ 壊れた world_info[name] を一括チェック（TypeError の原因特定用）
+        diagnoseCorruption: () => {
+            const ctx = getSTContext();
+            const worldInfo = ctx?.world_info || window.world_info;
+            const chars = ctx?.characters || [];
+            const issues = [];
+
+            for (const char of chars) {
+                const extW = char.data?.extensions?.world;
+                if (!extW) continue;
+                if (!worldInfo || !worldInfo[extW]) {
+                    issues.push({
+                        char: char.name,
+                        world: extW,
+                        issue: 'world_info に存在しない',
+                    });
+                }
+            }
+
+            return {
+                worldInfoKeys: worldInfo ? Object.keys(worldInfo) : [],
+                issues,
+            };
         },
         diagnose: async () => {
             const ctx = getSTContext();
