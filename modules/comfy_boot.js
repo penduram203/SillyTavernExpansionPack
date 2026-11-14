@@ -114,6 +114,292 @@
     }
 })();
 
+// ============================================================
+// ★ ComfyUI /prompt 傍受 + WebSocket 進捗取得（アプローチ1）
+//
+//    ST SD 拡張は ComfyUI モード時、以下の流れで動作する:
+//      1. POST /api/sd/comfy/prompt
+//           body: {prompt: {...}, client_id: "<ST生成UUID>"}
+//           → ST サーバーが ComfyUI /prompt にプロキシ
+//      2. ST は /history/{prompt_id} をポーリングして完了を待つ
+//    ST 自身は WebSocket を開かないが、client_id は送っている。
+//
+//    そこでこのモジュールは:
+//      1. /prompt の POST ボディから client_id を抽出
+//      2. レスポンスから prompt_id を抽出
+//      3. client_id で ComfyUI /ws に直接接続
+//      4. progress イベントを受信して comfyui-progress として転送
+//
+//    接続に失敗した場合（CORS / mixed content / localtunnel）は
+//    警告を出すだけで、既存のスピナー表示（Option A）に影響しない。
+// ============================================================
+(function installComfyPromptWatcher() {
+    if (window.__gicComfyPromptWatcherInstalled) return;
+    window.__gicComfyPromptWatcherInstalled = true;
+
+    // -- State --
+    let _ws = null;
+    let _wsClientId = null;
+    let _wsUrl = null;
+    let _wsConnecting = false;
+    let _wsTimeoutTimer = null;
+    let _currentPromptId = null;
+    let _capturedClientId = null;
+
+    // -- Helpers --
+    function getComfyBaseUrl() {
+        try {
+            const ctx = window.SillyTavern?.getContext?.();
+            const sd = ctx?.extensionSettings?.sd;
+            const url = sd?.comfy_url || sd?.comfyui_url || sd?.url || sd?.server_url || '';
+            if (url && /^https?:\/\//i.test(url)) {
+                return url.trim().replace(/\/+$/, '');
+            }
+        } catch (e) { /* ignore */ }
+        return null;
+    }
+
+    function buildWsUrl(clientId) {
+        const baseUrl = getComfyBaseUrl();
+        if (baseUrl) {
+            // https://host/ → wss://host/ws?clientId=...  (http → ws も同様)
+            return baseUrl.replace(/^http/i, 'ws')
+                + '/ws?clientId=' + encodeURIComponent(clientId);
+        }
+        // ComfyUI URL 未設定の場合はローカル前提
+        const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        const host = window.location.hostname || '127.0.0.1';
+        return `${proto}://${host}:8188/ws?clientId=${encodeURIComponent(clientId)}`;
+    }
+
+    function generateClientId() {
+        try {
+            if (crypto.randomUUID) return crypto.randomUUID().replace(/-/g, '');
+        } catch (e) { /* ignore */ }
+        return Array.from({ length: 32 }, () =>
+            Math.floor(Math.random() * 16).toString(16)
+        ).join('');
+    }
+
+    function dispatch(type, detail) {
+        try {
+            window.dispatchEvent(new CustomEvent(type, { detail }));
+        } catch (e) { /* ignore */ }
+    }
+
+    function closeWs(reason) {
+        if (_wsTimeoutTimer) {
+            clearTimeout(_wsTimeoutTimer);
+            _wsTimeoutTimer = null;
+        }
+        if (_ws) {
+            try {
+                console.log(`[GIC-Boot] ComfyUI WS を閉じます (${reason})`);
+                _ws.close(1000, reason);
+            } catch (e) { /* ignore */ }
+            _ws = null;
+        }
+        _wsConnecting = false;
+    }
+
+    function resetWsTimeout() {
+        if (_wsTimeoutTimer) clearTimeout(_wsTimeoutTimer);
+        _wsTimeoutTimer = setTimeout(() => {
+            console.warn('[GIC-Boot] ComfyUI WS タイムアウト (120秒) → 閉じます');
+            closeWs('timeout');
+            _currentPromptId = null;
+        }, 120000);
+    }
+
+    function handleWsMessage(ev) {
+        let msg;
+        try { msg = JSON.parse(ev.data); } catch (e) { return; }
+        if (!msg || typeof msg !== 'object') return;
+
+        const t = msg.type;
+        const d = msg.data || {};
+
+        // ★ 現在監視中の prompt_id と異なるイベントは無視
+        //   （status / queue_remaining は全体状態なので通す）
+        if (_currentPromptId && d.prompt_id && d.prompt_id !== _currentPromptId) {
+            if (t !== 'status' && t !== 'queue_remaining') return;
+        }
+
+        switch (t) {
+            case 'progress': {
+                const value = Number(d.value);
+                const max = Number(d.max);
+                if (Number.isFinite(value) && Number.isFinite(max) && max > 0) {
+                    console.log(`[GIC-Boot] 📊 progress: ${value}/${max} (prompt=${d.prompt_id})`);
+                    dispatch('comfyui-progress', { value, max, promptId: d.prompt_id });
+                }
+                break;
+            }
+            case 'execution_start':
+                console.log(`[GIC-Boot] 🚀 execution_start: ${d.prompt_id}`);
+                dispatch('comfyui-progress-start', { promptId: d.prompt_id });
+                break;
+            case 'execution_success':
+            case 'execution_error':
+            case 'execution_interrupted':
+                console.log(`[GIC-Boot] 🏁 ${t}: ${d.prompt_id}`);
+                dispatch('comfyui-progress-end', { promptId: d.prompt_id, reason: t });
+                _currentPromptId = null;
+                break;
+            case 'executing':
+                if (d.node === null || d.node === undefined) {
+                    console.log(`[GIC-Boot] ✅ executing/node=null: ${d.prompt_id}`);
+                    dispatch('comfyui-progress-end', { promptId: d.prompt_id, reason: 'executing-null' });
+                    _currentPromptId = null;
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    function openWs(clientId) {
+        if (_ws && _ws.readyState === WebSocket.OPEN) {
+            console.log(`[GIC-Boot] 既存 WS を再利用 (clientId=${_wsClientId})`);
+            resetWsTimeout();
+            return;
+        }
+        if (_wsConnecting) {
+            console.log('[GIC-Boot] WS 接続中...');
+            return;
+        }
+
+        _wsClientId = clientId || generateClientId();
+        _wsUrl = buildWsUrl(_wsClientId);
+        console.log(`[GIC-Boot] ComfyUI WS に接続: ${_wsUrl}`);
+
+        _wsConnecting = true;
+        try {
+            _ws = new WebSocket(_wsUrl);
+
+            _ws.addEventListener('open', () => {
+                _wsConnecting = false;
+                console.log(`[GIC-Boot] ✅ ComfyUI WS 接続成功 (clientId=${_wsClientId})`);
+                resetWsTimeout();
+            });
+
+            _ws.addEventListener('message', handleWsMessage);
+
+            _ws.addEventListener('error', () => {
+                _wsConnecting = false;
+                console.warn(
+                    '[GIC-Boot] ❌ ComfyUI WS エラー（CORS / mixed content / ' +
+                    'localtunnel 制限の可能性）。スピナー表示で継続します。'
+                );
+            });
+
+            _ws.addEventListener('close', (e) => {
+                console.log(`[GIC-Boot] ComfyUI WS 切断 (code=${e.code}, reason="${e.reason || ''}")`);
+                _ws = null;
+                _wsConnecting = false;
+                if (_wsTimeoutTimer) {
+                    clearTimeout(_wsTimeoutTimer);
+                    _wsTimeoutTimer = null;
+                }
+            });
+
+            resetWsTimeout();
+        } catch (e) {
+            _wsConnecting = false;
+            console.warn('[GIC-Boot] ComfyUI WS 接続例外:', e);
+        }
+    }
+
+    // -- fetch インターセプタ --
+    const origFetch = window.fetch;
+    if (origFetch && !origFetch.__gicPromptWatcherPatched) {
+        const wrapped = function(input, init) {
+            const url = typeof input === 'string'
+                ? input
+                : (input && typeof input.url === 'string' ? input.url : '');
+            const method = (init?.method || 'GET').toUpperCase();
+
+            const isPromptCall =
+                method === 'POST' && (
+                    url.includes('/api/sd/comfy/prompt') ||
+                    /\/prompt(\?|$)/.test(url)
+                );
+
+            if (!isPromptCall) {
+                return origFetch.apply(this, arguments);
+            }
+
+            // ★ リクエストボディから client_id を抽出
+            //   ST SD 拡張は {prompt, client_id} を送っている。
+            //   client_id が無い場合は独自生成でフォールバック。
+            try {
+                if (init && typeof init.body === 'string' &&
+                    init.body.length > 0 && init.body[0] === '{') {
+                    const bodyObj = JSON.parse(init.body);
+                    const cid = bodyObj?.client_id;
+                    if (cid && typeof cid === 'string' && cid.length >= 8) {
+                        _capturedClientId = cid;
+                        console.log(`[GIC-Boot] 🔑 client_id を抽出: ${cid}`);
+                    }
+                }
+            } catch (e) { /* ignore */ }
+
+            console.log(`[GIC-Boot] 🔍 /prompt POST を検出: ${url}`);
+
+            return origFetch.apply(this, arguments).then(async (resp) => {
+                try {
+                    if (resp.ok) {
+                        const cloned = resp.clone();
+                        const data = await cloned.json();
+                        const promptId = data?.prompt_id;
+                        if (promptId && typeof promptId === 'string') {
+                            console.log(`[GIC-Boot] ✅ prompt_id 取得: ${promptId}`);
+                            _currentPromptId = promptId;
+                            openWs(_capturedClientId || generateClientId());
+                        } else {
+                            console.log('[GIC-Boot] ⚠️ prompt_id を取得できませんでした:', data);
+                        }
+                    }
+                } catch (e) {
+                    console.debug('[GIC-Boot] /prompt レスポンス解析スキップ:', e);
+                }
+                return resp;
+            });
+        };
+        wrapped.__gicPromptWatcherPatched = true;
+        window.fetch = wrapped;
+    }
+
+    // -- 完了通知で WS を掃除（少し待って残イベントを受ける） --
+    window.addEventListener('comfyui-progress-end', () => {
+        setTimeout(() => {
+            if (!_currentPromptId) closeWs('progress-end');
+        }, 5000);
+    });
+
+    // -- デバッグ用 API --
+    window.GicComfyWs = {
+        status: () => ({
+            connected: !!_ws && _ws.readyState === WebSocket.OPEN,
+            connecting: _wsConnecting,
+            url: _wsUrl,
+            clientId: _wsClientId,
+            currentPromptId: _currentPromptId,
+            lastCapturedClientId: _capturedClientId,
+        }),
+        testConnect: () => {
+            const id = generateClientId();
+            console.log(`[GIC-Boot] テスト接続 (clientId=${id})`);
+            openWs(id);
+        },
+        close: (r) => closeWs(r || 'manual'),
+        buildWsUrl,
+        getComfyBaseUrl,
+    };
+
+    console.log('[GIC-Boot] /prompt 監視 + WebSocket 進捗取得を有効化');
+})();
+
 (function installComfyBoot() {
     if (window.__gicComfyBootInstalled) return;
     window.__gicComfyBootInstalled = true;
