@@ -8,10 +8,8 @@
 //   自動作成されるロアブックには「00_共通ルール」エントリが1つだけ
 //   Constant / at Depth System / depth=1 で事前作成される。
 //
-// ★ サーバー上の実在確認を一次情報源とする。
-//   メモリ上の world_info に残骸があっても、サーバーに無ければ強制上書きする。
-//
-// ★ 新規キャラ作成直後（ロアブック未存在）でも同じ処理が走る。
+// ★ ST 本体と同じ world_info インスタンス / saveWorldInfo / getRequestHeaders
+//   を使用する。動的 import による別インスタンス問題を回避する。
 
 (function () {
     'use strict';
@@ -68,32 +66,91 @@
         return window.$ || window.jQuery || null;
     }
 
-    function getCsrfToken() {
+    // ============================================================
+    // ★ ST 本体と同じ world_info インスタンスを取得
+    //   優先順:
+    //     1. ctx.world_info (getContext 経由)
+    //     2. window.world_info
+    //     3. 動的 import の mod.world_info (最終手段)
+    // ============================================================
+    function getWorldInfoInstance() {
+        // 1. ctx.world_info
         try {
-            return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
-        } catch (e) { return ''; }
+            const ctx = getSTContext();
+            if (ctx && ctx.world_info && typeof ctx.world_info === 'object') {
+                return ctx.world_info;
+            }
+        } catch (e) { /* ignore */ }
+
+        // 2. window.world_info
+        if (window.world_info && typeof window.world_info === 'object') {
+            return window.world_info;
+        }
+
+        return null;
     }
 
-    function getHeaders() {
+    // ============================================================
+    // ★ ST 本体と同じ saveWorldInfo 関数を取得
+    // ============================================================
+    async function getSaveWorldInfoFn() {
+        try {
+            const ctx = getSTContext();
+            if (ctx && typeof ctx.saveWorldInfo === 'function') {
+                return ctx.saveWorldInfo;
+            }
+        } catch (e) { /* ignore */ }
+
+        try {
+            const mod = await import('../../../../world-info.js');
+            if (typeof mod.saveWorldInfo === 'function') {
+                return mod.saveWorldInfo;
+            }
+        } catch (e) {
+            console.warn(LOG, 'saveWorldInfo の動的 import 失敗:', e);
+        }
+        return null;
+    }
+
+    // ============================================================
+    // ★ 確実な getRequestHeaders（CSRF トークン付き）
+    //   優先順:
+    //     1. script.js の getRequestHeaders（動的 import）
+    //     2. ctx.getRequestHeaders
+    //     3. meta[name="csrf-token"] から自前で構築
+    // ============================================================
+    async function getRequestHeadersSafe() {
+        // 1. script.js の getRequestHeaders
+        try {
+            const mod = await import('../../../../../script.js');
+            if (typeof mod.getRequestHeaders === 'function') {
+                const h = mod.getRequestHeaders();
+                if (h && typeof h === 'object') return h;
+            }
+        } catch (e) { /* ignore */ }
+
+        // 2. ctx.getRequestHeaders
         try {
             const ctx = getSTContext();
             if (ctx && typeof ctx.getRequestHeaders === 'function') {
-                return ctx.getRequestHeaders();
+                const h = ctx.getRequestHeaders();
+                if (h && typeof h === 'object') return h;
             }
         } catch (e) { /* ignore */ }
-        return {
-            'Content-Type': 'application/json',
-            'X-CSRF-Token': getCsrfToken(),
-        };
-    }
 
-    async function getWorldInfoModule() {
+        // 3. フォールバック: meta タグから構築
+        const headers = { 'Content-Type': 'application/json' };
         try {
-            return await import('../../../../world-info.js');
-        } catch (e) {
-            console.warn(LOG, 'world-info.js import 失敗:', e);
-            return null;
-        }
+            const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+            const csrfInput = document.querySelector('#csrf_token');
+            const csrf =
+                csrfMeta?.getAttribute('content') ||
+                csrfInput?.getAttribute('data-token') ||
+                csrfInput?.value ||
+                '';
+            if (csrf) headers['X-CSRF-Token'] = csrf;
+        } catch (e) { /* ignore */ }
+        return headers;
     }
 
     // ============================================================
@@ -121,14 +178,14 @@
 
     // ============================================================
     // ★ サーバー上の実在確認（一次情報源）
-    //   /api/worldinfo/get で entries が1件以上あれば true
     // ============================================================
     async function _verifyWorldbookOnServer(worldName) {
         if (!worldName) return false;
         try {
+            const headers = await getRequestHeadersSafe();
             const resp = await fetch('/api/worldinfo/get', {
                 method: 'POST',
-                headers: getHeaders(),
+                headers,
                 body: JSON.stringify({ name: worldName }),
                 cache: 'no-store',
             });
@@ -142,9 +199,6 @@
 
     // ============================================================
     // キャラに関連付けられたロアブック名の候補
-    //   1. char.data.extensions.world  (ST の正式な関連付け)
-    //   2. char.data.world             (旧形式)
-    //   3. char.name                   (キャラ名と同名のロアブック)
     // ============================================================
     function _getCharacterWorldCandidates() {
         const candidates = [];
@@ -175,10 +229,6 @@
 
     // ============================================================
     // 自動作成するエントリのテンプレート
-    //   - constant: true (WI Entry Status: Constant)
-    //   - position: 4 (at Depth)
-    //   - depth: 1
-    //   - role: 0 (System)
     // ============================================================
     function _createCommonRuleEntry(uid) {
         return {
@@ -218,10 +268,7 @@
     }
 
     // ============================================================
-    // ★ ロアブックの自動作成（サーバー実在確認ベース）
-    //   1) サーバー上に存在 → true を返す（作成スキップ）
-    //   2) サーバー上に無い → メモリを強制上書きして保存
-    //   3) 保存後サーバー再確認 → 成否を返す
+    // ★ ロアブックの自動作成（ST 本体のインスタンスを使用）
     // ============================================================
     async function _createWorldbookIfMissing(worldName) {
         if (!worldName) return false;
@@ -232,60 +279,65 @@
             return true;
         }
 
-        // ── 2. world-info モジュール取得 ──
-        const mod = await getWorldInfoModule();
-        if (!mod) {
-            console.warn(LOG, 'world-info.js が読み込めないため自動作成をスキップ');
+        // ── 2. ST 本体の world_info インスタンスを取得 ──
+        const worldInfo = getWorldInfoInstance();
+        if (!worldInfo) {
+            console.warn(LOG, 'world_info インスタンスを取得できません');
             return false;
         }
 
-        // ── 3. メモリを強制上書き（残骸 stub を除去） ──
-        if (!mod.world_info) mod.world_info = {};
-        mod.world_info[worldName] = {
+        // ── 3. 強制上書き（残骸 stub を除去） ──
+        worldInfo[worldName] = {
             entries: {
                 0: _createCommonRuleEntry(0),
             },
         };
 
-        // window.world_info と mod.world_info が別オブジェクトの場合に同期
-        try {
-            if (window.world_info && window.world_info !== mod.world_info) {
-                window.world_info[worldName] = mod.world_info[worldName];
-            }
-        } catch (e) { /* ignore */ }
-
         // ── 4. 保存 ──
         let saved = false;
-        if (typeof mod.saveWorldInfo === 'function') {
+
+        // ① saveWorldInfo を試す
+        const saveWorldInfo = await getSaveWorldInfoFn();
+        if (saveWorldInfo) {
             try {
-                await mod.saveWorldInfo(worldName, true);
+                await saveWorldInfo(worldName, true, false);
+                // 例外が出なければ成功とみなす（実際の確認は後で）
                 saved = true;
-                console.log(`${LOG} 💾 saveWorldInfo("${worldName}", true) 完了`);
+                console.log(`${LOG} 💾 saveWorldInfo("${worldName}", true, false) 実行`);
             } catch (e) {
                 console.warn(LOG, 'saveWorldInfo 失敗:', e);
             }
         }
 
-        if (!saved) {
-            // フォールバック: /api/worldinfo/edit 直叩き
+        // ② サーバー確認（①が成功しても実際には保存されていない可能性）
+        if (!(await _verifyWorldbookOnServer(worldName))) {
+            console.log(`${LOG} saveWorldInfo で保存されなかったため、直接 API を叩きます`);
             try {
+                const headers = await getRequestHeadersSafe();
                 const resp = await fetch('/api/worldinfo/edit', {
                     method: 'POST',
-                    headers: getHeaders(),
+                    headers,
                     body: JSON.stringify({
                         name: worldName,
-                        data: mod.world_info[worldName],
+                        data: worldInfo[worldName],
                     }),
                 });
                 if (resp.ok) {
                     saved = true;
-                    console.log(`${LOG} 💾 /api/worldinfo/edit 完了`);
+                    console.log(`${LOG} 💾 /api/worldinfo/edit 成功`);
                 } else {
-                    console.warn(`${LOG} /api/worldinfo/edit HTTP ${resp.status}`);
+                    let errText = '';
+                    try { errText = await resp.text(); } catch (e) { /* ignore */ }
+                    console.warn(
+                        `${LOG} /api/worldinfo/edit HTTP ${resp.status} ` +
+                        `body="${errText.slice(0, 200)}"`
+                    );
                 }
             } catch (e) {
                 console.warn(LOG, '/api/worldinfo/edit 例外:', e);
             }
+        } else {
+            saved = true;
         }
 
         if (!saved) return false;
@@ -306,7 +358,7 @@
     }
 
     // ============================================================
-    // キャラクターへのバインド（char.data.extensions.world を設定）
+    // キャラクターへのバインド
     // ============================================================
     async function _bindCharacterToWorld(char, worldName) {
         if (!char || !worldName) return false;
@@ -315,25 +367,24 @@
             if (!char.data.extensions) char.data.extensions = {};
 
             if (char.data.extensions.world === worldName) {
-                return true;  // 既にバインド済み
+                return true;
             }
 
             char.data.extensions.world = worldName;
 
-            // CharStore 経由で保存（推奨）
             if (window.CharStore?.saveCharacterExtension) {
                 window.CharStore.saveCharacterExtension('world', worldName, { immediate: true });
                 console.log(`${LOG} 🔗 キャラ "${char.name}" をロアブック "${worldName}" にバインド`);
                 return true;
             }
 
-            // フォールバック: 直接 merge-attributes
             const avatar = char.avatar && char.avatar !== 'none'
                 ? char.avatar
                 : `${char.name}.png`;
+            const headers = await getRequestHeadersSafe();
             const resp = await fetch('/api/characters/merge-attributes', {
                 method: 'POST',
-                headers: getHeaders(),
+                headers,
                 body: JSON.stringify({
                     avatar: avatar,
                     avatar_url: avatar,
@@ -362,10 +413,7 @@
         const ed = document.querySelector('#world_editor_select');
         if (!ed) return false;
         const value = _findOptionValue(ed, name);
-        if (value === null) {
-            console.debug(LOG, `#world_editor_select に "${name}" のオプションなし`);
-            return false;
-        }
+        if (value === null) return false;
         try {
             $(ed).val(value).trigger('change');
             return true;
@@ -384,10 +432,7 @@
         const wi = document.querySelector('#world_info');
         if (!wi) return false;
         const value = _findOptionValue(wi, name);
-        if (value === null) {
-            console.debug(LOG, `#world_info に "${name}" のオプションなし`);
-            return false;
-        }
+        if (value === null) return false;
         try {
             if (wi.hasAttribute('multiple')) {
                 $(wi).val([value]).trigger('change');
@@ -418,11 +463,9 @@
 
             const char = getCurrentChar();
             const sameChar = (_lastProcessedChar === charName);
-
-            // ── 1. 候補名を取得 ──
             const candidates = _getCharacterWorldCandidates();
 
-            // ── 2. 存在するロアブックを探す（DOM セレクト） ──
+            // ── 1. 既存ロアブックを探す ──
             let targetName = null;
             for (let i = 0; i < FIND_RETRY_MAX; i++) {
                 for (const name of candidates) {
@@ -435,7 +478,7 @@
                 await wait(FIND_RETRY_DELAY_MS);
             }
 
-            // ── 3. 見つからない場合は自動作成 + バインド ──
+            // ── 2. 見つからない場合は自動作成 + バインド ──
             if (!targetName) {
                 const worldToCreate = candidates[0] || charName;
                 console.log(
@@ -450,10 +493,9 @@
                     return;
                 }
 
-                // キャラクターをロアブックにバインド
                 await _bindCharacterToWorld(char, worldToCreate);
 
-                // ST のワールドリストが再読込されるのを待つ
+                // ST のワールドリスト再読込を待つ
                 await wait(POST_CREATE_WAIT_MS);
 
                 // DOM セレクトへの反映を確認
@@ -475,13 +517,13 @@
                 }
             }
 
-            // ── 4. 同一キャラで既に設定済みならスキップ ──
+            // ── 3. 同一キャラで既に設定済みならスキップ ──
             if (!force && sameChar && reason !== 'chat-changed') {
-                console.debug(LOG, `同一キャラ "${charName}" のためスキップ（force=true で再適用可能）`);
+                console.debug(LOG, `同一キャラ "${charName}" のためスキップ`);
                 return;
             }
 
-            // ── 5. 編集対象 → アクティブ の順で設定 ──
+            // ── 4. 編集対象 → アクティブ の順で設定 ──
             const editOk = _setEditTarget(targetName);
             await wait(APPLY_DELAY_MS);
             const activeOk = _setActive(targetName);
@@ -577,6 +619,24 @@
         bindCharacter: async (worldName) => {
             const char = getCurrentChar();
             return _bindCharacterToWorld(char, worldName || getCurrentCharName());
+        },
+        // ★ デバッグ: ST 本体の world_info / saveWorldInfo の取得状態を確認
+        diagnose: async () => {
+            const ctx = getSTContext();
+            const worldInfoCtx = ctx?.world_info;
+            const worldInfoWin = window.world_info;
+            const sameInstance = worldInfoCtx === worldInfoWin;
+            const saveFn = await getSaveWorldInfoFn();
+            const headers = await getRequestHeadersSafe();
+            return {
+                hasCtxWorldInfo: !!worldInfoCtx,
+                hasWinWorldInfo: !!worldInfoWin,
+                sameInstance,
+                worldInfoKeys: worldInfoCtx ? Object.keys(worldInfoCtx) : [],
+                hasSaveWorldInfo: !!saveFn,
+                hasCsrfToken: !!(headers['X-CSRF-Token']),
+                headers,
+            };
         },
         resetProcessed: () => { _lastProcessedChar = null; },
     };
