@@ -16,7 +16,13 @@
     const CONTAINER_ID = 'status-indicator-container';
     const STYLE_ID = 'status-indicator-style';
     const MAX_SHOW_MS = 180000; // 3分でタイムアウト（暴走防止）
-
+    // ============================================================
+    // ★ 旧「事前設定モード」用のスタブ
+    //   背景生成モードは合体モード固定化に伴い廃止されたが、
+    //   既存コードに参照が残っているため no-op として定義する。
+    // ============================================================
+    function isPreSetupMode() { return false; }
+    function showPreSetupModeUnderLLM() { /* no-op */ }
     // ============================================================
     // ★ 画像生成進捗リング用の定数
     //    SVG 円周 = 2πr。dasharray / dashoffset で進捗を表現する。
