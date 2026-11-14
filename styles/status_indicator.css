@@ -6,12 +6,12 @@
  * ============================================================ */
 #status-indicator-container {
     position: fixed;
-    bottom: 130px;           /* ★ ボタン群の真上（調整可能） */
-    left: 100px;             /* ★ 左から 100px */
+    bottom: 130px;           /* ★ JS が上書き（フォールバック） */
+    left: 100px;             /* ★ JS が上書き（フォールバック） */
     z-index: 20000;
-    pointer-events: none;    /* コンテナ自体は透過。子要素で個別に有効化 */
+    pointer-events: none;
     display: flex;
-    flex-direction: column;  /* ★ 縦並び */
+    flex-direction: column;
     gap: 6px;
     align-items: flex-start;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
@@ -22,9 +22,9 @@
     align-items: center;
     background-color: rgba(0, 0, 0, 0.65);
     color: #ffffff;
-    padding: 6px 14px;
+    padding: 4px 10px;         /* ★ 絵文字の左端を詰める（14 → 10） */
     border-radius: 6px;
-    font-size: 18px;          /* ★ 絵文字が視認できるサイズ */
+    font-size: 18px;
     font-weight: bold;
     border: 2px solid #64b5f6;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.65);
@@ -32,8 +32,8 @@
     white-space: nowrap;
     line-height: 1.2;
     letter-spacing: 0.3px;
-    pointer-events: auto;     /* ★ ホバー検出を有効化 */
-    cursor: help;             /* ★ ホバー可能であることを示す */
+    pointer-events: auto;
+    cursor: help;
     user-select: none;
     -webkit-user-select: none;
 }
