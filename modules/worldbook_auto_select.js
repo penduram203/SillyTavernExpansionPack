@@ -3,6 +3,12 @@
 // ロアブックが存在しない場合はキャラ名と同じロアブックを自動作成し、
 // キャラクターとバインド（char.data.extensions.world）する。
 //
+// ★ v8.2:
+//   ロアブック編集画面で「エントリータイトル/メモ」(textarea[name="comment"])を
+//   編集すると、同じ world_entry 内の「カンマ区切りリスト」(textarea[name="key"])
+//   に同じ内容を自動コピーする機能を追加。
+//   設定 newEntryDefaults と同様に commentToKeySync で ON/OFF 可能（既定 ON）。
+//
 // ★ v8.1:
 //   ユーザーがロアブック編集画面で「New Entry」ボタンから新規エントリを作成した時、
 //   WI Entry Status=Normal / position=at Depth System(@D ⚙️) / depth=0 を
@@ -31,7 +37,7 @@
 //     自己修復が全て失敗した場合のみ、設定 lastResortReload=true の時に限り
 //     リロードする（既定は false）。
 
-console.log('[WBAutoSelect] 📦 v8.1 module loading (soft-refresh + new-entry defaults)...');
+console.log('[WBAutoSelect] 📦 v8.2 module loading (soft-refresh + new-entry defaults + comment→key sync)...');
 
 (function () {
     'use strict';
@@ -80,6 +86,7 @@ console.log('[WBAutoSelect] 📦 v8.1 module loading (soft-refresh + new-entry d
     const DEFAULT_SETTINGS = {
         lastResortReload: false,
         newEntryDefaults: true,
+        commentToKeySync: true,
     };
 
     let settings = { ...DEFAULT_SETTINGS };
@@ -596,13 +603,8 @@ console.log('[WBAutoSelect] 📦 v8.1 module loading (soft-refresh + new-entry d
     // ============================================================
     // ★ v8.1: ユーザーが新規エントリを作成した時の初期値設定
     //   WI Entry Status = Normal / position = at Depth System / depth = 0
-    //
-    //   検出: 「New Entry」ボタン(#world_popup_new)のクリック直後だけ監視し、
-    //         クリック時点に無かった uid（かつ既存の最大 uid より大きいもの）を新規とみなす。
-    //   適用: ST の編集欄に 'input' イベントを送り、ST 自身に data 更新+保存をさせる。
-    //   ※ ロアブック自動作成は API 経由でありボタン操作ではないため対象外。
     // ============================================================
-    let _newEntryWatch = null;   // { startedAt, knownUids:Set, maxKnown:number, timer }
+    let _newEntryWatch = null;
     const _appliedNewEntryUids = new Set();
 
     function _getEntryElements() {
@@ -628,15 +630,30 @@ console.log('[WBAutoSelect] 📦 v8.1 module loading (soft-refresh + new-entry d
             try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch (e2) { /* ignore */ }
         }
     }
+    function _triggerInputAndChange(el) {
+        const $ = getJQuery();
+        try {
+            if ($) {
+                $(el).trigger('input');
+                $(el).trigger('change');
+            } else {
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        } catch (e) {
+            try {
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            } catch (e2) { /* ignore */ }
+        }
+    }
 
-    // Normal / @D system / depth 0 を適用。必要な欄が揃っていない場合は false（再試行させる）
     function _applyNewEntryDefaults(entryEl) {
         if (!entryEl) return false;
 
         const posSel = entryEl.querySelector('select[name="position"]');
         if (!posSel) return false;
 
-        // ── position: at Depth (value=4) の system ロール ──
         let posIdx = -1;
         const opts = Array.from(posSel.options);
         const depthOpts = opts
@@ -657,7 +674,6 @@ console.log('[WBAutoSelect] 📦 v8.1 module loading (soft-refresh + new-entry d
         posSel.selectedIndex = posIdx;
         _triggerInput(posSel);
 
-        // 旧版 ST: role が独立したセレクタの場合は system(0)
         const roleSel = entryEl.querySelector('select[name="role"], select[name="entryRole"]');
         if (roleSel) {
             const sysIdx = Array.from(roleSel.options).findIndex(o => String(o.value) === '0');
@@ -667,14 +683,12 @@ console.log('[WBAutoSelect] 📦 v8.1 module loading (soft-refresh + new-entry d
             }
         }
 
-        // ── depth = 0 ──
         const depthInput = entryEl.querySelector('input[name="depth"]');
         if (depthInput) {
             depthInput.value = String(NEW_ENTRY_DEPTH);
             _triggerInput(depthInput);
         }
 
-        // ── WI Entry Status = Normal ──
         const stateSel = entryEl.querySelector('select[name="entryStateSelector"]');
         if (stateSel) {
             let idx = Array.from(stateSel.options).findIndex(o => String(o.value) === 'normal');
@@ -686,7 +700,6 @@ console.log('[WBAutoSelect] 📦 v8.1 module loading (soft-refresh + new-entry d
                 _triggerInput(stateSel);
             }
         } else {
-            // 旧版: constant / vectorized のチェックボックスを外す
             for (const nm of ['constant', 'vectorized']) {
                 const cb = entryEl.querySelector(`input[name="${nm}"]`);
                 if (cb && cb.checked) {
@@ -720,7 +733,6 @@ console.log('[WBAutoSelect] 📦 v8.1 module loading (soft-refresh + new-entry d
 
     function _startNewEntryWatch() {
         if (_getSettings().newEntryDefaults === false) return;
-        // ロアブック自動作成中は対象外
         if (_creating.size > 0) return;
 
         _stopNewEntryWatch();
@@ -739,7 +751,6 @@ console.log('[WBAutoSelect] 📦 v8.1 module loading (soft-refresh + new-entry d
             if (Date.now() - watch.startedAt > NEW_ENTRY_WATCH_MS) { _stopNewEntryWatch(); return; }
             if (watch.busy) return;
 
-            // 新規候補: 以前の DOM に無く、かつ既存の最大 uid より大きいもの（最大 uid を優先）
             let candidate = null;
             for (const el of _getEntryElements()) {
                 const uid = String(el.getAttribute('uid'));
@@ -759,7 +770,7 @@ console.log('[WBAutoSelect] 📦 v8.1 module loading (soft-refresh + new-entry d
             try {
                 await _applyNewEntryDefaultsWithRetry(candidate.uid);
             } finally {
-                _stopNewEntryWatch();   // 1 回のクリックにつき 1 エントリのみ
+                _stopNewEntryWatch();
             }
         }, NEW_ENTRY_POLL_MS);
     }
@@ -771,12 +782,54 @@ console.log('[WBAutoSelect] 📦 v8.1 module loading (soft-refresh + new-entry d
         document.addEventListener('click', (e) => {
             const btn = e.target?.closest?.('#world_popup_new');
             if (!btn) return;
-            // ST のクリック処理でエントリが作られる前の状態をスナップショットするため、
-            // capture フェーズで即座に監視を開始する
             _startNewEntryWatch();
         }, true);
 
         console.log(`${LOG} 🆕 new-entry defaults installed (Normal / @D system / depth=${NEW_ENTRY_DEPTH})`);
+    }
+
+    // ============================================================
+    // ★ v8.2: エントリータイトル/メモ → カンマ区切りリスト 自動同期
+    //   textarea[name="comment"] を編集すると、同じ world_entry 内の
+    //   textarea[name="key"] に同じ値をコピーする。
+    //   ST の jQuery ハンドラに認識させるため input と change を両方発火。
+    //   ※ ロアブック自動作成中は無視（00_共通ルール は API 経由なので
+    //     そもそも input は発火しないが念のため）
+    // ============================================================
+    let _commentToKeyInstalled = false;
+    function installCommentToKeySync() {
+        if (_commentToKeyInstalled) return;
+        _commentToKeyInstalled = true;
+
+        document.addEventListener('input', (e) => {
+            // 設定 OFF なら何もしない
+            if (_getSettings().commentToKeySync === false) return;
+            // ロアブック自動作成中は対象外
+            if (_creating.size > 0) return;
+
+            const el = e.target;
+            if (!el || el.tagName !== 'TEXTAREA') return;
+            if (el.name !== 'comment') return;
+
+            const entryEl = el.closest('.world_entry');
+            if (!entryEl) return;
+
+            const keyEl = entryEl.querySelector('textarea[name="key"]');
+            if (!keyEl) return;
+
+            const newValue = el.value;
+            if (keyEl.value === newValue) return;
+
+            keyEl.value = newValue;
+            _triggerInputAndChange(keyEl);
+
+            console.debug(
+                `${LOG} 📝 comment→key synced (uid=${entryEl.getAttribute('uid')}, ` +
+                `len=${newValue.length})`
+            );
+        }, true);
+
+        console.log(`${LOG} 📝 comment→key sync installed`);
     }
 
     // ============================================================
@@ -902,7 +955,6 @@ console.log('[WBAutoSelect] 📦 v8.1 module loading (soft-refresh + new-entry d
                 await wait(FIND_RETRY_DELAY_MS);
             }
 
-            // ── 存在しない → 作成（リロードなし） ──
             if (!targetName) {
                 const worldToCreate = charNameAtStart;
                 console.log(`${LOG} 🆕 creating "${worldToCreate}"`);
@@ -941,7 +993,6 @@ console.log('[WBAutoSelect] 📦 v8.1 module loading (soft-refresh + new-entry d
                 return;
             }
 
-            // ── エディタ + アクティブ選択 ──
             const editOk = await _setEditTarget(targetName);
             await wait(APPLY_DELAY_MS);
             if (isStale()) return;
@@ -1045,6 +1096,7 @@ console.log('[WBAutoSelect] 📦 v8.1 module loading (soft-refresh + new-entry d
 
         setupEventListeners();
         installNewEntryDefaults();
+        installCommentToKeySync();
 
         setTimeout(() => scheduleAutoSelect('initial'), reloadState ? 1000 : 1500);
         console.log(LOG, 'init complete');
@@ -1087,14 +1139,36 @@ console.log('[WBAutoSelect] 📦 v8.1 module loading (soft-refresh + new-entry d
             _saveSettings();
             return settings.lastResortReload;
         },
-        // ★ v8.1: 新規エントリ初期値の ON/OFF
         setNewEntryDefaults: (enabled) => {
             settings.newEntryDefaults = !!enabled;
             _saveSettings();
             console.log(`${LOG} newEntryDefaults = ${settings.newEntryDefaults}`);
             return settings.newEntryDefaults;
         },
-        // ★ v8.1: 指定 uid（省略時は最後のエントリ）に手動で初期値を適用（デバッグ用）
+        // ★ v8.2: comment→key 同期の ON/OFF
+        setCommentToKeySync: (enabled) => {
+            settings.commentToKeySync = !!enabled;
+            _saveSettings();
+            console.log(`${LOG} commentToKeySync = ${settings.commentToKeySync}`);
+            return settings.commentToKeySync;
+        },
+        // ★ v8.2: 現在の comment 値で key を手動同期（デバッグ用、uid 省略時は最後のエントリ）
+        syncCommentToKeyNow: (uid) => {
+            const els = _getEntryElements();
+            if (els.length === 0) return false;
+            let target = uid !== undefined && uid !== null
+                ? document.querySelector(`.world_entry[uid="${CSS.escape(String(uid))}"]`)
+                : els[els.length - 1];
+            if (!target) return false;
+            const c = target.querySelector('textarea[name="comment"]');
+            const k = target.querySelector('textarea[name="key"]');
+            if (!c || !k) return false;
+            if (k.value === c.value) return true;
+            k.value = c.value;
+            _triggerInputAndChange(k);
+            console.log(`${LOG} 📝 comment→key synced manually (uid=${target.getAttribute('uid')})`);
+            return true;
+        },
         applyNewEntryDefaults: async (uid) => {
             let target = uid;
             if (target === undefined || target === null) {
@@ -1126,7 +1200,7 @@ console.log('[WBAutoSelect] 📦 v8.1 module loading (soft-refresh + new-entry d
         diagnose: async () => {
             const api = await _getWIApi();
             return {
-                version: 'v8.1',
+                version: 'v8.2',
                 settings: { ...settings },
                 currentChar: getCurrentCharName(),
                 api: {
@@ -1140,6 +1214,7 @@ console.log('[WBAutoSelect] 📦 v8.1 module loading (soft-refresh + new-entry d
                     ?.selectedOptions?.[0]?.textContent?.trim() || null,
                 newEntryButtonFound: !!document.querySelector('#world_popup_new'),
                 newEntryWatching: !!_newEntryWatch,
+                commentToKeyInstalled: _commentToKeyInstalled,
                 emptySaveGuards: Array.from(_emptySaveGuards.keys()),
                 creating: Array.from(_creating.keys()),
             };
@@ -1151,5 +1226,5 @@ console.log('[WBAutoSelect] 📦 v8.1 module loading (soft-refresh + new-entry d
         },
     };
 
-    console.log(LOG, 'window.WorldbookAutoSelect API exposed (v8.1)');
+    console.log(LOG, 'window.WorldbookAutoSelect API exposed (v8.2)');
 })();
