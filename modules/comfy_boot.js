@@ -11,19 +11,9 @@
 //        （ST本体の getVideoThumbnail をスキップして高速化）
 
 // ============================================================
-// ★ ComfyUI WebSocket 進捗インターセプタ
-//    ST SD 拡張が ComfyUI と通信する WebSocket をパッチし、
-//    進捗メッセージをカスタムイベントとして転送する。
-//
-//    ComfyUI の WS メッセージ:
-//      {"type":"execution_start", ...}                → 生成開始
-//      {"type":"progress","data":{"value":N,"max":M}} → 進捗
-//      {"type":"execution_success", ...}              → 完了
-//      {"type":"executing","data":{"node":null}}      → プロンプト完了
-//
-//    ★ gic.js は最初の import で comfy_boot.js を読み込むため、
-//      この IIFE が例外を投げると GIC 全体が読み込まれなくなる。
-//      必ず try/catch で保護する。
+// ★ ComfyUI WebSocket 進捗インターセプタ（診断ログ付き）
+//    ST SD 拡張が ComfyUI と通信する WS をパッチして進捗を中継する。
+//    URL マッチングを広げ、全 WS 生成をログに残して原因特定を容易にする。
 // ============================================================
 (function installComfyWsProgressInterceptor() {
     if (window.__gicComfyWsPatched) return;
@@ -36,7 +26,18 @@
         function isComfyWsUrl(wsUrl) {
             try {
                 const u = new URL(wsUrl, window.location.origin);
-                return /\/ws(\/|$|\?)/.test(u.pathname);
+                // ① パスに /ws を含む（/ws, /ws/, /api/sd/comfy/ws など）
+                if (/\/ws(\/|$)/.test(u.pathname)) return true;
+                // ② ホストに comfy を含む
+                if (/comfy/i.test(u.hostname + u.pathname)) return true;
+                // ③ デフォルト ComfyUI ポート
+                if (u.port === '8188') return true;
+                // ④ localtunnel ドメイン
+                if (/loca\.lt/i.test(u.hostname)) return true;
+                // ⑤ localhost / 127.0.0.1 の非 ST ポート
+                if ((u.hostname === 'localhost' || u.hostname === '127.0.0.1') &&
+                    u.port && u.port !== '8000') return true;
+                return false;
             } catch (e) { return false; }
         }
 
@@ -48,11 +49,23 @@
 
         function handleMessage(raw, url) {
             let data;
-            try { data = JSON.parse(raw); } catch (e) { return; }
+            try {
+                if (typeof raw === 'string') {
+                    data = JSON.parse(raw);
+                } else if (raw && typeof raw.text === 'function') {
+                    // Blob の可能性
+                    raw.text().then(t => handleMessage(t, url)).catch(() => {});
+                    return;
+                } else {
+                    return;
+                }
+            } catch (e) { return; }
             if (!data || typeof data !== 'object') return;
 
             const t = data.type;
             const d = data.data || {};
+
+            console.log(`[GIC-Boot] WS msg from ${url}: type=${t}`, d);
 
             if (t === 'progress') {
                 const value = Number(d.value);
@@ -72,33 +85,31 @@
         }
 
         function GicWebSocket(url, protocols) {
+            // ★ 全ての WS 生成をログに残す（診断用）
+            console.log(`[GIC-Boot] WS created: ${url}`);
+
             const ws = protocols !== undefined
                 ? new OrigWebSocket(url, protocols)
                 : new OrigWebSocket(url);
 
             if (isComfyWsUrl(url)) {
+                console.log(`[GIC-Boot] ✅ ComfyUI WS を検出 → 進捗を監視: ${url}`);
                 try {
-                    console.log(`[GIC-Boot] ComfyUI WS を検出 → 進捗を監視: ${url}`);
                     ws.addEventListener('message', (e) => handleMessage(e.data, url));
                 } catch (e) { /* ignore */ }
             }
             return ws;
         }
 
-        // instanceof 互換のため prototype / 継承チェーンを引き継ぐ
         GicWebSocket.prototype = OrigWebSocket.prototype;
         Object.setPrototypeOf(GicWebSocket, OrigWebSocket);
 
-        // ★ static constants (CONNECTING/OPEN/CLOSING/CLOSED) は
-        //   Object.setPrototypeOf で OrigWebSocket から継承されるため
-        //   明示的な代入は不要。
-        //   （strict モードでは read-only への代入が TypeError になるので
-        //     代入自体を行わないこと）
+        // ★ static 定数は継承されるため代入しない
+        //   （strict モードでは read-only への代入が TypeError になる）
 
         window.WebSocket = GicWebSocket;
         console.log('[GIC-Boot] ComfyUI WS 進捗インターセプタを設置');
     } catch (e) {
-        // ★ ここで失敗しても GIC 本体の動作には影響させない
         console.warn('[GIC-Boot] ComfyUI WS 進捗インターセプタ設置失敗:', e);
     }
 })();
