@@ -3,31 +3,33 @@
 // ロアブックが存在しない場合はキャラ名と同じロアブックを自動作成し、
 // キャラクターとバインド（char.data.extensions.world）する。
 //
-// ★ v7 修正（今回 / 自動F5方式に転換）:
-//   これまでの JS レベルでのレース条件対策（Layer1-3）では、
-//   ST 内部の saveWorldInfo が DOM から空エントリを読み取って
-//   /api/worldinfo/edit を叩くタイミングを完全に制御できず、
-//   「自動作成されるがエントリが空」が50%程度の確率で発生していた。
-//   唯一確実な解決策は F5（ブラウザ更新）であることが判明したため、
-//   ロアブック新規作成直後に「自動F5相当のリロード」を実行する方式に変更。
+// ★ v8（リロード不要方式）:
+//   v7 までは新規作成後に location.reload() していたが、根本原因は
+//   「サーバーファイルは正常なのに ST 内部のワールドインフォ用キャッシュ/UI が
+//    古い（空）まま」だったこと。F5 が効いたのはメモリが消えるため。
+//   v8 では ST 公式の関数（context / world-info.js 経由）を使って
+//   キャッシュ・ワールド一覧・エディタを正規の手順で更新する。
 //
-//   フロー:
-//     1. ロアブックが存在しない → importWorldInfo で作成
-//     2. サーバーファイルの内容を検証（1エントリ存在を確認）
-//     3. チャット・スクロール位置を sessionStorage に保存
-//     4. トースト通知表示
-//     5. location.reload() でページリロード
-//     6. リロード後は ST がサーバーから正常にロアブックを読み込む
-//     7. autoSelect が走るが、ファイルは正常なので「選択」だけ行う
+//   作成フロー:
+//     1. saveWorldInfo(name, data, true) でキャッシュ+サーバーを同時更新
+//        （失敗時: 直接 /api/worldinfo/edit → importWorldInfo の順でフォールバック）
+//     2. サーバーのファイルを検証
+//     3. updateWorldInfoList() でワールド一覧を更新
+//     4. reloadWorldInfoEditor() でエディタに読込
+//     5. エディタ DOM が空なら、サーバー内容でキャッシュを上書きして再読込（自己修復）
 //
-//   ★ ループガード:
-//     60秒以内に3回以上リロードが発生した場合はループと判定して中止。
-//   ★ 無効化:
-//     設定 `autoReloadAfterCreate: false` で旧来の JS レベル対策にフォールバック。
-//   ★ 手動トリガー:
-//     window.WorldbookAutoSelect.forceReload() で任意にリロード可能。
+//   ★ 削除対応:
+//     /api/worldinfo/delete を検知して、そのロアブックのガード・処理済み状態をクリアする。
+//     （削除済みロアブックの古いデータが再作成を邪魔しないようにする）
+//
+//   ★ v7 の world_info への Proxy/getter 注入と、エディタ select への
+//     偽 option(value=名前) 追加は撤去（ST 内部状態との不整合の原因になるため）。
+//
+//   ★ 最終手段としてのリロード:
+//     自己修復が全て失敗した場合のみ、設定 lastResortReload=true の時に限り
+//     リロードする（既定は false）。
 
-console.log('[WBAutoSelect] 📦 v7 module loading (auto-reload strategy)...');
+console.log('[WBAutoSelect] 📦 v8 module loading (soft-refresh strategy, no reload)...');
 
 (function () {
     'use strict';
@@ -38,19 +40,24 @@ console.log('[WBAutoSelect] 📦 v7 module loading (auto-reload strategy)...');
     const RETRY_AFTER_FAILURE_MS = 1500;
     const FIND_RETRY_MAX = 5;
     const FIND_RETRY_DELAY_MS = 300;
-    const VERIFY_RETRY_MAX = 5;
+    const VERIFY_RETRY_MAX = 6;
     const VERIFY_RETRY_DELAY_MS = 300;
     const APPLY_DELAY_MS = 500;
-    const SELF_HEAL_INTERVAL_MS = 1000;
     const EMPTY_SAVE_GUARD_MS = 30000;
+    const HEAL_MAX_ATTEMPTS = 3;
+    const EDITOR_RENDER_WAIT_TRIES = 10;
+    const EDITOR_RENDER_WAIT_MS = 250;
+    const LIST_SYNC_RETRY_MAX = 5;
+
+    // 最終手段リロード用
     const RELOAD_DELAY_MS = 1000;
     const RELOAD_LOOP_WINDOW_MS = 60000;
     const RELOAD_MAX_PER_WINDOW = 3;
-
     const RELOAD_STATE_KEY = 'wbAutoSelect_reloadState';
     const RELOAD_SCROLL_KEY = 'wbAutoSelect_scroll';
     const RELOAD_COUNT_KEY = 'wbAutoSelect_reloadCount';
 
+    const COMMON_RULE_NAME = '00_共通ルール';
     const COMMON_RULE_CONTENT =
         '【絶対厳守ルール】\n' +
         '1. プレイヤーが入力した番号に対応する場面を描写する。\n' +
@@ -62,7 +69,7 @@ console.log('[WBAutoSelect] 📦 v7 module loading (auto-reload strategy)...');
         '6. 描写本文を書いたら、必ず空行を2行入れる。';
 
     const DEFAULT_SETTINGS = {
-        autoReloadAfterCreate: true,
+        lastResortReload: false,
     };
 
     let settings = { ...DEFAULT_SETTINGS };
@@ -71,245 +78,8 @@ console.log('[WBAutoSelect] 📦 v7 module loading (auto-reload strategy)...');
     let _retryTimer = null;
     let _lastProcessedChar = null;
     let _lastFailure = { char: null, at: 0 };
-    const _warnedMismatch = new Set();
-    const _protectedWorlds = new Set();
-    const _protectionTargets = new Map();
-    let _lastWorldInfoInstance = null;
-    const _emptySaveGuards = new Map();
-
-    // ============================================================
-    // 設定管理
-    // ============================================================
-    function _getSettings() {
-        try {
-            const ctx = getSTContext();
-            if (ctx?.extensionSettings?.[SETTINGS_KEY]) {
-                return { ...DEFAULT_SETTINGS, ...ctx.extensionSettings[SETTINGS_KEY] };
-            }
-        } catch (e) { /* ignore */ }
-        return { ...settings };
-    }
-
-    function _saveSettings() {
-        try {
-            const ctx = getSTContext();
-            if (!ctx?.extensionSettings) return;
-            if (!ctx.extensionSettings[SETTINGS_KEY]) {
-                ctx.extensionSettings[SETTINGS_KEY] = {};
-            }
-            Object.assign(ctx.extensionSettings[SETTINGS_KEY], settings);
-            if (typeof ctx.saveSettingsDebounced === 'function') {
-                ctx.saveSettingsDebounced();
-            }
-        } catch (e) { /* ignore */ }
-    }
-
-    function loadSettings() {
-        settings = _getSettings();
-        console.log(`${LOG} settings loaded:`, settings);
-    }
-
-    // ============================================================
-    // ★ v7: 自動リロード機構
-    // ============================================================
-    function _checkReloadLoop() {
-        try {
-            const raw = sessionStorage.getItem(RELOAD_COUNT_KEY);
-            const data = raw ? JSON.parse(raw) : { count: 0, firstAt: 0 };
-            const now = Date.now();
-            if (now - data.firstAt > RELOAD_LOOP_WINDOW_MS) {
-                data.count = 0;
-                data.firstAt = now;
-            }
-            data.count++;
-            sessionStorage.setItem(RELOAD_COUNT_KEY, JSON.stringify(data));
-            return data.count;
-        } catch (e) {
-            return 1;
-        }
-    }
-
-    function _savePreReloadState(charName, worldName) {
-        try {
-            sessionStorage.setItem(RELOAD_STATE_KEY, JSON.stringify({
-                charName, worldName, createdAt: Date.now(),
-            }));
-            const chat = document.getElementById('chat');
-            if (chat && chat.scrollTop > 0) {
-                sessionStorage.setItem(RELOAD_SCROLL_KEY, String(chat.scrollTop));
-            }
-        } catch (e) { /* ignore */ }
-    }
-
-    function _showReloadToast(worldName, deferred = false) {
-        try {
-            if (typeof window.toastr === 'undefined') return;
-            if (deferred) {
-                window.toastr.warning(
-                    `ロアブック「${worldName}」を作成しました。反映にはページを手動で再読み込みしてください。`,
-                    '', { timeOut: 10000, positionClass: 'toast-top-center' }
-                );
-            } else {
-                window.toastr.info(
-                    `ロアブック「${worldName}」を作成しました。ページを再読み込みします...`,
-                    '', { timeOut: 3000, positionClass: 'toast-top-center' }
-                );
-            }
-        } catch (e) { /* ignore */ }
-    }
-
-    async function _scheduleReloadAndExit(charName, worldName) {
-        // 最終検証: サーバーにファイルが存在することを確認
-        let verified = await _verifyWorldbookOnServer(worldName);
-        if (!verified) {
-            // ガードのスナップショットで復元を試みる
-            const guard = _emptySaveGuards.get(worldName);
-            if (guard?.entries && Object.keys(guard.entries).length > 0) {
-                console.log(`${LOG} 🔧 final restore before reload: "${worldName}"`);
-                await _directEditWorldbook(worldName, guard.entries);
-                verified = await _verifyWorldbookOnServer(worldName);
-            }
-        }
-        if (!verified) {
-            console.error(`${LOG} ❌ cannot reload - server file still empty for "${worldName}"`);
-            return false;
-        }
-
-        // ループガード
-        const count = _checkReloadLoop();
-        if (count > RELOAD_MAX_PER_WINDOW) {
-            console.error(
-                `${LOG} 🛑 reload loop detected (${count}/${RELOAD_MAX_PER_WINDOW} in window), aborting`
-            );
-            _showReloadToast(worldName, true);
-            return false;
-        }
-
-        // ユーザーが入力中なら延期
-        const textarea = document.getElementById('send_textarea');
-        if (textarea && textarea.value.trim().length > 0) {
-            console.log(`${LOG} ⏸ user has pending input, deferring reload`);
-            _showReloadToast(worldName, true);
-            return false;
-        }
-
-        // 状態を保存
-        _savePreReloadState(charName, worldName);
-
-        // トースト通知
-        _showReloadToast(worldName, false);
-
-        console.log(
-            `${LOG} 🔃 scheduling reload in ${RELOAD_DELAY_MS}ms ` +
-            `(char="${charName}", world="${worldName}", count=${count})`
-        );
-
-        setTimeout(() => {
-            try {
-                location.reload();
-            } catch (e) {
-                console.error(`${LOG} location.reload() failed:`, e);
-            }
-        }, RELOAD_DELAY_MS);
-
-        return true;
-    }
-
-    function _consumeReloadState() {
-        try {
-            const raw = sessionStorage.getItem(RELOAD_STATE_KEY);
-            if (!raw) return null;
-            sessionStorage.removeItem(RELOAD_STATE_KEY);
-            const state = JSON.parse(raw);
-            if (Date.now() - state.createdAt > 60000) {
-                console.log(`${LOG} stale reload state ignored`);
-                return null;
-            }
-            return state;
-        } catch (e) { return null; }
-    }
-
-    function _restoreScrollAfterReload() {
-        try {
-            const raw = sessionStorage.getItem(RELOAD_SCROLL_KEY);
-            if (!raw) return;
-            sessionStorage.removeItem(RELOAD_SCROLL_KEY);
-            const target = parseInt(raw, 10);
-            if (!Number.isFinite(target) || target <= 0) return;
-            // チャット描画完了後にスクロール復元
-            const tryRestore = (attempt = 0) => {
-                const chat = document.getElementById('chat');
-                if (chat && chat.scrollHeight > 100) {
-                    chat.scrollTop = target;
-                    console.log(`${LOG} 📜 scroll restored to ${target}px`);
-                    return;
-                }
-                if (attempt < 20) {
-                    setTimeout(() => tryRestore(attempt + 1), 200);
-                }
-            };
-            setTimeout(() => tryRestore(0), 1500);
-        } catch (e) { /* ignore */ }
-    }
-
-    // ============================================================
-    // /api/worldinfo/edit インターセプタ（フォールバック用）
-    // ============================================================
-    (function installWorldInfoEditInterceptor() {
-        if (window.__wbAutoSelectFetchPatched) return;
-        window.__wbAutoSelectFetchPatched = true;
-
-        const originalFetch = window.fetch;
-        window.__wbAutoSelectOriginalFetch = originalFetch;
-
-        window.fetch = function(input, init) {
-            const url = typeof input === 'string' ? input : (input && input.url) || '';
-            if (!url.includes('/api/worldinfo/edit')) {
-                return originalFetch.apply(this, arguments);
-            }
-            if (!init || typeof init.body !== 'string') {
-                return originalFetch.apply(this, arguments);
-            }
-            let body;
-            try { body = JSON.parse(init.body); } catch (e) {
-                return originalFetch.apply(this, arguments);
-            }
-            const name = body?.name;
-            if (!name) return originalFetch.apply(this, arguments);
-            const guard = _emptySaveGuards.get(name);
-            if (!guard || Date.now() > guard.until) return originalFetch.apply(this, arguments);
-
-            const incomingEntries = body?.data?.entries;
-            const incomingIsEmpty = !incomingEntries
-                || (typeof incomingEntries === 'object'
-                    && Object.keys(incomingEntries).length === 0);
-            if (!incomingIsEmpty) {
-                guard.entries = JSON.parse(JSON.stringify(incomingEntries));
-                return originalFetch.apply(this, arguments);
-            }
-            if (!guard.entries || Object.keys(guard.entries).length === 0) {
-                return originalFetch.apply(this, arguments);
-            }
-            console.warn(`${LOG} 🛡️ empty save BLOCKED for "${name}"`);
-            const newBody = {
-                ...body,
-                data: { ...(body.data || {}), entries: JSON.parse(JSON.stringify(guard.entries)) },
-            };
-            return originalFetch.call(this, input, { ...init, body: JSON.stringify(newBody) });
-        };
-        console.log('[WBAutoSelect] 🛡️ edit interceptor installed');
-    })();
-
-    function _protectFromEmptySave(name, entries, durationMs = EMPTY_SAVE_GUARD_MS) {
-        if (!name || !entries) return;
-        if (Object.keys(entries).length === 0) return;
-        const existing = _emptySaveGuards.get(name);
-        _emptySaveGuards.set(name, {
-            createdAt: existing?.createdAt || Date.now(),
-            until: Date.now() + durationMs,
-            entries: JSON.parse(JSON.stringify(entries)),
-        });
-    }
+    const _emptySaveGuards = new Map();   // name -> { createdAt, until, entries }
+    const _creating = new Map();          // name -> Promise<boolean>（多重作成防止）
 
     // ============================================================
     // 基本ヘルパー
@@ -329,11 +99,11 @@ console.log('[WBAutoSelect] 📦 v7 module loading (auto-reload strategy)...');
         } catch (e) { return null; }
     }
     function getCurrentCharName() {
-        const char = getCurrentChar();
-        return char?.name || null;
+        return getCurrentChar()?.name || null;
     }
     function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
     function getJQuery() { return window.$ || window.jQuery || null; }
+    function clone(o) { return JSON.parse(JSON.stringify(o)); }
 
     async function getRequestHeadersSafe() {
         try {
@@ -364,52 +134,52 @@ console.log('[WBAutoSelect] 📦 v7 module loading (auto-reload strategy)...');
     }
 
     // ============================================================
-    // world_info インスタンス管理
+    // 設定管理
     // ============================================================
-    function isPlainWorldInfoObject(x) {
-        if (!x || typeof x !== 'object') return false;
-        if (x.jquery) return false;
-        if (Array.isArray(x)) return false;
-        return true;
-    }
-    function getWorldInfoInstance() {
-        const ctx = getSTContext();
-        let obj = null;
-        if (isPlainWorldInfoObject(ctx?.world_info)) obj = ctx.world_info;
-        else if (isPlainWorldInfoObject(window.world_info)) obj = window.world_info;
-        if (obj && obj !== _lastWorldInfoInstance) {
-            _lastWorldInfoInstance = obj;
-            _reinstallAllProtections();
-        }
-        return obj;
-    }
-    function _reinstallAllProtections() {
-        const wi = _lastWorldInfoInstance;
-        if (!wi || _protectionTargets.size === 0) return;
-        let reinstalled = 0;
-        for (const [name, data] of _protectionTargets.entries()) {
-            if (_installProtectionOn(wi, name, data.entries)) reinstalled++;
-        }
-        if (reinstalled > 0) console.log(`${LOG} 🔄 reinstalled ${reinstalled} protections`);
-    }
-    function _shouldSkipValidateKey(name) {
-        if (!name) return true;
-        if (/^\d+$/.test(name)) return true;
-        if (name.startsWith('jQuery')) return true;
-        if (name.startsWith('sizzle')) return true;
-        if (name === 'length' || name === 'prevObject' || name === 'selector' || name === 'context') return true;
-        return false;
-    }
-    function _sanitizeWorldInfoObject() {
-        const worldInfo = getWorldInfoInstance();
-        if (!worldInfo) return 0;
-        let removed = 0;
-        for (const key of Object.keys(worldInfo)) {
-            if (_shouldSkipValidateKey(key)) {
-                try { delete worldInfo[key]; removed++; } catch (e) { /* ignore */ }
+    function _getSettings() {
+        try {
+            const ctx = getSTContext();
+            if (ctx?.extensionSettings?.[SETTINGS_KEY]) {
+                return { ...DEFAULT_SETTINGS, ...ctx.extensionSettings[SETTINGS_KEY] };
             }
+        } catch (e) { /* ignore */ }
+        return { ...settings };
+    }
+    function _saveSettings() {
+        try {
+            const ctx = getSTContext();
+            if (!ctx?.extensionSettings) return;
+            if (!ctx.extensionSettings[SETTINGS_KEY]) ctx.extensionSettings[SETTINGS_KEY] = {};
+            Object.assign(ctx.extensionSettings[SETTINGS_KEY], settings);
+            if (typeof ctx.saveSettingsDebounced === 'function') ctx.saveSettingsDebounced();
+        } catch (e) { /* ignore */ }
+    }
+    function loadSettings() {
+        settings = _getSettings();
+        console.log(`${LOG} settings loaded:`, settings);
+    }
+
+    // ============================================================
+    // ST 公式 ワールドインフォ API の取得
+    //   context 経由を優先し、無ければ world-info.js のエクスポートを使う。
+    // ============================================================
+    let _modPromise = null;
+    function _loadWIModule() {
+        if (!_modPromise) {
+            _modPromise = import('../../../../world-info.js').catch(() => null);
         }
-        return removed;
+        return _modPromise;
+    }
+    async function _getWIApi() {
+        const ctx = getSTContext();
+        const mod = await _loadWIModule();
+        const fn = (...c) => c.find(f => typeof f === 'function') || null;
+        return {
+            save: fn(ctx?.saveWorldInfo, mod?.saveWorldInfo),
+            reloadEditor: fn(ctx?.reloadWorldInfoEditor, mod?.reloadEditor),
+            updateList: fn(ctx?.updateWorldInfoList, mod?.updateWorldInfoList),
+            importWI: fn(mod?.importWorldInfo),
+        };
     }
 
     // ============================================================
@@ -431,10 +201,16 @@ console.log('[WBAutoSelect] 📦 v7 module loading (auto-reload strategy)...');
         } catch (e) { return null; }
     }
     async function _verifyWorldbookOnServer(worldName) {
-        if (!worldName) return false;
         const data = await fetchWorldbookFromServer(worldName);
-        if (!data || !data.entries) return false;
-        return Object.keys(data.entries).length > 0;
+        return !!(data && data.entries && Object.keys(data.entries).length > 0);
+    }
+    async function _waitForServerEntries(worldName, tries = VERIFY_RETRY_MAX) {
+        for (let i = 0; i < tries; i++) {
+            const data = await fetchWorldbookFromServer(worldName);
+            if (data?.entries && Object.keys(data.entries).length > 0) return data.entries;
+            await wait(VERIFY_RETRY_DELAY_MS);
+        }
+        return null;
     }
     async function _directEditWorldbook(name, entries) {
         try {
@@ -446,27 +222,90 @@ console.log('[WBAutoSelect] 📦 v7 module loading (auto-reload strategy)...');
             return resp.ok;
         } catch (e) { return false; }
     }
-    async function refreshWorldSelects() {
-        let success = false;
-        try {
-            const ctx = getSTContext();
-            if (ctx && typeof ctx.getSettings === 'function') {
-                await ctx.getSettings();
-                success = true;
-            }
-        } catch (e) { /* ignore */ }
-        if (!success) {
-            try {
-                const mod = await import('../../../../world-info.js');
-                if (typeof mod.loadWorldInfoList === 'function') {
-                    await mod.loadWorldInfoList();
-                    success = true;
-                }
-            } catch (e) { /* ignore */ }
-        }
-        getWorldInfoInstance();
-        return success;
+
+    // ============================================================
+    // 空保存ガード + 削除検知（fetch インターセプタ）
+    // ============================================================
+    function _protectFromEmptySave(name, entries, durationMs = EMPTY_SAVE_GUARD_MS) {
+        if (!name || !entries || Object.keys(entries).length === 0) return;
+        const existing = _emptySaveGuards.get(name);
+        _emptySaveGuards.set(name, {
+            createdAt: existing?.createdAt || Date.now(),
+            until: Date.now() + durationMs,
+            entries: clone(entries),
+        });
     }
+
+    function _onWorldDeleted(name) {
+        if (!name) return;
+        _emptySaveGuards.delete(name);
+        _lastProcessedChar = null;
+        _lastFailure = { char: null, at: 0 };
+        console.log(`${LOG} 🗑 world deleted detected → state cleared: "${name}"`);
+    }
+
+    (function installWorldInfoFetchInterceptor() {
+        if (window.__wbAutoSelectFetchPatched) return;
+        window.__wbAutoSelectFetchPatched = true;
+
+        const originalFetch = window.fetch;
+        window.__wbAutoSelectOriginalFetch = originalFetch;
+
+        window.fetch = function (input, init) {
+            const url = typeof input === 'string' ? input : (input && input.url) || '';
+            const isEdit = url.includes('/api/worldinfo/edit');
+            const isDelete = url.includes('/api/worldinfo/delete');
+            if (!isEdit && !isDelete) return originalFetch.apply(this, arguments);
+            if (!init || typeof init.body !== 'string') return originalFetch.apply(this, arguments);
+
+            let body;
+            try { body = JSON.parse(init.body); } catch (e) {
+                return originalFetch.apply(this, arguments);
+            }
+            const name = body?.name;
+            if (!name) return originalFetch.apply(this, arguments);
+
+            // ---- 削除検知 ----
+            if (isDelete) {
+                const p = originalFetch.apply(this, arguments);
+                p.then(r => { if (r && r.ok) _onWorldDeleted(name); }).catch(() => {});
+                return p;
+            }
+
+            // ---- 空保存ガード ----
+            const guard = _emptySaveGuards.get(name);
+            if (!guard || Date.now() > guard.until) return originalFetch.apply(this, arguments);
+
+            const incoming = body?.data?.entries;
+            const incomingIsEmpty = !incoming
+                || (typeof incoming === 'object' && Object.keys(incoming).length === 0);
+            if (!incomingIsEmpty) {
+                guard.entries = clone(incoming);
+                return originalFetch.apply(this, arguments);
+            }
+            if (!guard.entries || Object.keys(guard.entries).length === 0) {
+                return originalFetch.apply(this, arguments);
+            }
+            console.warn(`${LOG} 🛡️ empty save BLOCKED for "${name}" (restored from guard)`);
+            const newBody = {
+                ...body,
+                data: { ...(body.data || {}), entries: clone(guard.entries) },
+            };
+            return originalFetch.call(this, input, { ...init, body: JSON.stringify(newBody) });
+        };
+        console.log('[WBAutoSelect] 🛡️ worldinfo fetch interceptor installed (edit guard + delete hook)');
+    })();
+
+    window.addEventListener('unhandledrejection', (e) => {
+        const msg = String(e.reason?.message || e.reason?.stack || e.reason || '');
+        const stBug =
+            msg.includes("right-hand side of 'in' should be an object") ||
+            (msg.includes("can't convert undefined to object") && msg.includes('world-info.js')) ||
+            (msg.includes('getCharacterLore') && msg.includes('world-info.js')) ||
+            (msg.includes('getGlobalLore') && msg.includes('world-info.js')) ||
+            (msg.includes('displayWorldEntries') && msg.includes('world-info.js'));
+        if (stBug) e.preventDefault();
+    });
 
     // ============================================================
     // DOM ヘルパー
@@ -476,8 +315,8 @@ console.log('[WBAutoSelect] 📦 v7 module loading (auto-reload strategy)...');
         for (const opt of selectEl.options) {
             const v = (opt.value || '').trim();
             const t = (opt.textContent || '').trim();
+            if (t === name) return opt.value;     // ST の value はインデックスなので text 優先
             if (v === name) return opt.value;
-            if (t === name) return opt.value;
         }
         return null;
     }
@@ -487,21 +326,6 @@ console.log('[WBAutoSelect] 📦 v7 module loading (auto-reload strategy)...');
         if (_findOptionValue(document.querySelector('#world_info'), name) !== null) return true;
         return false;
     }
-    function _addOptionToSelectsIfMissing(name) {
-        if (!name) return;
-        const ed = document.querySelector('#world_editor_select');
-        if (ed && _findOptionValue(ed, name) === null) {
-            const opt = document.createElement('option');
-            opt.value = name; opt.textContent = name;
-            ed.appendChild(opt);
-        }
-        const wi = document.querySelector('#world_info');
-        if (wi && _findOptionValue(wi, name) === null) {
-            const opt = document.createElement('option');
-            opt.value = name; opt.textContent = name;
-            wi.appendChild(opt);
-        }
-    }
     function _removeStaleDomOption(name) {
         if (!name) return;
         for (const sel of ['#world_editor_select', '#world_info']) {
@@ -510,114 +334,67 @@ console.log('[WBAutoSelect] 📦 v7 module loading (auto-reload strategy)...');
             for (const opt of Array.from(el.options)) {
                 const v = (opt.value || '').trim();
                 const t = (opt.textContent || '').trim();
-                if (v === name || t === name) {
+                if (t === name || (v === name && !/^\d+$/.test(v))) {
                     try { opt.remove(); } catch (e) { /* ignore */ }
                 }
             }
         }
     }
-
-    // ============================================================
-    // メモリ保護
-    // ============================================================
-    function _createProtectedValue(data) {
-        if (!data || typeof data !== 'object') return data;
-        const copy = JSON.parse(JSON.stringify(data));
-        try {
-            if (typeof Proxy === 'function') {
-                return new Proxy(copy, {
-                    set(target, prop, value) {
-                        if (prop === 'entries') {
-                            if (!value || typeof value !== 'object') return true;
-                            if (Object.keys(value).length === 0) return true;
-                        }
-                        return Reflect.set(target, prop, value);
-                    },
-                });
-            }
-        } catch (e) { /* fallback */ }
-        return copy;
+    function _isEditorOn(name) {
+        const ed = document.querySelector('#world_editor_select');
+        if (!ed) return false;
+        const opt = ed.options?.[ed.selectedIndex];
+        if (!opt) return false;
+        return (opt.textContent || '').trim() === name || (opt.value || '').trim() === name;
     }
-    function _installProtectionOn(worldInfo, worldName, entries) {
-        if (!worldInfo || !worldName || !entries) return false;
-        if (Object.keys(entries).length === 0) return false;
-        const desc = Object.getOwnPropertyDescriptor(worldInfo, worldName);
-        if (desc && typeof desc.get === 'function' && typeof desc.set === 'function') {
-            try { worldInfo[worldName] = { entries: JSON.parse(JSON.stringify(entries)) }; return true; }
-            catch (e) { return false; }
-        }
-        let realValue = _createProtectedValue({ entries });
-        try {
-            Object.defineProperty(worldInfo, worldName, {
-                configurable: true, enumerable: true,
-                get() { return realValue; },
-                set(v) {
-                    if (v === null || v === undefined) return;
-                    if (v && typeof v === 'object' && v.entries
-                        && Object.keys(v.entries).length > 0) {
-                        realValue = _createProtectedValue(v);
-                        return;
-                    }
-                },
-            });
-            return true;
-        } catch (e) {
-            try { worldInfo[worldName] = { entries: JSON.parse(JSON.stringify(entries)) }; return true; }
-            catch (e2) { return false; }
-        }
-    }
-    function _ensureWorldInfoProtected(worldName, entries) {
-        if (!worldName || !entries) return false;
-        if (Object.keys(entries).length === 0) return false;
-        _protectionTargets.set(worldName, { entries: JSON.parse(JSON.stringify(entries)) });
-        const worldInfo = getWorldInfoInstance();
-        if (!worldInfo) return false;
-        const ok = _installProtectionOn(worldInfo, worldName, entries);
-        if (ok) _protectedWorlds.add(worldName);
-        return ok;
-    }
-    async function _ensureSpecificWorldReady(name) {
-        if (!name) return false;
-        const worldInfo = getWorldInfoInstance();
-        if (!worldInfo) return false;
-        const cur = worldInfo[name];
-        const valid = cur && typeof cur === 'object'
-            && cur.entries && Object.keys(cur.entries).length > 0;
-        if (valid) return true;
-        const fromServer = await fetchWorldbookFromServer(name);
-        if (fromServer?.entries && Object.keys(fromServer.entries).length > 0) {
-            _ensureWorldInfoProtected(name, fromServer.entries);
-            return true;
-        }
-        return false;
-    }
-    async function _validateAllWorldInfoEntries() {
-        const worldInfo = getWorldInfoInstance();
-        if (!worldInfo) return;
-        _sanitizeWorldInfoObject();
-        const broken = [];
-        for (const name of Object.keys(worldInfo)) {
-            if (_shouldSkipValidateKey(name)) continue;
-            const cur = worldInfo[name];
-            const valid = cur && typeof cur === 'object'
-                && cur.entries && Object.keys(cur.entries).length > 0;
-            if (!valid) broken.push(name);
-        }
-        if (broken.length === 0) return;
-        for (const name of broken) {
-            const fromServer = await fetchWorldbookFromServer(name);
-            if (fromServer?.entries && Object.keys(fromServer.entries).length > 0) {
-                _ensureWorldInfoProtected(name, fromServer.entries);
-            } else {
-                try { delete worldInfo[name]; _protectedWorlds.delete(name); _protectionTargets.delete(name); } catch (e) { /* ignore */ }
-            }
-        }
+    // null = エディタ DOM 自体が無い（検証不能）
+    function _countEditorEntries() {
+        const list = document.querySelector('#world_popup_entries_list');
+        if (!list) return null;
+        return list.querySelectorAll('.world_entry').length;
     }
 
+    // ============================================================
+    // ワールド一覧の更新（公式 API → フォールバック）
+    // ============================================================
+    async function refreshWorldSelects() {
+        let success = false;
+        try {
+            const api = await _getWIApi();
+            if (api.updateList) {
+                await api.updateList();
+                success = true;
+            }
+        } catch (e) { /* ignore */ }
+        if (!success) {
+            try {
+                const ctx = getSTContext();
+                if (ctx && typeof ctx.getSettings === 'function') {
+                    await ctx.getSettings();
+                    success = true;
+                }
+            } catch (e) { /* ignore */ }
+        }
+        return success;
+    }
+
+    // ワールド一覧に name が現れるまで更新を繰り返す
+    async function _syncWorldListUntilVisible(name) {
+        for (let i = 0; i < LIST_SYNC_RETRY_MAX; i++) {
+            if (_hasWorldBookInDOM(name)) return true;
+            await refreshWorldSelects();
+            await wait(200);
+        }
+        return _hasWorldBookInDOM(name);
+    }
+
+    // ============================================================
+    // エントリ生成
+    // ============================================================
     function _createCommonRuleEntry(uid) {
         return {
             uid: uid, displayIndex: uid, key: [], keysecondary: [],
-            comment: '00_共通ルール', content: COMMON_RULE_CONTENT,
+            comment: COMMON_RULE_NAME, content: COMMON_RULE_CONTENT,
             constant: true, vectorized: false, selective: true, selectiveLogic: 0,
             addMemo: false, order: 100, position: 4, disable: false,
             excludeRecursion: false, preventRecursion: false, delayUntilRecursion: false,
@@ -629,73 +406,82 @@ console.log('[WBAutoSelect] 📦 v7 module loading (auto-reload strategy)...');
         };
     }
 
+    // ============================================================
+    // ロアブック作成（リロード不要）
+    //   1) 公式 saveWorldInfo（キャッシュ+サーバー同時更新）
+    //   2) 直接 /api/worldinfo/edit
+    //   3) importWorldInfo
+    // ============================================================
     async function _createWorldbookIfMissing(worldName) {
         if (!worldName) return false;
-        const existing = await fetchWorldbookFromServer(worldName);
-        if (existing && existing.entries && Object.keys(existing.entries).length > 0) {
-            _protectFromEmptySave(worldName, existing.entries);
-            _ensureWorldInfoProtected(worldName, existing.entries);
-            return true;
-        }
-        const newEntries = { 0: _createCommonRuleEntry(0) };
+        if (_creating.has(worldName)) return _creating.get(worldName);
 
-        // パターン A: importWorldInfo
-        try {
-            const mod = await import('../../../../world-info.js');
-            if (typeof mod.importWorldInfo === 'function') {
-                const jsonContent = JSON.stringify({ entries: newEntries }, null, 2);
-                const blob = new Blob([jsonContent], { type: 'application/json' });
-                const file = new File([blob], `${worldName}.json`, { type: 'application/json' });
-                await mod.importWorldInfo(file, false);
-                console.log(`${LOG} 📥 importWorldInfo created "${worldName}"`);
-                await wait(500);
-
-                let verified = null;
-                for (let i = 0; i < VERIFY_RETRY_MAX; i++) {
-                    const fetched = await fetchWorldbookFromServer(worldName);
-                    if (fetched?.entries && Object.keys(fetched.entries).length > 0) {
-                        const first = Object.values(fetched.entries)[0];
-                        if (first?.comment === '00_共通ルール') {
-                            verified = fetched.entries;
-                            break;
-                        }
-                    }
-                    await wait(VERIFY_RETRY_DELAY_MS);
-                }
-                if (verified) {
-                    _protectFromEmptySave(worldName, verified);
-                    _ensureWorldInfoProtected(worldName, verified);
-                    await refreshWorldSelects();
-                    _addOptionToSelectsIfMissing(worldName);
-                    _ensureWorldInfoProtected(worldName, verified);
-                    _protectFromEmptySave(worldName, verified);
-                    return true;
-                }
-            }
-        } catch (e) { console.warn(`${LOG} importWorldInfo failed:`, e?.message || e); }
-
-        // パターン B: direct edit のみ
-        const ok = await _directEditWorldbook(worldName, newEntries);
-        if (ok) {
-            const fetched = await fetchWorldbookFromServer(worldName);
-            if (fetched?.entries && Object.keys(fetched.entries).length > 0) {
-                _protectFromEmptySave(worldName, fetched.entries);
-                _ensureWorldInfoProtected(worldName, fetched.entries);
-                await refreshWorldSelects();
-                _addOptionToSelectsIfMissing(worldName);
-                _ensureWorldInfoProtected(worldName, fetched.entries);
-                _protectFromEmptySave(worldName, fetched.entries);
+        const promise = (async () => {
+            const existing = await fetchWorldbookFromServer(worldName);
+            if (existing?.entries && Object.keys(existing.entries).length > 0) {
+                _protectFromEmptySave(worldName, existing.entries);
                 return true;
             }
-        }
-        return false;
+
+            const newEntries = { 0: _createCommonRuleEntry(0) };
+            // ST が途中で空保存してもこの内容で上書きされるようガード
+            _protectFromEmptySave(worldName, newEntries);
+
+            const api = await _getWIApi();
+            let verified = null;
+
+            // ── 方式1: 公式 saveWorldInfo ──
+            if (api.save) {
+                try {
+                    await api.save(worldName, { entries: clone(newEntries) }, true);
+                    verified = await _waitForServerEntries(worldName);
+                    if (verified) console.log(`${LOG} ✅ created via saveWorldInfo: "${worldName}"`);
+                } catch (e) {
+                    console.warn(`${LOG} saveWorldInfo failed:`, e?.message || e);
+                }
+            }
+
+            // ── 方式2: 直接 edit ──
+            if (!verified) {
+                if (await _directEditWorldbook(worldName, newEntries)) {
+                    verified = await _waitForServerEntries(worldName);
+                    if (verified) console.log(`${LOG} ✅ created via direct edit: "${worldName}"`);
+                }
+            }
+
+            // ── 方式3: importWorldInfo ──
+            if (!verified && api.importWI) {
+                try {
+                    const blob = new Blob([JSON.stringify({ entries: newEntries }, null, 2)],
+                        { type: 'application/json' });
+                    const file = new File([blob], `${worldName}.json`, { type: 'application/json' });
+                    await api.importWI(file, false);
+                    verified = await _waitForServerEntries(worldName, VERIFY_RETRY_MAX + 4);
+                    if (verified) console.log(`${LOG} ✅ created via importWorldInfo: "${worldName}"`);
+                } catch (e) {
+                    console.warn(`${LOG} importWorldInfo failed:`, e?.message || e);
+                }
+            }
+
+            if (!verified) return false;
+
+            _protectFromEmptySave(worldName, verified);
+            await refreshWorldSelects();
+            return true;
+        })();
+
+        _creating.set(worldName, promise);
+        try { return await promise; }
+        finally { _creating.delete(worldName); }
     }
 
+    // ============================================================
+    // キャラクターとのバインド
+    // ============================================================
     async function _bindCharacterToWorld(char, worldName, force = false) {
         if (!char || !worldName) return false;
         if (!force && char.data?.extensions?.world === worldName) return true;
-        const ok = await _ensureSpecificWorldReady(worldName);
-        if (!ok) return false;
+        if (!(await _verifyWorldbookOnServer(worldName))) return false;
         try {
             if (!char.data) char.data = {};
             if (!char.data.extensions) char.data.extensions = {};
@@ -715,12 +501,24 @@ console.log('[WBAutoSelect] 📦 v7 module loading (auto-reload strategy)...');
         } catch (e) { return false; }
     }
 
-    async function _setEditTarget(name) {
+    // ============================================================
+    // エディタ / アクティブ選択
+    // ============================================================
+    async function _reloadEditor(name) {
+        const api = await _getWIApi();
+        if (api.reloadEditor) {
+            try {
+                await api.reloadEditor(name, true);
+                await wait(100);
+                if (_isEditorOn(name)) return true;
+            } catch (e) {
+                console.warn(`${LOG} reloadEditor failed:`, e?.message || e);
+            }
+        }
+        // フォールバック: ドロップダウン操作（option は ST が生成したものだけを使う）
         const $ = getJQuery();
         const ed = document.querySelector('#world_editor_select');
         if (!$ || !ed) return false;
-        if (!(await _ensureSpecificWorldReady(name))) return false;
-        if (_findOptionValue(ed, name) === null) _addOptionToSelectsIfMissing(name);
         const value = _findOptionValue(ed, name);
         if (value === null) return false;
         try {
@@ -729,84 +527,142 @@ console.log('[WBAutoSelect] 📦 v7 module loading (auto-reload strategy)...');
         } catch (e) { return false; }
     }
 
+    async function _setEditTarget(name) {
+        if (!name) return false;
+        if (!(await _verifyWorldbookOnServer(name))) return false;
+        if (!_hasWorldBookInDOM(name)) await _syncWorldListUntilVisible(name);
+        return _reloadEditor(name);
+    }
+
     async function _setActive(name) {
         const $ = getJQuery();
         const wi = document.querySelector('#world_info');
-        if (!$ || !wi) return false;
-        if (!(await _ensureSpecificWorldReady(name))) return false;
-        if (_findOptionValue(wi, name) === null) _addOptionToSelectsIfMissing(name);
+        if (!$ || !wi || !name) return false;
+        if (!(await _verifyWorldbookOnServer(name))) return false;
+        if (_findOptionValue(wi, name) === null) await _syncWorldListUntilVisible(name);
         const value = _findOptionValue(wi, name);
         if (value === null) return false;
         try {
-            if (wi.hasAttribute('multiple')) $(wi).val([value]).trigger('change');
-            else $(wi).val(value).trigger('change');
+            if (wi.hasAttribute('multiple')) {
+                const cur = $(wi).val() || [];
+                const next = Array.isArray(cur) ? cur.slice() : [cur];
+                if (!next.includes(String(value))) next.push(String(value));
+                // 当該キャラ用のみを選択（従来動作に合わせ単一選択）
+                $(wi).val([String(value)]).trigger('change');
+            } else {
+                $(wi).val(value).trigger('change');
+            }
             return true;
         } catch (e) { return false; }
     }
 
-    async function _repairCurrentCharWorld() {
-        try {
-            const char = getCurrentChar();
-            if (!char) return;
-            const candidates = _getCharacterWorldCandidates(char);
-            const worldInfo = getWorldInfoInstance();
-            if (!worldInfo) return;
-            for (const name of candidates) {
-                if (!name) continue;
-                if (!_hasWorldBookInDOM(name)) continue;
-                const cur = worldInfo[name];
-                const valid = cur && typeof cur === 'object'
-                    && cur.entries && Object.keys(cur.entries).length > 0;
-                if (!valid) {
-                    const fromServer = await fetchWorldbookFromServer(name);
-                    if (fromServer?.entries) _ensureWorldInfoProtected(name, fromServer.entries);
-                } else if (!_protectedWorlds.has(name)) {
-                    _ensureWorldInfoProtected(name, cur.entries);
-                }
-                break;
+    // ============================================================
+    // ★ 自己修復: エディタが空表示なら、サーバー内容でキャッシュを上書きして再読込
+    // ============================================================
+    async function _ensureEditorShows(name) {
+        const api = await _getWIApi();
+
+        for (let attempt = 1; attempt <= HEAL_MAX_ATTEMPTS; attempt++) {
+            // 描画待ち
+            for (let i = 0; i < EDITOR_RENDER_WAIT_TRIES; i++) {
+                const n = _countEditorEntries();
+                if (n === null) return true;     // 検証不能 → 成功扱い
+                if (n > 0 && _isEditorOn(name)) return true;
+                await wait(EDITOR_RENDER_WAIT_MS);
             }
+
+            console.warn(`${LOG} ⚠️ editor shows 0 entries for "${name}" → heal attempt ${attempt}/${HEAL_MAX_ATTEMPTS}`);
+
+            const server = await fetchWorldbookFromServer(name);
+            if (!server?.entries) {
+                console.warn(`${LOG} heal: server has no entries for "${name}"`);
+                return false;
+            }
+            _protectFromEmptySave(name, server.entries);
+
+            // キャッシュをサーバーの内容で上書き
+            if (api.save) {
+                try {
+                    await api.save(name, { entries: clone(server.entries) }, true);
+                } catch (e) {
+                    console.warn(`${LOG} heal: saveWorldInfo failed:`, e?.message || e);
+                }
+            }
+            await refreshWorldSelects();
+            await _reloadEditor(name);
+        }
+
+        const n = _countEditorEntries();
+        return n === null || n > 0;
+    }
+
+    // ============================================================
+    // 最終手段のリロード（既定で無効）
+    // ============================================================
+    function _checkReloadLoop() {
+        try {
+            const raw = sessionStorage.getItem(RELOAD_COUNT_KEY);
+            const data = raw ? JSON.parse(raw) : { count: 0, firstAt: 0 };
+            const now = Date.now();
+            if (now - data.firstAt > RELOAD_LOOP_WINDOW_MS) { data.count = 0; data.firstAt = now; }
+            data.count++;
+            sessionStorage.setItem(RELOAD_COUNT_KEY, JSON.stringify(data));
+            return data.count;
+        } catch (e) { return 1; }
+    }
+    function _savePreReloadState(charName, worldName) {
+        try {
+            sessionStorage.setItem(RELOAD_STATE_KEY, JSON.stringify({ charName, worldName, createdAt: Date.now() }));
+            const chat = document.getElementById('chat');
+            if (chat && chat.scrollTop > 0) sessionStorage.setItem(RELOAD_SCROLL_KEY, String(chat.scrollTop));
+        } catch (e) { /* ignore */ }
+    }
+    async function _scheduleReloadAndExit(charName, worldName) {
+        if (!(await _verifyWorldbookOnServer(worldName))) return false;
+        const count = _checkReloadLoop();
+        if (count > RELOAD_MAX_PER_WINDOW) {
+            console.error(`${LOG} 🛑 reload loop detected, aborting`);
+            return false;
+        }
+        const textarea = document.getElementById('send_textarea');
+        if (textarea && textarea.value.trim().length > 0) return false;
+        _savePreReloadState(charName, worldName);
+        try {
+            window.toastr?.info?.(`ロアブック「${worldName}」の反映のためページを再読み込みします...`, '',
+                { timeOut: 3000, positionClass: 'toast-top-center' });
+        } catch (e) { /* ignore */ }
+        setTimeout(() => { try { location.reload(); } catch (e) { /* ignore */ } }, RELOAD_DELAY_MS);
+        return true;
+    }
+    function _consumeReloadState() {
+        try {
+            const raw = sessionStorage.getItem(RELOAD_STATE_KEY);
+            if (!raw) return null;
+            sessionStorage.removeItem(RELOAD_STATE_KEY);
+            const state = JSON.parse(raw);
+            if (Date.now() - state.createdAt > 60000) return null;
+            return state;
+        } catch (e) { return null; }
+    }
+    function _restoreScrollAfterReload() {
+        try {
+            const raw = sessionStorage.getItem(RELOAD_SCROLL_KEY);
+            if (!raw) return;
+            sessionStorage.removeItem(RELOAD_SCROLL_KEY);
+            const target = parseInt(raw, 10);
+            if (!Number.isFinite(target) || target <= 0) return;
+            const tryRestore = (attempt = 0) => {
+                const chat = document.getElementById('chat');
+                if (chat && chat.scrollHeight > 100) { chat.scrollTop = target; return; }
+                if (attempt < 20) setTimeout(() => tryRestore(attempt + 1), 200);
+            };
+            setTimeout(() => tryRestore(0), 1500);
         } catch (e) { /* ignore */ }
     }
 
-    function _pollGuardedWorldsMemory() {
-        const worldInfo = getWorldInfoInstance();
-        if (!worldInfo) return;
-        for (const [name, guard] of _emptySaveGuards.entries()) {
-            if (Date.now() > guard.until) continue;
-            if (!guard.entries || Object.keys(guard.entries).length === 0) continue;
-            const cur = worldInfo[name];
-            const isEmpty = !cur || !cur.entries || Object.keys(cur.entries).length === 0;
-            if (isEmpty) _ensureWorldInfoProtected(name, guard.entries);
-        }
-    }
-
-    let _selfHealTimer = null;
-    function startSelfHeal() {
-        if (_selfHealTimer) return;
-        _selfHealTimer = setInterval(() => {
-            _repairCurrentCharWorld().catch(() => {});
-            _pollGuardedWorldsMemory();
-            getWorldInfoInstance();
-        }, SELF_HEAL_INTERVAL_MS);
-    }
-
-    window.addEventListener('unhandledrejection', (e) => {
-        const msg = String(e.reason?.message || e.reason?.stack || e.reason || '');
-        const stBug =
-            msg.includes("right-hand side of 'in' should be an object") ||
-            (msg.includes("can't convert undefined to object") && msg.includes('world-info.js')) ||
-            (msg.includes('getCharacterLore') && msg.includes('world-info.js')) ||
-            (msg.includes('getGlobalLore') && msg.includes('world-info.js')) ||
-            (msg.includes('displayWorldEntries') && msg.includes('world-info.js'));
-        if (stBug) {
-            e.preventDefault();
-            setTimeout(() => {
-                _validateAllWorldInfoEntries().catch(() => {});
-                _repairCurrentCharWorld().catch(() => {});
-            }, 100);
-        }
-    });
-
+    // ============================================================
+    // 候補名・存在確認
+    // ============================================================
     function _getCharacterWorldCandidates(char) {
         const candidates = [];
         if (!char) return candidates;
@@ -826,39 +682,13 @@ console.log('[WBAutoSelect] 📦 v7 module loading (auto-reload strategy)...');
         return candidates;
     }
 
+    // サーバー上に（エントリ付きで）実在するか。無ければ DOM の古い option を掃除する。
     async function _hasWorldBookVerified(name) {
         if (!name) return false;
-        const serverHas = await _verifyWorldbookOnServer(name);
-        if (serverHas) {
-            const fromServer = await fetchWorldbookFromServer(name);
-            if (fromServer?.entries && Object.keys(fromServer.entries).length > 0) {
-                const worldInfo = getWorldInfoInstance();
-                if (worldInfo) {
-                    const cur = worldInfo[name];
-                    const valid = cur && typeof cur === 'object'
-                        && cur.entries && Object.keys(cur.entries).length > 0;
-                    if (!valid) _ensureWorldInfoProtected(name, fromServer.entries);
-                }
-                return true;
-            }
-        }
-        const worldInfo = getWorldInfoInstance();
-        if (worldInfo) {
-            try { delete worldInfo[name]; } catch (e) { /* ignore */ }
-            _protectedWorlds.delete(name);
-            _protectionTargets.delete(name);
-        }
+        if (await _verifyWorldbookOnServer(name)) return true;
         _removeStaleDomOption(name);
+        _emptySaveGuards.delete(name);
         return false;
-    }
-
-    function _hasWorldBook(name) {
-        if (!name) return false;
-        const worldInfo = getWorldInfoInstance();
-        if (worldInfo && worldInfo[name]?.entries) {
-            return Object.keys(worldInfo[name].entries).length > 0;
-        }
-        return _hasWorldBookInDOM(name);
     }
 
     // ============================================================
@@ -882,20 +712,15 @@ console.log('[WBAutoSelect] 📦 v7 module loading (auto-reload strategy)...');
             let wasCreated = false;
 
             for (let i = 0; i < FIND_RETRY_MAX; i++) {
-                if (isStale()) {
-                    console.debug(LOG, `stale: char changed (${charNameAtStart} → ${getCurrentCharName()})`);
-                    return;
-                }
+                if (isStale()) return;
                 for (const name of candidates) {
-                    if (await _hasWorldBookVerified(name)) {
-                        targetName = name;
-                        break;
-                    }
+                    if (await _hasWorldBookVerified(name)) { targetName = name; break; }
                 }
                 if (targetName) break;
                 await wait(FIND_RETRY_DELAY_MS);
             }
 
+            // ── 存在しない → 作成（リロードなし） ──
             if (!targetName) {
                 const worldToCreate = charNameAtStart;
                 console.log(`${LOG} 🆕 creating "${worldToCreate}"`);
@@ -908,44 +733,23 @@ console.log('[WBAutoSelect] 📦 v7 module loading (auto-reload strategy)...');
                 }
                 wasCreated = true;
 
-                const bound = await _bindCharacterToWorld(charAtStart, worldToCreate);
+                if (isStale()) return;
+
+                const bound = await _bindCharacterToWorld(charAtStart, worldToCreate, true);
                 if (!bound) {
                     console.warn(`${LOG} bind FAILED: "${worldToCreate}"`);
                     _recordFailure(charNameAtStart);
                     return;
                 }
 
-                // ★ v7: 新規作成直後に自動リロード
-                if (_getSettings().autoReloadAfterCreate !== false) {
-                    const reloaded = await _scheduleReloadAndExit(charNameAtStart, worldToCreate);
-                    if (reloaded) {
-                        // リロードがスケジュールされた → ここで処理終了
-                        return;
-                    }
-                    // リロードできなかった場合（入力中/ループ検出/検証失敗）は
-                    // 通常フローにフォールバック
-                    console.log(`${LOG} reload skipped → falling back to normal flow`);
+                // ST のワールド一覧に反映されるまで待つ
+                const visible = await _syncWorldListUntilVisible(worldToCreate);
+                if (!visible) {
+                    console.warn(`${LOG} "${worldToCreate}" not visible in ST world list`);
+                    _recordFailure(charNameAtStart);
+                    return;
                 }
-
-                await wait(300);
-                for (let i = 0; i < FIND_RETRY_MAX; i++) {
-                    if (_hasWorldBookInDOM(worldToCreate)) { targetName = worldToCreate; break; }
-                    if (i === 1) {
-                        await refreshWorldSelects();
-                        _addOptionToSelectsIfMissing(worldToCreate);
-                    }
-                    await wait(FIND_RETRY_DELAY_MS);
-                }
-                if (!targetName) {
-                    const serverHas = await _verifyWorldbookOnServer(worldToCreate);
-                    if (serverHas) {
-                        _addOptionToSelectsIfMissing(worldToCreate);
-                        targetName = worldToCreate;
-                    } else {
-                        _recordFailure(charNameAtStart);
-                        return;
-                    }
-                }
+                targetName = worldToCreate;
             }
 
             if (isStale()) return;
@@ -956,6 +760,7 @@ console.log('[WBAutoSelect] 📦 v7 module loading (auto-reload strategy)...');
                 return;
             }
 
+            // ── エディタ + アクティブ選択 ──
             const editOk = await _setEditTarget(targetName);
             await wait(APPLY_DELAY_MS);
             if (isStale()) return;
@@ -963,28 +768,32 @@ console.log('[WBAutoSelect] 📦 v7 module loading (auto-reload strategy)...');
 
             if (editOk || activeOk) {
                 console.log(`${LOG} 🔖 selected "${targetName}" (edit=${editOk}, active=${activeOk})`);
+
                 if (targetName === charNameAtStart) {
                     const currentExt = charAtStart.data?.extensions?.world;
                     if (currentExt !== targetName) {
                         await _bindCharacterToWorld(charAtStart, targetName, true);
                     }
                 }
-                _lastProcessedChar = charNameAtStart;
-                _lastFailure = { char: null, at: 0 };
-            } else {
-                console.warn(`${LOG} selection failed for "${targetName}" → retry create`);
-                const recreated = await _createWorldbookIfMissing(targetName);
-                if (recreated) {
-                    await wait(300);
-                    const editOk2 = await _setEditTarget(targetName);
-                    await wait(APPLY_DELAY_MS);
-                    const activeOk2 = await _setActive(targetName);
-                    if (editOk2 || activeOk2) {
-                        _lastProcessedChar = charNameAtStart;
-                        _lastFailure = { char: null, at: 0 };
+
+                // ★ エディタが空表示になっていないか検証し、必要なら自己修復
+                if (editOk) {
+                    const shown = await _ensureEditorShows(targetName);
+                    if (!shown) {
+                        console.error(`${LOG} ❌ editor still empty after heal: "${targetName}"`);
+                        if (_getSettings().lastResortReload === true) {
+                            const reloaded = await _scheduleReloadAndExit(charNameAtStart, targetName);
+                            if (reloaded) return;
+                        }
+                        _recordFailure(charNameAtStart);
                         return;
                     }
                 }
+
+                _lastProcessedChar = charNameAtStart;
+                _lastFailure = { char: null, at: 0 };
+            } else {
+                console.warn(`${LOG} selection failed for "${targetName}"`);
                 _recordFailure(charNameAtStart);
             }
         } catch (e) {
@@ -1048,25 +857,15 @@ console.log('[WBAutoSelect] 📦 v7 module loading (auto-reload strategy)...');
 
         loadSettings();
 
-        // ★ v7: リロード直後か判定
         const reloadState = _consumeReloadState();
         if (reloadState) {
-            console.log(
-                `${LOG} ✅ resuming after auto-reload: char="${reloadState.charName}", ` +
-                `world="${reloadState.worldName}"`
-            );
+            console.log(`${LOG} ✅ resuming after reload: char="${reloadState.charName}", world="${reloadState.worldName}"`);
         }
-
-        // ★ v7: スクロール位置復元
         _restoreScrollAfterReload();
 
         setupEventListeners();
-        startSelfHeal();
 
-        // リロード直後は少し早めに autoSelect を走らせる
-        const delay = reloadState ? 1000 : 1500;
-        setTimeout(() => scheduleAutoSelect('initial'), delay);
-
+        setTimeout(() => scheduleAutoSelect('initial'), reloadState ? 1000 : 1500);
         console.log(LOG, 'init complete');
     }
     if (document.readyState === 'loading') {
@@ -1087,16 +886,10 @@ console.log('[WBAutoSelect] 📦 v7 module loading (auto-reload strategy)...');
             const token = ++_generationToken;
             return autoSelect(token, 'manual-force', { force: true });
         },
-        // ★ v7: 手動リロード API
         forceReload: async () => {
             const charName = getCurrentCharName();
-            if (!charName) {
-                console.warn(`${LOG} forceReload: no current char`);
-                return false;
-            }
-            const verified = await _verifyWorldbookOnServer(charName);
-            if (!verified) {
-                console.warn(`${LOG} forceReload: "${charName}" not on server, creating first`);
+            if (!charName) return false;
+            if (!(await _verifyWorldbookOnServer(charName))) {
                 const created = await _createWorldbookIfMissing(charName);
                 if (!created) return false;
             }
@@ -1106,26 +899,16 @@ console.log('[WBAutoSelect] 📦 v7 module loading (auto-reload strategy)...');
         setSettings: (patch) => {
             settings = { ...settings, ...patch };
             _saveSettings();
-            console.log(`${LOG} settings updated:`, settings);
             return settings;
         },
-        setAutoReload: (enabled) => {
-            settings.autoReloadAfterCreate = !!enabled;
+        setLastResortReload: (enabled) => {
+            settings.lastResortReload = !!enabled;
             _saveSettings();
-            console.log(`${LOG} autoReloadAfterCreate = ${settings.autoReloadAfterCreate}`);
-            return settings.autoReloadAfterCreate;
+            return settings.lastResortReload;
         },
         getCurrentCharName,
-        hasWorldBook: _hasWorldBook,
         hasWorldBookVerified: _hasWorldBookVerified,
         hasWorldBookInDOM: _hasWorldBookInDOM,
-        hasWorldBookInMemory: (name) => {
-            const worldInfo = getWorldInfoInstance();
-            return !!(worldInfo && worldInfo[name]?.entries
-                && Object.keys(worldInfo[name].entries).length > 0);
-        },
-        isProtected: (name) => _protectedWorlds.has(name),
-        getProtectedWorlds: () => Array.from(_protectedWorlds),
         getEmptySaveGuards: () => {
             const out = {};
             for (const [k, v] of _emptySaveGuards.entries()) {
@@ -1137,40 +920,36 @@ console.log('[WBAutoSelect] 📦 v7 module loading (auto-reload strategy)...');
         verifyWorldbookOnServer: (name) => _verifyWorldbookOnServer(name || getCurrentCharName()),
         fetchWorldbook: (name) => fetchWorldbookFromServer(name || getCurrentCharName()),
         refreshWorldSelects,
-        validateAllWorldInfoEntries: _validateAllWorldInfoEntries,
+        ensureEditorShows: (name) => _ensureEditorShows(name || getCurrentCharName()),
         bindCharacter: async (worldName, force) => {
             const char = getCurrentChar();
             return _bindCharacterToWorld(char, worldName || getCurrentCharName(), !!force);
         },
         diagnose: async () => {
-            const ctx = getSTContext();
-            const worldInfoCtx = ctx?.world_info;
-            const worldInfoWin = window.world_info;
-            const worldInfo = worldInfoCtx || worldInfoWin;
+            const api = await _getWIApi();
             return {
+                version: 'v8',
                 settings: { ...settings },
-                hasCtxWorldInfo: !!worldInfoCtx,
-                hasWinWorldInfo: !!worldInfoWin,
-                sameInstance: worldInfoCtx === worldInfoWin,
-                worldInfoKeys: worldInfo ? Object.keys(worldInfo).slice(0, 30) : [],
-                protectedWorlds: Array.from(_protectedWorlds),
-                emptySaveGuards: Array.from(_emptySaveGuards.keys()),
                 currentChar: getCurrentCharName(),
-                reloadState: (() => {
-                    try {
-                        const raw = sessionStorage.getItem(RELOAD_STATE_KEY);
-                        return raw ? JSON.parse(raw) : null;
-                    } catch (e) { return null; }
-                })(),
+                api: {
+                    save: !!api.save,
+                    reloadEditor: !!api.reloadEditor,
+                    updateList: !!api.updateList,
+                    importWI: !!api.importWI,
+                },
+                editorEntryCount: _countEditorEntries(),
+                editorSelected: document.querySelector('#world_editor_select')
+                    ?.selectedOptions?.[0]?.textContent?.trim() || null,
+                emptySaveGuards: Array.from(_emptySaveGuards.keys()),
+                creating: Array.from(_creating.keys()),
             };
         },
         resetProcessed: () => {
             _lastProcessedChar = null;
             _lastFailure = { char: null, at: 0 };
-            _warnedMismatch.clear();
             if (_retryTimer) { clearTimeout(_retryTimer); _retryTimer = null; }
         },
     };
 
-    console.log(LOG, 'window.WorldbookAutoSelect API exposed (v7)');
+    console.log(LOG, 'window.WorldbookAutoSelect API exposed (v8)');
 })();
