@@ -124,38 +124,83 @@
     //     3. 動的 import の getSettings
     // ============================================================
     async function refreshWorldSelects() {
-        // ① loadWorldInfoList（ST world-info.js）
+        let success = false;
+
+        // ① loadWorldInfoList
         try {
             const mod = await import('../../../../world-info.js');
             if (typeof mod.loadWorldInfoList === 'function') {
                 await mod.loadWorldInfoList();
-                console.debug(LOG, 'loadWorldInfoList 実行');
-                return true;
+                console.log(`${LOG} 📋 loadWorldInfoList 実行成功`);
+                success = true;
             }
-        } catch (e) { /* ignore */ }
+        } catch (e) {
+            console.warn(`${LOG} loadWorldInfoList 失敗:`, e.message || e);
+        }
 
         // ② ctx.getSettings
-        try {
-            const ctx = getSTContext();
-            if (ctx && typeof ctx.getSettings === 'function') {
-                await ctx.getSettings();
-                console.debug(LOG, 'ctx.getSettings 実行');
-                return true;
+        if (!success) {
+            try {
+                const ctx = getSTContext();
+                if (ctx && typeof ctx.getSettings === 'function') {
+                    await ctx.getSettings();
+                    console.log(`${LOG} 📋 ctx.getSettings 実行成功`);
+                    success = true;
+                }
+            } catch (e) {
+                console.warn(`${LOG} ctx.getSettings 失敗:`, e.message || e);
             }
-        } catch (e) { /* ignore */ }
+        }
 
-        // ③ 動的 import の getSettings
-        try {
-            const mod = await import('../../../../world-info.js');
-            if (typeof mod.getSettings === 'function') {
-                await mod.getSettings();
-                console.debug(LOG, 'getSettings 実行');
-                return true;
+        // ③ mod.getSettings
+        if (!success) {
+            try {
+                const mod = await import('../../../../world-info.js');
+                if (typeof mod.getSettings === 'function') {
+                    await mod.getSettings();
+                    console.log(`${LOG} 📋 mod.getSettings 実行成功`);
+                    success = true;
+                }
+            } catch (e) {
+                console.warn(`${LOG} mod.getSettings 失敗:`, e.message || e);
             }
-        } catch (e) { /* ignore */ }
-        return false;
+        }
+
+        return success;
     }
 
+    // ============================================================
+    // ★ DOM セレクトに option を直接注入（保険）
+    //   loadWorldInfoList が効かない環境（ST のバージョン差異・
+    //   キャッシュ問題）でも確実に option を出現させる。
+    // ============================================================
+    function _addOptionToSelectsIfMissing(name) {
+        if (!name) return;
+        const added = [];
+
+        const ed = document.querySelector('#world_editor_select');
+        if (ed && _findOptionValue(ed, name) === null) {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            ed.appendChild(opt);
+            added.push('world_editor_select');
+        }
+
+        const wi = document.querySelector('#world_info');
+        if (wi && _findOptionValue(wi, name) === null) {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            wi.appendChild(opt);
+            added.push('world_info');
+        }
+
+        if (added.length > 0) {
+            console.log(`${LOG} 📋 DOM に "${name}" option を直接注入: [${added.join(', ')}]`);
+        }
+    }
+    
     async function fetchWorldbookFromServer(worldName) {
         if (!worldName) return null;
         try {
@@ -189,22 +234,57 @@
     }
 
     // ============================================================
-    // ★ 存在確認: DOM だけでなくメモリも見る
-    //   サーバー実在は別関数で確認するが、ここでは同期判定のみ。
+    // ★ DOM のみの同期チェック（高速パス）
     // ============================================================
-    function _hasWorldBook(name) {
+    function _hasWorldBookInDOM(name) {
         if (!name) return false;
-        // ① DOM セレクト
         const ed = document.querySelector('#world_editor_select');
         if (_findOptionValue(ed, name) !== null) return true;
         const wi = document.querySelector('#world_info');
         if (_findOptionValue(wi, name) !== null) return true;
-        // ② メモリ（DOM が遅延している場合の保険）
-        const worldInfo = getWorldInfoInstance();
-        if (worldInfo && worldInfo[name]) return true;
         return false;
     }
 
+    // ============================================================
+    // ★ 存在確認（DOM + 検証済みメモリ）
+    //   DOM に無くメモリだけある場合は、サーバー検証してから判断する。
+    //   サーバーに無ければ stale としてメモリから削除する。
+    //   （これが「手動削除後に自動作成が動かない」問題の修正点）
+    // ============================================================
+    async function _hasWorldBookVerified(name) {
+        if (!name) return false;
+
+        // ① DOM チェック（最速・信頼できる）
+        if (_hasWorldBookInDOM(name)) return true;
+
+        // ② メモリにあればサーバー検証
+        const worldInfo = getWorldInfoInstance();
+        if (worldInfo && worldInfo[name]) {
+            console.debug(LOG, `"${name}" は DOM に無いがメモリにあるため、サーバー検証`);
+            const serverHas = await _verifyWorldbookOnServer(name);
+            if (serverHas) {
+                console.debug(LOG, `"${name}" はサーバーに存在（DOM 反映遅延のみ）`);
+                return true;
+            }
+            // ★ stale メモリを掃除
+            console.warn(
+                `${LOG} ⚠️ メモリの "${name}" はサーバーに存在しないため削除（手動削除の残骸）`
+            );
+            delete worldInfo[name];
+            return false;
+        }
+
+        return false;
+    }
+
+    // 後方互換（debug 用）: DOM + メモリを同期判定（検証なし）
+    function _hasWorldBook(name) {
+        if (!name) return false;
+        if (_hasWorldBookInDOM(name)) return true;
+        const worldInfo = getWorldInfoInstance();
+        return !!(worldInfo && worldInfo[name]);
+    }
+    
     async function _verifyWorldbookOnServer(worldName) {
         if (!worldName) return false;
         const data = await fetchWorldbookFromServer(worldName);
@@ -498,7 +578,7 @@
         console.log(`${LOG} 開始: char="${charNameAtStart}", reason=${reason}, 候補=[${candidates.join(', ')}]`);
 
         try {
-            // ── 1. 既存ロアブックを探す ──
+            // ── 1. 既存ロアブックを探す（DOM + サーバー検証済みメモリ） ──
             let targetName = null;
             for (let i = 0; i < FIND_RETRY_MAX; i++) {
                 if (isStale()) {
@@ -506,7 +586,7 @@
                     return;
                 }
                 for (const name of candidates) {
-                    if (_hasWorldBook(name)) {
+                    if (await _hasWorldBookVerified(name)) {
                         targetName = name;
                         break;
                     }
@@ -527,7 +607,6 @@
                     return;
                 }
 
-                // ★ バインド
                 const bound = await _bindCharacterToWorld(charAtStart, worldToCreate);
                 if (!bound) {
                     console.warn(`${LOG} ロアブック "${worldToCreate}" へのバインドに失敗しました`);
@@ -535,21 +614,25 @@
                     return;
                 }
 
-                // ★ UI 更新を強制（best-effort）
+                // ── DOM 反映: refreshWorldSelects + 直接注入保険 ──
                 await refreshWorldSelects();
+                _addOptionToSelectsIfMissing(worldToCreate);  // ★ 保険
                 await wait(300);
 
-                // ★ 再度存在確認（DOM or メモリ）
+                // 再度 DOM 確認
                 for (let i = 0; i < FIND_RETRY_MAX; i++) {
-                    if (_hasWorldBook(worldToCreate)) {
+                    if (_hasWorldBookInDOM(worldToCreate)) {
                         targetName = worldToCreate;
                         break;
                     }
-                    if (i === 1) await refreshWorldSelects();
+                    if (i === 1) {
+                        await refreshWorldSelects();
+                        _addOptionToSelectsIfMissing(worldToCreate);  // ★ 保険
+                    }
                     await wait(FIND_RETRY_DELAY_MS);
                 }
 
-                // ★ 最終フォールバック: サーバー実在すれば成功扱い
+                // 最終フォールバック: サーバー実在すれば成功扱い
                 if (!targetName) {
                     const serverHas = await _verifyWorldbookOnServer(worldToCreate);
                     if (serverHas) {
@@ -565,6 +648,8 @@
                                 worldInfo[worldToCreate] = { entries: fromServer.entries };
                             }
                         }
+                        // 保険として DOM にも注入
+                        _addOptionToSelectsIfMissing(worldToCreate);
                         targetName = worldToCreate;
                     } else {
                         console.warn(
