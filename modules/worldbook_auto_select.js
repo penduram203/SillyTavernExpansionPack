@@ -3,18 +3,21 @@
 // ロアブックが存在しない場合はキャラ名と同じロアブックを自動作成し、
 // キャラクターとバインド（char.data.extensions.world）する。
 //
-// ★ world_info 保護:
-//   - Object.defineProperty で setter を上書きし、boolean/null/空オブジェクト
-//     の書き込みを拒否する。
-//   - jQuery オブジェクト / 配列は world_info として扱わない。
+// ★ 設計方針: ロアブック名 = キャラ名 / [char.name, ext.world, data.world]
 //
-// ★ _validateAllWorldInfoEntries:
-//   - 数値キー ("0", "1") と jQuery/sizzle expando キーはスキップ
-//   - 呼び出しは unhandledrejection ハンドラのみ（critical path から外す）
-//
-// ★ _setActive / _setEditTarget:
-//   - 一括検証は呼ばない。特定ワールドのみ検証してから change を発火
-//   - ST の onWorldInfoChange / onWorldEditorSelectChange が正常動作する
+// ★ 真因と対策:
+//   (1) /api/worldinfo/edit はファイルを書くだけで、ST の設定 world_names には
+//       登録されない。ST の getSettings() が呼ばれると world_names がサーバー
+//       設定から再読込され、world_info[name] が消える。
+//       → /api/settings/get + /api/settings/save で world_names をサーバー設定に
+//         確実に保存する。これを change 発火前に実行。
+//   (2) world_info に jQuery/Sizzle expando (0, 1, 2, jQuery..., sizzle...) が
+//       混入すると displayWorldEntries / getGlobalLore がクラッシュ。
+//       → getWorldInfoInstance で jQuery を拒否、_shouldSkipValidateKey で
+//         スキップ、_sanitizeWorldInfoObject で除去。
+//   (3) importWorldInfo は内部 saveWorldInfo が 400 で失敗することがある。
+//       → /api/worldinfo/import を直接叩き、失敗時は /api/worldinfo/edit へ
+//         フォールバック。
 
 (function () {
     'use strict';
@@ -48,6 +51,9 @@
     const _warnedMismatch = new Set();
     const _protectedWorlds = new Set();
 
+    // ============================================================
+    // 基本ヘルパー
+    // ============================================================
     function getSTContext() {
         try {
             if (window.SillyTavern && typeof window.SillyTavern.getContext === 'function') {
@@ -132,6 +138,155 @@
         return null;
     }
 
+    // ============================================================
+    // ★ world_info から jQuery/Sizzle の汚染キーを除去
+    // ============================================================
+    function _shouldSkipValidateKey(name) {
+        if (!name) return true;
+        if (/^\d+$/.test(name)) return true;
+        if (name.startsWith('jQuery')) return true;
+        if (name.startsWith('sizzle')) return true;
+        if (name === 'length') return true;
+        if (name === 'prevObject') return true;
+        if (name === 'selector') return true;
+        if (name === 'context') return true;
+        return false;
+    }
+
+    function _sanitizeWorldInfoObject() {
+        const worldInfo = getWorldInfoInstance();
+        if (!worldInfo) return 0;
+
+        let removed = 0;
+        for (const key of Object.keys(worldInfo)) {
+            if (_shouldSkipValidateKey(key)) {
+                try {
+                    delete worldInfo[key];
+                    removed++;
+                } catch (e) { /* ignore */ }
+            }
+        }
+        if (removed > 0) {
+            console.log(`${LOG} 🧹 world_info から不正キー ${removed}件を削除`);
+        }
+        return removed;
+    }
+
+    // ============================================================
+    // ★ world_names をサーバー設定に永続化
+    //   ST の getSettings() で world_names がサーバー値に上書きされ、
+    //   world_info[name] が消えるのを防ぐための最重要処理。
+    // ============================================================
+    async function _persistWorldNameToServerSettings(worldName) {
+        if (!worldName) return false;
+        try {
+            const headers = await getRequestHeadersSafe();
+
+            // 現在の設定を取得
+            const getResp = await fetch('/api/settings/get', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({}),
+            });
+            if (!getResp.ok) {
+                console.warn(`${LOG} /api/settings/get HTTP ${getResp.status}`);
+                return false;
+            }
+            const settings = await getResp.json();
+            if (!settings || typeof settings !== 'object') return false;
+
+            // world_names を配列として確保
+            if (!Array.isArray(settings.world_names)) {
+                settings.world_names = [];
+            }
+            if (settings.world_names.includes(worldName)) {
+                console.debug(`${LOG} サーバー設定の world_names に "${worldName}" は既に存在`);
+                return true;
+            }
+            settings.world_names.push(worldName);
+
+            // 保存
+            const saveResp = await fetch('/api/settings/save', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(settings),
+            });
+            if (!saveResp.ok) {
+                console.warn(`${LOG} /api/settings/save HTTP ${saveResp.status}`);
+                return false;
+            }
+            console.log(`${LOG} 💾 サーバー設定の world_names に "${worldName}" を追加`);
+            return true;
+        } catch (e) {
+            console.warn(`${LOG} _persistWorldNameToServerSettings error:`, e);
+            return false;
+        }
+    }
+
+    // ============================================================
+    // ★ /api/worldinfo/import を直接叩く（world_names が ST 内で更新される）
+    // ============================================================
+    async function _importWorldInfoViaAPI(worldName, entries) {
+        try {
+            const headers = await getRequestHeadersSafe();
+            delete headers['Content-Type'];
+
+            const jsonContent = JSON.stringify({ entries }, null, 2);
+            const blob = new Blob([jsonContent], { type: 'application/json' });
+            const file = new File([blob], `${worldName}.json`, { type: 'application/json' });
+
+            const formData = new FormData();
+            formData.append('avatar', file);
+
+            const resp = await fetch('/api/worldinfo/import', {
+                method: 'POST',
+                headers,
+                body: formData,
+            });
+
+            if (resp.ok) {
+                console.log(`${LOG} 📥 /api/worldinfo/import 成功: "${worldName}"`);
+                return true;
+            }
+            console.warn(`${LOG} /api/worldinfo/import HTTP ${resp.status}`);
+            return false;
+        } catch (e) {
+            console.warn(`${LOG} _importWorldInfoViaAPI error:`, e);
+            return false;
+        }
+    }
+
+    // ============================================================
+    // サーバーからロアブック取得
+    // ============================================================
+    async function fetchWorldbookFromServer(worldName) {
+        if (!worldName) return null;
+        try {
+            const headers = await getRequestHeadersSafe();
+            const resp = await fetch('/api/worldinfo/get', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ name: worldName }),
+                cache: 'no-store',
+            });
+            if (!resp.ok) return null;
+            const data = await resp.json();
+            if (data?.entries && Object.keys(data.entries).length > 0) {
+                return data;
+            }
+            return null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    async function _verifyWorldbookOnServer(worldName) {
+        if (!worldName) return false;
+        const data = await fetchWorldbookFromServer(worldName);
+        if (!data || !data.entries) return false;
+        return Object.keys(data.entries).length > 0;
+    }
+
     async function refreshWorldSelects() {
         let success = false;
 
@@ -162,34 +317,9 @@
         return success;
     }
 
-    async function fetchWorldbookFromServer(worldName) {
-        if (!worldName) return null;
-        try {
-            const headers = await getRequestHeadersSafe();
-            const resp = await fetch('/api/worldinfo/get', {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({ name: worldName }),
-                cache: 'no-store',
-            });
-            if (!resp.ok) return null;
-            const data = await resp.json();
-            if (data?.entries && Object.keys(data.entries).length > 0) {
-                return data;
-            }
-            return null;
-        } catch (e) {
-            return null;
-        }
-    }
-
-    async function _verifyWorldbookOnServer(worldName) {
-        if (!worldName) return false;
-        const data = await fetchWorldbookFromServer(worldName);
-        if (!data || !data.entries) return false;
-        return Object.keys(data.entries).length > 0;
-    }
-
+    // ============================================================
+    // DOM ヘルパー
+    // ============================================================
     function _findOptionValue(selectEl, name) {
         if (!selectEl || !name) return null;
         for (const opt of selectEl.options) {
@@ -210,6 +340,36 @@
         return false;
     }
 
+    function _addOptionToSelectsIfMissing(name) {
+        if (!name) return;
+        const added = [];
+
+        const ed = document.querySelector('#world_editor_select');
+        if (ed && _findOptionValue(ed, name) === null) {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            ed.appendChild(opt);
+            added.push('world_editor_select');
+        }
+
+        const wi = document.querySelector('#world_info');
+        if (wi && _findOptionValue(wi, name) === null) {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            wi.appendChild(opt);
+            added.push('world_info');
+        }
+
+        if (added.length > 0) {
+            console.log(`${LOG} 📋 DOM に "${name}" option を直接注入: [${added.join(', ')}]`);
+        }
+    }
+
+    // ============================================================
+    // ★ world_info[name] を Object.defineProperty で保護
+    // ============================================================
     function _ensureWorldInfoProtected(worldName, entries) {
         if (!worldName || !entries) return false;
         if (Object.keys(entries).length === 0) return false;
@@ -258,9 +418,6 @@
         }
     }
 
-    // ============================================================
-    // ★ 特定ワールドの有効性のみ確認（他には触らない）
-    // ============================================================
     async function _ensureSpecificWorldReady(name) {
         if (!name) return false;
         const worldInfo = getWorldInfoInstance();
@@ -280,94 +437,64 @@
     }
 
     // ============================================================
-    // ★ world_names に確実に登録
+    // ★ world_names に確実に登録（メモリ + サーバー設定 + ST 強制反映）
     // ============================================================
     async function _ensureWorldInSTWorldNames(worldName) {
         if (!worldName) return false;
 
-        // 既に登録済み？
-        try {
-            const ctx = getSTContext();
-            if (Array.isArray(ctx?.world_names) && ctx.world_names.includes(worldName)) {
-                return true;
-            }
-        } catch (e) { /* ignore */ }
+        // 1. 既にメモリにある？
+        const inCtx = (() => {
+            try {
+                const ctx = getSTContext();
+                return Array.isArray(ctx?.world_names) && ctx.world_names.includes(worldName);
+            } catch (e) { return false; }
+        })();
+        if (inCtx) return true;
 
-        try {
-            const mod = await import('../../../../world-info.js');
-            if (Array.isArray(mod.world_names) && mod.world_names.includes(worldName)) {
-                // mod には入っているが ctx はダメかもしれない → ctx に追加を試みる
-                try {
-                    const ctx = getSTContext();
-                    if (Array.isArray(ctx?.world_names) && !ctx.world_names.includes(worldName)) {
-                        ctx.world_names.push(worldName);
-                    }
-                } catch (e) { /* ignore */ }
-                return true;
-            }
-        } catch (e) { /* ignore */ }
-
-        // ST に再読み込みさせる
-        await refreshWorldSelects();
-        await wait(200);
-
-        try {
-            const ctx = getSTContext();
-            if (Array.isArray(ctx?.world_names) && ctx.world_names.includes(worldName)) {
-                console.log(`${LOG} ✅ world_names に "${worldName}" が反映されました`);
-                return true;
-            }
-        } catch (e) { /* ignore */ }
-
-        try {
-            const mod = await import('../../../../world-info.js');
-            if (Array.isArray(mod.world_names) && mod.world_names.includes(worldName)) {
-                console.log(`${LOG} ✅ mod.world_names に "${worldName}" が反映されました`);
-                return true;
-            }
-        } catch (e) { /* ignore */ }
-
-        // 手動 push
-        let pushed = false;
+        // 2. メモリ配列へ push
         try {
             const mod = await import('../../../../world-info.js');
             if (Array.isArray(mod.world_names) && !mod.world_names.includes(worldName)) {
                 mod.world_names.push(worldName);
-                console.log(`${LOG} 📋 mod.world_names に "${worldName}" を手動追加`);
-                pushed = true;
+                console.log(`${LOG} 📋 mod.world_names に "${worldName}" を追加`);
             }
         } catch (e) { /* ignore */ }
         try {
             const ctx = getSTContext();
             if (Array.isArray(ctx?.world_names) && !ctx.world_names.includes(worldName)) {
                 ctx.world_names.push(worldName);
-                console.log(`${LOG} 📋 ctx.world_names に "${worldName}" を手動追加`);
-                pushed = true;
+                console.log(`${LOG} 📋 ctx.world_names に "${worldName}" を追加`);
             }
         } catch (e) { /* ignore */ }
-        return pushed;
+
+        // 3. ★ サーバー設定に永続化（最重要）
+        await _persistWorldNameToServerSettings(worldName);
+
+        // 4. ST の saveSettings でも永続化
+        try {
+            const scriptMod = await import('../../../../../script.js');
+            if (typeof scriptMod.saveSettings === 'function') {
+                await scriptMod.saveSettings();
+                console.log(`${LOG} 💾 saveSettings 完了`);
+            }
+        } catch (e) { /* ignore */ }
+
+        // 5. ST に再読み込みさせる
+        await refreshWorldSelects();
+        await wait(200);
+
+        return true;
     }
 
     // ============================================================
-    // ★ 一括検証（unhandledrejection ハンドラ専用）
-    //   数値キー・jQuery/sizzle キーはスキップ
+    // 一括検証（unhandledrejection 専用）
     // ============================================================
-    function _shouldSkipValidateKey(name) {
-        if (!name) return true;
-        if (/^\d+$/.test(name)) return true;
-        if (name.startsWith('jQuery')) return true;
-        if (name.startsWith('sizzle')) return true;
-        if (name === 'length') return true;
-        if (name === 'prevObject') return true;
-        return false;
-    }
-
     async function _validateAllWorldInfoEntries() {
         const worldInfo = getWorldInfoInstance();
-        if (!worldInfo) {
-            console.debug(`${LOG} _validateAllWorldInfoEntries: world_info が無効 (jQuery/配列) のためスキップ`);
-            return;
-        }
+        if (!worldInfo) return;
+
+        // まず汚染キーを除去
+        _sanitizeWorldInfoObject();
 
         const names = Object.keys(worldInfo);
         const broken = [];
@@ -404,26 +531,49 @@
     // ============================================================
     function _createCommonRuleEntry(uid) {
         return {
-            uid: uid, displayIndex: uid,
-            key: [], keysecondary: [],
-            comment: '00_共通ルール', content: COMMON_RULE_CONTENT,
-            constant: true, vectorized: false, selective: true, selectiveLogic: 0,
-            addMemo: false, order: 100, position: 4, disable: false,
-            excludeRecursion: false, preventRecursion: false, delayUntilRecursion: false,
-            probability: 100, useProbability: true, depth: 1,
-            group: '', groupOverride: false, groupWeight: 100,
-            scanDepth: null, caseSensitive: null, matchWholeWord: null, matchWholeWords: null,
-            useGroupScoring: null, automationId: '', role: 0,
-            sticky: 0, cooldown: 0, delay: 0,
+            uid: uid,
+            displayIndex: uid,
+            key: [],
+            keysecondary: [],
+            comment: '00_共通ルール',
+            content: COMMON_RULE_CONTENT,
+            constant: true,
+            vectorized: false,
+            selective: true,
+            selectiveLogic: 0,
+            addMemo: false,
+            order: 100,
+            position: 4,
+            disable: false,
+            excludeRecursion: false,
+            preventRecursion: false,
+            delayUntilRecursion: false,
+            probability: 100,
+            useProbability: true,
+            depth: 1,
+            group: '',
+            groupOverride: false,
+            groupWeight: 100,
+            scanDepth: null,
+            caseSensitive: null,
+            matchWholeWord: null,
+            matchWholeWords: null,
+            useGroupScoring: null,
+            automationId: '',
+            role: 0,
+            sticky: 0,
+            cooldown: 0,
+            delay: 0,
         };
     }
 
     // ============================================================
-    // 自動作成
+    // ★ 自動作成（import API 優先 + サーバー設定永続化）
     // ============================================================
     async function _createWorldbookIfMissing(worldName) {
         if (!worldName) return false;
 
+        // 1. 既存チェック
         const existing = await fetchWorldbookFromServer(worldName);
         if (existing && existing.entries && Object.keys(existing.entries).length > 0) {
             _ensureWorldInfoProtected(worldName, existing.entries);
@@ -431,36 +581,42 @@
             return true;
         }
 
-        const newWorldData = { entries: { 0: _createCommonRuleEntry(0) } };
-        let saved = false;
+        const newEntries = { 0: _createCommonRuleEntry(0) };
 
-        for (let attempt = 1; attempt <= SAVE_RETRY_MAX; attempt++) {
-            try {
-                const headers = await getRequestHeadersSafe();
-                const resp = await fetch('/api/worldinfo/edit', {
-                    method: 'POST',
-                    headers,
-                    body: JSON.stringify({ name: worldName, data: newWorldData }),
-                });
-                if (resp.ok) {
-                    console.log(`${LOG} 💾 /api/worldinfo/edit 成功 (attempt ${attempt})`);
-                    saved = true;
-                    break;
+        // 2. import API で作成（world_names も ST 内で更新される）
+        let saved = await _importWorldInfoViaAPI(worldName, newEntries);
+
+        // 3. 失敗時は /api/worldinfo/edit で直接作成
+        if (!saved) {
+            for (let attempt = 1; attempt <= SAVE_RETRY_MAX; attempt++) {
+                try {
+                    const headers = await getRequestHeadersSafe();
+                    const resp = await fetch('/api/worldinfo/edit', {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify({ name: worldName, data: { entries: newEntries } }),
+                    });
+                    if (resp.ok) {
+                        console.log(`${LOG} 💾 /api/worldinfo/edit 成功 (attempt ${attempt})`);
+                        saved = true;
+                        break;
+                    }
+                    let errText = '';
+                    try { errText = await resp.text(); } catch (e) { /* ignore */ }
+                    console.warn(
+                        `${LOG} /api/worldinfo/edit HTTP ${resp.status} (attempt ${attempt}) ` +
+                        `body="${errText.slice(0, 200)}"`
+                    );
+                } catch (e) {
+                    console.warn(`${LOG} /api/worldinfo/edit 例外 (attempt ${attempt}):`, e);
                 }
-                let errText = '';
-                try { errText = await resp.text(); } catch (e) { /* ignore */ }
-                console.warn(
-                    `${LOG} /api/worldinfo/edit HTTP ${resp.status} (attempt ${attempt}) ` +
-                    `body="${errText.slice(0, 200)}"`
-                );
-            } catch (e) {
-                console.warn(`${LOG} /api/worldinfo/edit 例外 (attempt ${attempt}):`, e);
+                if (attempt < SAVE_RETRY_MAX) await wait(SAVE_RETRY_DELAY_MS);
             }
-            if (attempt < SAVE_RETRY_MAX) await wait(SAVE_RETRY_DELAY_MS);
         }
 
         if (!saved) return false;
 
+        // 4. サーバー検証
         let verified = null;
         for (let i = 0; i < VERIFY_RETRY_MAX; i++) {
             const fetched = await fetchWorldbookFromServer(worldName);
@@ -479,16 +635,18 @@
             return false;
         }
 
-        _ensureWorldInfoProtected(worldName, verified);
+        // 5. ★ サーバー設定に world_names を永続化（これが最重要）
+        await _persistWorldNameToServerSettings(worldName);
 
-        // ★ refreshWorldSelects を先に呼んでから world_names を確認
-        await refreshWorldSelects();
+        // 6. 保護 + メモリ反映
+        _ensureWorldInfoProtected(worldName, verified);
         await _ensureWorldInSTWorldNames(worldName);
+        await refreshWorldSelects();
         _addOptionToSelectsIfMissing(worldName);
 
         console.log(
             `${LOG} 🆕 ロアブック "${worldName}" を自動作成しました ` +
-            `(entries ${Object.keys(verified).length}件, 保護済み, 検証済み)`
+            `(entries ${Object.keys(verified).length}件, 保護済み, 設定永続化済み)`
         );
         return true;
     }
@@ -500,7 +658,6 @@
             return true;
         }
 
-        // 対象ワールドのみ確保
         const ok = await _ensureSpecificWorldReady(worldName);
         if (!ok) {
             console.warn(
@@ -543,7 +700,7 @@
     }
 
     // ============================================================
-    // ★ _setEditTarget: 特定ワールドのみ検証 → change 発火
+    // 編集対象ドロップダウン: change 付き
     // ============================================================
     async function _setEditTarget(name) {
         const $ = getJQuery();
@@ -559,7 +716,6 @@
             return true;
         }
 
-        // ★ 特定ワールドのみ準備（一括検証しない）
         await _ensureSpecificWorldReady(name);
 
         try {
@@ -570,17 +726,19 @@
             return false;
         }
 
-        // 事後復元（change 中の上書き対策）
+        // 事後復元
         const restore = () => {
-            if (!_protectedWorlds.has(name)) return;
             const wi = getWorldInfoInstance();
             if (!wi) return;
             const cur = wi[name];
             const valid = cur && typeof cur === 'object'
                 && cur.entries && Object.keys(cur.entries).length > 0;
-            if (!valid) {
-                // 保護済みなら setter が拒否するだけなので実害なし
-                console.debug(`${LOG} 事後復元: "${name}" が無効になっていたが保護済み`);
+            if (!valid && _protectedWorlds.has(name)) {
+                // 保護済みなら setter で拒否されているはず
+                const fromServer = fetchWorldbookFromServer(name);
+                fromServer.then(d => {
+                    if (d?.entries) _ensureWorldInfoProtected(name, d.entries);
+                }).catch(() => {});
             }
         };
         setTimeout(restore, 300);
@@ -590,7 +748,7 @@
     }
 
     // ============================================================
-    // ★ _setActive: 特定ワールドのみ検証 → change 発火
+    // アクティブ選択: change 付き
     // ============================================================
     async function _setActive(name) {
         const $ = getJQuery();
@@ -606,7 +764,6 @@
             return true;
         }
 
-        // ★ 特定ワールドのみ準備（一括検証しない）
         const ok = await _ensureSpecificWorldReady(name);
         if (!ok) {
             console.warn(`${LOG} _setActive: "${name}" を準備できません`);
@@ -624,7 +781,7 @@
             console.warn(LOG, '_setActive error:', e);
         }
 
-        // 選択状態の確認（ログ出力のみ）
+        // 選択状態の確認
         setTimeout(() => {
             try {
                 const sel = Array.from(wi.selectedOptions || [])
@@ -639,35 +796,8 @@
         return true;
     }
 
-    function _addOptionToSelectsIfMissing(name) {
-        if (!name) return;
-        const added = [];
-
-        const ed = document.querySelector('#world_editor_select');
-        if (ed && _findOptionValue(ed, name) === null) {
-            const opt = document.createElement('option');
-            opt.value = name;
-            opt.textContent = name;
-            ed.appendChild(opt);
-            added.push('world_editor_select');
-        }
-
-        const wi = document.querySelector('#world_info');
-        if (wi && _findOptionValue(wi, name) === null) {
-            const opt = document.createElement('option');
-            opt.value = name;
-            opt.textContent = name;
-            wi.appendChild(opt);
-            added.push('world_info');
-        }
-
-        if (added.length > 0) {
-            console.log(`${LOG} 📋 DOM に "${name}" option を直接注入: [${added.join(', ')}]`);
-        }
-    }
-
     // ============================================================
-    // ★ 自己修復（特定ワールドのみ、一括検証しない）
+    // 自己修復
     // ============================================================
     async function _repairCurrentCharWorld() {
         try {
@@ -734,6 +864,9 @@
         }
     });
 
+    // ============================================================
+    // キャラクタワールド候補取得
+    // ============================================================
     function _getCharacterWorldCandidates(char) {
         const candidates = [];
         if (!char) return candidates;
@@ -896,6 +1029,9 @@
                 return;
             }
 
+            // ★ 最重要: change 発火前に world_names をサーバー設定に永続化
+            await _persistWorldNameToServerSettings(targetName);
+
             const editOk = await _setEditTarget(targetName);
             await wait(APPLY_DELAY_MS);
             if (isStale()) return;
@@ -1006,6 +1142,9 @@
         init();
     }
 
+    // ============================================================
+    // デバッグ用 API
+    // ============================================================
     window.WorldbookAutoSelect = {
         run: (reason, options) => {
             const token = ++_generationToken;
@@ -1031,8 +1170,10 @@
         verifyWorldbookOnServer: (name) => _verifyWorldbookOnServer(name || getCurrentCharName()),
         fetchWorldbook: (name) => fetchWorldbookFromServer(name || getCurrentCharName()),
         refreshWorldSelects,
+        persistWorldNameToServerSettings: (name) => _persistWorldNameToServerSettings(name || getCurrentCharName()),
         ensureWorldInSTWorldNames: (name) => _ensureWorldInSTWorldNames(name || getCurrentCharName()),
         validateAllWorldInfoEntries: _validateAllWorldInfoEntries,
+        sanitizeWorldInfo: _sanitizeWorldInfoObject,
         bindCharacter: async (worldName, force) => {
             const char = getCurrentChar();
             return _bindCharacterToWorld(char, worldName || getCurrentCharName(), !!force);
@@ -1046,9 +1187,9 @@
             const worldInfo = getWorldInfoInstance();
             const fromMemory = worldInfo?.[name];
 
-            // world_names の状態も報告
             let ctxWorldNames = null;
             let modWorldNames = null;
+            let serverWorldNames = null;
             try {
                 const ctx = getSTContext();
                 ctxWorldNames = Array.isArray(ctx?.world_names) ? ctx.world_names.slice() : null;
@@ -1057,17 +1198,26 @@
                 const mod = await import('../../../../world-info.js');
                 modWorldNames = Array.isArray(mod.world_names) ? mod.world_names.slice() : null;
             } catch (e) { /* ignore */ }
+            try {
+                const headers = await getRequestHeadersSafe();
+                const r = await fetch('/api/settings/get', {
+                    method: 'POST', headers, body: JSON.stringify({}),
+                });
+                if (r.ok) {
+                    const s = await r.json();
+                    serverWorldNames = Array.isArray(s?.world_names) ? s.world_names.slice() : null;
+                }
+            } catch (e) { /* ignore */ }
 
             return {
                 worldName: name,
                 protected: _protectedWorlds.has(name),
-                serverExists: !!fromServer,
+                serverFileExists: !!fromServer,
                 serverEntryCount: fromServer ? Object.keys(fromServer.entries || {}).length : 0,
                 memoryExists: !!fromMemory,
                 memoryEntryCount: fromMemory?.entries
                     ? Object.keys(fromMemory.entries).length
                     : 0,
-                memoryType: typeof fromMemory,
                 domHasEditorOption: _findOptionValue(
                     document.querySelector('#world_editor_select'), name
                 ) !== null,
@@ -1076,6 +1226,7 @@
                 ) !== null,
                 inCtxWorldNames: ctxWorldNames?.includes(name) ?? null,
                 inModWorldNames: modWorldNames?.includes(name) ?? null,
+                inServerWorldNames: serverWorldNames?.includes(name) ?? null,
             };
         },
         repairEmptyWorldbook: async (worldName) => {
@@ -1137,7 +1288,7 @@
                 ctxIsJQuery: !!(worldInfoCtx && worldInfoCtx.jquery),
                 winIsJQuery: !!(worldInfoWin && worldInfoWin.jquery),
                 sameInstance: worldInfoCtx === worldInfoWin,
-                worldInfoKeys: worldInfo ? Object.keys(worldInfo).slice(0, 20) : [],
+                worldInfoKeys: worldInfo ? Object.keys(worldInfo).slice(0, 30) : [],
                 hasCsrfToken: !!(headers['X-CSRF-Token']),
                 currentToken: _generationToken,
                 lastProcessedChar: _lastProcessedChar,
