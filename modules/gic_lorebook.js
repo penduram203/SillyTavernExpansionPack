@@ -1340,6 +1340,10 @@ async function processChoice(force = false) {
             }));
         } catch (e) { /* ignore */ }
 
+        // ★ 全フェーズを通してユーザー操作をロックする
+        //   （📃 応答生成中 → 📷 画像準備中 → 📷 画像生成中 → 完了 まで解除しない）
+        try { window.GicApi?.lockUserInput?.('image-generation-phase-start'); } catch (e) { /* ignore */ }
+
         try {
             await processChoiceCombined(
                 worldName, entry, prompt, negativePrompt, resolution,
@@ -1351,6 +1355,8 @@ async function processChoice(force = false) {
                     detail: { entryKey: _pendingGenerationContext?.entryKey },
                 }));
             } catch (e) { /* ignore */ }
+            // ★ ロック解除（プロセス全体の最後）
+            try { window.GicApi?.unlockUserInput?.('image-generation-phase-end'); } catch (e) { /* ignore */ }
         }
     } catch (e) {
         console.error('[GIC-Lore] processChoice エラー:', e);
