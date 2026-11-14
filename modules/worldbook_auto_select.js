@@ -16,29 +16,30 @@
 //     フォールバックする。
 //
 // ★ world_info 保護:
-//   - Object.defineProperty で setter を上書きし、boolean/null/空オブジェクト
-//     の書き込みを拒否する。jQuery/Sizzle expando キーも sanitize で除去。
+//   - Object.defineProperty で setter を上書きし、boolean/空オブジェクト/
+//     null/undefined の書き込みを「無視」する。jQuery/Sizzle expando キーも
+//     sanitize で除去。
 //   - これにより ST の displayWorldEntries / getGlobalLore の
 //     "right-hand side of 'in' should be an object, got boolean" クラッシュを回避。
 //
 // ★ unhandledrejection ハンドラ:
 //   - ST 内部エラーを抑止し、対象 world のみ復元する。
 //
-// ★ v2 修正（今回）:
-//   - _hasWorldBookVerified: DOM option を「存在の証拠」として信頼しない。
-//     メモリ entries>0 → server ファイル有効、の二段階検証に変更。
-//     無効判定時は stale DOM option を削除する（_removeStaleDomOption）。
-//   - _setEditTarget / _setActive: entries 未準備で change を発火しない。
-//     entries が空のまま ST の change ハンドラに渡すと、
-//     ST が「見かけ上の空ロアブック」を作ってしまい、
-//     「空エントリで自動作成される」「削除時に World Info is not set」
-//     の原因になっていた。
-//   - _ensureWorldInfoProtected の setter:
-//     null / undefined を「削除要求」として尊重し、realValue を null に。
-//     従来は無視していたため、ST が world_info[name] = null で削除しても
-//     メモリ上の古い entries が残り、次回検証をすり抜けていた。
-//   - autoSelect: _setEditTarget / _setActive の両方が失敗した場合、
-//     その場で _createWorldbookIfMissing を再試行する回退フローを追加。
+// ★ v3 修正（今回 / 根本原因の解消）:
+//   - 【重要】setter で null/undefined を「削除要求」として扱うのをやめ、
+//     「ST 本体の内部状態操作」として無視するよう変更。
+//     ST は内部処理中に world_info[name] = null を頻繁に書くため、
+//     これを削除扱いにすると有効なメモリ状態まで破壊され、
+//     その後の saveWorldInfo が空エントリでサーバーファイルを上書きして
+//     しまう（「ロアブックが空で自動作成される」「World Info is not set」
+//     の直接原因）。
+//   - _hasWorldBookVerified はメモリを信用せず、必ずサーバーファイルを
+//     検証する。サーバーを「真実の源」とする。
+//   - サーバーにファイルが無いと確認できた場合のみ、明示的に
+//     delete worldInfo[name] でメモリをクリアする。
+//   - _removeStaleDomOption / _ensureSpecificWorldReady のチェックは維持。
+//   - _setEditTarget / _setActive は entries 未準備で change を発火しない
+//     （これは前回修正を維持）。
 
 (function () {
     'use strict';
@@ -305,7 +306,7 @@
     }
 
     // ============================================================
-    // ★ v2: stale な DOM option を削除
+    // stale な DOM option を削除
     //   ST はロアブック削除時に #world_editor_select / #world_info の
     //   option を即座に更新しないことがある。この stale option を
     //   信じると「存在しない world を存在すると誤判定」してしまう。
@@ -344,6 +345,19 @@
 
     // ============================================================
     // world_info[name] を Object.defineProperty で保護
+    //
+    // ★ v3 重要変更:
+    //   setter が null/undefined を受け取っても「無視」する。
+    //   ST 本体は内部処理中に world_info[name] = null を頻繁に書くが、
+    //   これは「削除」ではなく「内部的な状態操作」である。
+    //   これを削除扱いにすると、その後の saveWorldInfo が
+    //   空エントリでサーバーファイルを上書きしてしまい、
+    //   「ロアブックが空で自動作成される」「World Info is not set」
+    //   の直接原因になる。
+    //
+    //   本当の削除検知は _hasWorldBookVerified 内で
+    //   「サーバーファイルが存在しない」ことを確認した上で
+    //   明示的に delete worldInfo[name] する。
     // ============================================================
     function _ensureWorldInfoProtected(worldName, entries) {
         if (!worldName || !entries) return false;
@@ -371,24 +385,21 @@
                 enumerable: true,
                 get() { return realValue; },
                 set(v) {
-                    // ★ v2: null / undefined は「削除要求」として尊重する
-                    //   従来は ignore していたため、ST が world_info[name] = null で
-                    //   削除してもメモリ上に古い entries が残り続け、
-                    //   _hasWorldBookVerified が誤って「存在する」と判定していた。
+                    // ★ v3: null / undefined は「ST 本体の内部状態操作」として無視。
+                    //   ST は loadWorldInfo のエラー処理・displayWorldEntries の
+                    //   初期化・onWorldEditorSelectChange のクリーンアップ等で
+                    //   頻繁に null を書く。これを削除扱いにすると有効な
+                    //   メモリ状態まで破壊される。
                     if (v === null || v === undefined) {
-                        realValue = null;
-                        _protectedWorlds.delete(worldName);
                         return;
                     }
+                    // 有効な entries を持つオブジェクトのみ受け入れる
                     if (v && typeof v === 'object' && v.entries && Object.keys(v.entries).length > 0) {
                         realValue = v;
-                    } else if (typeof v === 'boolean') {
-                        // ignore (ST の既知のバグ: boolean が混入する)
-                    } else if (typeof v === 'object' && (!v.entries || Object.keys(v.entries || {}).length === 0)) {
-                        // ignore (空の entries は保護)
-                    } else {
-                        realValue = v;
+                        return;
                     }
+                    // boolean / 空オブジェクト / その他は無視
+                    // （ST の既知のバグで混入する不正な値を弾く）
                 },
             });
             _protectedWorlds.add(worldName);
@@ -523,15 +534,11 @@
                 const blob = new Blob([jsonContent], { type: 'application/json' });
                 const file = new File([blob], `${worldName}.json`, { type: 'application/json' });
 
-                // importWorldInfo は内部で /api/worldinfo/import を叩き、
-                // 成功後に getSettings() を実行して world_names も更新する。
                 await mod.importWorldInfo(file, false);
                 console.log(`${LOG} 📥 importWorldInfo で "${worldName}" を作成`);
 
-                // world_names 更新と UI 同期を待つ
                 await wait(500);
 
-                // サーバー検証
                 let verified = null;
                 for (let i = 0; i < VERIFY_RETRY_MAX; i++) {
                     const fetched = await fetchWorldbookFromServer(worldName);
@@ -569,7 +576,6 @@
                 console.log(`${LOG} 📥 createNewWorldInfo で空の "${worldName}" を作成`);
                 await wait(300);
 
-                // エントリを書き込む
                 let editOk = false;
                 for (let attempt = 1; attempt <= SAVE_RETRY_MAX; attempt++) {
                     try {
@@ -701,18 +707,17 @@
     // ============================================================
     // 編集対象ドロップダウン: change 付き
     //
-    // ★ v2 修正: entries が server / メモリ上に存在することを確認してから
-    //    change を発火する。空のまま ST の change ハンドラを呼ぶと、
-    //    ST が「見かけ上の空ロアブック」を作ってしまい、
-    //    「空エントリで自動作成」「削除時に World Info is not set」
-    //    の原因になっていた。
+    // ★ v3 修正維持: entries が server / メモリ上に存在することを
+    //   確認してから change を発火する。空のまま ST の change ハンドラを
+    //   呼ぶと、ST が「見かけ上の空ロアブック」を作ってしまい、
+    //   「空エントリで自動作成」「削除時に World Info is not set」
+    //   の原因になっていた。
     // ============================================================
     async function _setEditTarget(name) {
         const $ = getJQuery();
         const ed = document.querySelector('#world_editor_select');
         if (!$ || !ed) return false;
 
-        // ★ v2: entries を先に確実にロード
         const ready = await _ensureSpecificWorldReady(name);
         if (!ready) {
             console.warn(`${LOG} _setEditTarget: "${name}" の entries を準備できません`);
@@ -756,15 +761,12 @@
 
     // ============================================================
     // アクティブ選択: change 付き
-    //
-    // ★ v2 修正: entries 未準備で change を発火しない（同上）
     // ============================================================
     async function _setActive(name) {
         const $ = getJQuery();
         const wi = document.querySelector('#world_info');
         if (!$ || !wi) return false;
 
-        // ★ v2: entries を先に確実にロード
         const ok = await _ensureSpecificWorldReady(name);
         if (!ok) {
             console.warn(`${LOG} _setActive: "${name}" を準備できません`);
@@ -808,6 +810,11 @@
 
     // ============================================================
     // 自己修復
+    //
+    // ★ v3 補足:
+    //   setter が null を無視するため、メモリは通常 valid のまま。
+    //   ここでは「メモリが有効なら保護を再インストールするだけ」
+    //   「メモリが無効ならサーバーから復元する」というシンプルな役割。
     // ============================================================
     async function _repairCurrentCharWorld() {
         try {
@@ -901,52 +908,54 @@
     }
 
     // ============================================================
-    // ★ v2: worldbook 存在検証を厳格化
-    //   DOM の option は「存在の証拠」として信頼しない。
-    //   (ST が lorebook を削除した時、option が即座に更新されず
-    //    stale になる。これを信じると「空エントリのまま自動選択」が走り、
-    //    ST の change ハンドラが空ロアブックを作ってしまう。)
+    // ★ v3: worldbook 存在検証
+    //
+    //   「サーバーファイル」を唯一の真実の源とする。
+    //   メモリは ST 本体の内部操作で頻繁に書き換わるため信用しない。
     //
     //   検証順:
-    //     ① メモリ上 worldInfo[name].entries が非空 → true
-    //     ② server 上の /api/worldinfo/get が非空 entries → true
-    //     ③ どちらも無効 → stale DOM option を削除して false
+    //     ① server 上の /api/worldinfo/get が非空 entries → true
+    //        同時にメモリが無効なら server データで復元
+    //     ② server に無い → メモリを delete し、stale DOM option も削除
+    //        → false
     // ============================================================
     async function _hasWorldBookVerified(name) {
         if (!name) return false;
 
-        const worldInfo = getWorldInfoInstance();
-
-        // ── ① メモリ検証 ──
-        if (worldInfo) {
-            const cur = worldInfo[name];
-            if (cur && typeof cur === 'object' && cur.entries) {
-                const count = Object.keys(cur.entries).length;
-                if (count > 0) return true;
-                // 空の entries → 無効とみなし削除
-                try { delete worldInfo[name]; } catch (e) { /* ignore */ }
-                _protectedWorlds.delete(name);
-            } else if (cur === null || cur === undefined) {
-                _protectedWorlds.delete(name);
-            }
-        }
-
-        // ── ② server 検証 ──
+        // ── ① server 検証（メモリより優先） ──
         const serverHas = await _verifyWorldbookOnServer(name);
         if (serverHas) {
             const fromServer = await fetchWorldbookFromServer(name);
             if (fromServer?.entries && Object.keys(fromServer.entries).length > 0) {
-                _ensureWorldInfoProtected(name, fromServer.entries);
+                // メモリが無効ならサーバーから復元
+                const worldInfo = getWorldInfoInstance();
+                if (worldInfo) {
+                    const cur = worldInfo[name];
+                    const memoryValid = cur && typeof cur === 'object'
+                        && cur.entries && Object.keys(cur.entries).length > 0;
+                    if (!memoryValid) {
+                        _ensureWorldInfoProtected(name, fromServer.entries);
+                        console.log(
+                            `${LOG} 🩹 "${name}" のメモリをサーバーから復元 ` +
+                            `(${Object.keys(fromServer.entries).length}件)`
+                        );
+                    }
+                }
                 return true;
             }
         }
 
-        // ── ③ stale DOM option を削除 ──
+        // ── ② server に無い → メモリ・DOM をクリーンアップ ──
+        const worldInfo = getWorldInfoInstance();
+        if (worldInfo) {
+            try { delete worldInfo[name]; } catch (e) { /* ignore */ }
+            _protectedWorlds.delete(name);
+        }
         _removeStaleDomOption(name);
         return false;
     }
 
-    // ★ v2: デバッグ API 用の簡易版もメモリ優先で検証
+    // ★ デバッグ API 用の簡易版
     function _hasWorldBook(name) {
         if (!name) return false;
         const worldInfo = getWorldInfoInstance();
@@ -1079,8 +1088,8 @@
                 _lastProcessedChar = charNameAtStart;
                 _lastFailure = { char: null, at: 0 };
             } else {
-                // ★ v2: 両方失敗 → targetName が実は存在しない可能性
-                //   その場で再作成して再試行する（次回起動を待たない）
+                // 両方失敗 → targetName が実は存在しない可能性
+                // その場で再作成して再試行する
                 console.warn(
                     `${LOG} ロアブック "${targetName}" の選択に失敗 → 再作成を試行`
                 );
@@ -1230,7 +1239,6 @@
             return _bindCharacterToWorld(char, worldName || getCurrentCharName(), !!force);
         },
         repairCurrentCharWorld: () => _repairCurrentCharWorld(),
-        // ★ v2: stale DOM option を手動削除するためのデバッグ API
         removeStaleDomOption: (name) => _removeStaleDomOption(name || getCurrentCharName()),
         inspectWorldbook: async (worldName) => {
             const name = worldName || getCurrentCharName();
