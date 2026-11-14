@@ -15,31 +15,24 @@
 //   - importWorldInfo が失敗した場合のみ createNewWorldInfo + edit へ
 //     フォールバックする。
 //
-// ★ world_info 保護:
-//   - Object.defineProperty で setter を上書きし、boolean/空オブジェクト/
-//     null/undefined の書き込みを「無視」する。jQuery/Sizzle expando キーも
-//     sanitize で除去。
-//   - これにより ST の displayWorldEntries / getGlobalLore の
-//     "right-hand side of 'in' should be an object, got boolean" クラッシュを回避。
+// ★ world_info 保護（v4）:
+//   ST 本体は world_info オブジェクトを頻繁に置換・破壊する:
+//     (a) getSettings() 内で `world_info = {...}` とオブジェクト置換
+//     (b) `world_info[name].entries = {}` という入れ子プロパティ置換
+//     (c) `delete world_info[name]`
+//   (a) は Object.defineProperty 保護が新オブジェクトに引き継がれない
+//   (b) は setter を通らないため素通り
+//   (c) は保護ごと削除
+//
+//   対策:
+//     - _protectionTargets に保護対象スナップショットを保持
+//     - getWorldInfoInstance() でインスタンス変化を検知し全保護を再インストール
+//     - setter で deepcopy して参照切り離し
+//     - getter で Proxy を返し entries への空オブジェクト代入を無視
+//     - self-heal 間隔短縮 (2000 → 1000ms)
 //
 // ★ unhandledrejection ハンドラ:
-//   - ST 内部エラーを抑止し、対象 world のみ復元する。
-//
-// ★ v3 修正（今回 / 根本原因の解消）:
-//   - 【重要】setter で null/undefined を「削除要求」として扱うのをやめ、
-//     「ST 本体の内部状態操作」として無視するよう変更。
-//     ST は内部処理中に world_info[name] = null を頻繁に書くため、
-//     これを削除扱いにすると有効なメモリ状態まで破壊され、
-//     その後の saveWorldInfo が空エントリでサーバーファイルを上書きして
-//     しまう（「ロアブックが空で自動作成される」「World Info is not set」
-//     の直接原因）。
-//   - _hasWorldBookVerified はメモリを信用せず、必ずサーバーファイルを
-//     検証する。サーバーを「真実の源」とする。
-//   - サーバーにファイルが無いと確認できた場合のみ、明示的に
-//     delete worldInfo[name] でメモリをクリアする。
-//   - _removeStaleDomOption / _ensureSpecificWorldReady のチェックは維持。
-//   - _setEditTarget / _setActive は entries 未準備で change を発火しない
-//     （これは前回修正を維持）。
+//   ST 内部エラーを抑止し、対象 world のみ復元する。
 
 (function () {
     'use strict';
@@ -53,7 +46,7 @@
     const VERIFY_RETRY_MAX = 5;
     const VERIFY_RETRY_DELAY_MS = 300;
     const APPLY_DELAY_MS = 200;
-    const SELF_HEAL_INTERVAL_MS = 2000;
+    const SELF_HEAL_INTERVAL_MS = 1000;  // v4: 2000 → 1000
 
     const COMMON_RULE_CONTENT =
         '【絶対厳守ルール】\n' +
@@ -72,6 +65,11 @@
     let _lastFailure = { char: null, at: 0 };
     const _warnedMismatch = new Set();
     const _protectedWorlds = new Set();
+
+    // ★ v4: 保護対象のスナップショット
+    //   world_info オブジェクトが置換された時、この内容で保護を再インストールする
+    const _protectionTargets = new Map();  // worldName -> { entries: ... }
+    let _lastWorldInfoInstance = null;
 
     // ============================================================
     // 基本ヘルパー
@@ -138,26 +136,44 @@
 
     // ============================================================
     // world_info インスタンス取得（jQuery / 配列を拒否）
+    // ★ v4: インスタンス変化を検知して保護を再インストール
     // ============================================================
     function isPlainWorldInfoObject(x) {
         if (!x || typeof x !== 'object') return false;
-        if (x.jquery) return false;         // jQuery オブジェクト
-        if (Array.isArray(x)) return false;  // 配列
+        if (x.jquery) return false;
+        if (Array.isArray(x)) return false;
         return true;
     }
 
     function getWorldInfoInstance() {
-        try {
-            const ctx = getSTContext();
-            if (isPlainWorldInfoObject(ctx?.world_info)) {
-                return ctx.world_info;
-            }
-        } catch (e) { /* ignore */ }
+        const ctx = getSTContext();
+        let obj = null;
+        if (isPlainWorldInfoObject(ctx?.world_info)) obj = ctx.world_info;
+        else if (isPlainWorldInfoObject(window.world_info)) obj = window.world_info;
 
-        if (isPlainWorldInfoObject(window.world_info)) {
-            return window.world_info;
+        if (obj && obj !== _lastWorldInfoInstance) {
+            _lastWorldInfoInstance = obj;
+            _reinstallAllProtections();
         }
-        return null;
+        return obj;
+    }
+
+    // ★ v4: 保護対象を新しい world_info インスタンスに再インストール
+    function _reinstallAllProtections() {
+        const wi = _lastWorldInfoInstance;
+        if (!wi) return;
+        if (_protectionTargets.size === 0) return;
+
+        const targets = Array.from(_protectionTargets.entries());
+        let reinstalled = 0;
+        for (const [name, data] of targets) {
+            if (_installProtectionOn(wi, name, data.entries)) {
+                reinstalled++;
+            }
+        }
+        console.log(
+            `${LOG} 🔄 world_info インスタンス変化 → ${reinstalled}/${targets.length} 件の保護を再インストール`
+        );
     }
 
     // ============================================================
@@ -252,6 +268,10 @@
             }
         }
 
+        // ★ v4: getSettings() は world_info を置き換える可能性があるので、
+        //   getWorldInfoInstance を呼んでインスタンス変化検知をトリガー
+        getWorldInfoInstance();
+
         return success;
     }
 
@@ -305,13 +325,6 @@
         }
     }
 
-    // ============================================================
-    // stale な DOM option を削除
-    //   ST はロアブック削除時に #world_editor_select / #world_info の
-    //   option を即座に更新しないことがある。この stale option を
-    //   信じると「存在しない world を存在すると誤判定」してしまう。
-    //   server にもメモリにも実体が無いことを確認した後で呼ぶ。
-    // ============================================================
     function _removeStaleDomOption(name) {
         if (!name) return;
         let removed = 0;
@@ -344,40 +357,61 @@
     }
 
     // ============================================================
-    // world_info[name] を Object.defineProperty で保護
-    //
-    // ★ v3 重要変更:
-    //   setter が null/undefined を受け取っても「無視」する。
-    //   ST 本体は内部処理中に world_info[name] = null を頻繁に書くが、
-    //   これは「削除」ではなく「内部的な状態操作」である。
-    //   これを削除扱いにすると、その後の saveWorldInfo が
-    //   空エントリでサーバーファイルを上書きしてしまい、
-    //   「ロアブックが空で自動作成される」「World Info is not set」
-    //   の直接原因になる。
-    //
-    //   本当の削除検知は _hasWorldBookVerified 内で
-    //   「サーバーファイルが存在しない」ことを確認した上で
-    //   明示的に delete worldInfo[name] する。
+    // ★ v4: 保護された値を作成（Proxy + deepcopy）
+    //   (a) setter 経由で受け入れる値は deepcopy で参照を切り離す
+    //   (b) getter が返す値は Proxy でラップし、
+    //       `world_info[name].entries = {}` のような空オブジェクト代入を無視
     // ============================================================
-    function _ensureWorldInfoProtected(worldName, entries) {
-        if (!worldName || !entries) return false;
+    function _createProtectedValue(data) {
+        if (!data || typeof data !== 'object') return data;
+
+        // deepcopy で参照切り離し
+        const copy = JSON.parse(JSON.stringify(data));
+
+        // Proxy が使える環境なら entries への空オブジェクト代入を無視
+        try {
+            if (typeof Proxy === 'function') {
+                return new Proxy(copy, {
+                    set(target, prop, value) {
+                        if (prop === 'entries') {
+                            // 空の entries への置換は ST の内部状態操作として無視
+                            if (!value || typeof value !== 'object') {
+                                return true;
+                            }
+                            if (Object.keys(value).length === 0) {
+                                return true;
+                            }
+                        }
+                        return Reflect.set(target, prop, value);
+                    },
+                });
+            }
+        } catch (e) { /* Proxy 不可環境はフォールバック */ }
+
+        return copy;
+    }
+
+    // ============================================================
+    // ★ v4: 特定の world_info インスタンスに保護をインストール
+    // ============================================================
+    function _installProtectionOn(worldInfo, worldName, entries) {
+        if (!worldInfo || !worldName || !entries) return false;
         if (Object.keys(entries).length === 0) return false;
 
-        const worldInfo = getWorldInfoInstance();
-        if (!worldInfo) return false;
-
+        // 既存の defineProperty 保護があるか
         const desc = Object.getOwnPropertyDescriptor(worldInfo, worldName);
         if (desc && typeof desc.get === 'function' && typeof desc.set === 'function') {
+            // 既存の保護がある → 値を更新（setter 経由）
             try {
                 worldInfo[worldName] = { entries: JSON.parse(JSON.stringify(entries)) };
-                _protectedWorlds.add(worldName);
                 return true;
             } catch (e) {
                 return false;
             }
         }
 
-        let realValue = { entries: JSON.parse(JSON.stringify(entries)) };
+        // 保護が無い → 新規インストール
+        let realValue = _createProtectedValue({ entries });
 
         try {
             Object.defineProperty(worldInfo, worldName, {
@@ -385,30 +419,52 @@
                 enumerable: true,
                 get() { return realValue; },
                 set(v) {
-                    // ★ v3: null / undefined は「ST 本体の内部状態操作」として無視。
-                    //   ST は loadWorldInfo のエラー処理・displayWorldEntries の
-                    //   初期化・onWorldEditorSelectChange のクリーンアップ等で
-                    //   頻繁に null を書く。これを削除扱いにすると有効な
-                    //   メモリ状態まで破壊される。
+                    // null/undefined は ST 本体の内部状態操作として無視
                     if (v === null || v === undefined) {
                         return;
                     }
                     // 有効な entries を持つオブジェクトのみ受け入れる
-                    if (v && typeof v === 'object' && v.entries && Object.keys(v.entries).length > 0) {
-                        realValue = v;
+                    if (v && typeof v === 'object' && v.entries
+                        && Object.keys(v.entries).length > 0) {
+                        realValue = _createProtectedValue(v);
                         return;
                     }
                     // boolean / 空オブジェクト / その他は無視
-                    // （ST の既知のバグで混入する不正な値を弾く）
                 },
             });
-            _protectedWorlds.add(worldName);
-            console.log(`${LOG} 🛡️ "${worldName}" の world_info 保護をインストール`);
             return true;
         } catch (e) {
-            try { worldInfo[worldName] = realValue; return true; }
-            catch (e2) { return false; }
+            try {
+                worldInfo[worldName] = { entries: JSON.parse(JSON.stringify(entries)) };
+                return true;
+            } catch (e2) {
+                return false;
+            }
         }
+    }
+
+    // ============================================================
+    // 公開用: world_info に保護をインストール
+    //   保護対象スナップショットも同時に更新する
+    // ============================================================
+    function _ensureWorldInfoProtected(worldName, entries) {
+        if (!worldName || !entries) return false;
+        if (Object.keys(entries).length === 0) return false;
+
+        // スナップショット更新
+        _protectionTargets.set(worldName, {
+            entries: JSON.parse(JSON.stringify(entries)),
+        });
+
+        const worldInfo = getWorldInfoInstance();
+        if (!worldInfo) return false;
+
+        const ok = _installProtectionOn(worldInfo, worldName, entries);
+        if (ok) {
+            _protectedWorlds.add(worldName);
+            console.log(`${LOG} 🛡️ "${worldName}" の world_info 保護をインストール`);
+        }
+        return ok;
     }
 
     async function _ensureSpecificWorldReady(name) {
@@ -462,6 +518,7 @@
                 try {
                     delete worldInfo[name];
                     _protectedWorlds.delete(name);
+                    _protectionTargets.delete(name);
                     console.log(`${LOG} 🧹 "${name}" を world_info から削除（サーバーにも無し）`);
                 } catch (e) { /* ignore */ }
             }
@@ -510,14 +567,13 @@
     }
 
     // ============================================================
-    // ★ 自動作成:
-    //   1) importWorldInfo（正規経路・world_names も更新される）
+    // 自動作成:
+    //   1) importWorldInfo（正規経路）
     //   2) createNewWorldInfo + /api/worldinfo/edit（フォールバック）
     // ============================================================
     async function _createWorldbookIfMissing(worldName) {
         if (!worldName) return false;
 
-        // 既存チェック（entries 付き）
         const existing = await fetchWorldbookFromServer(worldName);
         if (existing && existing.entries && Object.keys(existing.entries).length > 0) {
             _ensureWorldInfoProtected(worldName, existing.entries);
@@ -556,6 +612,8 @@
                     _ensureWorldInfoProtected(worldName, verified);
                     await refreshWorldSelects();
                     _addOptionToSelectsIfMissing(worldName);
+                    // ★ v4: getSettings による world_info 置換後の再保護
+                    _ensureWorldInfoProtected(worldName, verified);
                     console.log(
                         `${LOG} 🆕 ロアブック "${worldName}" を importWorldInfo 経由で作成完了 ` +
                         `(entries ${Object.keys(verified).length}件)`
@@ -614,6 +672,7 @@
                         _ensureWorldInfoProtected(worldName, verified);
                         await refreshWorldSelects();
                         _addOptionToSelectsIfMissing(worldName);
+                        _ensureWorldInfoProtected(worldName, verified);
                         console.log(
                             `${LOG} 🆕 ロアブック "${worldName}" を createNewWorldInfo + edit で作成完了 ` +
                             `(entries ${Object.keys(verified).length}件)`
@@ -642,6 +701,7 @@
                         _ensureWorldInfoProtected(worldName, fetched.entries);
                         await refreshWorldSelects();
                         _addOptionToSelectsIfMissing(worldName);
+                        _ensureWorldInfoProtected(worldName, fetched.entries);
                         console.log(`${LOG} 🆕 ロアブック "${worldName}" を edit のみで作成完了`);
                         return true;
                     }
@@ -706,12 +766,7 @@
 
     // ============================================================
     // 編集対象ドロップダウン: change 付き
-    //
-    // ★ v3 修正維持: entries が server / メモリ上に存在することを
-    //   確認してから change を発火する。空のまま ST の change ハンドラを
-    //   呼ぶと、ST が「見かけ上の空ロアブック」を作ってしまい、
-    //   「空エントリで自動作成」「削除時に World Info is not set」
-    //   の原因になっていた。
+    //   entries 未準備で change を発火しない（空エントリロアブック生成防止）
     // ============================================================
     async function _setEditTarget(name) {
         const $ = getJQuery();
@@ -741,6 +796,7 @@
             return false;
         }
 
+        // change 後の復元確認（ST が entries をクリアする場合がある）
         const restore = () => {
             const wi = getWorldInfoInstance();
             if (!wi) return;
@@ -810,11 +866,6 @@
 
     // ============================================================
     // 自己修復
-    //
-    // ★ v3 補足:
-    //   setter が null を無視するため、メモリは通常 valid のまま。
-    //   ここでは「メモリが有効なら保護を再インストールするだけ」
-    //   「メモリが無効ならサーバーから復元する」というシンプルな役割。
     // ============================================================
     async function _repairCurrentCharWorld() {
         try {
@@ -855,6 +906,8 @@
         if (_selfHealTimer) return;
         _selfHealTimer = setInterval(() => {
             _repairCurrentCharWorld().catch(() => {});
+            // ★ v4: インスタンス変化検知を毎回トリガー
+            getWorldInfoInstance();
         }, SELF_HEAL_INTERVAL_MS);
         console.log(`${LOG} 🩹 定期自己修復を開始 (interval=${SELF_HEAL_INTERVAL_MS}ms)`);
     }
@@ -908,26 +961,15 @@
     }
 
     // ============================================================
-    // ★ v3: worldbook 存在検証
-    //
-    //   「サーバーファイル」を唯一の真実の源とする。
-    //   メモリは ST 本体の内部操作で頻繁に書き換わるため信用しない。
-    //
-    //   検証順:
-    //     ① server 上の /api/worldinfo/get が非空 entries → true
-    //        同時にメモリが無効なら server データで復元
-    //     ② server に無い → メモリを delete し、stale DOM option も削除
-    //        → false
+    // worldbook 存在検証（サーバーを真実の源とする）
     // ============================================================
     async function _hasWorldBookVerified(name) {
         if (!name) return false;
 
-        // ── ① server 検証（メモリより優先） ──
         const serverHas = await _verifyWorldbookOnServer(name);
         if (serverHas) {
             const fromServer = await fetchWorldbookFromServer(name);
             if (fromServer?.entries && Object.keys(fromServer.entries).length > 0) {
-                // メモリが無効ならサーバーから復元
                 const worldInfo = getWorldInfoInstance();
                 if (worldInfo) {
                     const cur = worldInfo[name];
@@ -945,17 +987,16 @@
             }
         }
 
-        // ── ② server に無い → メモリ・DOM をクリーンアップ ──
         const worldInfo = getWorldInfoInstance();
         if (worldInfo) {
             try { delete worldInfo[name]; } catch (e) { /* ignore */ }
             _protectedWorlds.delete(name);
+            _protectionTargets.delete(name);
         }
         _removeStaleDomOption(name);
         return false;
     }
 
-    // ★ デバッグ API 用の簡易版
     function _hasWorldBook(name) {
         if (!name) return false;
         const worldInfo = getWorldInfoInstance();
@@ -1088,8 +1129,6 @@
                 _lastProcessedChar = charNameAtStart;
                 _lastFailure = { char: null, at: 0 };
             } else {
-                // 両方失敗 → targetName が実は存在しない可能性
-                // その場で再作成して再試行する
                 console.warn(
                     `${LOG} ロアブック "${targetName}" の選択に失敗 → 再作成を試行`
                 );
@@ -1227,6 +1266,7 @@
         },
         isProtected: (name) => _protectedWorlds.has(name),
         getProtectedWorlds: () => Array.from(_protectedWorlds),
+        getProtectionTargets: () => Array.from(_protectionTargets.keys()),
         getCharacterWorldCandidates: () => _getCharacterWorldCandidates(getCurrentChar()),
         createWorldbook: (name) => _createWorldbookIfMissing(name || getCurrentCharName()),
         verifyWorldbookOnServer: (name) => _verifyWorldbookOnServer(name || getCurrentCharName()),
@@ -1240,6 +1280,14 @@
         },
         repairCurrentCharWorld: () => _repairCurrentCharWorld(),
         removeStaleDomOption: (name) => _removeStaleDomOption(name || getCurrentCharName()),
+        // ★ v4: インスタンス変化を手動でチェック
+        checkInstanceChange: () => {
+            getWorldInfoInstance();
+            return {
+                instance: _lastWorldInfoInstance,
+                protectionTargets: Array.from(_protectionTargets.keys()),
+            };
+        },
         inspectWorldbook: async (worldName) => {
             const name = worldName || getCurrentCharName();
             if (!name) return { error: 'no worldName' };
@@ -1262,6 +1310,7 @@
             return {
                 worldName: name,
                 protected: _protectedWorlds.has(name),
+                protectionTargetExists: _protectionTargets.has(name),
                 serverFileExists: !!fromServer,
                 serverEntryCount: fromServer ? Object.keys(fromServer.entries || {}).length : 0,
                 memoryExists: !!fromMemory,
@@ -1319,6 +1368,7 @@
                     try {
                         delete worldInfo[name];
                         _protectedWorlds.delete(name);
+                        _protectionTargets.delete(name);
                         cleaned++;
                     } catch (e) { /* ignore */ }
                 }
@@ -1337,13 +1387,15 @@
                 ctxIsJQuery: !!(worldInfoCtx && worldInfoCtx.jquery),
                 winIsJQuery: !!(worldInfoWin && worldInfoWin.jquery),
                 sameInstance: worldInfoCtx === worldInfoWin,
+                lastInstanceMatch: _lastWorldInfoInstance === worldInfo,
                 worldInfoKeys: worldInfo ? Object.keys(worldInfo).slice(0, 30) : [],
+                protectionTargets: Array.from(_protectionTargets.keys()),
+                protectedWorlds: Array.from(_protectedWorlds),
                 hasCsrfToken: !!(headers['X-CSRF-Token']),
                 currentToken: _generationToken,
                 lastProcessedChar: _lastProcessedChar,
                 lastFailure: _lastFailure,
                 warnedMismatch: Array.from(_warnedMismatch),
-                protectedWorlds: Array.from(_protectedWorlds),
             };
         },
         resetProcessed: () => {
