@@ -1065,6 +1065,7 @@
             }
             state = { signature: sig, flags: newFlags };
             _bagState.set(key, state);
+            _scheduleBagStateSave();   // ★ 配列変更時に永続化
         }
         return state;
     }
@@ -1076,6 +1077,112 @@
             console.debug(`[ImageDisplay] 🔄 シャッフルバッグ状態をリセット (${size} キー)`);
         }
     }
+
+    // ============================================================
+    // ★ シャッフルバッグ状態の永続化
+    //   character.data.extensions.image_display_bag_state に保存する。
+    //   - フラグ変更時に debounce 保存（即時 in-memory 更新 + 300ms 後 persist）
+    //   - beforeunload / pagehide で即時フラッシュ
+    //   - キャラ切替時に新キャラの状態を復元
+    // ============================================================
+    const BAG_STATE_NS = 'image_display_bag_state';
+    let _bagStateSaveTimer = null;
+
+    function _serializeBagState() {
+        const out = {};
+        for (const [key, state] of _bagState.entries()) {
+            out[key] = {
+                signature: state.signature,
+                flags: Object.fromEntries(state.flags),
+            };
+        }
+        return out;
+    }
+
+    function _persistBagState() {
+        if (_bagStateSaveTimer) {
+            clearTimeout(_bagStateSaveTimer);
+            _bagStateSaveTimer = null;
+        }
+        if (_bagState.size === 0) return;
+
+        try {
+            const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+            const char = ctx?.characters?.[ctx?.characterId];
+            if (!char) return;
+
+            const payload = _serializeBagState();
+            if (!char.data) char.data = {};
+            if (!char.data.extensions) char.data.extensions = {};
+            char.data.extensions[BAG_STATE_NS] = payload;
+
+            if (window.CharStore?.saveCharacterExtension) {
+                window.CharStore.saveCharacterExtension(BAG_STATE_NS, payload);
+            }
+            console.debug(`[ImageDisplay] 💾 バッグ状態を保存: ${Object.keys(payload).length} キー`);
+        } catch (e) {
+            console.warn('[ImageDisplay] バッグ状態保存エラー:', e);
+        }
+    }
+
+    function _scheduleBagStateSave() {
+        if (_bagState.size === 0) return;
+
+        // ★ 即時 in-memory 更新（キャラ切替直後でも正しいデータが残る）
+        try {
+            const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+            const char = ctx?.characters?.[ctx?.characterId];
+            if (char) {
+                const payload = _serializeBagState();
+                if (!char.data) char.data = {};
+                if (!char.data.extensions) char.data.extensions = {};
+                char.data.extensions[BAG_STATE_NS] = payload;
+            }
+        } catch (e) { /* ignore */ }
+
+        // ★ debounce で CharStore persist（HTTP リクエスト抑制）
+        if (_bagStateSaveTimer) return;
+        _bagStateSaveTimer = setTimeout(() => {
+            _bagStateSaveTimer = null;
+            _persistBagState();
+        }, 300);
+    }
+
+    function _loadBagStateFromChar() {
+        _bagState.clear();
+        try {
+            const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+            const char = ctx?.characters?.[ctx?.characterId];
+            if (!char) return;
+
+            const serialized = char?.data?.extensions?.[BAG_STATE_NS];
+            if (!serialized || typeof serialized !== 'object') {
+                console.debug('[ImageDisplay] 保存済みバッグ状態なし');
+                return;
+            }
+
+            for (const [key, data] of Object.entries(serialized)) {
+                if (!data || typeof data !== 'object') continue;
+                if (typeof data.signature !== 'string') continue;
+                if (!data.flags || typeof data.flags !== 'object') continue;
+                const flags = new Map();
+                for (const [src, flag] of Object.entries(data.flags)) {
+                    flags.set(src, flag ? 1 : 0);
+                }
+                _bagState.set(key, { signature: data.signature, flags });
+            }
+            console.debug(`[ImageDisplay] 📂 バッグ状態を復元: ${_bagState.size} キー`);
+        } catch (e) {
+            console.warn('[ImageDisplay] バッグ状態読み込みエラー:', e);
+        }
+    }
+
+    // beforeunload / pagehide でフラッシュ
+    ['beforeunload', 'pagehide'].forEach(evt => {
+        window.addEventListener(evt, () => {
+            if (_bagState.size > 0) _persistBagState();
+        });
+    });
     
     function getRandomImageSource(imageSource, keyHint = null) {
         if (Array.isArray(imageSource)) {
@@ -1095,6 +1202,7 @@
                     state.flags.set(src, 0);
                 }
                 candidates = valid;
+                _scheduleBagStateSave();   // ★ 全リセット時の永続化
                 console.debug(
                     `[ImageDisplay] 🔄 全画像表示済みのためフラグをリセット ` +
                     `(key=${String(key).slice(0, 40)}, count=${valid.length})`
@@ -1103,6 +1211,7 @@
 
             const picked = candidates[Math.floor(Math.random() * candidates.length)];
             state.flags.set(picked, 1);
+            _scheduleBagStateSave();   // ★ 1枚選出時の永続化
             console.debug(
                 `[ImageDisplay] 🎲 半ランダム選択: ${picked.split('/').pop()} ` +
                 `(未表示 ${candidates.length - 1}/${valid.length})`
@@ -1345,6 +1454,7 @@
     //   - _lastSentKeywordImage をクリアしてから最新メッセージを再スキャン
     //   - findLastKeywordImage() で該当キーワードの画像を取得（bag state 経由で半ランダム選択）
     //   - updateImageWithUrl() で即座に表示
+    //   - 一致なしの場合はデフォルトへフォールバック
     // ============================================================
     async function pickAndShowCurrentKeyword() {
         _lastSentKeywordImage = null;
@@ -1354,7 +1464,7 @@
             _lastSentKeywordImage = matchedUrl;
             return updateImageWithUrl(matchedUrl);
         }
-        // ★ マッチなし → デフォルトへフォールバック（従来は何もしなかった）
+        // ★ マッチなし → デフォルトへフォールバック
         const fallback = getRandomImageSource(currentImageMap.default, '__default__')
             || currentImageMap.default;
         if (fallback && typeof fallback === 'string' && fallback.trim()) {
@@ -1662,7 +1772,16 @@
             return;
         }
         if (!forceRefresh && currentCharacter === charName && currentImageMap !== defaultImageMap) return;
+
+        // ★ キャラ切替判定（currentCharacter 更新前）
+        const characterChanged = (currentCharacter !== charName);
+
         currentCharacter = charName;
+
+        // ★ キャラ切替時のみバッグ状態を復元
+        if (characterChanged) {
+            _loadBagStateFromChar();
+        }
 
         if (!forceRefresh && imageMapCache.has(charName)) {
             currentImageMap = imageMapCache.get(charName);
@@ -2131,10 +2250,10 @@
 
             if (eventTypes.CHAT_LOADED) safeOn(eventTypes.CHAT_LOADED, immediateUpdate);
                 const onCharacterOrChatChanged = () => {
-                    // ★ シャッフルバッグ状態をリセット
-                    //   キャラ切替・チャット切替で画像マップが変わるため、
-                    //   前キャラの表示済みフラグを引き継がないようにする。
-                    _resetBagState();
+                    // ★ _resetBagState() を削除
+                    //   キャラ切替時は loadCharacterData 内で _loadBagStateFromChar() が
+                    //   新キャラの状態を読み込むため、ここでのリセットは不要
+                    //   （チャット切替時は同一キャラなので state を維持すべき）
 
                     // ★ バトルモード中はロックを保持（背景切替を防ぐ）
                     if (!isBattleModeActive() && !_battleImageLock) {
@@ -2212,10 +2331,6 @@
         });
 
         // ★ ギャラリー一括削除（gic-image-deleted）にも対応
-        //    gic.js の executeBulkDelete が発火する。
-        //    stj_editor.js が image_display_extension の更新と
-        //    lbe-image-map-updated の発火を担当するため、ここでは
-        //    _lastSentKeywordImage のクリアだけ行う。
         window.addEventListener('gic-image-deleted', (e) => {
             const { charName, fileNames } = e.detail || {};
             if (!charName || !Array.isArray(fileNames) || fileNames.length === 0) return;
@@ -2235,11 +2350,10 @@
 
             // stj_editor.js が後続で lbe-image-map-updated を発火するので、
             // ここでは _lastSentKeywordImage をクリアするだけで良い。
-            // safeUpdateImage() が次のポーリングで fresh scan する。
             _lastSentKeywordImage = null;
             invalidateMatchCache();
         });
-        
+
         // ② ST ネイティブイベント（外部編集・他経路の更新を拾う）
         try {
             const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
@@ -2400,6 +2514,37 @@
             } catch (e) {
                 return { ok: false, error: String(e) };
             }
+        },
+
+        // ★ バッグ状態の手動リセット（デバッグ・復旧用）
+        resetBagState: function () {
+            _resetBagState();
+            // 永続化データもクリア
+            try {
+                const ctx = SillyTavern.getContext();
+                const char = ctx?.characters?.[ctx?.characterId];
+                if (char?.data?.extensions?.[BAG_STATE_NS]) {
+                    delete char.data.extensions[BAG_STATE_NS];
+                    window.CharStore?.saveCharacterExtension?.(BAG_STATE_NS, {}, { immediate: true });
+                }
+            } catch (e) { /* ignore */ }
+            return true;
+        },
+        // ★ バッグ状態の内容を取得（デバッグ用）
+        getBagState: function () {
+            const out = {};
+            for (const [key, state] of _bagState.entries()) {
+                out[key] = {
+                    signature: state.signature.slice(0, 80),
+                    flags: Object.fromEntries(
+                        Array.from(state.flags.entries()).map(([src, flag]) => [
+                            src.split('/').pop(),
+                            flag
+                        ])
+                    ),
+                };
+            }
+            return out;
         },
         
         getCurrentMode: function () { return currentMode; },
