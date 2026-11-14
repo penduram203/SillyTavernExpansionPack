@@ -394,7 +394,9 @@ import('./sound_effects.js').catch(err => {
     }
 
     // ============================================================
-    // ★ 共通ルール変数の取得（キャラ変更自動検出 + globals除外対応）
+    // ★ 共通ルール変数の取得（キャラ固有ロアブックのみ対象）
+    //   globals（#world_info / #world_editor_select）は参照しない。
+    //   → キャラ切替時に旧キャラの変数で UI が引き継がれるのを防ぐ。
     // ============================================================
     async function refreshCommonRuleFlags(force = false) {
         const currentCharName = getCurrentCharName();
@@ -431,18 +433,10 @@ import('./sound_effects.js').catch(err => {
                     return _commonRuleFlags;
                 }
 
-                // ★ キャラ変更直後は globals を信用しない
-                //   （worldbook_auto_select.js の 700ms デバウンス中は
-                //    #world_info / #world_editor_select が旧キャラのままで、
-                //    旧キャラの 00_共通ルール を誤って読み込むのを防ぐ）
-                const includeGlobals = !charChanged;
-                const candidates = getWorldNameCandidates(includeGlobals);
-                if (candidates.length === 0) {
-                    _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, titleScreen: false, chatWindow: true, worldName: null };
-                    _commonRuleFlagsCharName = currentCharName;
-                    _logStateIfChanged(_commonRuleFlags);
-                    return _commonRuleFlags;
-                }
+                // ★ globals は常に除外（includeGlobals=false）
+                //   → #world_info / #world_editor_select は見ない
+                //   → 旧キャラのワールドブックが globals に残っていても影響を受けない
+                const candidates = getWorldNameCandidates(false);
 
                 for (const worldName of candidates) {
                     let entries = null;
@@ -478,9 +472,8 @@ import('./sound_effects.js').catch(err => {
                     return _commonRuleFlags;
                 }
 
-                // ★ どの候補にも 00_共通ルール が無い → デフォルト（UI 表示）
-                //   キャラ変更時は globals にフォールバックしないので、
-                //   旧キャラの変数を誤って引き継ぐことがない
+                // ★ キャラ固有のワールドブックに 00_共通ルール が無い
+                //   → デフォルト（UI 表示）。globals にはフォールバックしない。
                 _commonRuleFlags = { ok: false, rpgMode: false, choicesMode: false, titleScreen: false, chatWindow: true, worldName: null };
                 _commonRuleFlagsCharName = currentCharName;
                 _logStateIfChanged(_commonRuleFlags);
@@ -1765,6 +1758,21 @@ import('./sound_effects.js').catch(err => {
 
                         // 4) パネル内容もクリア（次回 render で再構築）
                         _lastRenderKey = '';
+    
+                        // ★ 5) body クラス変更後の再レイアウトを他拡張に促す
+                        //    chat_window_onoff.js / gic.js などが resize をリッスンして
+                        //    #toggle-chat-button / 🎨 / 💡 の位置を再計算する。
+                        //    body クラス変更（varmgr-hide-chat-window 等）で
+                        //    #sheld の表示状態が変わり、ボタン位置がズレるのを防ぐ。
+                        requestAnimationFrame(() => {
+                            try { window.dispatchEvent(new Event('resize')); } catch (e) { /* ignore */ }
+                        });
+                        setTimeout(() => {
+                            try { window.dispatchEvent(new Event('resize')); } catch (e) { /* ignore */ }
+                        }, 100);
+                        setTimeout(() => {
+                            try { window.dispatchEvent(new Event('resize')); } catch (e) { /* ignore */ }
+                        }, 300);
                     }
 
                     // 新キャラのフラグを非同期で再計算
