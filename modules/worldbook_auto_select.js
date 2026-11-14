@@ -3,6 +3,12 @@
 // ロアブックが存在しない場合はキャラ名と同じロアブックを自動作成し、
 // キャラクターとバインド（char.data.extensions.world）する。
 //
+// ★ v8.1:
+//   ユーザーがロアブック編集画面で「New Entry」ボタンから新規エントリを作成した時、
+//   WI Entry Status=Normal / position=at Depth System(@D ⚙️) / depth=0 を
+//   自動設定する。設定は作成直後の1回だけで、以降の変更はユーザーの自由。
+//   ※ ロアブック自動作成（00_共通ルール）はこの処理の対象外。
+//
 // ★ v8（リロード不要方式）:
 //   v7 までは新規作成後に location.reload() していたが、根本原因は
 //   「サーバーファイルは正常なのに ST 内部のワールドインフォ用キャッシュ/UI が
@@ -20,16 +26,12 @@
 //
 //   ★ 削除対応:
 //     /api/worldinfo/delete を検知して、そのロアブックのガード・処理済み状態をクリアする。
-//     （削除済みロアブックの古いデータが再作成を邪魔しないようにする）
-//
-//   ★ v7 の world_info への Proxy/getter 注入と、エディタ select への
-//     偽 option(value=名前) 追加は撤去（ST 内部状態との不整合の原因になるため）。
 //
 //   ★ 最終手段としてのリロード:
 //     自己修復が全て失敗した場合のみ、設定 lastResortReload=true の時に限り
 //     リロードする（既定は false）。
 
-console.log('[WBAutoSelect] 📦 v8 module loading (soft-refresh strategy, no reload)...');
+console.log('[WBAutoSelect] 📦 v8.1 module loading (soft-refresh + new-entry defaults)...');
 
 (function () {
     'use strict';
@@ -48,6 +50,13 @@ console.log('[WBAutoSelect] 📦 v8 module loading (soft-refresh strategy, no re
     const EDITOR_RENDER_WAIT_TRIES = 10;
     const EDITOR_RENDER_WAIT_MS = 250;
     const LIST_SYNC_RETRY_MAX = 5;
+
+    // 新規エントリ初期値
+    const NEW_ENTRY_WATCH_MS = 8000;
+    const NEW_ENTRY_POLL_MS = 150;
+    const NEW_ENTRY_APPLY_RETRY_MAX = 12;
+    const NEW_ENTRY_APPLY_RETRY_MS = 150;
+    const NEW_ENTRY_DEPTH = 0;
 
     // 最終手段リロード用
     const RELOAD_DELAY_MS = 1000;
@@ -70,6 +79,7 @@ console.log('[WBAutoSelect] 📦 v8 module loading (soft-refresh strategy, no re
 
     const DEFAULT_SETTINGS = {
         lastResortReload: false,
+        newEntryDefaults: true,
     };
 
     let settings = { ...DEFAULT_SETTINGS };
@@ -161,7 +171,6 @@ console.log('[WBAutoSelect] 📦 v8 module loading (soft-refresh strategy, no re
 
     // ============================================================
     // ST 公式 ワールドインフォ API の取得
-    //   context 経由を優先し、無ければ world-info.js のエクスポートを使う。
     // ============================================================
     let _modPromise = null;
     function _loadWIModule() {
@@ -378,7 +387,6 @@ console.log('[WBAutoSelect] 📦 v8 module loading (soft-refresh strategy, no re
         return success;
     }
 
-    // ワールド一覧に name が現れるまで更新を繰り返す
     async function _syncWorldListUntilVisible(name) {
         for (let i = 0; i < LIST_SYNC_RETRY_MAX; i++) {
             if (_hasWorldBookInDOM(name)) return true;
@@ -408,9 +416,6 @@ console.log('[WBAutoSelect] 📦 v8 module loading (soft-refresh strategy, no re
 
     // ============================================================
     // ロアブック作成（リロード不要）
-    //   1) 公式 saveWorldInfo（キャッシュ+サーバー同時更新）
-    //   2) 直接 /api/worldinfo/edit
-    //   3) importWorldInfo
     // ============================================================
     async function _createWorldbookIfMissing(worldName) {
         if (!worldName) return false;
@@ -424,7 +429,6 @@ console.log('[WBAutoSelect] 📦 v8 module loading (soft-refresh strategy, no re
             }
 
             const newEntries = { 0: _createCommonRuleEntry(0) };
-            // ST が途中で空保存してもこの内容で上書きされるようガード
             _protectFromEmptySave(worldName, newEntries);
 
             const api = await _getWIApi();
@@ -515,7 +519,6 @@ console.log('[WBAutoSelect] 📦 v8 module loading (soft-refresh strategy, no re
                 console.warn(`${LOG} reloadEditor failed:`, e?.message || e);
             }
         }
-        // フォールバック: ドロップダウン操作（option は ST が生成したものだけを使う）
         const $ = getJQuery();
         const ed = document.querySelector('#world_editor_select');
         if (!$ || !ed) return false;
@@ -544,10 +547,6 @@ console.log('[WBAutoSelect] 📦 v8 module loading (soft-refresh strategy, no re
         if (value === null) return false;
         try {
             if (wi.hasAttribute('multiple')) {
-                const cur = $(wi).val() || [];
-                const next = Array.isArray(cur) ? cur.slice() : [cur];
-                if (!next.includes(String(value))) next.push(String(value));
-                // 当該キャラ用のみを選択（従来動作に合わせ単一選択）
                 $(wi).val([String(value)]).trigger('change');
             } else {
                 $(wi).val(value).trigger('change');
@@ -557,16 +556,15 @@ console.log('[WBAutoSelect] 📦 v8 module loading (soft-refresh strategy, no re
     }
 
     // ============================================================
-    // ★ 自己修復: エディタが空表示なら、サーバー内容でキャッシュを上書きして再読込
+    // 自己修復: エディタが空表示なら、サーバー内容でキャッシュを上書きして再読込
     // ============================================================
     async function _ensureEditorShows(name) {
         const api = await _getWIApi();
 
         for (let attempt = 1; attempt <= HEAL_MAX_ATTEMPTS; attempt++) {
-            // 描画待ち
             for (let i = 0; i < EDITOR_RENDER_WAIT_TRIES; i++) {
                 const n = _countEditorEntries();
-                if (n === null) return true;     // 検証不能 → 成功扱い
+                if (n === null) return true;
                 if (n > 0 && _isEditorOn(name)) return true;
                 await wait(EDITOR_RENDER_WAIT_MS);
             }
@@ -580,7 +578,6 @@ console.log('[WBAutoSelect] 📦 v8 module loading (soft-refresh strategy, no re
             }
             _protectFromEmptySave(name, server.entries);
 
-            // キャッシュをサーバーの内容で上書き
             if (api.save) {
                 try {
                     await api.save(name, { entries: clone(server.entries) }, true);
@@ -594,6 +591,192 @@ console.log('[WBAutoSelect] 📦 v8 module loading (soft-refresh strategy, no re
 
         const n = _countEditorEntries();
         return n === null || n > 0;
+    }
+
+    // ============================================================
+    // ★ v8.1: ユーザーが新規エントリを作成した時の初期値設定
+    //   WI Entry Status = Normal / position = at Depth System / depth = 0
+    //
+    //   検出: 「New Entry」ボタン(#world_popup_new)のクリック直後だけ監視し、
+    //         クリック時点に無かった uid（かつ既存の最大 uid より大きいもの）を新規とみなす。
+    //   適用: ST の編集欄に 'input' イベントを送り、ST 自身に data 更新+保存をさせる。
+    //   ※ ロアブック自動作成は API 経由でありボタン操作ではないため対象外。
+    // ============================================================
+    let _newEntryWatch = null;   // { startedAt, knownUids:Set, maxKnown:number, timer }
+    const _appliedNewEntryUids = new Set();
+
+    function _getEntryElements() {
+        return Array.from(document.querySelectorAll('.world_entry[uid]'));
+    }
+    function _snapshotEntryUids() {
+        const set = new Set();
+        let max = -1;
+        for (const el of _getEntryElements()) {
+            const uid = String(el.getAttribute('uid'));
+            set.add(uid);
+            if (/^\d+$/.test(uid)) max = Math.max(max, Number(uid));
+        }
+        return { set, max };
+    }
+
+    function _triggerInput(el) {
+        const $ = getJQuery();
+        try {
+            if ($) $(el).trigger('input');
+            else el.dispatchEvent(new Event('input', { bubbles: true }));
+        } catch (e) {
+            try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch (e2) { /* ignore */ }
+        }
+    }
+
+    // Normal / @D system / depth 0 を適用。必要な欄が揃っていない場合は false（再試行させる）
+    function _applyNewEntryDefaults(entryEl) {
+        if (!entryEl) return false;
+
+        const posSel = entryEl.querySelector('select[name="position"]');
+        if (!posSel) return false;
+
+        // ── position: at Depth (value=4) の system ロール ──
+        let posIdx = -1;
+        const opts = Array.from(posSel.options);
+        const depthOpts = opts
+            .map((o, i) => ({ o, i }))
+            .filter(x => String(x.o.value) === '4');
+        if (depthOpts.length > 0) {
+            const sys = depthOpts.find(x => {
+                const r = x.o.getAttribute('data-role');
+                return r === '0' || r === 'system';
+            });
+            posIdx = (sys || depthOpts[0]).i;
+        } else {
+            const byText = opts.findIndex(o => /@D|depth/i.test(o.textContent || ''));
+            if (byText >= 0) posIdx = byText;
+        }
+        if (posIdx < 0) return false;
+
+        posSel.selectedIndex = posIdx;
+        _triggerInput(posSel);
+
+        // 旧版 ST: role が独立したセレクタの場合は system(0)
+        const roleSel = entryEl.querySelector('select[name="role"], select[name="entryRole"]');
+        if (roleSel) {
+            const sysIdx = Array.from(roleSel.options).findIndex(o => String(o.value) === '0');
+            if (sysIdx >= 0) {
+                roleSel.selectedIndex = sysIdx;
+                _triggerInput(roleSel);
+            }
+        }
+
+        // ── depth = 0 ──
+        const depthInput = entryEl.querySelector('input[name="depth"]');
+        if (depthInput) {
+            depthInput.value = String(NEW_ENTRY_DEPTH);
+            _triggerInput(depthInput);
+        }
+
+        // ── WI Entry Status = Normal ──
+        const stateSel = entryEl.querySelector('select[name="entryStateSelector"]');
+        if (stateSel) {
+            let idx = Array.from(stateSel.options).findIndex(o => String(o.value) === 'normal');
+            if (idx < 0) {
+                idx = Array.from(stateSel.options).findIndex(o => /normal/i.test(o.textContent || ''));
+            }
+            if (idx >= 0) {
+                stateSel.selectedIndex = idx;
+                _triggerInput(stateSel);
+            }
+        } else {
+            // 旧版: constant / vectorized のチェックボックスを外す
+            for (const nm of ['constant', 'vectorized']) {
+                const cb = entryEl.querySelector(`input[name="${nm}"]`);
+                if (cb && cb.checked) {
+                    cb.checked = false;
+                    _triggerInput(cb);
+                    try { cb.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) { /* ignore */ }
+                }
+            }
+        }
+
+        return true;
+    }
+
+    async function _applyNewEntryDefaultsWithRetry(uid) {
+        for (let i = 0; i < NEW_ENTRY_APPLY_RETRY_MAX; i++) {
+            const el = document.querySelector(`.world_entry[uid="${CSS.escape(String(uid))}"]`);
+            if (el && _applyNewEntryDefaults(el)) {
+                console.log(`${LOG} 🆕 new entry defaults applied: uid=${uid} (Normal / @D system / depth=${NEW_ENTRY_DEPTH})`);
+                return true;
+            }
+            await wait(NEW_ENTRY_APPLY_RETRY_MS);
+        }
+        console.warn(`${LOG} new entry defaults: could not apply to uid=${uid}`);
+        return false;
+    }
+
+    function _stopNewEntryWatch() {
+        if (_newEntryWatch?.timer) clearInterval(_newEntryWatch.timer);
+        _newEntryWatch = null;
+    }
+
+    function _startNewEntryWatch() {
+        if (_getSettings().newEntryDefaults === false) return;
+        // ロアブック自動作成中は対象外
+        if (_creating.size > 0) return;
+
+        _stopNewEntryWatch();
+        const snap = _snapshotEntryUids();
+        const watch = {
+            startedAt: Date.now(),
+            knownUids: snap.set,
+            maxKnown: snap.max,
+            timer: null,
+            busy: false,
+        };
+        _newEntryWatch = watch;
+
+        watch.timer = setInterval(async () => {
+            if (_newEntryWatch !== watch) { clearInterval(watch.timer); return; }
+            if (Date.now() - watch.startedAt > NEW_ENTRY_WATCH_MS) { _stopNewEntryWatch(); return; }
+            if (watch.busy) return;
+
+            // 新規候補: 以前の DOM に無く、かつ既存の最大 uid より大きいもの（最大 uid を優先）
+            let candidate = null;
+            for (const el of _getEntryElements()) {
+                const uid = String(el.getAttribute('uid'));
+                if (watch.knownUids.has(uid) || _appliedNewEntryUids.has(uid)) continue;
+                if (/^\d+$/.test(uid)) {
+                    const n = Number(uid);
+                    if (n <= watch.maxKnown) continue;
+                    if (!candidate || n > candidate.n) candidate = { uid, n };
+                } else if (!candidate) {
+                    candidate = { uid, n: -1 };
+                }
+            }
+            if (!candidate) return;
+
+            watch.busy = true;
+            _appliedNewEntryUids.add(candidate.uid);
+            try {
+                await _applyNewEntryDefaultsWithRetry(candidate.uid);
+            } finally {
+                _stopNewEntryWatch();   // 1 回のクリックにつき 1 エントリのみ
+            }
+        }, NEW_ENTRY_POLL_MS);
+    }
+
+    function installNewEntryDefaults() {
+        if (window.__wbAutoSelectNewEntryInstalled) return;
+        window.__wbAutoSelectNewEntryInstalled = true;
+
+        document.addEventListener('click', (e) => {
+            const btn = e.target?.closest?.('#world_popup_new');
+            if (!btn) return;
+            // ST のクリック処理でエントリが作られる前の状態をスナップショットするため、
+            // capture フェーズで即座に監視を開始する
+            _startNewEntryWatch();
+        }, true);
+
+        console.log(`${LOG} 🆕 new-entry defaults installed (Normal / @D system / depth=${NEW_ENTRY_DEPTH})`);
     }
 
     // ============================================================
@@ -682,7 +865,6 @@ console.log('[WBAutoSelect] 📦 v8 module loading (soft-refresh strategy, no re
         return candidates;
     }
 
-    // サーバー上に（エントリ付きで）実在するか。無ければ DOM の古い option を掃除する。
     async function _hasWorldBookVerified(name) {
         if (!name) return false;
         if (await _verifyWorldbookOnServer(name)) return true;
@@ -742,7 +924,6 @@ console.log('[WBAutoSelect] 📦 v8 module loading (soft-refresh strategy, no re
                     return;
                 }
 
-                // ST のワールド一覧に反映されるまで待つ
                 const visible = await _syncWorldListUntilVisible(worldToCreate);
                 if (!visible) {
                     console.warn(`${LOG} "${worldToCreate}" not visible in ST world list`);
@@ -776,7 +957,6 @@ console.log('[WBAutoSelect] 📦 v8 module loading (soft-refresh strategy, no re
                     }
                 }
 
-                // ★ エディタが空表示になっていないか検証し、必要なら自己修復
                 if (editOk) {
                     const shown = await _ensureEditorShows(targetName);
                     if (!shown) {
@@ -864,6 +1044,7 @@ console.log('[WBAutoSelect] 📦 v8 module loading (soft-refresh strategy, no re
         _restoreScrollAfterReload();
 
         setupEventListeners();
+        installNewEntryDefaults();
 
         setTimeout(() => scheduleAutoSelect('initial'), reloadState ? 1000 : 1500);
         console.log(LOG, 'init complete');
@@ -906,6 +1087,23 @@ console.log('[WBAutoSelect] 📦 v8 module loading (soft-refresh strategy, no re
             _saveSettings();
             return settings.lastResortReload;
         },
+        // ★ v8.1: 新規エントリ初期値の ON/OFF
+        setNewEntryDefaults: (enabled) => {
+            settings.newEntryDefaults = !!enabled;
+            _saveSettings();
+            console.log(`${LOG} newEntryDefaults = ${settings.newEntryDefaults}`);
+            return settings.newEntryDefaults;
+        },
+        // ★ v8.1: 指定 uid（省略時は最後のエントリ）に手動で初期値を適用（デバッグ用）
+        applyNewEntryDefaults: async (uid) => {
+            let target = uid;
+            if (target === undefined || target === null) {
+                const els = _getEntryElements();
+                if (els.length === 0) return false;
+                target = els[els.length - 1].getAttribute('uid');
+            }
+            return _applyNewEntryDefaultsWithRetry(target);
+        },
         getCurrentCharName,
         hasWorldBookVerified: _hasWorldBookVerified,
         hasWorldBookInDOM: _hasWorldBookInDOM,
@@ -928,7 +1126,7 @@ console.log('[WBAutoSelect] 📦 v8 module loading (soft-refresh strategy, no re
         diagnose: async () => {
             const api = await _getWIApi();
             return {
-                version: 'v8',
+                version: 'v8.1',
                 settings: { ...settings },
                 currentChar: getCurrentCharName(),
                 api: {
@@ -940,6 +1138,8 @@ console.log('[WBAutoSelect] 📦 v8 module loading (soft-refresh strategy, no re
                 editorEntryCount: _countEditorEntries(),
                 editorSelected: document.querySelector('#world_editor_select')
                     ?.selectedOptions?.[0]?.textContent?.trim() || null,
+                newEntryButtonFound: !!document.querySelector('#world_popup_new'),
+                newEntryWatching: !!_newEntryWatch,
                 emptySaveGuards: Array.from(_emptySaveGuards.keys()),
                 creating: Array.from(_creating.keys()),
             };
@@ -951,5 +1151,5 @@ console.log('[WBAutoSelect] 📦 v8 module loading (soft-refresh strategy, no re
         },
     };
 
-    console.log(LOG, 'window.WorldbookAutoSelect API exposed (v8)');
+    console.log(LOG, 'window.WorldbookAutoSelect API exposed (v8.1)');
 })();
