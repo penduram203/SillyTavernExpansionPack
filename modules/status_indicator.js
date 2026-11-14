@@ -2,8 +2,10 @@
 // 画面上部に「応答生成中…」「画像生成中…」のステータスを表示する。
 //   - LLM応答生成: MESSAGE_SENT/MESSAGE_SWIPED で表示、GENERATION_ENDED で非表示
 //   - 画像生成: gic-image-generation-started/ended カスタムイベントで表示制御
-//     preparing:true → 緑枠スピナー（画像準備中…）
-//     preparing:false → オレンジ枠スピナー（画像生成中…）
+//     preparing:true → 📷 スピナー（画像準備中…）
+//     preparing:false → 🖼 スピナー（画像生成中…）
+//   - LLM応答生成は 📃 スピナー
+//   - ホバー時に data-tooltip を即座に表示（独自ツールチップ）
 
 (function () {
     'use strict';
@@ -17,8 +19,6 @@
     //   背景生成モードは合体モード固定化に伴い廃止されたが、
     //   gic-mode-changed ハンドラと window.StatusIndicator 代入部に
     //   参照が残っているため no-op として定義する。
-    //   （未定義だと ReferenceError で window.StatusIndicator の代入が
-    //     中断され、モジュール末尾の評価が失敗する）
     // ============================================================
     function isPreSetupMode() { return false; }
     function showPreSetupModeUnderLLM() { /* no-op */ }
@@ -73,11 +73,12 @@
     // ============================================================
     // ★ ステータス表示
     //    type:
-    //      'llm'        … 応答生成中…（青枠・スピナー）
-    //      'preparing'  … 画像準備中…（緑枠・スピナー）
-    //      'generating' … 画像生成中…（オレンジ枠・スピナー）
-    //      'mode'       … モード表示（黄枠・スピナーなし）
+    //      'llm'        … 📃 スピナー（応答生成中…）
+    //      'preparing'  … 📷 スピナー（画像準備中…）
+    //      'generating' … 🖼 スピナー（画像生成中…）
+    //      'mode'       … ⚙️ スピナーなし（モード表示）
     //    'image' は後方互換（preparing 相当として扱う）
+    //    絵文字にホバーすると data-tooltip の詳細テキストを即座に表示する。
     // ============================================================
     function showStatus(key, text, type) {
         if (!key || !text) return;
@@ -95,9 +96,30 @@
             items.set(key, el);
         }
 
-        // ★ Option A: テキストのみ（スピナーは CSS ::before）。
-        //   generating も preparing と同じ表示形式で、枠色のみで差別化する。
-        el.textContent = text;
+        // ★ 絵文字とツールチップテキストの決定
+        let emoji = '';
+        let tooltip = '';
+        if (type === 'llm' || text === '応答生成中…') {
+            emoji = '📃';
+            tooltip = '応答生成中…';
+        } else if (type === 'preparing' || type === 'image') {
+            emoji = '📷';
+            tooltip = '画像準備中…';
+        } else if (type === 'generating') {
+            emoji = '🖼';
+            tooltip = '画像生成中…';
+        } else if (type === 'mode') {
+            emoji = '⚙️';
+            tooltip = text;
+        } else {
+            emoji = '⏳';
+            tooltip = text;
+        }
+
+        el.textContent = emoji;
+        el.dataset.tooltip = tooltip;
+        el.setAttribute('aria-label', tooltip);  // アクセシビリティ用
+        el.removeAttribute('title');              // native title は無効化（二重表示防止）
 
         // ── クラス切り替え ──
         const isImage = (type === 'image' || type === 'preparing' || type === 'generating');
@@ -160,8 +182,8 @@
 
         // ============================================================
         // 画像生成（カスタムイベント）
-        //   preparing=true  → 画像準備中…（緑枠）
-        //   preparing=false → 画像生成中…（オレンジ枠）
+        //   preparing=true  → 📷 スピナー（緑枠）
+        //   preparing=false → 🖼 スピナー（オレンジ枠）
         // ============================================================
         window.addEventListener('gic-image-generation-started', (e) => {
             const preparing = e?.detail?.preparing === true;
@@ -187,6 +209,78 @@
 
         console.log(LOG, 'イベントリスナーを登録しました');
     }
+
+    // ============================================================
+    // ★ 即座表示ツールチップ
+    //    status-indicator-item にマウスが乗ったら、data-tooltip の
+    //    内容を即座にツールチップとして表示する。
+    //    （native title は 1秒前後の遅延があるため独自実装）
+    // ============================================================
+    (function setupImmediateTooltip() {
+        let tooltipEl = null;
+
+        function ensureTooltip() {
+            if (tooltipEl && document.body.contains(tooltipEl)) return tooltipEl;
+            tooltipEl = document.createElement('div');
+            tooltipEl.id = 'status-immediate-tooltip';
+            document.body.appendChild(tooltipEl);
+            return tooltipEl;
+        }
+
+        function showTooltip(target) {
+            const text = target.dataset.tooltip;
+            if (!text) return;
+            const tip = ensureTooltip();
+            tip.textContent = text;
+            // ★ opacity: 0 の状態で一旦レイアウト確定させてから visible を付与
+            tip.classList.add('visible');
+
+            // 位置計算: 対象の上に表示
+            const rect = target.getBoundingClientRect();
+            const tipRect = tip.getBoundingClientRect();
+
+            let top = rect.top - tipRect.height - 8;
+            let left = rect.left + rect.width / 2 - tipRect.width / 2;
+
+            // 画面外にはみ出さないよう補正
+            if (top < 4) top = rect.bottom + 8;   // 上に収まらなければ下へ
+            if (left < 4) left = 4;
+            if (left + tipRect.width > window.innerWidth - 4) {
+                left = window.innerWidth - tipRect.width - 4;
+            }
+
+            tip.style.left = Math.round(left) + 'px';
+            tip.style.top = Math.round(top) + 'px';
+        }
+
+        function hideTooltip() {
+            if (tooltipEl) tooltipEl.classList.remove('visible');
+        }
+
+        // ── イベント委譲（document 全体で監視） ──
+        document.addEventListener('mouseover', (e) => {
+            const target = e.target && e.target.closest
+                ? e.target.closest('.status-indicator-item')
+                : null;
+            if (!target) return;
+            showTooltip(target);
+        }, true);
+
+        document.addEventListener('mouseout', (e) => {
+            const target = e.target && e.target.closest
+                ? e.target.closest('.status-indicator-item')
+                : null;
+            if (!target) return;
+            // relatedTarget が同じ target 内なら無視（内部の子要素移動）
+            if (e.relatedTarget && target.contains(e.relatedTarget)) return;
+            hideTooltip();
+        }, true);
+
+        // スクロールやウィンドウリサイズ時に位置がずれないよう非表示
+        window.addEventListener('scroll', hideTooltip, true);
+        window.addEventListener('resize', hideTooltip);
+        window.addEventListener('blur', hideTooltip);
+    })();
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => {
