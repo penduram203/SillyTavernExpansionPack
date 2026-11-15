@@ -8,7 +8,7 @@
   top: 0;
   left: auto;
   right: 0;
-  width: calc(85vw - var(--exp-scale, 1) * 280px);
+  width: 70.5vw;
   min-width: calc(var(--exp-scale, 1) * 500px);
   height: 100vh;
   background-color: #2d3748;
