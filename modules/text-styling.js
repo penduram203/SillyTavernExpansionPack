@@ -535,11 +535,21 @@ function initTextStyling() {
         const sheld = document.getElementById('sheld');
         if (!sheld) return;
 
-        sheld.style.resize = 'none';
-        sheld.style.inset = '3.5vh 0px 60px 25vw';
-        sheld.style.height = '100vh';
-        sheld.style.width = '50vw';
-        sheld.style.margin = 'unset';
+        // ★ image-display.js の idp-chat-explicit を強制除去
+        //   （過去のドラッグ/リサイズで保存された px 幅を無効化）
+        sheld.classList.remove('idp-chat-explicit', 'idp-chat-maximized');
+        sheld.style.removeProperty('--idp-chat-left');
+        sheld.style.removeProperty('--idp-chat-top');
+        sheld.style.removeProperty('--idp-chat-width');
+        sheld.style.removeProperty('--idp-chat-height');
+        sheld.style.removeProperty('--idp-form-max-width');
+
+        // ★ !important 付きで設定（image-display.js の CSS !important に勝つため）
+        sheld.style.setProperty('resize', 'none', 'important');
+        sheld.style.setProperty('inset', '3.5vh 0px 60px 25vw', 'important');
+        sheld.style.setProperty('height', '100vh', 'important');
+        sheld.style.setProperty('width', '50vw', 'important');
+        sheld.style.setProperty('margin', 'unset', 'important');
 
         try {
             if (window.ImageDisplayExtension?.applyMaximizeMode) {
@@ -555,11 +565,19 @@ function initTextStyling() {
         const sheld = document.getElementById('sheld');
         if (!sheld) return;
 
-        sheld.style.resize = 'none';
-        sheld.style.inset = '3.5vh 0px 60px 50vw';
-        sheld.style.height = '100vh';
-        sheld.style.width = '50vw';
-        sheld.style.margin = 'unset';
+        // ★ idp-chat-explicit を強制除去
+        sheld.classList.remove('idp-chat-explicit', 'idp-chat-maximized');
+        sheld.style.removeProperty('--idp-chat-left');
+        sheld.style.removeProperty('--idp-chat-top');
+        sheld.style.removeProperty('--idp-chat-width');
+        sheld.style.removeProperty('--idp-chat-height');
+        sheld.style.removeProperty('--idp-form-max-width');
+
+        sheld.style.setProperty('resize', 'none', 'important');
+        sheld.style.setProperty('inset', '3.5vh 0px 60px 50vw', 'important');
+        sheld.style.setProperty('height', '100vh', 'important');
+        sheld.style.setProperty('width', '50vw', 'important');
+        sheld.style.setProperty('margin', 'unset', 'important');
 
         try {
             if (window.ImageDisplayExtension?.applyHalfMaximizeMode) {
@@ -576,18 +594,17 @@ function initTextStyling() {
     function applyManualLayout() {
         const sheld = document.getElementById('sheld');
         if (sheld) {
-            sheld.style.resize = 'none';
-            sheld.style.inset = '3.5vh 0px 60px 25vw';
-            sheld.style.height = '100vh';
-            sheld.style.width = '50vw';
-            sheld.style.margin = 'unset';
+            sheld.style.setProperty('resize', 'none', 'important');
+            sheld.style.setProperty('inset', '3.5vh 0px 60px 25vw', 'important');
+            sheld.style.setProperty('height', '100vh', 'important');
+            sheld.style.setProperty('width', '50vw', 'important');
+            sheld.style.setProperty('margin', 'unset', 'important');
         }
 
         try {
             if (window.ImageDisplayExtension?.applyNormalMode) {
                 window.ImageDisplayExtension.applyNormalMode();
             }
-            // ★ openCustomWindow の自動呼び出しは行わない
             console.log('[Text Styling] レイアウト: 手動（画像位置・サイズを手動設定）');
         } catch (e) {
             console.warn('[Text Styling] Image Display 連携エラー（手動）:', e);
@@ -739,6 +756,21 @@ function initTextStyling() {
 
         // ★ 保存されたレイアウトモードを適用（保存はしない）
         setLayoutMode(currentLayoutMode, { skipSave: true });
+
+        // ★ ウィンドウリサイズ時にレイアウトを再適用
+        //   （4K ⇄ 1920 切替時も 50vw が再計算される）
+        let _tsResizeTimer = null;
+        window.addEventListener('resize', () => {
+            if (_tsResizeTimer) clearTimeout(_tsResizeTimer);
+            _tsResizeTimer = setTimeout(() => {
+                _tsResizeTimer = null;
+                try {
+                    setLayoutMode(currentLayoutMode, { skipSave: true });
+                } catch (e) {
+                    console.warn('[Text Styling] resize 時のレイアウト再適用に失敗:', e);
+                }
+            }, 150);
+        });        
     }, 500);
 }
 
