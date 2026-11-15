@@ -289,10 +289,13 @@ function applyChatLayout() {
 // 削除/解除ボタンの概算幅（padding 0 8px + "削除"/"解除" の文字幅）
 const WCB_BTN_WIDTH_ESTIMATE = 48;
 const WCB_GAP = 5;
-// T ボタンと💡の相対距離（削除/解除ボタン幅 + gap で、右端ぴったりに揃う）
-const WCB_LEFT_OFFSET_PX = WCB_BTN_WIDTH_ESTIMATE + WCB_GAP;  // = 53
-// 🎨/💡 を左に寄せる量 = 旧オフセット(100) - 新オフセット(53)
-const ICON_LEFT_SHIFT_PX = 100 - WCB_LEFT_OFFSET_PX;  // = 47
+function getWcbLeftOffsetPx() {
+    return window.S ? window.S(WCB_BTN_WIDTH_ESTIMATE + WCB_GAP) : (WCB_BTN_WIDTH_ESTIMATE + WCB_GAP);
+}
+function getIconLeftShiftPx() {
+    const base = 100;
+    return window.S ? (window.S(base) - getWcbLeftOffsetPx()) : (base - (WCB_BTN_WIDTH_ESTIMATE + WCB_GAP));
+}
 
 // ★ 固定位置用のキャッシュ（無駄な style 操作を避ける）
 let _lastToggleBtnLeft = -1;
@@ -320,7 +323,7 @@ function applyToggleChatButtonLayout() {
     //   1920px 幅 → 250px
     //   2560px 幅 → 333px
     //   3840px 幅 → 500px
-    let left = Math.round(vw * TOGGLE_LEFT_RATIO);
+    let left = Math.round(vw * 250 / 1920) - getIconLeftShiftPx();
     // ★ top は下端からの固定余白（絶対値）
     //   962 高 → 871
     //   2160 高 → 2069
@@ -412,7 +415,7 @@ function applyWindowControlButtonsLayout() {
     const restoreH = restoreBtn.offsetHeight || 32;
 
     // ★ Ｔ の X: 💡 の左端から 100px 左へ
-    let restoreLeft = toggleRect.left - WCB_LEFT_OFFSET_PX;
+    let restoreLeft = toggleRect.left - getWcbLeftOffsetPx();
     // 画面左端を超えないようクランプ
     if (restoreLeft < margin) restoreLeft = margin;
 
