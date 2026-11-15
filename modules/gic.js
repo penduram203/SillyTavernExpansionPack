@@ -5101,9 +5101,21 @@ function applyGalleryWindowLayout() {
                 const baseW = galleryBaseWidthCache.get(el);
                 const S = window.S || ((px) => px);
                 const maxW = Math.max(S(100), vw - S(GALLERY_WINDOW_MAX_VIEWPORT_MARGIN));
-                const targetW = Math.min(maxW, Math.round(S(baseW + GALLERY_WINDOW_WIDTH_EXTRA)));
+                // ★ 4K 環境で baseW が 2倍（960等）に誤測定されるケースへの防御
+                //   ST 本来の gallery 幅は 480px なので、それを超える場合はキャップ
+                const BASE_GALLERY_W = 480;
+                const effectiveBaseW = Math.min(baseW, BASE_GALLERY_W);
+                if (baseW > BASE_GALLERY_W) {
+                    console.log(
+                        `[GIC] 🩹 baseW をキャップ: ${Math.round(baseW)}px → ${BASE_GALLERY_W}px ` +
+                        `(二重スケーリング防止)`
+                    );
+                }
+                const targetW = Math.min(maxW, Math.round(S(effectiveBaseW + GALLERY_WINDOW_WIDTH_EXTRA)));
                 el.style.setProperty('width', targetW + 'px', 'important');
                 el.style.setProperty('max-width', targetW + 'px', 'important');
+                el.style.setProperty('margin', '0', 'important');
+                el.style.setProperty('transform', 'none', 'important');
             }
         }
     }
