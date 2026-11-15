@@ -7990,7 +7990,7 @@ function showDeleteConfirmDialog(fileName) {
         });
 
         const title = document.createElement('div');
-        title.textContent = '画像の登録が解除された上にデータ自体も削除されます';
+        title.textContent = '画像登録が解除され画像ファイル自体も削除されます';
         Object.assign(title.style, {
             fontSize: '20px',
             fontWeight: 'bold',
