@@ -50,7 +50,7 @@
   left: auto;
   right: 0;
   bottom: 0;
-  width: calc(85vw - var(--exp-scale, 1) * 280px);
+  width: 70.5vw;
   min-width: calc(var(--exp-scale, 1) * 500px);
   z-index: 100;
 
