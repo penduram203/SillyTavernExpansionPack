@@ -392,6 +392,30 @@
         document.head.appendChild(style);
     })();
 
+    // ★ 左右モード時の画像右寄せを CSS で強制する
+    //   （JS の設定タイミングに依存しない確実な方法）
+    (function injectHalfMaximizedCSS() {
+        if (document.getElementById('idp-halfmax-objectpos-css')) return;
+        const style = document.createElement('style');
+        style.id = 'idp-halfmax-objectpos-css';
+        style.textContent = `
+            /* 左右モード（half-maximized）時は画像を右寄せ */
+            #image-display-container.half-maximized #media-element-container,
+            #image-display-container.half-maximized #media-element-container *,
+            #image-display-container.half-maximized #media-element-container > img,
+            #image-display-container.half-maximized #media-element-container > video {
+                object-position: right center !important;
+            }
+            /* 通常/最大化モード時は中央寄せに戻す */
+            #image-display-container:not(.half-maximized) #media-element-container > img,
+            #image-display-container:not(.half-maximized) #media-element-container > video {
+                object-position: center center !important;
+            }
+        `;
+        document.head.appendChild(style);
+        console.log('[ImageDisplay] 🎯 half-maximized object-position CSS injected');
+    })();
+    
     const imageContainer = document.createElement('div');
     imageContainer.id = 'image-display-container';
     imageContainer.style.setProperty('z-index', Z_INDEX_BODY, 'important');
@@ -1372,7 +1396,7 @@
             }));
         } catch (e) { /* ignore */ }
         
-        // ★ split mode では右寄せ
+        // ★ モードに応じた object-position
         const objPos = (currentMode === 'halfMaximized') ? 'right center' : 'center center';
         
         if (isVideoUrl(newUrl)) {
@@ -1386,7 +1410,7 @@
             videoElement.style.width = '100%';
             videoElement.style.height = '100%';
             videoElement.style.objectFit = 'contain';
-            videoElement.style.objectPosition = objPos;   // ★ 追加
+            videoElement.style.setProperty('object-position', objPos, 'important');  // ★ 追加
             videoElement.onerror = () => handleMediaError(videoElement, newUrl);
             mediaContainer.innerHTML = '';
             mediaContainer.appendChild(videoElement);
@@ -1406,11 +1430,9 @@
             imgElement.style.width = '100%';
             imgElement.style.height = '100%';
             imgElement.style.objectFit = 'contain';
-            imgElement.style.objectPosition = objPos;   // ★ 追加
+            imgElement.style.setProperty('object-position', objPos, 'important');  // ★ 追加
             imgElement.onerror = () => handleMediaError(imgElement, newUrl);
-            imgElement.onload = () => {
-                console.log(`[ImageDisplay] img 読み込み成功: ${imgElement.naturalWidth}x${imgElement.naturalHeight} (${urlForLoad.slice(0, 80)})`);
-            };
+            imgElement.onload = () => { /* ... */ };
             imgElement.src = urlForLoad;
             mediaContainer.innerHTML = '';
             mediaContainer.appendChild(imgElement);
@@ -2046,7 +2068,10 @@
         halfMaximizeButton.classList.remove('disabled'); halfMaximizeButton.classList.add('enabled');
         customButton.classList.remove('disabled'); customButton.classList.add('enabled');
         currentMode = 'normal';
-        _setMediaObjectPosition('center center');
+        // ★ 中央寄せに戻す
+        mediaContainer.querySelectorAll(':scope > img, :scope > video').forEach(el => {
+            el.style.setProperty('object-position', 'center center', 'important');
+        });
         updateSizeButtons();
         syncHeaderPosition();
         syncHeaderVisibility();
@@ -2069,7 +2094,10 @@
         halfMaximizeButton.classList.remove('disabled'); halfMaximizeButton.classList.add('enabled');
         customButton.classList.remove('disabled'); customButton.classList.add('enabled');
         currentMode = 'maximized';
-        _setMediaObjectPosition('center center');
+        // ★ 中央寄せに戻す
+        mediaContainer.querySelectorAll(':scope > img, :scope > video').forEach(el => {
+            el.style.setProperty('object-position', 'center center', 'important');
+        });
         updateSizeButtons();
         syncHeaderPosition();
         syncHeaderVisibility();
@@ -2092,7 +2120,11 @@
         halfMaximizeButton.classList.remove('enabled'); halfMaximizeButton.classList.add('disabled');
         customButton.classList.remove('disabled'); customButton.classList.add('enabled');
         currentMode = 'halfMaximized';
-        _setMediaObjectPosition('center center');
+        // ★ 画像を右寄せ（チャットウィンドウの左端と隣接）
+        //   CSS で強制しているが、念のため直接設定も行う
+        mediaContainer.querySelectorAll(':scope > img, :scope > video').forEach(el => {
+            el.style.setProperty('object-position', 'right center', 'important');
+        });
         updateSizeButtons();
         syncHeaderPosition();
         syncHeaderVisibility();
