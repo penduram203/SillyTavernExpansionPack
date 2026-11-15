@@ -8325,11 +8325,12 @@ function positionUnregisterButton() {
     }
 }
 
-// ============================================================
-// ★ 登録解除ボタンの表示状態を更新
-//   現在表示中の画像が image_display_extension のいずれかのキーワードセルに
-//   登録されていればボタンを表示する。登録が無ければ非表示にする。
-// ============================================================
+// ★ v8.6: refreshUnregisterButtonState 専用の除外セット
+//   UNREGISTER_EXCLUDED_KEYS は stj_editor.js と共有しているため、
+//   default キーの画像でも「削除/登録解除」ボタンを表示したい本関数では
+//   別セットを使う（thumbnail のみサムネイル専用なので除外維持）。
+const _UNREGISTER_BUTTON_EXCLUDED_KEYS = new Set(['thumbnail']);
+
 function refreshUnregisterButtonState() {
     const unregBtn = document.getElementById(UNREGISTER_BUTTON_ID);
     const delBtn = document.getElementById(DELETE_IMAGE_BUTTON_ID);
@@ -8361,12 +8362,16 @@ function refreshUnregisterButtonState() {
     try {
         currentUrl = window.ImageDisplayExtension?.getCurrentImageUrl?.() || null;
     } catch (e) { /* ignore */ }
-    if (!currentUrl) { hideAll(); return; }
+    if (!currentUrl) {
+        console.debug('[GIC] refreshUnregisterButton: no currentUrl → hide');
+        hideAll();
+        return;
+    }
 
     const fileName = extractBasename(currentUrl);
     if (!fileName) { hideAll(); return; }
 
-    // image_display_extension を走査して該当キーを収集
+    // image_display_extension を走査
     let char = null;
     try {
         const ctx = getContext();
@@ -8377,9 +8382,10 @@ function refreshUnregisterButtonState() {
     const ext = char?.data?.extensions?.image_display_extension;
     if (!ext || typeof ext !== 'object') { hideAll(); return; }
 
+    // ★ default キーも含めてマッチング（thumbnail のみ除外）
     const matches = [];
     for (const [key, val] of Object.entries(ext)) {
-        if (UNREGISTER_EXCLUDED_KEYS.has(key)) continue;
+        if (_UNREGISTER_BUTTON_EXCLUDED_KEYS.has(key)) continue;
         const list = Array.isArray(val) ? val : (typeof val === 'string' ? [val] : []);
         for (const p of list) {
             if (typeof p !== 'string') continue;
@@ -8390,16 +8396,43 @@ function refreshUnregisterButtonState() {
         }
     }
 
-    if (matches.length === 0) { hideAll(); return; }
-
-    _currentRegisteredKeywords = { charName, fileName, entryKeys: matches };
-
-    if (unregBtn && !unregBtn.classList.contains('gic-unregister-visible')) {
-        unregBtn.classList.add('gic-unregister-visible');
+    if (matches.length === 0) {
+        console.debug(
+            `[GIC] refreshUnregisterButton: "${fileName}" が image_display_extension に未登録 → hide`
+        );
+        hideAll();
+        return;
     }
-    if (delBtn && !delBtn.classList.contains('gic-delete-image-visible')) {
+
+    // ★ 登録解除可能なキー（UNREGISTER_EXCLUDED_KEYS を除いたもの）
+    const unregisterableKeys = matches.filter(k => !UNREGISTER_EXCLUDED_KEYS.has(k));
+
+    _currentRegisteredKeywords = {
+        charName,
+        fileName,
+        entryKeys: unregisterableKeys,   // 登録解除対象（default/thumbnail を除く）
+        allMatchedKeys: matches,         // マッチした全キー（デバッグ用）
+    };
+
+    console.log(
+        `[GIC] refreshUnregisterButton: ✅ visible ` +
+        `(fileName="${fileName}", matches=[${matches.join(', ')}], ` +
+        `unregisterable=[${unregisterableKeys.join(', ')}])`
+    );
+
+    // 登録解除ボタンは「登録解除可能キーが1つ以上」の時のみ表示
+    if (unregBtn) {
+        if (unregisterableKeys.length > 0) {
+            unregBtn.classList.add('gic-unregister-visible');
+        } else {
+            unregBtn.classList.remove('gic-unregister-visible');
+        }
+    }
+    // 削除ボタンは matches が1つ以上あれば表示（default のみでも可）
+    if (delBtn) {
         delBtn.classList.add('gic-delete-image-visible');
     }
+
     positionUnregisterButton();
 }
 
