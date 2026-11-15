@@ -2,10 +2,12 @@
 // フォントスケール（Font Scale）の上限を 2.0 に拡張し、
 // 解像度に応じて自動設定する拡張モジュール。
 //
-// ★ v3 修正:
-//   - 解像度選択をドロップダウン形式に変更（ダイアログ縦幅を縮小）
-//   - ガードループ（1000ms毎）を撤去し、即時 + 200ms + 600ms + 2000ms + 4000ms
-//     の5段階再適用に変更（負荷軽減）
+// ★ v4 修正:
+//   - 解像度選択肢を 6 個 → 20 個に拡張（HD〜8K まで幅広く網羅）
+//   - ダイアログ全体のフォントサイズを 1.5 倍に拡大
+//   - 「↓のドロップダウンをクリックして解像度を選択して下さい」メッセージを追加
+//   - ドロップダウンの選択肢に ellipsis を追加（長い解像度名でもレイアウト崩れ防止）
+//   - ダイアログ幅を S(900) → S(1200) に拡大（フォント拡大に伴う調整）
 
 (function () {
     'use strict';
@@ -23,16 +25,33 @@
     const MIN_SCALE = 0.5;
     const MAX_SCALE = 2.0;
 
+    // ★ v4: 解像度選択肢を HD〜8K まで拡張
     const PRESETS = [
-        { label: '1366×768 (ノートPC)', w: 1366, h: 768 },
-        { label: '1600×900', w: 1600, h: 900 },
+        { label: '1280×720 (HD)',          w: 1280, h: 720 },
+        { label: '1280×800 (WXGA)',        w: 1280, h: 800 },
+        { label: '1366×768 (ノートPC)',    w: 1366, h: 768 },
+        { label: '1440×900 (WXGA+)',       w: 1440, h: 900 },
+        { label: '1600×900 (HD+)',         w: 1600, h: 900 },
+        { label: '1680×1050 (WSXGA+)',     w: 1680, h: 1050 },
         { label: '1920×1080 (FHD / 基準)', w: 1920, h: 1080 },
-        { label: '2560×1440 (WQHD)', w: 2560, h: 1440 },
-        { label: '3840×2160 (4K / UHD)', w: 3840, h: 2160 },
-        { label: '5120×2880 (5K)', w: 5120, h: 2880 },
+        { label: '1920×1200 (WUXGA)',      w: 1920, h: 1200 },
+        { label: '2560×1080 (UW-FHD)',     w: 2560, h: 1080 },
+        { label: '2560×1440 (WQHD)',       w: 2560, h: 1440 },
+        { label: '2560×1600 (WQXGA)',      w: 2560, h: 1600 },
+        { label: '3440×1440 (UWQHD)',      w: 3440, h: 1440 },
+        { label: '3840×1080 (32:9)',       w: 3840, h: 1080 },
+        { label: '3840×2160 (4K UHD)',     w: 3840, h: 2160 },
+        { label: '3840×2400 (WQUXGA)',     w: 3840, h: 2400 },
+        { label: '5120×1440 (32:9)',       w: 5120, h: 1440 },
+        { label: '5120×2160 (5K2K)',       w: 5120, h: 2160 },
+        { label: '5120×2880 (5K)',         w: 5120, h: 2880 },
+        { label: '6016×3384 (6K)',         w: 6016, h: 3384 },
+        { label: '7680×4320 (8K UHD)',     w: 7680, h: 4320 },
     ];
 
-    // ★ v3: ガードループ用の目標値（手動変更検出のため保持）
+    // ★ v4: デフォルトは 1920×1080 (index 6)
+    const DEFAULT_IDX = 6;
+
     let _targetFontScale = null;
 
     function getSTContext() {
@@ -142,8 +161,7 @@
         // ⑦ 目標値として記録
         _targetFontScale = s;
 
-        // ⑧ ★ v3: 5段階遅延再適用（ガードループ撤去に伴う負荷軽減）
-        //    ST の非同期再描画（loadSettings, getSettings, applyFontScale 等）に追従
+        // ⑧ 5段階遅延再適用
         const stages = [0, 200, 600, 2000, 4000];
         for (const delay of stages) {
             if (delay === 0) {
@@ -160,7 +178,6 @@
         return true;
     }
 
-    // 再適用ヘルパー（共通処理）
     function _reapplyFontScale(s, targetPx, slider, counter) {
         document.documentElement.style.setProperty('--mainFontSize', `${targetPx}px`);
 
@@ -185,7 +202,6 @@
             const v = parseFloat(target.value);
             if (!Number.isFinite(v)) return;
 
-            // 手動変更を検出したら目標値をクリア
             if (_targetFontScale !== null && Math.abs(v - _targetFontScale) > 0.01) {
                 console.log(`${LOG} ユーザーが手動で Font Scale を ${v} に変更 → 遅延再適用を停止`);
                 _targetFontScale = null;
@@ -216,7 +232,8 @@
     }
 
     // ============================================================
-    // 解像度ダイアログ（ドロップダウン形式 / 1.5倍サイズ・太字）
+    // 解像度ダイアログ
+    //   ★ v4: フォントサイズ1.5倍 / 選択肢20個 / 誘導メッセージ追加
     // ============================================================
     function showResolutionDialog() {
         if (document.getElementById('exp-font-scale-dialog-overlay')) return;
@@ -256,18 +273,20 @@
             border: `${S(3)}px solid #4a5568`,
             borderRadius: `${S(18)}px`,
             padding: `${S(42)}px ${S(48)}px`,
-            maxWidth: `min(${S(900)}px, calc(100vw - 40px))`,
+            // ★ v4: フォント拡大に伴い幅を S(900)→S(1200) に拡大
+            maxWidth: `min(${S(1200)}px, calc(100vw - 40px))`,
             width: '100%',
             boxShadow: `0 ${S(20)}px ${S(60)}px rgba(0, 0, 0, 0.85)`,
             boxSizing: 'border-box',
         });
 
         // ── タイトル ──
+        //   ★ v4: S(33) → S(49.5) (1.5倍)
         const h2 = document.createElement('h2');
         h2.textContent = 'モニタ解像度を選択してください';
         Object.assign(h2.style, {
             margin: `0 0 ${S(18)}px 0`,
-            fontSize: `${S(33)}px`,
+            fontSize: `${S(49.5)}px`,
             fontWeight: '900',
             color: '#ffffff',
             letterSpacing: '0.02em',
@@ -275,29 +294,43 @@
         box.appendChild(h2);
 
         // ── 説明 ──
+        //   ★ v4: S(21) → S(31.5)
         const desc = document.createElement('p');
         desc.innerHTML = '選択した解像度に応じて、<strong style="color:#f6e05e;">フォントスケール</strong>を自動的に設定します。<br>（1920×1080 を基準として、スケール値を計算します）';
         Object.assign(desc.style, {
-            margin: `0 0 ${S(28)}px 0`,
-            fontSize: `${S(21)}px`,
+            margin: `0 0 ${S(24)}px 0`,
+            fontSize: `${S(31.5)}px`,
             fontWeight: '600',
             lineHeight: '1.7',
             color: '#cbd5e0',
         });
         box.appendChild(desc);
 
-        // ── ★ v3: ドロップダウン形式に変更 ──
+        // ── ★ v4: 誘導メッセージを追加 ──
+        const hint = document.createElement('p');
+        hint.textContent = '↓のドロップダウンをクリックして解像度を選択して下さい';
+        Object.assign(hint.style, {
+            margin: `0 0 ${S(15)}px 0`,
+            fontSize: `${S(31.5)}px`,
+            fontWeight: '900',
+            lineHeight: '1.5',
+            color: '#f6e05e',
+        });
+        box.appendChild(hint);
+
+        // ── ラベル ──
         const selectLabel = document.createElement('label');
         Object.assign(selectLabel.style, {
             display: 'block',
             marginBottom: `${S(12)}px`,
-            fontSize: `${S(21)}px`,
+            fontSize: `${S(31.5)}px`,
             fontWeight: '700',
             color: '#e2e8f0',
         });
         selectLabel.textContent = '解像度:';
         box.appendChild(selectLabel);
 
+        // ── ドロップダウン ──
         const select = document.createElement('select');
         select.id = 'exp-fs-resolution-select';
         Object.assign(select.style, {
@@ -307,20 +340,22 @@
             color: '#ffffff',
             border: `${S(3)}px solid #4299e1`,
             borderRadius: `${S(9)}px`,
-            fontSize: `${S(21)}px`,
+            fontSize: `${S(31.5)}px`,
             fontWeight: '700',
             cursor: 'pointer',
             marginBottom: `${S(28)}px`,
             boxSizing: 'border-box',
             fontFamily: 'inherit',
+            // ★ v4: 長い解像度名でもレイアウト崩れを防ぐ
+            textOverflow: 'ellipsis',
         });
 
-        let selectedIdx = 2; // デフォルト: 1920×1080
+        let selectedIdx = DEFAULT_IDX;
         PRESETS.forEach((preset, idx) => {
             const opt = document.createElement('option');
             opt.value = String(idx);
             const s = computeScale(preset.w, preset.h);
-            opt.textContent = `${preset.label}  —  scale ${s.toFixed(2)}`;
+            opt.textContent = `${preset.label}  [×${s.toFixed(2)}]`;
             if (idx === selectedIdx) opt.selected = true;
             select.appendChild(opt);
         });
@@ -333,12 +368,13 @@
         box.appendChild(select);
 
         // ── 「再表示しない」チェックボックス ──
+        //   ★ v4: S(19.5) → S(29.25)
         const dontShowLabel = document.createElement('label');
         Object.assign(dontShowLabel.style, {
             display: 'flex',
             alignItems: 'center',
             gap: `${S(12)}px`,
-            fontSize: `${S(19.5)}px`,
+            fontSize: `${S(29.25)}px`,
             fontWeight: '600',
             color: '#cbd5e0',
             cursor: 'pointer',
@@ -348,8 +384,8 @@
         dontShowInput.type = 'checkbox';
         dontShowInput.id = 'exp-fs-dont-show';
         Object.assign(dontShowInput.style, {
-            width: `${S(24)}px`,
-            height: `${S(24)}px`,
+            width: `${S(30)}px`,
+            height: `${S(30)}px`,
             cursor: 'pointer',
             margin: '0',
         });
@@ -358,11 +394,12 @@
         box.appendChild(dontShowLabel);
 
         // ── 注記 ──
+        //   ★ v4: S(18) → S(27)
         const note = document.createElement('p');
         note.textContent = 'フォントサイズは、ユーザー設定の「フォントスケール」からいつでも自由に変更できます。';
         Object.assign(note.style, {
             margin: `0 0 ${S(28)}px 0`,
-            fontSize: `${S(18)}px`,
+            fontSize: `${S(27)}px`,
             fontWeight: '600',
             lineHeight: '1.6',
             color: '#a0aec0',
@@ -371,6 +408,7 @@
         box.appendChild(note);
 
         // ── ボタン ──
+        //   ★ v4: S(21) → S(31.5)
         const btnRow = document.createElement('div');
         Object.assign(btnRow.style, {
             display: 'flex',
@@ -388,7 +426,7 @@
             border: 'none',
             borderRadius: `${S(9)}px`,
             cursor: 'pointer',
-            fontSize: `${S(21)}px`,
+            fontSize: `${S(31.5)}px`,
             fontWeight: '900',
         });
 
@@ -402,7 +440,7 @@
             border: 'none',
             borderRadius: `${S(9)}px`,
             cursor: 'pointer',
-            fontSize: `${S(21)}px`,
+            fontSize: `${S(31.5)}px`,
             fontWeight: '900',
         });
 
