@@ -1233,11 +1233,11 @@ function getCurrentCharacterName() {
            ============================================================ */
         .gic-keyword-label {
             position: absolute !important;
-            bottom: 3px !important;
+            bottom: calc(var(--exp-scale, 1) * 3px) !important;
             left: 50% !important;
             transform: translateX(-50%) !important;
-            max-width: calc(100% - 6px) !important;
-            font-size: 16px !important;
+            max-width: calc(100% - var(--exp-scale, 1) * 6px) !important;
+            font-size: calc(var(--exp-scale, 1) * 16px) !important;
             font-weight: bold !important;
             color: #ffffff !important;
             text-align: center !important;
@@ -1248,14 +1248,14 @@ function getCurrentCharacterName() {
             z-index: 15 !important;
             user-select: none !important;
             -webkit-user-select: none !important;
-            -webkit-text-stroke: 1.5px #000000 !important;
+            -webkit-text-stroke: calc(var(--exp-scale, 1) * 1.5px) #000000 !important;
             paint-order: stroke fill !important;
             text-shadow:
-                -1px -1px 0 #000,
-                 1px -1px 0 #000,
-                -1px  1px 0 #000,
-                 1px  1px 0 #000,
-                 0 0 3px rgba(0, 0, 0, 0.8) !important;
+                calc(var(--exp-scale, 1) * -1px) calc(var(--exp-scale, 1) * -1px) 0 #000,
+                calc(var(--exp-scale, 1) * 1px)  calc(var(--exp-scale, 1) * -1px) 0 #000,
+                calc(var(--exp-scale, 1) * -1px) calc(var(--exp-scale, 1) * 1px)  0 #000,
+                calc(var(--exp-scale, 1) * 1px)  calc(var(--exp-scale, 1) * 1px)  0 #000,
+                0 0 calc(var(--exp-scale, 1) * 3px) rgba(0, 0, 0, 0.8) !important;
             box-sizing: border-box !important;
             line-height: 1.2 !important;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif !important;
@@ -1469,6 +1469,110 @@ function getCurrentCharacterName() {
         ${promptOverlayHoverSel} {
             opacity: 1 !important;
             pointer-events: auto !important;
+        }
+
+        /* ============================================================
+           ★ 拡大ビュー用プロンプトオーバーレイ（解像度スケーリング対応）
+           createPromptOverlay() の inline style より優先されるよう !important を付与
+           ============================================================ */
+        .gic-prompt-overlay {
+            position: absolute !important;
+            bottom: calc(var(--exp-scale, 1) * 8px) !important;
+            left: calc(var(--exp-scale, 1) * 8px) !important;
+            right: auto !important;
+            transform: none !important;
+            width: max-content !important;
+            max-width: min(calc(var(--exp-scale, 1) * 700px), calc(100% - var(--exp-scale, 1) * 16px)) !important;
+            display: flex !important;
+            flex-direction: column !important;
+            gap: calc(var(--exp-scale, 1) * 6px) !important;
+            z-index: 15001 !important;
+            box-sizing: border-box !important;
+            align-items: flex-start !important;
+        }
+
+        .gic-prompt-overlay .gic-keyword-label-btn {
+            align-self: flex-start !important;
+            padding: calc(var(--exp-scale, 1) * 6px) calc(var(--exp-scale, 1) * 12px) !important;
+            background: #444444 !important;
+            color: #ffffff !important;
+            border: 1px solid #666666 !important;
+            border-radius: calc(var(--exp-scale, 1) * 4px) !important;
+            font-size: calc(var(--exp-scale, 1) * 12px) !important;
+            font-family: inherit !important;
+            pointer-events: none !important;
+            user-select: none !important;
+        }
+
+        .gic-prompt-overlay .gic-keyword-text {
+            align-self: flex-start !important;
+            padding: calc(var(--exp-scale, 1) * 6px) calc(var(--exp-scale, 1) * 12px) !important;
+            background: #000000 !important;
+            color: #ffffff !important;
+            border: 2px solid #000000 !important;
+            border-radius: calc(var(--exp-scale, 1) * 4px) !important;
+            font-size: calc(var(--exp-scale, 1) * 20px) !important;
+            font-weight: bold !important;
+            font-family: inherit !important;
+            pointer-events: none !important;
+            user-select: none !important;
+            max-width: 100% !important;
+            word-break: break-word !important;
+            line-height: 1.3 !important;
+            box-sizing: border-box !important;
+        }
+
+        .gic-prompt-overlay .gic-copy-row {
+            display: flex !important;
+            flex-wrap: wrap !important;
+            gap: calc(var(--exp-scale, 1) * 6px) !important;
+            align-items: flex-start !important;
+            pointer-events: auto !important;
+            align-self: flex-start !important;
+        }
+
+        .gic-prompt-overlay .gic-copy-row > button {
+            padding: calc(var(--exp-scale, 1) * 6px) calc(var(--exp-scale, 1) * 12px) !important;
+            background: #444444 !important;
+            color: #ffffff !important;
+            border: 1px solid #666666 !important;
+            border-radius: calc(var(--exp-scale, 1) * 4px) !important;
+            cursor: pointer !important;
+            font-size: calc(var(--exp-scale, 1) * 12px) !important;
+            font-family: inherit !important;
+            pointer-events: auto !important;
+        }
+
+        .gic-prompt-overlay .gic-copy-row > button:hover {
+            background: #666666 !important;
+        }
+
+        .gic-prompt-overlay .gic-prompt-panel,
+        .gic-prompt-overlay .gic-negative-prompt-panel {
+            padding: calc(var(--exp-scale, 1) * 10px) calc(var(--exp-scale, 1) * 12px) !important;
+            border-radius: calc(var(--exp-scale, 1) * 4px) !important;
+            font-size: calc(var(--exp-scale, 1) * 12px) !important;
+            font-family: monospace !important;
+            white-space: pre-wrap !important;
+            word-break: break-word !important;
+            overflow-wrap: anywhere !important;
+            box-sizing: border-box !important;
+            line-height: 1.4 !important;
+            max-height: calc(100vh - var(--exp-scale, 1) * 120px) !important;
+            overflow-y: auto !important;
+            width: 100% !important;
+        }
+
+        .gic-prompt-overlay .gic-prompt-panel {
+            background: rgba(0, 0, 0, 0.88) !important;
+            color: #ffffff !important;
+            border: 1px solid #555555 !important;
+        }
+
+        .gic-prompt-overlay .gic-negative-prompt-panel {
+            background: rgba(40, 0, 0, 0.88) !important;
+            color: #ffcccc !important;
+            border: 1px solid #884444 !important;
         }
         
     `;
@@ -4754,8 +4858,6 @@ function createPromptOverlay(panel) {
             font-family: inherit;
             pointer-events: auto;
         `;
-        btn.addEventListener('mouseenter', () => { btn.style.background = '#666'; });
-        btn.addEventListener('mouseleave', () => { btn.style.background = '#444'; });
         return btn;
     };
 
