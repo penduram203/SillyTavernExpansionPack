@@ -56,6 +56,32 @@
         _raf = requestAnimationFrame(() => { _raf = null; apply(); });
     });
 
+    // ============================================================
+    // ★ チャット内容の解像度スケーリング
+    //   #sheld 内の font-size を --exp-scale 倍する。
+    //   - --mainFontSize を #sheld スコープでのみ上書き（外部 UI に影響しない）
+    //   - #sheld 自身の font-size も直接設定（子孫の継承を保証）
+    // ============================================================
+    (function injectChatContentScaling() {
+        if (document.getElementById('exp-chat-scaling-css')) return;
+        const style = document.createElement('style');
+        style.id = 'exp-chat-scaling-css';
+        style.textContent = `
+            /* 元の --mainFontSize を保持（#sheld 内での上書き基準） */
+            html {
+                --exp-original-mainFontSize: var(--mainFontSize, 15px);
+            }
+
+            /* #sheld 内のテキストを scale 倍 */
+            #sheld {
+                font-size: calc(var(--exp-original-mainFontSize) * var(--exp-scale, 1)) !important;
+                --mainFontSize: calc(var(--exp-original-mainFontSize) * var(--exp-scale, 1));
+            }
+        `;
+        document.head.appendChild(style);
+        console.log(`${LOG} chat content scaling CSS injected`);
+    })();
+    
     console.log(`${LOG} installed`, {
         physW: window.innerWidth,
         physH: window.innerHeight,
