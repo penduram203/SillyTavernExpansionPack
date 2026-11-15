@@ -11,6 +11,10 @@
 //        （ST本体の getVideoThumbnail をスキップして高速化する）
 
 import './console_filter.js';   // ★ 先頭に追加（他の全モジュールより先にフィルタをインストール）
+//    復元方法（フィルタ自体を止めたい場合）
+//    F12 コンソールで: ConsoleFilter.disable() を実行
+//    恒久的に: localStorage.setItem('exp_console_filter_enabled', 'false') を実行して F5
+//    完全削除: comfy_boot.js の import './console_filter.js'; を削除
 
 (function installComfyBoot() {
     if (window.__gicComfyBootInstalled) return;
