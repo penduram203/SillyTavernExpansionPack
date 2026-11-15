@@ -943,9 +943,9 @@ function getCurrentCharacterName() {
 
         .nGY2paginationRectangle,
         .nGY2paginationRectangleCurrentPage {
-            height: ${GALLERY_PAGINATION_HEIGHT}px !important;
-            min-height: ${GALLERY_PAGINATION_HEIGHT}px !important;
-            max-height: ${GALLERY_PAGINATION_HEIGHT}px !important;
+            height: calc(var(--exp-scale, 1) * ${GALLERY_PAGINATION_HEIGHT}px) !important;
+            min-height: calc(var(--exp-scale, 1) * ${GALLERY_PAGINATION_HEIGHT}px) !important;
+            max-height: calc(var(--exp-scale, 1) * ${GALLERY_PAGINATION_HEIGHT}px) !important;
             position: relative !important;
             background-color: transparent !important;
             background-image: none !important;
@@ -966,7 +966,7 @@ function getCurrentCharacterName() {
             left: 50% !important;
             transform: translate(-50%, -50%) !important;
             font-weight: bold !important;
-            font-size: 16px !important;
+            font-size: calc(var(--exp-scale, 1) * 16px) !important;
             color: #000000 !important;
             -webkit-text-stroke: 3px #ffffff !important;
             paint-order: stroke fill !important;
@@ -1000,27 +1000,27 @@ function getCurrentCharacterName() {
             position: fixed !important;
             display: flex !important;
             align-items: center !important;
-            gap: 4px !important;
+            gap: calc(var(--exp-scale, 1) * 4px) !important;
             z-index: 2147483647 !important;
             pointer-events: auto !important;
         }
 
         .gic-pagination-pager .gic-pagination-page,
         .gic-pagination-pager .gic-pagination-nav {
-            width: 38px !important;
-            min-width: 38px !important;
-            max-width: 38px !important;
-            height: 45px !important;
-            min-height: 45px !important;
-            max-height: 45px !important;
+            width: calc(var(--exp-scale, 1) * 38px) !important;
+            min-width: calc(var(--exp-scale, 1) * 38px) !important;
+            max-width: calc(var(--exp-scale, 1) * 38px) !important;
+            height: calc(var(--exp-scale, 1) * 45px) !important;
+            min-height: calc(var(--exp-scale, 1) * 45px) !important;
+            max-height: calc(var(--exp-scale, 1) * 45px) !important;
             padding: 0 !important;
-            font-size: 14px !important;
+            font-size: calc(var(--exp-scale, 1) * 14px) !important;
             font-weight: bold !important;
             font-family: sans-serif !important;
             color: #000000 !important;
             background-color: rgba(255, 255, 255, 0.6) !important;
             border: 1px solid rgba(0, 0, 0, 0.3) !important;
-            border-radius: 4px !important;
+            border-radius: calc(var(--exp-scale, 1) * 4px) !important;
             cursor: pointer !important;
             user-select: none !important;
             display: inline-flex !important;
@@ -5159,8 +5159,9 @@ function positionPager(pager) {
     const gr = galleryEl.getBoundingClientRect();
     if (gr.width === 0 || gr.height === 0) return;
 
-    const rightInset = (window.innerWidth - gr.right) + PAGINATION_OFFSET_LEFT;
-    const bottom     = (window.innerHeight - gr.bottom) + PAGINATION_OFFSET_UP;
+    const S = window.S || ((px) => px);
+    const rightInset = (window.innerWidth - gr.right) + S(PAGINATION_OFFSET_LEFT);
+    const bottom     = (window.innerHeight - gr.bottom) + S(PAGINATION_OFFSET_UP);
 
     pager.style.setProperty('position', 'fixed', 'important');
     pager.style.setProperty('right', Math.round(rightInset) + 'px', 'important');
@@ -6827,15 +6828,16 @@ function enforceGalleryGridLayout() {
     });
     if (visibleThumbs.length === 0) return;
 
+    const S             = window.S || ((px) => px);
     const COLS          = 3;
     const MAX_ROWS      = 4;
     const H_GAP         = 0;
     const V_GAP         = 0;
     const RIGHT_EXTRA   = 0;
-    const TOP_PADDING   = 6;
-    const PAGER_RESERVE = 70;
-    const THUMB_MAX     = 180;
-    const THUMB_MIN     = 120;
+    const TOP_PADDING   = S(6);
+    const PAGER_RESERVE = S(70);
+    const THUMB_MAX     = S(180);
+    const THUMB_MIN     = S(120);
 
     const galleryRect0 = gallery.getBoundingClientRect();
     const halfH = galleryRect0.height / 2;
@@ -6852,7 +6854,7 @@ function enforceGalleryGridLayout() {
             }
         });
     });
-    const headerH = Math.max(40, Math.ceil(headerBottom) + 6);
+    const headerH = Math.max(S(40), Math.ceil(headerBottom) + S(6));
 
     const containerW = Math.max(100, Math.round(galleryRect0.width)  || 830);
     const containerH = Math.max(100, Math.round(galleryRect0.height) || 922);
@@ -7159,10 +7161,12 @@ function applyGalleryLayout() {
 
         try { enforceGalleryGridLayout(); } catch (e) { /* ignore */ }
 
+        const _S_pager = window.S || ((px) => px);
+        const _pagerH = _S_pager(GALLERY_PAGINATION_HEIGHT);
         document.querySelectorAll('.nGY2paginationRectangle, .nGY2paginationRectangleCurrentPage').forEach(el => {
-            el.style.setProperty('height', GALLERY_PAGINATION_HEIGHT + 'px', 'important');
-            el.style.setProperty('min-height', GALLERY_PAGINATION_HEIGHT + 'px', 'important');
-            el.style.setProperty('max-height', GALLERY_PAGINATION_HEIGHT + 'px', 'important');
+            el.style.setProperty('height', _pagerH + 'px', 'important');
+            el.style.setProperty('min-height', _pagerH + 'px', 'important');
+            el.style.setProperty('max-height', _pagerH + 'px', 'important');
             el.style.setProperty('position', 'relative', 'important');
         });
 
