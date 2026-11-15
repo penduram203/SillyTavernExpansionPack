@@ -1,5 +1,5 @@
 // font_scale_auto.js
-// v7.7-robust: ドラッグ中はブラウザ native drag に任せ、内部状態は離した瞬間のみ更新
+// v7.8-robust: ドラッグ中はブラウザ native drag に任せる。guard の drag 中ブロックを撤去。
 //
 // ★ v7.1: 再起動時のユーザー設定尊重 / ドラッグ中バースト抑止
 // ★ v7.2: 合成イベント (isTrusted=false) フィルタ / slider.value setter ガード
@@ -7,8 +7,10 @@
 // ★ v7.4: スライダードラッグ中は input を完全無視
 // ★ v7.5: slider.min/max 属性を信用せず MIN_SCALE/MAX_SCALE 定数を使用
 // ★ v7.6: ドラッグ中は内部状態を一切触らない
-// ★ v7.7: pixel→value の独自計算を廃止し、ブラウザ native drag に任せる。
-//         ドラッグ中は input の値を読むだけ、pointerup で内部状態に反映する。
+// ★ v7.7: pixel→value の独自計算を廃止し、ブラウザ native drag に任せる
+// ★ v7.8: setter ガードの「drag 中ブロック」を撤去。これは Firefox の
+//         内部値更新を妨げて visual と内部値の desync を起こしていた。
+//         --mainFontSize の小数を 2 桁に丸める。
 //
 
 (function () {
@@ -126,7 +128,8 @@
         }
         const ctx = getSTContext();
         const intended = _userIntentScale;
-        const px = `${ST_BASE_FONT_PX * intended}px`;
+        // ★ v7.8: 浮動小数点誤差を 2 桁に丸める（10.200000000000001px 対策）
+        const px = `${+(ST_BASE_FONT_PX * intended).toFixed(2)}px`;
 
         enforceMaxAttribute();
 
@@ -226,13 +229,19 @@
                     if (_verbose) {
                         console.log(`${LOG} [setter] ${this.id} value "${v}" (intent=${_userIntentScale}, dragging=${_draggingSlider})`);
                     }
-                    if (_draggingSlider) {
-                        console.log(`${LOG} [guard] drag 中の外部書き込み ${v} をブロック (preview=${_dragPreviewValue})`);
-                        return;
-                    }
                     const newNum = parseFloat(v);
+                    if (!Number.isFinite(newNum)) {
+                        return desc.set.call(this, v);
+                    }
+                    // ★ v7.8: ドラッグ中はブラウザ内部の値更新を妨げない。
+                    //   旧版は drag 中の書き込みを全ブロックしていたが、これが
+                    //   Firefox range input の内部値更新を阻害して visual と内部値の
+                    //   desync を引き起こしていた（2.0 ドラッグ → 1.24 になどの症状）。
+                    if (_draggingSlider) {
+                        if (_verbose) console.log(`${LOG} [setter] drag 中の書き込み ${v} を通過`);
+                        return desc.set.call(this, v);
+                    }
                     if (_userIntentScale === null ||
-                        !Number.isFinite(newNum) ||
                         Math.abs(newNum - _userIntentScale) <= 0.01) {
                         return desc.set.call(this, v);
                     }
@@ -300,6 +309,8 @@
         document.addEventListener('pointerdown', (e) => {
             if (e.target?.id === 'font_scale') {
                 if (_draggingSlider) return;
+                // ★ v7.8: ドラッグ開始時に min/max を必ず正す
+                enforceMaxAttribute();
                 _draggingSlider = true;
                 _dragPreviewValue = parseFloat(e.target.value);
                 if (!Number.isFinite(_dragPreviewValue)) _dragPreviewValue = null;
@@ -322,8 +333,7 @@
             if (!Number.isFinite(v)) return;
 
             if (target.id === 'font_scale' && _draggingSlider) {
-                // ★ v7.7: ブラウザ native drag が pixel→value を正しく計算するので、
-                //   ここでは値をそのまま読むだけ。内部状態には一切書かない。
+                // ★ v7.8: ブラウザ native drag の値をそのまま読む
                 _dragPreviewValue = v;
                 if (_verbose) console.log(`${LOG} [drag] input value=${v}`);
                 return;
@@ -360,9 +370,19 @@
         document.addEventListener('pointerup', (e) => {
             if (!_draggingSlider) return;
             _draggingSlider = false;
-            const finalValue = _dragPreviewValue;
+            // ★ v7.8: 念のため min/max を強制してから確定
+            enforceMaxAttribute();
+            const slider = document.getElementById('font_scale');
+            let finalValue = _dragPreviewValue;
+            // _dragPreviewValue が取れていない場合は slider.value を使う
+            if (finalValue === null || !Number.isFinite(finalValue)) {
+                if (slider) {
+                    const sv = parseFloat(slider.value);
+                    if (Number.isFinite(sv)) finalValue = sv;
+                }
+            }
             _dragPreviewValue = null;
-            if (finalValue !== null) {
+            if (finalValue !== null && Number.isFinite(finalValue)) {
                 _userIntentScale = finalValue;
                 _lastTrustedInputAt = 0;
                 if (_verbose) console.log(`${LOG} [drag] end, applying ${finalValue}`);
@@ -643,7 +663,7 @@
             const ctx = getSTContext();
             const curSlider = document.getElementById('font_scale');
             return {
-                version: 'v7.7-robust',
+                version: 'v7.8-robust',
                 verbose: _verbose,
                 userIntent: _userIntentScale,
                 initApplyDone: _initApplyDone,
@@ -669,6 +689,6 @@
         },
     };
 
-    console.log(`${LOG} ✅ installed (v7.7-robust)`);
-    console.log(`${LOG} v7.7 検出用マーカー: このメッセージが出ていれば v7.7 が動作中`);
+    console.log(`${LOG} ✅ installed (v7.8-robust)`);
+    console.log(`${LOG} v7.8 検出用マーカー: このメッセージが出ていれば v7.8 が動作中`);
 })();
