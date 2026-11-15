@@ -1485,21 +1485,21 @@ function getCurrentCharacterName() {
             position: fixed;
             left: -9999px;
             top: -9999px;
-            height: 50px;
-            padding: 0 14px;
+            height: calc(var(--exp-scale, 1) * 50px);
+            padding: 0 calc(var(--exp-scale, 1) * 8px);
             background-color: #d4c11e;
             color: #1a202c;
             border: 1px solid #e38d14;
-            border-radius: 4px;
+            border-radius: calc(var(--exp-scale, 1) * 4px);
             cursor: pointer;
             display: none;
             align-items: center;
             justify-content: center;
-            font-size: 13px;
+            font-size: calc(var(--exp-scale, 1) * 13px);
             font-weight: bold;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
             z-index: 15000;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+            box-shadow: 0 calc(var(--exp-scale, 1) * 2px) calc(var(--exp-scale, 1) * 8px) rgba(0, 0, 0, 0.5);
             opacity: 0;
             pointer-events: none;
             transition: opacity 0.15s ease, background-color 0.15s ease;
@@ -1513,20 +1513,17 @@ function getCurrentCharacterName() {
             display: flex;
         }
 
-        /* 💡 近接時: 半透明で表示（#toggle-chat-button と同じ挙動） */
         body.chat-bulb-hover #${UNREGISTER_BUTTON_ID}.gic-unregister-visible {
             opacity: 0.3;
             pointer-events: auto;
         }
 
-        /* 直接ホバー時: 完全不透明 */
         html body #${UNREGISTER_BUTTON_ID}.gic-unregister-visible:hover {
             opacity: 1 !important;
             background-color: #fcf526 !important;
             pointer-events: auto !important;
         }
 
-        /* パネル・ギャラリー・バトル中は完全非表示 */
         html body.tsp-open #${UNREGISTER_BUTTON_ID},
         html body.gallery-open #${UNREGISTER_BUTTON_ID},
         html body.stj-editor-open #${UNREGISTER_BUTTON_ID},
@@ -1535,29 +1532,26 @@ function getCurrentCharacterName() {
             pointer-events: none !important;
             opacity: 0 !important;
         }
-        
-        /* ============================================================
-           ★ 画像削除ボタン（登録解除ボタンの左隣）
-           ============================================================ */
+
         #${DELETE_IMAGE_BUTTON_ID} {
             position: fixed;
             left: -9999px;
             top: -9999px;
-            height: 50px;
-            padding: 0 14px;
+            height: calc(var(--exp-scale, 1) * 50px);
+            padding: 0 calc(var(--exp-scale, 1) * 8px);
             background-color: #c53030;
             color: #ffffff;
             border: 1px solid #9b2c2c;
-            border-radius: 4px;
+            border-radius: calc(var(--exp-scale, 1) * 4px);
             cursor: pointer;
             display: none;
             align-items: center;
             justify-content: center;
-            font-size: 13px;
+            font-size: calc(var(--exp-scale, 1) * 13px);
             font-weight: bold;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
             z-index: 15000;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+            box-shadow: 0 calc(var(--exp-scale, 1) * 2px) calc(var(--exp-scale, 1) * 8px) rgba(0, 0, 0, 0.5);
             opacity: 0;
             pointer-events: none;
             transition: opacity 0.15s ease, background-color 0.15s ease;
