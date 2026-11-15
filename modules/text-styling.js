@@ -589,20 +589,30 @@ function initTextStyling() {
         }
     }
 
-    // ★ 手動モード: テキストは中央配置、画像は通常モード
-    //    カスタムウィンドウの自動オープンは行わない（ボタン経由で開く）
+    // ★ 手動モード: チャットウィンドウは自由にドラッグ・リサイズ可能
+    //   image-display.js の idp-chat-explicit モード（--idp-chat-* 変数制御）に任せる。
+    //   inline の inset/width/height を除去しないと、ドラッグ/リサイズが効かない。
     function applyManualLayout() {
         const sheld = document.getElementById('sheld');
         if (sheld) {
-            sheld.style.setProperty('resize', 'none', 'important');
-            sheld.style.setProperty('inset', '3.5vh 0px 60px 25vw', 'important');
-            sheld.style.setProperty('height', '100vh', 'important');
-            sheld.style.setProperty('width', '50vw', 'important');
-            sheld.style.setProperty('margin', 'unset', 'important');
+            // ★ inline 固定をすべて除去
+            //   （image-display.js が --idp-chat-left/top/width/height で制御できるように）
+            sheld.style.removeProperty('resize');
+            sheld.style.removeProperty('inset');
+            sheld.style.removeProperty('width');
+            sheld.style.removeProperty('height');
+            sheld.style.removeProperty('margin');
         }
 
         try {
-            if (window.ImageDisplayExtension?.applyNormalMode) {
+            // ① chatPreState を初期化 + idp-chat-explicit クラス付与
+            //    （chatPreState が null でも現在位置から初期化される）
+            if (typeof window.ImageDisplayExtension?.ensureChatExplicitPosition === 'function') {
+                window.ImageDisplayExtension.ensureChatExplicitPosition();
+            }
+            // ② chatCurrentMode を 'normal' にし、--idp-chat-* 変数を反映
+            //    （chatPreState が初期化済みなので applyChatNormalState が動く）
+            if (typeof window.ImageDisplayExtension?.applyNormalMode === 'function') {
                 window.ImageDisplayExtension.applyNormalMode();
             }
             console.log('[Text Styling] レイアウト: 手動（画像位置・サイズを手動設定）');
