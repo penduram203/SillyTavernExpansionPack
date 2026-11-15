@@ -1,19 +1,13 @@
 // font_scale_auto.js
-// v7.9-robust: ドラッグ中は一切内部状態を触らず、pointerup 時に
-//              ポインタ位置から値を算出して確定する。
+// v8.0-simple: ユーザー操作と一切競合しない設計
 //
-// ★ v7.1: 再起動時のユーザー設定尊重
-// ★ v7.2: 合成イベント (isTrusted=false) フィルタ
-// ★ v7.3: slider 差し替え検知
-// ★ v7.4: ドラッグ中の input 無視
-// ★ v7.5: min/max を MIN_SCALE/MAX_SCALE 定数で制御
-// ★ v7.6: ドラッグ中は内部状態を触らない
-// ★ v7.7: pixel→value の独自計算を廃止
-// ★ v7.8: setter ガードの drag 中ブロック撤去
-// ★ v7.9: ドラッグ中は setter ガードで外部書き込みをブロックし、
-//         pointerup の瞬間に e.clientX と slider の矩形から値を算出。
-//         _dragPreviewValue / input には一切依存しない。
-//         --mainFontSize の小数は 2 桁に丸める。
+// ★ 設計
+//   - ダイアログで決めた解像度スケールは「起動直後の数秒だけ」適用する
+//     （ST の起動時設定読込との競合対策）
+//   - ユーザーがスライダー/カウンターに触れた瞬間に自動適用は完全停止
+//   - ドラッグ判定・ピクセル計算・setter ガード・強制ループは全廃
+//   - 値の適用は ST 自身の input ハンドラ経由（設定保存も ST に任せる）
+//   - 「再表示しない」はデフォルトでチェック済み
 //
 
 (function () {
@@ -27,10 +21,12 @@
     const RESOLUTION_LABEL_KEY = 'exp_font_scale_resolution_label';
 
     const BASE_W = 1920;
-    const BASE_H = 1080;
     const ST_BASE_FONT_PX = 15;
     const MIN_SCALE = 0.5;
     const MAX_SCALE = 2.0;
+
+    // 起動直後にダイアログ値を再適用するタイミング(ms)。ユーザー操作で即キャンセルされる
+    const STARTUP_REAPPLY_DELAYS_MS = [300, 1000, 2500];
 
     const PRESETS = [
         { label: '1280×720 (HD)',          w: 1280, h: 720 },
@@ -49,18 +45,16 @@
         { label: '3840×2160 (4K UHD)',     w: 3840, h: 2160 },
         { label: '3840×2400 (WQUXGA)',     w: 3840, h: 2400 },
     ];
-
     const DEFAULT_IDX = 6;
 
-    let _initApplyDone = false;
-    let _userIntentScale = null;
-    let _lastTrustedInputAt = 0;
-    const _guardedSliders = new WeakSet();
-    let _sliderGuardObserver = null;
     let _verbose = false;
-    let _draggingSlider = false;
-    let _dragPointerId = null;
-    let _sliderAttrObserver = null;
+    // ユーザーがスライダー/カウンターに触れたか（true なら自動適用は一切しない）
+    let _userTouched = false;
+    // 起動直後に再適用する予定のスケール（null なら予定なし）
+    let _startupScale = null;
+    let _startupTimers = [];
+
+    function vlog(...a) { if (_verbose) console.log(LOG, ...a); }
 
     function getSTContext() {
         try {
@@ -71,52 +65,45 @@
         return null;
     }
 
-    function computeScale(w, h) {
+    function computeScale(w) {
         if (!Number.isFinite(w) || w <= 0) return 1;
-        const raw = w / BASE_W;
-        return Math.max(MIN_SCALE, Math.min(MAX_SCALE, raw));
+        return Math.max(MIN_SCALE, Math.min(MAX_SCALE, w / BASE_W));
     }
 
-    function computeValueFromPointer(clientX, slider) {
-        if (!slider) return null;
-        const rect = slider.getBoundingClientRect();
-        if (rect.width <= 0) return null;
-        const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-        const v = MIN_SCALE + (MAX_SCALE - MIN_SCALE) * ratio;
-        // step に合わせて丸める（0.01 刻み）
-        const step = parseFloat(slider.step) || 0.01;
-        return Math.round(v / step) * step;
+    // ============================================================
+    // power_user オブジェクト群（ST のバージョン差を吸収）
+    // ============================================================
+    function getPowerUserObjects() {
+        const ctx = getSTContext();
+        const list = [
+            ctx?.powerUserSettings,
+            ctx?.extensionSettings?.power_user,
+            window.power_user,
+            window.powerUserSettings,
+        ];
+        return list.filter(o => o && typeof o === 'object');
     }
 
-    function enforceMaxAttribute() {
+    function getCurrentScale() {
+        for (const o of getPowerUserObjects()) {
+            if (typeof o.font_scale === 'number' && isFinite(o.font_scale)) return o.font_scale;
+        }
         const slider = document.getElementById('font_scale');
-        const counter = document.getElementById('font_scale_counter');
+        const v = parseFloat(slider?.value);
+        return Number.isFinite(v) ? v : 1;
+    }
+
+    // ============================================================
+    // min / max 属性を強制（ST 標準は max=1.5）
+    // ============================================================
+    function enforceMaxAttribute() {
         const minStr = String(MIN_SCALE);
         const maxStr = String(MAX_SCALE);
-        let changed = false;
-
-        if (slider) {
-            if (slider.getAttribute('max') !== maxStr) {
-                slider.setAttribute('max', maxStr);
-                changed = true;
-            }
-            if (slider.getAttribute('min') !== minStr) {
-                slider.setAttribute('min', minStr);
-                changed = true;
-            }
-        }
-        if (counter) {
-            if (counter.getAttribute('max') !== maxStr) {
-                counter.setAttribute('max', maxStr);
-                changed = true;
-            }
-            if (counter.getAttribute('min') !== minStr) {
-                counter.setAttribute('min', minStr);
-                changed = true;
-            }
-        }
-        if (changed && _verbose) {
-            console.log(`${LOG} #font_scale / #font_scale_counter の min/max を ${minStr}/${maxStr} に強制`);
+        for (const id of ['font_scale', 'font_scale_counter']) {
+            const el = document.getElementById(id);
+            if (!el) continue;
+            if (el.getAttribute('max') !== maxStr) el.setAttribute('max', maxStr);
+            if (el.getAttribute('min') !== minStr) el.setAttribute('min', minStr);
         }
     }
 
@@ -134,327 +121,149 @@
         mo.observe(document.body, { childList: true, subtree: true });
     }
 
-    function _applyUserIntent(silent = false) {
-        if (_userIntentScale === null) return;
-        if (_draggingSlider) {
-            if (_verbose) console.log(`${LOG} [apply] skipped (dragging)`);
-            return;
+    // ============================================================
+    // input 要素の value をネイティブ setter で書き込む
+    // ============================================================
+    function setNativeValue(el, v) {
+        if (!el) return;
+        try {
+            const desc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+            desc.set.call(el, String(v));
+        } catch (e) {
+            el.value = String(v);
         }
-        const ctx = getSTContext();
-        const intended = _userIntentScale;
-        const px = `${+(ST_BASE_FONT_PX * intended).toFixed(2)}px`;
+    }
 
+    function setMainFontSize(scale) {
+        const px = `${+(ST_BASE_FONT_PX * scale).toFixed(2)}px`;
+        document.documentElement.style.setProperty('--mainFontSize', px);
+    }
+
+    // ============================================================
+    // 起動時: ST が保持している値を UI に反映
+    //   max=1.5 の状態で ST が slider.value=2.0 を設定すると 1.5 に
+    //   クランプされるため、max を広げた後に power_user の値で再同期する
+    // ============================================================
+    function syncUiFromSettings() {
+        if (_userTouched) return;
+        const cur = getCurrentScale();
+        const slider = document.getElementById('font_scale');
+        const counter = document.getElementById('font_scale_counter');
+        if (slider && Math.abs(parseFloat(slider.value) - cur) > 0.001) setNativeValue(slider, cur);
+        if (counter && Math.abs(parseFloat(counter.value) - cur) > 0.001) setNativeValue(counter, cur);
+        vlog(`UI を設定値 ${cur} に同期`);
+    }
+
+    // ============================================================
+    // スケールを適用する
+    //   dispatch=true: スライダーに input イベントを送り、ST 自身のハンドラに
+    //                  power_user 更新・反映・設定保存をやらせる
+    // ============================================================
+    function applyScaleNow(scale, dispatch) {
         enforceMaxAttribute();
 
-        const paths = [
-            { name: 'ctx.powerUserSettings',            obj: ctx?.powerUserSettings },
-            { name: 'ctx.extensionSettings.power_user', obj: ctx?.extensionSettings?.power_user },
-            { name: 'window.power_user',                obj: window.power_user },
-            { name: 'window.powerUserSettings',         obj: window.powerUserSettings },
-        ];
-
-        for (const { name, obj } of paths) {
-            if (obj && typeof obj === 'object') {
-                const current = obj.font_scale;
-                if (typeof current !== 'number' || Math.abs(current - intended) > 0.01) {
-                    obj.font_scale = intended;
-                    if (!silent && typeof current === 'number') {
-                        console.log(`${LOG} ${name}.font_scale: ${current} → ${intended} を強制`);
-                    }
-                }
-            }
-        }
+        for (const o of getPowerUserObjects()) o.font_scale = scale;
 
         const slider = document.getElementById('font_scale');
-        if (slider) {
-            const cur = parseFloat(slider.value);
-            if (Math.abs(cur - intended) > 0.01) {
-                try {
-                    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')
-                        .set.call(slider, String(intended));
-                } catch (e) {
-                    slider.value = String(intended);
-                }
-                if (!silent) console.log(`${LOG} slider: ${cur} → ${intended} を強制`);
-            }
-        }
-
         const counter = document.getElementById('font_scale_counter');
-        if (counter) {
-            const cur = parseFloat(counter.value);
-            if (Math.abs(cur - intended) > 0.01) {
-                counter.value = String(intended);
-                if (!silent) console.log(`${LOG} counter: ${cur} → ${intended} を強制`);
-            }
+        setNativeValue(slider, scale);
+        setNativeValue(counter, scale);
+        setMainFontSize(scale);
+
+        if (dispatch && slider) {
+            // 合成イベント(isTrusted=false)なので、こちらの trusted リスナーは反応しない
+            try { slider.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) { /* ignore */ }
         }
-
-        const curPx = document.documentElement.style.getPropertyValue('--mainFontSize');
-        if (curPx !== px) {
-            document.documentElement.style.setProperty('--mainFontSize', px);
-            if (!silent && curPx) console.log(`${LOG} --mainFontSize: ${curPx} → ${px} を強制`);
-        }
-    }
-
-    let _burstToken = 0;
-    function _scheduleEnforceBurst() {
-        if (_draggingSlider) {
-            if (_verbose) console.log(`${LOG} [burst] skipped (dragging)`);
-            return;
-        }
-        const myToken = ++_burstToken;
-        const start = performance.now();
-        let frameCount = 0;
-
-        setTimeout(() => {
-            if (_burstToken !== myToken) return;
-            if (performance.now() - _lastTrustedInputAt < 100) return;
-            _applyUserIntent(false);
-        }, 0);
-
-        const loop = () => {
-            if (_burstToken !== myToken) return;
-            frameCount++;
-            if (performance.now() - _lastTrustedInputAt >= 100) {
-                _applyUserIntent(false);
-            }
-            const elapsed = performance.now() - start;
-            if (elapsed < 500 || frameCount < 30) {
-                requestAnimationFrame(loop);
-            }
-        };
-        requestAnimationFrame(loop);
-    }
-
-    function installSliderWriteGuard() {
-        const slider = document.getElementById('font_scale');
-        if (!slider) return;
-        if (_guardedSliders.has(slider)) return;
 
         try {
-            const proto = Object.getPrototypeOf(slider);
-            const desc = Object.getOwnPropertyDescriptor(proto, 'value');
-            if (!desc || !desc.set) return;
-
-            Object.defineProperty(slider, 'value', {
-                configurable: true,
-                get() { return desc.get.call(this); },
-                set(v) {
-                    if (_verbose) {
-                        console.log(`${LOG} [setter] ${this.id} value "${v}" (intent=${_userIntentScale}, dragging=${_draggingSlider})`);
-                    }
-                    // ★ v7.9: ドラッグ中はすべての外部書き込みをブロック。
-                    //   これで ST が slider.value を書き換えて thumb を動かすのを防ぐ。
-                    //   Firefox の native drag は内部状態を直接更新するので、
-                    //   このブロックの影響を受けない。
-                    if (_draggingSlider) {
-                        if (_verbose) console.log(`${LOG} [guard] drag 中の書き込み ${v} をブロック`);
-                        return;
-                    }
-                    const newNum = parseFloat(v);
-                    if (!Number.isFinite(newNum)) {
-                        return desc.set.call(this, v);
-                    }
-                    if (_userIntentScale === null ||
-                        Math.abs(newNum - _userIntentScale) <= 0.01) {
-                        return desc.set.call(this, v);
-                    }
-                    const caller = (() => {
-                        try {
-                            const stack = new Error().stack || '';
-                            return stack.split('\n')[2]?.trim() || 'unknown';
-                        } catch (_) { return 'unknown'; }
-                    })();
-                    console.log(`${LOG} [guard] ST からの slider.value=${v} をブロック (intent=${_userIntentScale}) caller=${caller}`);
-                },
-            });
-            _guardedSliders.add(slider);
-            console.log(`${LOG} slider.value setter ガードを設置しました (${document.querySelectorAll('#font_scale').length} 個の #font_scale)`);
-        } catch (e) {
-            console.warn(`${LOG} slider.value ガード設置失敗:`, e);
-        }
+            const ctx = getSTContext();
+            if (typeof ctx?.saveSettingsDebounced === 'function') ctx.saveSettingsDebounced();
+        } catch (e) { /* ignore */ }
     }
 
-    function startSliderGuardObserver() {
-        if (_sliderGuardObserver) return;
-        _sliderGuardObserver = new MutationObserver(() => {
-            const slider = document.getElementById('font_scale');
-            if (slider && !_guardedSliders.has(slider)) {
-                console.log(`${LOG} [observer] #font_scale が差し替えられたためガードを再設置します`);
-                installSliderWriteGuard();
-                if (_sliderAttrObserver) { _sliderAttrObserver.disconnect(); _sliderAttrObserver = null; }
-                installSliderAttributeObserver();
-            }
-        });
-        _sliderGuardObserver.observe(document.body, { childList: true, subtree: true });
-        console.log(`${LOG} slider 差し替え監視を開始しました`);
+    function cancelStartupReapply() {
+        _startupScale = null;
+        _startupTimers.forEach(t => clearTimeout(t));
+        _startupTimers = [];
     }
 
-    function installSliderAttributeObserver() {
-        const slider = document.getElementById('font_scale');
-        if (!slider || _sliderAttrObserver) return;
-        _sliderAttrObserver = new MutationObserver((mutations) => {
-            for (const m of mutations) {
-                if (m.attributeName === 'value') {
-                    if (_draggingSlider) continue;
-                    if (_userIntentScale === null) continue;
-                    const attrVal = parseFloat(slider.getAttribute('value'));
-                    if (Number.isFinite(attrVal) && Math.abs(attrVal - _userIntentScale) > 0.01) {
-                        console.log(`${LOG} [attr-guard] setAttribute('value', ${attrVal}) を検知 (intent=${_userIntentScale})`);
-                        slider.setAttribute('value', String(_userIntentScale));
-                    }
-                } else if (m.attributeName === 'max' || m.attributeName === 'min') {
-                    enforceMaxAttribute();
-                }
-            }
-        });
-        _sliderAttrObserver.observe(slider, {
-            attributes: true,
-            attributeFilter: ['value', 'max', 'min']
-        });
-        console.log(`${LOG} slider 属性監視を開始しました (value/max/min)`);
-    }
-
-    function setupFontScaleInterceptor() {
-        installSliderWriteGuard();
-        installSliderAttributeObserver();
-
-        // ⓪ pointerdown: ドラッグ開始。以降、外部書き込みは setter ガードで遮断。
-        document.addEventListener('pointerdown', (e) => {
-            if (e.target?.id === 'font_scale') {
-                if (_draggingSlider) return;
-                enforceMaxAttribute();
-                _draggingSlider = true;
-                _dragPointerId = e.pointerId ?? null;
-                if (_verbose) console.log(`${LOG} [drag] start (pointerId=${_dragPointerId})`);
-            }
-        }, true);
-
-        // ① input: ドラッグ中は完全無視（内部状態に一切書かない）
-        document.addEventListener('input', (e) => {
-            const target = e.target;
-            if (!target) return;
-            if (target.id !== 'font_scale' && target.id !== 'font_scale_counter') return;
-
-            if (target.id === 'font_scale' && _draggingSlider) {
-                if (_verbose) console.log(`${LOG} [drag] input ignored (value=${target.value})`);
-                return;
-            }
-
-            if (!e.isTrusted) {
-                if (_verbose) console.log(`${LOG} [guard] 合成 input を無視 (${target.id}, value=${target.value})`);
-                return;
-            }
-
-            const v = parseFloat(target.value);
-            if (!Number.isFinite(v)) return;
-
-            if (_verbose || _userIntentScale === null || Math.abs(v - _userIntentScale) > 0.01) {
-                console.log(`${LOG} ユーザーが手動で Font Scale を ${v} に変更 (${target.id}) intent=${_userIntentScale}`);
-            }
-            _userIntentScale = v;
-            _lastTrustedInputAt = performance.now();
-            _applyUserIntent(true);
-            _scheduleEnforceBurst();
-        }, true);
-
-        // ② change: ドラッグ中は pointerup に任せる
-        document.addEventListener('change', (e) => {
-            const target = e.target;
-            if (!target || target.id !== 'font_scale') return;
-            if (_draggingSlider) return;
-            if (!e.isTrusted) {
-                if (_verbose) console.log(`${LOG} [guard] 合成 change を無視 (${target.id}, value=${target.value})`);
-                return;
-            }
-            const v = parseFloat(target.value);
-            if (!Number.isFinite(v)) return;
-            _userIntentScale = v;
-            _lastTrustedInputAt = performance.now();
-            _applyUserIntent(true);
-            _scheduleEnforceBurst();
-        }, true);
-
-        // ③ pointerup: ポインタ位置から値を算出して確定
-        document.addEventListener('pointerup', (e) => {
-            if (!_draggingSlider) return;
-            if (_dragPointerId !== null && e.pointerId !== undefined && e.pointerId !== _dragPointerId) return;
-            _draggingSlider = false;
-            _dragPointerId = null;
-
-            const slider = document.getElementById('font_scale');
-            if (!slider) return;
-            enforceMaxAttribute();
-            const v = computeValueFromPointer(e.clientX, slider);
-            if (!Number.isFinite(v)) {
-                if (_verbose) console.log(`${LOG} [drag] end, could not compute value`);
-                return;
-            }
-            _userIntentScale = v;
-            _lastTrustedInputAt = 0;
-            if (_verbose) console.log(`${LOG} [drag] end, clientX=${e.clientX}, computed=${v}`);
-            _applyUserIntent(false);
-            _scheduleEnforceBurst();
-        }, true);
-
-        // ④ pointercancel: 何もしない（visual は Firefox 任せ、内部状態も変更しない）
-        document.addEventListener('pointercancel', () => {
-            if (_draggingSlider && _verbose) console.log(`${LOG} [drag] cancel`);
-            _draggingSlider = false;
-            _dragPointerId = null;
-        }, true);
-
-        // ⑤ blur: フォーカス喪失でドラッグ状態をリセット
-        window.addEventListener('blur', () => {
-            if (_draggingSlider && _verbose) console.log(`${LOG} [drag] blur`);
-            _draggingSlider = false;
-            _dragPointerId = null;
-        });
-    }
-
-    function applyFontScale(scale, options = {}) {
-        const { fromInit = false } = options;
-        if (fromInit && _initApplyDone) {
-            console.log(`${LOG} init からの applyFontScale は既に実行済み。スキップ`);
-            return true;
-        }
-        if (fromInit) _initApplyDone = true;
+    function applyFontScale(scale) {
         let s = Number(scale);
         if (!Number.isFinite(s)) s = 1;
         s = Math.max(MIN_SCALE, Math.min(MAX_SCALE, s));
-        _userIntentScale = s;
-        _applyUserIntent(true);
-        const ctx = getSTContext();
-        if (typeof ctx?.saveSettingsDebounced === 'function') {
-            ctx.saveSettingsDebounced();
-        }
-        _scheduleEnforceBurst();
-        console.log(`${LOG} Font Scale を ${s} に設定 (fromInit=${fromInit})`);
+
+        // ダイアログ適用は「ユーザーの明示操作」なので、触れた扱いをリセットして適用する
+        _userTouched = false;
+        cancelStartupReapply();
+        applyScaleNow(s, true);
+
+        // ST の起動時処理との競合対策として、短時間だけ再適用する
+        _startupScale = s;
+        STARTUP_REAPPLY_DELAYS_MS.forEach(delay => {
+            const t = setTimeout(() => {
+                if (_userTouched || _startupScale !== s) return;
+                if (Math.abs(getCurrentScale() - s) > 0.001 ||
+                    Math.abs(parseFloat(document.getElementById('font_scale')?.value) - s) > 0.001) {
+                    vlog(`起動直後の再適用 (${delay}ms): ${s}`);
+                    applyScaleNow(s, true);
+                }
+            }, delay);
+            _startupTimers.push(t);
+        });
+
+        console.log(`${LOG} Font Scale を ${s} に設定`);
         return true;
     }
 
+    // ============================================================
+    // ユーザー操作の検出 → 自動適用を即停止
+    //   pointerdown / keydown / wheel / trusted input / change
+    // ============================================================
+    function isFontScaleTarget(el) {
+        return !!el && (el.id === 'font_scale' || el.id === 'font_scale_counter');
+    }
+
+    function markUserTouched(reason) {
+        if (!_userTouched) {
+            _userTouched = true;
+            cancelStartupReapply();
+            vlog(`ユーザー操作を検知 (${reason}) → 自動適用を停止`);
+        }
+    }
+
+    function setupUserInteractionListeners() {
+        ['pointerdown', 'mousedown', 'touchstart', 'keydown', 'wheel'].forEach(type => {
+            document.addEventListener(type, (e) => {
+                if (isFontScaleTarget(e.target)) markUserTouched(type);
+            }, { capture: true, passive: true });
+        });
+
+        // ユーザーが動かした値は「そのまま」--mainFontSize に反映するだけ。
+        // 値を書き換えたり、強制したりはしない。
+        const onUserValue = (e) => {
+            if (!e.isTrusted) return;
+            const t = e.target;
+            if (!isFontScaleTarget(t)) return;
+            markUserTouched(e.type);
+            const v = parseFloat(t.value);
+            if (!Number.isFinite(v)) return;
+            const clamped = Math.max(MIN_SCALE, Math.min(MAX_SCALE, v));
+            setMainFontSize(clamped);
+            vlog(`ユーザー入力 (${t.id}): ${clamped}`);
+        };
+        document.addEventListener('input', onUserValue, true);
+        document.addEventListener('change', onUserValue, true);
+    }
+
+    // ============================================================
+    // 解像度選択ダイアログ
+    // ============================================================
     function showResolutionDialog() {
         if (document.getElementById('exp-font-scale-dialog-overlay')) return;
 
+        // 既に表示済み: ST が保持している値（ユーザー設定）を尊重し、何も上書きしない
         if (localStorage.getItem(DIALOG_SHOWN_KEY) === 'true') {
-            const saved = localStorage.getItem(RESOLUTION_KEY);
-            if (saved) {
-                try {
-                    const data = JSON.parse(saved);
-                    const resolutionScale = computeScale(data.w, data.h);
-                    const ctx = getSTContext();
-                    const current =
-                        ctx?.powerUserSettings?.font_scale ??
-                        ctx?.extensionSettings?.power_user?.font_scale ??
-                        window.power_user?.font_scale;
-                    if (typeof current === 'number' && Math.abs(current - resolutionScale) >= 0.01) {
-                        console.log(`${LOG} ST の font_scale (${current}) が解像度スケール (${resolutionScale}) と異なるため、ユーザー設定を尊重します`);
-                        _userIntentScale = current;
-                        _initApplyDone = true;
-                    } else {
-                        applyFontScale(resolutionScale, { fromInit: true });
-                    }
-                } catch (e) { /* ignore */ }
-            }
+            console.log(`${LOG} ダイアログ表示済み → ST の保存値 (${getCurrentScale()}) を尊重`);
             return;
         }
 
@@ -519,7 +328,7 @@
         PRESETS.forEach((preset, idx) => {
             const opt = document.createElement('option');
             opt.value = String(idx);
-            const s = computeScale(preset.w, preset.h);
+            const s = computeScale(preset.w);
             opt.textContent = `${preset.label}  [×${s.toFixed(2)}]`;
             if (idx === selectedIdx) opt.selected = true;
             select.appendChild(opt);
@@ -529,6 +338,7 @@
             if (!Number.isFinite(selectedIdx)) selectedIdx = 0;
         });
         box.appendChild(select);
+
         const dontShowLabel = document.createElement('label');
         Object.assign(dontShowLabel.style, {
             display: 'flex', alignItems: 'center', gap: `${S(12)}px`,
@@ -538,12 +348,14 @@
         const dontShowInput = document.createElement('input');
         dontShowInput.type = 'checkbox';
         dontShowInput.id = 'exp-fs-dont-show';
+        dontShowInput.checked = true;   // ★ デフォルトでチェック済み（毎回の再表示・再上書きを防ぐ）
         Object.assign(dontShowInput.style, {
             width: `${S(30)}px`, height: `${S(30)}px`, cursor: 'pointer', margin: '0',
         });
         dontShowLabel.appendChild(dontShowInput);
         dontShowLabel.appendChild(document.createTextNode('このメッセージを再び表示しない'));
         box.appendChild(dontShowLabel);
+
         const note = document.createElement('p');
         note.textContent = 'フォントサイズは、ユーザー設定の「フォントスケール」からいつでも自由に変更できます。';
         Object.assign(note.style, {
@@ -576,9 +388,10 @@
         box.appendChild(btnRow);
         overlay.appendChild(box);
         document.body.appendChild(overlay);
+
         applyBtn.addEventListener('click', () => {
             const preset = PRESETS[selectedIdx];
-            const scale = computeScale(preset.w, preset.h);
+            const scale = computeScale(preset.w);
             localStorage.setItem(RESOLUTION_KEY, JSON.stringify({
                 w: preset.w, h: preset.h, scale, setAt: Date.now(),
             }));
@@ -591,18 +404,20 @@
         cancelBtn.addEventListener('click', () => { overlay.remove(); });
     }
 
+    // ============================================================
+    // 初期化
+    // ============================================================
     function init() {
         setupMaxAttributeObserver();
-        setupFontScaleInterceptor();
-        startSliderGuardObserver();
+        setupUserInteractionListeners();
 
         let tries = 0;
         const timer = setInterval(() => {
             tries++;
             if (document.getElementById('font_scale')) {
                 clearInterval(timer);
-                installSliderWriteGuard();
-                installSliderAttributeObserver();
+                enforceMaxAttribute();
+                syncUiFromSettings();   // max 拡張後に、クランプされた slider を設定値へ再同期
                 showResolutionDialog();
             } else if (tries > 30) {
                 clearInterval(timer);
@@ -612,10 +427,10 @@
     }
 
     function bootstrap() {
-        let _bootStarted = false;
+        let started = false;
         const startOnce = () => {
-            if (_bootStarted) return;
-            _bootStarted = true;
+            if (started) return;
+            started = true;
             init();
         };
         const ctx = getSTContext();
@@ -629,27 +444,28 @@
 
     bootstrap();
 
+    // ============================================================
+    // 公開 API
+    // ============================================================
     window.FontScaleAuto = {
         applyScale: applyFontScale,
-        showDialog: showResolutionDialog,
+        showDialog: () => {
+            localStorage.removeItem(DIALOG_SHOWN_KEY);
+            showResolutionDialog();
+        },
         resetDismissed: () => {
             localStorage.removeItem(DIALOG_SHOWN_KEY);
             localStorage.removeItem(RESOLUTION_KEY);
             localStorage.removeItem(RESOLUTION_LABEL_KEY);
-            _initApplyDone = false;
             console.log(`${LOG} 既読フラグと解像度設定をリセットしました`);
         },
+        // 互換用: 起動直後の自動適用を止める
         clearIntent: () => {
-            _userIntentScale = null;
-            console.log(`${LOG} ユーザー意図をクリアしました（自動上書き停止）`);
+            cancelStartupReapply();
+            console.log(`${LOG} 自動適用予定をクリアしました`);
         },
-        getCurrentScale: () => {
-            const ctx = getSTContext();
-            return ctx?.powerUserSettings?.font_scale ??
-                   ctx?.extensionSettings?.power_user?.font_scale ??
-                   window.power_user?.font_scale ?? 1;
-        },
-        getUserIntent: () => _userIntentScale,
+        getCurrentScale,
+        getUserIntent: () => _startupScale,
         getSavedResolution: () => {
             try {
                 const raw = localStorage.getItem(RESOLUTION_KEY);
@@ -659,34 +475,31 @@
         enableVerbose: () => { _verbose = true; console.log(`${LOG} verbose ON`); },
         disableVerbose: () => { _verbose = false; console.log(`${LOG} verbose OFF`); },
         diagnose: () => {
+            const slider = document.getElementById('font_scale');
+            const counter = document.getElementById('font_scale_counter');
             const ctx = getSTContext();
-            const curSlider = document.getElementById('font_scale');
             return {
-                version: 'v7.9-robust',
-                verbose: _verbose,
-                userIntent: _userIntentScale,
-                initApplyDone: _initApplyDone,
-                draggingSlider: _draggingSlider,
-                lastTrustedInputAgo: _lastTrustedInputAt === 0 ? null : Math.round(performance.now() - _lastTrustedInputAt),
-                sliderGuardInstalled: curSlider ? _guardedSliders.has(curSlider) : false,
-                fontScaleCount: document.querySelectorAll('#font_scale').length,
+                version: 'v8.0-simple',
+                userTouched: _userTouched,
+                startupScale: _startupScale,
+                currentScale: getCurrentScale(),
                 powerUserSettings: ctx?.powerUserSettings?.font_scale,
                 extensionSettingsPowerUser: ctx?.extensionSettings?.power_user?.font_scale,
                 windowPowerUser: window.power_user?.font_scale,
-                windowPowerUserSettings: window.powerUserSettings?.font_scale,
-                sliderValue: curSlider?.value,
-                sliderMin: curSlider?.getAttribute('min'),
-                sliderMax: curSlider?.getAttribute('max'),
-                counterValue: document.getElementById('font_scale_counter')?.value,
+                sliderValue: slider?.value,
+                sliderMin: slider?.getAttribute('min'),
+                sliderMax: slider?.getAttribute('max'),
+                counterValue: counter?.value,
                 mainFontSize: document.documentElement.style.getPropertyValue('--mainFontSize'),
             };
         },
+        // 互換用: 現在の ST 設定値を UI に再同期
         forceEnforce: () => {
-            _applyUserIntent(false);
-            console.log(`${LOG} 手動で強制適用しました`);
+            _userTouched = false;
+            enforceMaxAttribute();
+            syncUiFromSettings();
         },
     };
 
-    console.log(`${LOG} ✅ installed (v7.9-robust)`);
-    console.log(`${LOG} v7.9 検出用マーカー: このメッセージが出ていれば v7.9 が動作中`);
+    console.log(`${LOG} ✅ installed (v8.0-simple)`);
 })();
