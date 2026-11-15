@@ -10,8 +10,8 @@
 //     4. /api/images/list をインターセプトし、動画を _thum.png に置換する
 //        （ST本体の getVideoThumbnail をスキップして高速化する）
 
-import './resolution_scale.js';   // ★ 追加（console_filter より後でも先でも可）
-
+import './resolution_scale.js';
+import './font_scale_auto.js';   // ★ 追加
 import './console_filter.js';
 //    復元方法（フィルタ自体を止めたい場合）
 //    F12 コンソールで: ConsoleFilter.disable() を実行
