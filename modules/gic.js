@@ -2085,12 +2085,14 @@ function positionGalleryButton() {
         return;
     }
 
-    const gap  = 5;
-    const btnW = galleryBtn.offsetWidth  || 50;
-    const btnH = galleryBtn.offsetHeight || 50;
+    // ★ ギャップを解像度スケーリング
+    const S = window.S || ((px) => px);
+    const gap = S(5);
+    const btnW = galleryBtn.offsetWidth  || S(50);
+    const btnH = galleryBtn.offsetHeight || S(50);
 
     let left = toggleLeft;
-    let top  = toggleTop - btnH - gap;
+    let top  = toggleTop - btnH - gap;   // ← gap がスケール済み
 
     const margin = 4;
     const vw = window.innerWidth;
