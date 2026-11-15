@@ -2,6 +2,11 @@
 /* ============================================================ */
 /* Chat Window On/Off - スタイル                                  */
 /*                                                              */
+/* ★ 解像度スケーリング対応 (cssvar モード):                     */
+/*   1920×962 基準で設計。他の解像度では --exp-scale で比例拡大。 */
+/*   サイズ系の px はすべて calc(var(--exp-scale, 1) * Npx) に  */
+/*   置き換え済み。border-width(1px) と z-index はそのまま。      */
+/*                                                              */
 /* 【責務】                                                      */
 /*   - 💡/🎨 ボタンの配置（座標はJSが設定）                       */
 /*   - body.gic-buttons-wake / chat-bulb-hover の wake 状態制御   */
@@ -22,19 +27,22 @@
     position: fixed;
     left: -9999px;
     top: -9999px;
-    width: 50px;
-    height: 50px;
+    width:  calc(var(--exp-scale, 1) * 50px);
+    height: calc(var(--exp-scale, 1) * 50px);
     background-color: #444;
     color: white;
     border: 1px solid #666;
-    border-radius: 4px;
+    border-radius: calc(var(--exp-scale, 1) * 4px);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 26px;
+    font-size: calc(var(--exp-scale, 1) * 26px);
     z-index: 15000;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    box-shadow:
+        0 calc(var(--exp-scale, 1) * 2px)
+        calc(var(--exp-scale, 1) * 8px)
+        rgba(0,0,0,0.5);
     opacity: 0;
     pointer-events: auto;
     transition: opacity 0.15s ease;
@@ -51,8 +59,8 @@
 /* (2) 🎨 ギャラリーボタン: 電球ボタンの左隣に配置                 */
 /* ============================================================ */
 #gic-open-gallery-button {
-    width: 50px !important;
-    height: 50px !important;
+    width:  calc(var(--exp-scale, 1) * 50px) !important;
+    height: calc(var(--exp-scale, 1) * 50px) !important;
     opacity: 0 !important;
     transition: opacity 0.15s ease !important;
     pointer-events: auto !important;
@@ -202,17 +210,30 @@ html body.chat-window-is-hidden #sheldheader {
 /* (9) スクロールバーを画面右端に移動 + z-index 調整               */
 /* ============================================================ */
 :root {
-    --cw-content-width: 900px;
+    --cw-content-width: calc(var(--exp-scale, 1) * 900px);
 }
 
 @media (min-width: 1001px) {
     #sheld { overflow: visible !important; }
 
-    #chat::-webkit-scrollbar { display: block !important; width: 36px !important; }
-    #chat::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.2) !important; }
-    #chat::-webkit-scrollbar-thumb { background: rgba(200, 200, 200, 0.5) !important; border-radius: 6px !important; }
-    #chat::-webkit-scrollbar-thumb:hover { background: rgba(220, 220, 220, 0.8) !important; }
-    #chat { scrollbar-width: auto !important; scrollbar-color: rgba(200, 200, 200, 0.5) rgba(0, 0, 0, 0.2) !important; }
+    #chat::-webkit-scrollbar {
+        display: block !important;
+        width: calc(var(--exp-scale, 1) * 36px) !important;
+    }
+    #chat::-webkit-scrollbar-track {
+        background: rgba(0, 0, 0, 0.2) !important;
+    }
+    #chat::-webkit-scrollbar-thumb {
+        background: rgba(200, 200, 200, 0.5) !important;
+        border-radius: calc(var(--exp-scale, 1) * 6px) !important;
+    }
+    #chat::-webkit-scrollbar-thumb:hover {
+        background: rgba(220, 220, 220, 0.8) !important;
+    }
+    #chat {
+        scrollbar-width: auto !important;
+        scrollbar-color: rgba(200, 200, 200, 0.5) rgba(0, 0, 0, 0.2) !important;
+    }
 
     #chat {
         background-clip: content-box !important;
