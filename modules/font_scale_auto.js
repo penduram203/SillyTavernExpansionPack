@@ -2,12 +2,13 @@
 // フォントスケール（Font Scale）の上限を 2.0 に拡張し、
 // 解像度に応じて自動設定する拡張モジュール。
 //
-// ★ v4 修正:
-//   - 解像度選択肢を 6 個 → 20 個に拡張（HD〜8K まで幅広く網羅）
-//   - ダイアログ全体のフォントサイズを 1.5 倍に拡大
-//   - 「↓のドロップダウンをクリックして解像度を選択して下さい」メッセージを追加
-//   - ドロップダウンの選択肢に ellipsis を追加（長い解像度名でもレイアウト崩れ防止）
-//   - ダイアログ幅を S(900) → S(1200) に拡大（フォント拡大に伴う調整）
+// ★ v5 修正:
+//   - bootstrap() の double-init を startOnce ガードで防止
+//     （APP_READY 発火後、setTimeout(init, 5000) が init を再度実行して
+//      applyFontScale が 2回呼ばれ、ユーザーのスライダー変更を上書きしていた）
+//   - applyFontScale に fromInit オプションを追加（二重適用の防御）
+//   - font_scale_counter の input も監視対象に追加
+//   - 5120×1440 / 5120×2160 / 5120×2880 / 6016×3384 / 7680×4320 を除外
 
 (function () {
     'use strict';
@@ -25,7 +26,7 @@
     const MIN_SCALE = 0.5;
     const MAX_SCALE = 2.0;
 
-    // ★ v4: 解像度選択肢を HD〜8K まで拡張
+    // ★ v5: 5K 以上の解像度を除外（15 個）
     const PRESETS = [
         { label: '1280×720 (HD)',          w: 1280, h: 720 },
         { label: '1280×800 (WXGA)',        w: 1280, h: 800 },
@@ -42,16 +43,12 @@
         { label: '3840×1080 (32:9)',       w: 3840, h: 1080 },
         { label: '3840×2160 (4K UHD)',     w: 3840, h: 2160 },
         { label: '3840×2400 (WQUXGA)',     w: 3840, h: 2400 },
-        { label: '5120×1440 (32:9)',       w: 5120, h: 1440 },
-        { label: '5120×2160 (5K2K)',       w: 5120, h: 2160 },
-        { label: '5120×2880 (5K)',         w: 5120, h: 2880 },
-        { label: '6016×3384 (6K)',         w: 6016, h: 3384 },
-        { label: '7680×4320 (8K UHD)',     w: 7680, h: 4320 },
     ];
 
-    // ★ v4: デフォルトは 1920×1080 (index 6)
-    const DEFAULT_IDX = 6;
+    const DEFAULT_IDX = 6;  // 1920×1080
 
+    // ★ v5: init からの applyFontScale は 1 回だけ実行
+    let _initApplyDone = false;
     let _targetFontScale = null;
 
     function getSTContext() {
@@ -101,9 +98,18 @@
     }
 
     // ============================================================
-    // Font Scale の適用（多重パス・5段階反映）
+    // Font Scale の適用
+    // ★ v5: fromInit オプションで二重適用を防止
     // ============================================================
-    function applyFontScale(scale) {
+    function applyFontScale(scale, options = {}) {
+        const { fromInit = false } = options;
+
+        if (fromInit && _initApplyDone) {
+            console.log(`${LOG} init からの applyFontScale は既に実行済み。スキップ`);
+            return true;
+        }
+        if (fromInit) _initApplyDone = true;
+
         let s = Number(scale);
         if (!Number.isFinite(s)) s = 1;
         s = Math.max(MIN_SCALE, Math.min(MAX_SCALE, s));
@@ -174,7 +180,7 @@
             }
         }
 
-        console.log(`${LOG} Font Scale を ${s} に設定 (--mainFontSize = ${targetPx}px)`);
+        console.log(`${LOG} Font Scale を ${s} に設定 (--mainFontSize = ${targetPx}px, fromInit=${fromInit})`);
         return true;
     }
 
@@ -193,21 +199,26 @@
     }
 
     // ============================================================
-    // #font_scale 手動変更のキャプチャ（1.5超対応 + ガード解除）
+    // 手動変更のキャプチャ（スライダー + カウンター両対応）
+    // ★ v5: font_scale_counter も監視対象に追加
     // ============================================================
     function setupFontScaleInterceptor() {
         document.addEventListener('input', (e) => {
             const target = e.target;
-            if (!target || target.id !== 'font_scale') return;
+            if (!target) return;
+            if (target.id !== 'font_scale' && target.id !== 'font_scale_counter') return;
+
             const v = parseFloat(target.value);
             if (!Number.isFinite(v)) return;
 
+            // 手動変更を検出したら目標値をクリア
             if (_targetFontScale !== null && Math.abs(v - _targetFontScale) > 0.01) {
-                console.log(`${LOG} ユーザーが手動で Font Scale を ${v} に変更 → 遅延再適用を停止`);
+                console.log(`${LOG} ユーザーが手動で Font Scale を ${v} に変更 (${target.id}) → 遅延再適用を停止`);
                 _targetFontScale = null;
             }
 
-            if (v > 1.5) {
+            // 1.5 超の場合は ST のクランプを回避
+            if (v > 1.5 && target.id === 'font_scale') {
                 document.documentElement.style.setProperty(
                     '--mainFontSize',
                     `${ST_BASE_FONT_PX * v}px`
@@ -233,7 +244,6 @@
 
     // ============================================================
     // 解像度ダイアログ
-    //   ★ v4: フォントサイズ1.5倍 / 選択肢20個 / 誘導メッセージ追加
     // ============================================================
     function showResolutionDialog() {
         if (document.getElementById('exp-font-scale-dialog-overlay')) return;
@@ -243,7 +253,8 @@
             if (saved) {
                 try {
                     const data = JSON.parse(saved);
-                    applyFontScale(computeScale(data.w, data.h));
+                    // ★ v5: fromInit を渡して二重適用防止
+                    applyFontScale(computeScale(data.w, data.h), { fromInit: true });
                 } catch (e) { /* ignore */ }
             }
             return;
@@ -273,15 +284,12 @@
             border: `${S(3)}px solid #4a5568`,
             borderRadius: `${S(18)}px`,
             padding: `${S(42)}px ${S(48)}px`,
-            // ★ v4: フォント拡大に伴い幅を S(900)→S(1200) に拡大
             maxWidth: `min(${S(1200)}px, calc(100vw - 40px))`,
             width: '100%',
             boxShadow: `0 ${S(20)}px ${S(60)}px rgba(0, 0, 0, 0.85)`,
             boxSizing: 'border-box',
         });
 
-        // ── タイトル ──
-        //   ★ v4: S(33) → S(49.5) (1.5倍)
         const h2 = document.createElement('h2');
         h2.textContent = 'モニタ解像度を選択してください';
         Object.assign(h2.style, {
@@ -293,8 +301,6 @@
         });
         box.appendChild(h2);
 
-        // ── 説明 ──
-        //   ★ v4: S(21) → S(31.5)
         const desc = document.createElement('p');
         desc.innerHTML = '選択した解像度に応じて、<strong style="color:#f6e05e;">フォントスケール</strong>を自動的に設定します。<br>（1920×1080 を基準として、スケール値を計算します）';
         Object.assign(desc.style, {
@@ -306,7 +312,6 @@
         });
         box.appendChild(desc);
 
-        // ── ★ v4: 誘導メッセージを追加 ──
         const hint = document.createElement('p');
         hint.textContent = '↓のドロップダウンをクリックして解像度を選択して下さい';
         Object.assign(hint.style, {
@@ -318,7 +323,6 @@
         });
         box.appendChild(hint);
 
-        // ── ラベル ──
         const selectLabel = document.createElement('label');
         Object.assign(selectLabel.style, {
             display: 'block',
@@ -330,7 +334,6 @@
         selectLabel.textContent = '解像度:';
         box.appendChild(selectLabel);
 
-        // ── ドロップダウン ──
         const select = document.createElement('select');
         select.id = 'exp-fs-resolution-select';
         Object.assign(select.style, {
@@ -346,7 +349,6 @@
             marginBottom: `${S(28)}px`,
             boxSizing: 'border-box',
             fontFamily: 'inherit',
-            // ★ v4: 長い解像度名でもレイアウト崩れを防ぐ
             textOverflow: 'ellipsis',
         });
 
@@ -367,8 +369,6 @@
 
         box.appendChild(select);
 
-        // ── 「再表示しない」チェックボックス ──
-        //   ★ v4: S(19.5) → S(29.25)
         const dontShowLabel = document.createElement('label');
         Object.assign(dontShowLabel.style, {
             display: 'flex',
@@ -393,8 +393,6 @@
         dontShowLabel.appendChild(document.createTextNode('このメッセージを再び表示しない'));
         box.appendChild(dontShowLabel);
 
-        // ── 注記 ──
-        //   ★ v4: S(18) → S(27)
         const note = document.createElement('p');
         note.textContent = 'フォントサイズは、ユーザー設定の「フォントスケール」からいつでも自由に変更できます。';
         Object.assign(note.style, {
@@ -407,8 +405,6 @@
         });
         box.appendChild(note);
 
-        // ── ボタン ──
-        //   ★ v4: S(21) → S(31.5)
         const btnRow = document.createElement('div');
         Object.assign(btnRow.style, {
             display: 'flex',
@@ -451,7 +447,6 @@
         overlay.appendChild(box);
         document.body.appendChild(overlay);
 
-        // ── イベント ──
         applyBtn.addEventListener('click', () => {
             const preset = PRESETS[selectedIdx];
             const scale = computeScale(preset.w, preset.h);
@@ -468,6 +463,7 @@
                 localStorage.setItem(DIALOG_SHOWN_KEY, 'true');
             }
 
+            // ダイアログからの適用は fromInit=false（明示的なユーザー操作）
             applyFontScale(scale);
             overlay.remove();
             console.log(`${LOG} 解像度 ${preset.label} → scale ${scale.toFixed(2)} を適用`);
@@ -498,13 +494,21 @@
         }, 200);
     }
 
+    // ★ v5: double-init 防止
     function bootstrap() {
+        let _bootStarted = false;
+        const startOnce = () => {
+            if (_bootStarted) return;
+            _bootStarted = true;
+            init();
+        };
+
         const ctx = getSTContext();
         if (ctx?.eventSource && ctx?.eventTypes?.APP_READY) {
-            ctx.eventSource.on(ctx.eventTypes.APP_READY, init);
-            setTimeout(init, 5000);
+            ctx.eventSource.on(ctx.eventTypes.APP_READY, startOnce);
+            setTimeout(startOnce, 5000);
         } else {
-            setTimeout(init, 2000);
+            setTimeout(startOnce, 2000);
         }
     }
 
@@ -520,7 +524,13 @@
             localStorage.removeItem(DIALOG_SHOWN_KEY);
             localStorage.removeItem(RESOLUTION_KEY);
             localStorage.removeItem(RESOLUTION_LABEL_KEY);
+            _initApplyDone = false;
             console.log(`${LOG} 既読フラグと解像度設定をリセットしました`);
+        },
+        // ★ v5: 遅延再適用を手動停止（緊急用）
+        stopReapply: () => {
+            _targetFontScale = null;
+            console.log(`${LOG} 遅延再適用を手動で停止しました`);
         },
         getCurrentScale: () => {
             const ctx = getSTContext();
@@ -540,6 +550,7 @@
             const ctx = getSTContext();
             return {
                 targetScale: _targetFontScale,
+                initApplyDone: _initApplyDone,
                 powerUserSettings: ctx?.powerUserSettings?.font_scale,
                 extensionSettingsPowerUser: ctx?.extensionSettings?.power_user?.font_scale,
                 windowPowerUser: window.power_user?.font_scale,
@@ -553,5 +564,5 @@
         },
     };
 
-    console.log(`${LOG} installed`);
+    console.log(`${LOG} installed (v5)`);
 })();
