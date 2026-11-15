@@ -1486,7 +1486,7 @@ function getCurrentCharacterName() {
             left: -9999px;
             top: -9999px;
             height: 50px;
-            padding: 0 6px;
+            padding: 0 8px;
             background-color: #d4c11e;
             color: #1a202c;
             border: 1px solid #e38d14;
@@ -1544,7 +1544,7 @@ function getCurrentCharacterName() {
             left: -9999px;
             top: -9999px;
             height: 50px;
-            padding: 0 6px;
+            padding: 0 8px;
             background-color: #c53030;
             color: #ffffff;
             border: 1px solid #9b2c2c;
