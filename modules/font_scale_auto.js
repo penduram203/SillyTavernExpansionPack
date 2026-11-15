@@ -1,17 +1,13 @@
 // font_scale_auto.js
-// v7.4-robust: ST の内部実装に依存しないバースト再適用方式
-//
-// ★ 戦略:
-//   - キャプチャフェーズでユーザー意図を記録
-//   - power_user.font_scale を 4 パス全てに即時書き込み
-//   - setTimeout 0 + requestAnimationFrame で約 500ms バースト再適用
+// v7.5-robust: ST の内部実装に依存しないバースト再適用方式
 //
 // ★ v7.1: 再起動時のユーザー設定尊重 / ドラッグ中バースト抑止
 // ★ v7.2: 合成イベント (isTrusted=false) フィルタ / slider.value setter ガード
 // ★ v7.3: _isDragging バイパス撤去 / slider 差し替え検知
-// ★ v7.4: スライダードラッグ中は input を完全無視。
-//         pointermove から intent を算出し、rAF 補正ループで
-//         slider.value を強制維持。setAttribute('value') も監視。
+// ★ v7.4: スライダードラッグ中は input を完全無視 / pointermove から intent 算出
+// ★ v7.5: slider.min/max 属性を信用せず MIN_SCALE/MAX_SCALE 定数を使用。
+//         ST による max/min 書き換えを属性監視で検知し即座に戻す。
+//         _applyUserIntent 冒頭で毎回 enforceMaxAttribute を実行。
 //
 
 (function () {
@@ -80,17 +76,32 @@
     function enforceMaxAttribute() {
         const slider = document.getElementById('font_scale');
         const counter = document.getElementById('font_scale_counter');
+        const minStr = String(MIN_SCALE);
+        const maxStr = String(MAX_SCALE);
         let changed = false;
-        if (slider && slider.getAttribute('max') !== '2.0') {
-            slider.setAttribute('max', '2.0');
-            changed = true;
+
+        if (slider) {
+            if (slider.getAttribute('max') !== maxStr) {
+                slider.setAttribute('max', maxStr);
+                changed = true;
+            }
+            if (slider.getAttribute('min') !== minStr) {
+                slider.setAttribute('min', minStr);
+                changed = true;
+            }
         }
-        if (counter && counter.getAttribute('max') !== '2.0') {
-            counter.setAttribute('max', '2.0');
-            changed = true;
+        if (counter) {
+            if (counter.getAttribute('max') !== maxStr) {
+                counter.setAttribute('max', maxStr);
+                changed = true;
+            }
+            if (counter.getAttribute('min') !== minStr) {
+                counter.setAttribute('min', minStr);
+                changed = true;
+            }
         }
         if (changed && _verbose) {
-            console.log(`${LOG} #font_scale / #font_scale_counter の max を 2.0 に変更`);
+            console.log(`${LOG} #font_scale / #font_scale_counter の min/max を ${minStr}/${maxStr} に強制`);
         }
     }
 
@@ -113,6 +124,10 @@
         const ctx = getSTContext();
         const intended = _userIntentScale;
         const px = `${ST_BASE_FONT_PX * intended}px`;
+
+        // ★ v7.5: native setter は max 属性でクランプされるので、
+        //   書き込み前に必ず min/max を正す
+        enforceMaxAttribute();
 
         const paths = [
             { name: 'ctx.powerUserSettings',            obj: ctx?.powerUserSettings },
@@ -248,17 +263,24 @@
         if (!slider || _sliderAttrObserver) return;
         _sliderAttrObserver = new MutationObserver((mutations) => {
             for (const m of mutations) {
-                if (m.attributeName !== 'value') continue;
-                if (_userIntentScale === null) continue;
-                const attrVal = parseFloat(slider.getAttribute('value'));
-                if (Number.isFinite(attrVal) && Math.abs(attrVal - _userIntentScale) > 0.01) {
-                    console.log(`${LOG} [attr-guard] setAttribute('value', ${attrVal}) を検知 (intent=${_userIntentScale})`);
-                    slider.setAttribute('value', String(_userIntentScale));
+                if (m.attributeName === 'value') {
+                    if (_userIntentScale === null) continue;
+                    const attrVal = parseFloat(slider.getAttribute('value'));
+                    if (Number.isFinite(attrVal) && Math.abs(attrVal - _userIntentScale) > 0.01) {
+                        console.log(`${LOG} [attr-guard] setAttribute('value', ${attrVal}) を検知 (intent=${_userIntentScale})`);
+                        slider.setAttribute('value', String(_userIntentScale));
+                    }
+                } else if (m.attributeName === 'max' || m.attributeName === 'min') {
+                    // ★ v7.5: ST が max/min を書き換えたら即座に戻す
+                    enforceMaxAttribute();
                 }
             }
         });
-        _sliderAttrObserver.observe(slider, { attributes: true, attributeFilter: ['value'] });
-        console.log(`${LOG} slider.value 属性監視を開始しました`);
+        _sliderAttrObserver.observe(slider, {
+            attributes: true,
+            attributeFilter: ['value', 'max', 'min']
+        });
+        console.log(`${LOG} slider 属性監視を開始しました (value/max/min)`);
     }
 
     function setupFontScaleInterceptor() {
@@ -314,8 +336,10 @@
             const rect = slider.getBoundingClientRect();
             if (rect.width <= 0) return;
             const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-            const min = parseFloat(slider.min) || 0.5;
-            const max = parseFloat(slider.max) || 2.0;
+            // ★ v7.5: slider.min/max は ST に書き換えられることがあるので
+            //   自前の定数を使う（属性に依存しない）
+            const min = MIN_SCALE;
+            const max = MAX_SCALE;
             const step = parseFloat(slider.step) || 0.01;
             const raw = min + (max - min) * ratio;
             const v = Math.round(raw / step) * step;
@@ -539,4 +563,134 @@
         Object.assign(cancelBtn.style, {
             padding: `${S(15)}px ${S(36)}px`, background: '#4a5568', color: '#ffffff',
             border: 'none', borderRadius: `${S(9)}px`, cursor: 'pointer',
-            fontSize: `${S(31.
+            fontSize: `${S(31.5)}px`, fontWeight: '900',
+        });
+        const applyBtn = document.createElement('button');
+        applyBtn.type = 'button';
+        applyBtn.textContent = '適用';
+        Object.assign(applyBtn.style, {
+            padding: `${S(15)}px ${S(36)}px`, background: '#2b6cb0', color: '#ffffff',
+            border: 'none', borderRadius: `${S(9)}px`, cursor: 'pointer',
+            fontSize: `${S(31.5)}px`, fontWeight: '900',
+        });
+        btnRow.appendChild(cancelBtn);
+        btnRow.appendChild(applyBtn);
+        box.appendChild(btnRow);
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+        applyBtn.addEventListener('click', () => {
+            const preset = PRESETS[selectedIdx];
+            const scale = computeScale(preset.w, preset.h);
+            localStorage.setItem(RESOLUTION_KEY, JSON.stringify({
+                w: preset.w, h: preset.h, scale, setAt: Date.now(),
+            }));
+            localStorage.setItem(RESOLUTION_LABEL_KEY, preset.label);
+            if (dontShowInput.checked) localStorage.setItem(DIALOG_SHOWN_KEY, 'true');
+            applyFontScale(scale);
+            overlay.remove();
+            console.log(`${LOG} 解像度 ${preset.label} → scale ${scale.toFixed(2)} を適用`);
+        });
+        cancelBtn.addEventListener('click', () => { overlay.remove(); });
+    }
+
+    function init() {
+        setupMaxAttributeObserver();
+        setupFontScaleInterceptor();
+        startSliderGuardObserver();
+
+        let tries = 0;
+        const timer = setInterval(() => {
+            tries++;
+            if (document.getElementById('font_scale')) {
+                clearInterval(timer);
+                installSliderWriteGuard();
+                installSliderAttributeObserver();
+                showResolutionDialog();
+            } else if (tries > 30) {
+                clearInterval(timer);
+                console.warn(`${LOG} #font_scale が見つかりませんでした`);
+            }
+        }, 200);
+    }
+
+    function bootstrap() {
+        let _bootStarted = false;
+        const startOnce = () => {
+            if (_bootStarted) return;
+            _bootStarted = true;
+            init();
+        };
+        const ctx = getSTContext();
+        if (ctx?.eventSource && ctx?.eventTypes?.APP_READY) {
+            ctx.eventSource.on(ctx.eventTypes.APP_READY, startOnce);
+            setTimeout(startOnce, 5000);
+        } else {
+            setTimeout(startOnce, 2000);
+        }
+    }
+
+    bootstrap();
+
+    window.FontScaleAuto = {
+        applyScale: applyFontScale,
+        showDialog: showResolutionDialog,
+        resetDismissed: () => {
+            localStorage.removeItem(DIALOG_SHOWN_KEY);
+            localStorage.removeItem(RESOLUTION_KEY);
+            localStorage.removeItem(RESOLUTION_LABEL_KEY);
+            _initApplyDone = false;
+            console.log(`${LOG} 既読フラグと解像度設定をリセットしました`);
+        },
+        clearIntent: () => {
+            _userIntentScale = null;
+            console.log(`${LOG} ユーザー意図をクリアしました（自動上書き停止）`);
+        },
+        getCurrentScale: () => {
+            const ctx = getSTContext();
+            return ctx?.powerUserSettings?.font_scale ??
+                   ctx?.extensionSettings?.power_user?.font_scale ??
+                   window.power_user?.font_scale ?? 1;
+        },
+        getUserIntent: () => _userIntentScale,
+        getSavedResolution: () => {
+            try {
+                const raw = localStorage.getItem(RESOLUTION_KEY);
+                return raw ? JSON.parse(raw) : null;
+            } catch (e) { return null; }
+        },
+        enableVerbose: () => { _verbose = true; console.log(`${LOG} verbose ON`); },
+        disableVerbose: () => { _verbose = false; console.log(`${LOG} verbose OFF`); },
+        diagnose: () => {
+            const ctx = getSTContext();
+            const curSlider = document.getElementById('font_scale');
+            return {
+                version: 'v7.5-robust',
+                verbose: _verbose,
+                userIntent: _userIntentScale,
+                initApplyDone: _initApplyDone,
+                isDragging: _isDragging,
+                draggingSlider: _draggingSlider,
+                dragMonitorActive: _dragMonitorRaf !== null,
+                lastTrustedInputAgo: _lastTrustedInputAt === 0 ? null : Math.round(performance.now() - _lastTrustedInputAt),
+                sliderGuardInstalled: curSlider ? _guardedSliders.has(curSlider) : false,
+                fontScaleCount: document.querySelectorAll('#font_scale').length,
+                powerUserSettings: ctx?.powerUserSettings?.font_scale,
+                extensionSettingsPowerUser: ctx?.extensionSettings?.power_user?.font_scale,
+                windowPowerUser: window.power_user?.font_scale,
+                windowPowerUserSettings: window.powerUserSettings?.font_scale,
+                sliderValue: curSlider?.value,
+                sliderMin: curSlider?.getAttribute('min'),
+                sliderMax: curSlider?.getAttribute('max'),
+                counterValue: document.getElementById('font_scale_counter')?.value,
+                mainFontSize: document.documentElement.style.getPropertyValue('--mainFontSize'),
+            };
+        },
+        forceEnforce: () => {
+            _applyUserIntent(false);
+            console.log(`${LOG} 手動で強制適用しました`);
+        },
+    };
+
+    console.log(`${LOG} ✅ installed (v7.5-robust)`);
+    console.log(`${LOG} v7.5 検出用マーカー: このメッセージが出ていれば v7.5 が動作中`);
+})();
