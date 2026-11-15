@@ -352,9 +352,6 @@ function applyToggleChatButtonLayout() {
 // ============================================================
 let _wcbLayoutApplied = false;
 
-// ★ 新レイアウト: T/中央を左にオフセットする量
-const WCB_LEFT_OFFSET_PX = 53;
-
 function applyWindowControlButtonsLayout() {
     const toggleBtn  = document.getElementById('toggle-chat-button');
     const wcb        = document.getElementById('window-control-buttons');
