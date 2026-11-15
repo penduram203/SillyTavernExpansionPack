@@ -1,15 +1,14 @@
 // font_scale_auto.js
-// v7.6-robust: ドラッグ中は内部状態を一切触らない方式
+// v7.7-robust: ドラッグ中はブラウザ native drag に任せ、内部状態は離した瞬間のみ更新
 //
 // ★ v7.1: 再起動時のユーザー設定尊重 / ドラッグ中バースト抑止
 // ★ v7.2: 合成イベント (isTrusted=false) フィルタ / slider.value setter ガード
 // ★ v7.3: _isDragging バイパス撤去 / slider 差し替え検知
 // ★ v7.4: スライダードラッグ中は input を完全無視
 // ★ v7.5: slider.min/max 属性を信用せず MIN_SCALE/MAX_SCALE 定数を使用
-// ★ v7.6: ドラッグ中は _userIntentScale / power_user.font_scale / --mainFontSize を
-//         一切書き換えず、slider.value の見た目だけを強制する。
-//         pointerup の瞬間に初めて内部状態へ反映する。
-//         これにより ST のリアクティブ処理がドラッグ中に走らない。
+// ★ v7.6: ドラッグ中は内部状態を一切触らない
+// ★ v7.7: pixel→value の独自計算を廃止し、ブラウザ native drag に任せる。
+//         ドラッグ中は input の値を読むだけ、pointerup で内部状態に反映する。
 //
 
 (function () {
@@ -50,17 +49,13 @@
 
     let _initApplyDone = false;
     let _userIntentScale = null;
-    let _isDragging = false;
     let _lastTrustedInputAt = 0;
     const _guardedSliders = new WeakSet();
     let _sliderGuardObserver = null;
     let _verbose = false;
     let _draggingSlider = false;
-    let _dragMonitorRaf = null;
-    let _dragPointerId = null;
-    let _sliderAttrObserver = null;
-    // ★ v7.6: ドラッグ中の「見た目上の値」。内部状態には一切書かない
     let _dragPreviewValue = null;
+    let _sliderAttrObserver = null;
 
     function getSTContext() {
         try {
@@ -231,7 +226,6 @@
                     if (_verbose) {
                         console.log(`${LOG} [setter] ${this.id} value "${v}" (intent=${_userIntentScale}, dragging=${_draggingSlider})`);
                     }
-                    // ★ v7.6: ドラッグ中は外部からの書き込みを全ブロック
                     if (_draggingSlider) {
                         console.log(`${LOG} [guard] drag 中の外部書き込み ${v} をブロック (preview=${_dragPreviewValue})`);
                         return;
@@ -279,7 +273,7 @@
         _sliderAttrObserver = new MutationObserver((mutations) => {
             for (const m of mutations) {
                 if (m.attributeName === 'value') {
-                    if (_draggingSlider) continue; // ドラッグ中は無視
+                    if (_draggingSlider) continue;
                     if (_userIntentScale === null) continue;
                     const attrVal = parseFloat(slider.getAttribute('value'));
                     if (Number.isFinite(attrVal) && Math.abs(attrVal - _userIntentScale) > 0.01) {
@@ -302,126 +296,22 @@
         installSliderWriteGuard();
         installSliderAttributeObserver();
 
-        const isSliderTarget = (el) => {
-            if (!el) return false;
-            if (el.id === 'font_scale' || el.id === 'font_scale_counter') return true;
-            if (el.closest) return !!el.closest('#font_scale, #font_scale_counter');
-            return false;
-        };
-
-        const startDragMonitor = () => {
-            if (_dragMonitorRaf !== null) return;
-            const tick = () => {
-                if (!_draggingSlider) {
-                    _dragMonitorRaf = null;
-                    return;
-                }
-                const slider = document.getElementById('font_scale');
-                if (slider && _dragPreviewValue !== null) {
-                    const cur = parseFloat(slider.value);
-                    if (Math.abs(cur - _dragPreviewValue) > 0.01) {
-                        enforceMaxAttribute();
-                        try {
-                            Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')
-                                .set.call(slider, String(_dragPreviewValue));
-                            if (_verbose) console.log(`${LOG} [drag-monitor] slider was ${cur}, forced to ${_dragPreviewValue}`);
-                        } catch (e) { /* ignore */ }
-                    }
-                }
-                _dragMonitorRaf = requestAnimationFrame(tick);
-            };
-            _dragMonitorRaf = requestAnimationFrame(tick);
-        };
-
+        // ⓪ pointerdown: スライダードラッグ開始
         document.addEventListener('pointerdown', (e) => {
             if (e.target?.id === 'font_scale') {
                 if (_draggingSlider) return;
                 _draggingSlider = true;
-                _dragPointerId = e.pointerId ?? null;
                 _dragPreviewValue = parseFloat(e.target.value);
-                startDragMonitor();
+                if (!Number.isFinite(_dragPreviewValue)) _dragPreviewValue = null;
                 if (_verbose) console.log(`${LOG} [drag] start (preview=${_dragPreviewValue})`);
-            } else if (e.target?.id === 'font_scale_counter') {
-                _isDragging = true;
             }
         }, true);
 
-        document.addEventListener('pointermove', (e) => {
-            if (!_draggingSlider) return;
-            if (_dragPointerId !== null && e.pointerId !== undefined && e.pointerId !== _dragPointerId) return;
-            const slider = document.getElementById('font_scale');
-            if (!slider) return;
-            const rect = slider.getBoundingClientRect();
-            if (rect.width <= 0) return;
-            const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-            const min = MIN_SCALE;
-            const max = MAX_SCALE;
-            const step = parseFloat(slider.step) || 0.01;
-            const raw = min + (max - min) * ratio;
-            const v = Math.round(raw / step) * step;
-            const clamped = Math.max(min, Math.min(max, v));
-            _dragPreviewValue = clamped;
-
-            enforceMaxAttribute();
-            const cur = parseFloat(slider.value);
-            if (Math.abs(cur - clamped) > 0.001) {
-                try {
-                    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')
-                        .set.call(slider, String(clamped));
-                } catch (e) { /* ignore */ }
-            }
-            // ★ v7.6: _userIntentScale / _applyUserIntent は呼ばない
-        }, true);
-
-        document.addEventListener('pointerup', (e) => {
-            if (_draggingSlider) {
-                if (_dragPointerId !== null && e.pointerId !== undefined && e.pointerId !== _dragPointerId) return;
-                _draggingSlider = false;
-                _dragPointerId = null;
-                const finalValue = _dragPreviewValue;
-                _dragPreviewValue = null;
-                if (finalValue !== null) {
-                    _userIntentScale = finalValue;
-                    _lastTrustedInputAt = 0;
-                    if (_verbose) console.log(`${LOG} [drag] end, applying ${finalValue}`);
-                    _applyUserIntent(false);
-                    _scheduleEnforceBurst();
-                }
-            } else if (_isDragging) {
-                _isDragging = false;
-                _scheduleEnforceBurst();
-            }
-        }, true);
-
-        document.addEventListener('pointercancel', () => {
-            if (_draggingSlider) {
-                if (_verbose) console.log(`${LOG} [drag] cancel (preview discarded)`);
-            }
-            _isDragging = false;
-            _draggingSlider = false;
-            _dragPointerId = null;
-            _dragPreviewValue = null;
-        }, true);
-
-        window.addEventListener('blur', () => {
-            if (_draggingSlider) {
-                if (_verbose) console.log(`${LOG} [drag] blur, treating as cancel`);
-            }
-            _isDragging = false;
-            _draggingSlider = false;
-            _dragPointerId = null;
-            _dragPreviewValue = null;
-        });
-
+        // ① input: ドラッグ中はブラウザ native drag の値を読むだけ
         document.addEventListener('input', (e) => {
             const target = e.target;
             if (!target) return;
             if (target.id !== 'font_scale' && target.id !== 'font_scale_counter') return;
-
-            if (_draggingSlider) {
-                if (_verbose) console.log(`${LOG} [guard] slider drag 中の input を無視 (value=${target.value})`);
-                return;
-            }
 
             if (!e.isTrusted) {
                 if (_verbose) console.log(`${LOG} [guard] 合成 input を無視 (${target.id}, value=${target.value})`);
@@ -431,23 +321,33 @@
             const v = parseFloat(target.value);
             if (!Number.isFinite(v)) return;
 
+            if (target.id === 'font_scale' && _draggingSlider) {
+                // ★ v7.7: ブラウザ native drag が pixel→value を正しく計算するので、
+                //   ここでは値をそのまま読むだけ。内部状態には一切書かない。
+                _dragPreviewValue = v;
+                if (_verbose) console.log(`${LOG} [drag] input value=${v}`);
+                return;
+            }
+
             if (_verbose || _userIntentScale === null || Math.abs(v - _userIntentScale) > 0.01) {
                 console.log(`${LOG} ユーザーが手動で Font Scale を ${v} に変更 (${target.id}) intent=${_userIntentScale}`);
             }
             _userIntentScale = v;
             _lastTrustedInputAt = performance.now();
             _applyUserIntent(true);
-            if (!_isDragging) _scheduleEnforceBurst();
+            _scheduleEnforceBurst();
         }, true);
 
+        // ② change: ドラッグ中は pointerup に任せる
         document.addEventListener('change', (e) => {
             const target = e.target;
             if (!target || target.id !== 'font_scale') return;
-            if (_draggingSlider) return;
             if (!e.isTrusted) {
                 if (_verbose) console.log(`${LOG} [guard] 合成 change を無視 (${target.id}, value=${target.value})`);
                 return;
             }
+            if (_draggingSlider) return;
+
             const v = parseFloat(target.value);
             if (!Number.isFinite(v)) return;
             _userIntentScale = v;
@@ -455,6 +355,41 @@
             _applyUserIntent(true);
             _scheduleEnforceBurst();
         }, true);
+
+        // ③ pointerup: ドラッグ終了、ここで初めて内部状態に反映
+        document.addEventListener('pointerup', (e) => {
+            if (!_draggingSlider) return;
+            _draggingSlider = false;
+            const finalValue = _dragPreviewValue;
+            _dragPreviewValue = null;
+            if (finalValue !== null) {
+                _userIntentScale = finalValue;
+                _lastTrustedInputAt = 0;
+                if (_verbose) console.log(`${LOG} [drag] end, applying ${finalValue}`);
+                _applyUserIntent(false);
+                _scheduleEnforceBurst();
+            } else {
+                if (_verbose) console.log(`${LOG} [drag] end, no preview`);
+            }
+        }, true);
+
+        // ④ pointercancel: プレビュー破棄（内部状態はそのまま）
+        document.addEventListener('pointercancel', () => {
+            if (_draggingSlider) {
+                if (_verbose) console.log(`${LOG} [drag] cancel`);
+            }
+            _draggingSlider = false;
+            _dragPreviewValue = null;
+        }, true);
+
+        // ⑤ blur: フォーカス喪失でドラッグ状態をリセット
+        window.addEventListener('blur', () => {
+            if (_draggingSlider) {
+                if (_verbose) console.log(`${LOG} [drag] blur, treating as cancel`);
+            }
+            _draggingSlider = false;
+            _dragPreviewValue = null;
+        });
     }
 
     function applyFontScale(scale, options = {}) {
@@ -708,14 +643,12 @@
             const ctx = getSTContext();
             const curSlider = document.getElementById('font_scale');
             return {
-                version: 'v7.6-robust',
+                version: 'v7.7-robust',
                 verbose: _verbose,
                 userIntent: _userIntentScale,
                 initApplyDone: _initApplyDone,
-                isDragging: _isDragging,
                 draggingSlider: _draggingSlider,
                 dragPreviewValue: _dragPreviewValue,
-                dragMonitorActive: _dragMonitorRaf !== null,
                 lastTrustedInputAgo: _lastTrustedInputAt === 0 ? null : Math.round(performance.now() - _lastTrustedInputAt),
                 sliderGuardInstalled: curSlider ? _guardedSliders.has(curSlider) : false,
                 fontScaleCount: document.querySelectorAll('#font_scale').length,
@@ -736,6 +669,6 @@
         },
     };
 
-    console.log(`${LOG} ✅ installed (v7.6-robust)`);
-    console.log(`${LOG} v7.6 検出用マーカー: このメッセージが出ていれば v7.6 が動作中`);
+    console.log(`${LOG} ✅ installed (v7.7-robust)`);
+    console.log(`${LOG} v7.7 検出用マーカー: このメッセージが出ていれば v7.7 が動作中`);
 })();
