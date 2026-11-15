@@ -1,5 +1,5 @@
 // font_scale_auto.js
-// v7-robust: ST の内部実装に依存しないバースト再適用方式
+// v7.1-robust: ST の内部実装に依存しないバースト再適用方式
 //
 // ★ 戦略:
 //   - キャプチャフェーズでユーザー意図を記録
@@ -8,6 +8,13 @@
 //     （ST 本体の遅延上書きを捕捉）
 //   - ズレ検出時は console.log で可視化
 //   - init は 1 回のみ、タイマーなし
+//
+// ★ v7.1 修正点:
+//   - 再起動時、ST の現在値が解像度スケールと異なる場合はユーザー意図を
+//     優先し、強制適用しない（showResolutionDialog の既読分岐）
+//   - スライダードラッグ中はバーストを抑止し、ST 本体の再適用との
+//     毎フレーム衝突による点滅を回避
+//
 
 (function () {
     'use strict';
@@ -48,6 +55,8 @@
     let _initApplyDone = false;
     // ★ v7: ユーザーの意図したスケール（手動操作で常に上書き）
     let _userIntentScale = null;
+    // ★ v7.1: スライダードラッグ中フラグ（ST との衝突を避けるためバーストを抑止）
+    let _isDragging = false;
 
     function getSTContext() {
         try {
@@ -181,6 +190,25 @@
     // キャプチャフェーズ: ユーザー意図を記録 + 即時適用
     // ============================================================
     function setupFontScaleInterceptor() {
+        // ⓪ ドラッグ状態の追跡（スライダーのみ）
+        //   ドラッグ中はバーストを抑止し、ST 本体の再適用との毎フレーム衝突を避ける
+        document.addEventListener('pointerdown', (e) => {
+            if (e.target?.id === 'font_scale') {
+                _isDragging = true;
+            }
+        }, true);
+        document.addEventListener('pointerup', (e) => {
+            if (e.target?.id === 'font_scale' && _isDragging) {
+                _isDragging = false;
+                // 離した瞬間に1回だけバースト
+                _scheduleEnforceBurst();
+            }
+        }, true);
+        // pointerup が外で起きた場合の保険
+        document.addEventListener('pointercancel', (e) => {
+            if (e.target?.id === 'font_scale') _isDragging = false;
+        }, true);
+
         // ① input イベント（スライダー・カウンター両対応）
         document.addEventListener('input', (e) => {
             const target = e.target;
@@ -196,9 +224,10 @@
             }
             _userIntentScale = v;
 
-            // 即時適用 + バーストスケジュール
+            // 即時適用
             _applyUserIntent(true);
-            _scheduleEnforceBurst();
+            // ドラッグ中はバーストを起動しない（ST との衝突を避ける）
+            if (!_isDragging) _scheduleEnforceBurst();
         }, true);
 
         // ② change イベント（スライダーリリース時）
@@ -210,6 +239,7 @@
             if (!Number.isFinite(v)) return;
             _userIntentScale = v;
             _applyUserIntent(true);
+            // pointerup で既にバーストが走っていても、change 後にもう一度だけ実行
             _scheduleEnforceBurst();
         }, true);
     }
@@ -256,7 +286,24 @@
             if (saved) {
                 try {
                     const data = JSON.parse(saved);
-                    applyFontScale(computeScale(data.w, data.h), { fromInit: true });
+                    const resolutionScale = computeScale(data.w, data.h);
+
+                    // ST が現在保持している font_scale を取得
+                    const ctx = getSTContext();
+                    const current =
+                        ctx?.powerUserSettings?.font_scale ??
+                        ctx?.extensionSettings?.power_user?.font_scale ??
+                        window.power_user?.font_scale;
+
+                    if (typeof current === 'number' && Math.abs(current - resolutionScale) >= 0.01) {
+                        // ユーザーが手動で変更した値（解像度スケールと異なる）を尊重する
+                        console.log(`${LOG} ST の font_scale (${current}) が解像度スケール (${resolutionScale}) と異なるため、ユーザー設定を尊重します`);
+                        _userIntentScale = current;
+                        _initApplyDone = true;
+                    } else {
+                        // 初回と同じ扱い（未設定 or 解像度スケールと一致）
+                        applyFontScale(resolutionScale, { fromInit: true });
+                    }
                 } catch (e) { /* ignore */ }
             }
             return;
@@ -548,9 +595,10 @@
         diagnose: () => {
             const ctx = getSTContext();
             return {
-                version: 'v7-robust',
+                version: 'v7.1-robust',
                 userIntent: _userIntentScale,
                 initApplyDone: _initApplyDone,
+                isDragging: _isDragging,
                 powerUserSettings: ctx?.powerUserSettings?.font_scale,
                 extensionSettingsPowerUser: ctx?.extensionSettings?.power_user?.font_scale,
                 windowPowerUser: window.power_user?.font_scale,
@@ -567,6 +615,6 @@
         },
     };
 
-    console.log(`${LOG} ✅ installed (v7-robust)`);
-    console.log(`${LOG} v7 検出用マーカー: このメッセージが出ていれば v7 が動作中`);
+    console.log(`${LOG} ✅ installed (v7.1-robust)`);
+    console.log(`${LOG} v7.1 検出用マーカー: このメッセージが出ていれば v7.1 が動作中`);
 })();
