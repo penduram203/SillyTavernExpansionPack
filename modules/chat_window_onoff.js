@@ -345,6 +345,9 @@ function applyToggleChatButtonLayout() {
 // ============================================================
 let _wcbLayoutApplied = false;
 
+// ★ 新レイアウト: T/中央を左にオフセットする量
+const WCB_LEFT_OFFSET_PX = 100;
+
 function applyWindowControlButtonsLayout() {
     const toggleBtn  = document.getElementById('toggle-chat-button');
     const wcb        = document.getElementById('window-control-buttons');
@@ -360,7 +363,6 @@ function applyWindowControlButtonsLayout() {
         });
     };
 
-    // ── toggle が display:none / visibility:hidden の間は触らない ──
     const toggleCs = window.getComputedStyle(toggleBtn);
     const toggleHidden =
         toggleCs.display === 'none' ||
@@ -383,23 +385,26 @@ function applyWindowControlButtonsLayout() {
     const GAP = 5;
     const margin = 4;
     const vh = window.innerHeight;
+    const vw = window.innerWidth;
 
     // ★ 新レイアウト:
     //   行1: 画像削除  🎨       （gic.js が担当）
     //   行2: 登録解除  💡       （gic.js が担当 / 💡 は applyToggleChatButtonLayout）
     //   行3: Ｔ      中央      （本関数が担当）
     //
-    //   Ｔ   = 💡 の真下、💡 の左端に揃える
+    //   Ｔ   = 💡 の真下かつ左に 100px オフセット
     //   中央 = Ｔ の右隣、Ｔ の縦センター揃え
 
     const restoreW = restoreBtn.offsetWidth || 32;
     const restoreH = restoreBtn.offsetHeight || 32;
 
-    // Ｔ ボタン: 💡 の真下、左端揃え
-    const restoreLeft = toggleRect.left;
-    let   restoreTop  = toggleRect.top + toggleRect.height + GAP;
+    // ★ Ｔ の X: 💡 の左端から 100px 左へ
+    let restoreLeft = toggleRect.left - WCB_LEFT_OFFSET_PX;
+    // 画面左端を超えないようクランプ
+    if (restoreLeft < margin) restoreLeft = margin;
 
-    // ★ 安全クランプ: 万一 💡 が下端にいても Ｔ を画面内に収める
+    // Ｔ の Y: 💡 の真下
+    let restoreTop = toggleRect.top + toggleRect.height + GAP;
     if (restoreTop + restoreH > vh - margin) {
         restoreTop = vh - margin - restoreH;
     }
@@ -414,14 +419,12 @@ function applyWindowControlButtonsLayout() {
     restoreBtn.style.setProperty('bottom', 'auto', 'important');
     restoreBtn.style.setProperty('transform', 'none', 'important');
 
-    // 中央ボタン（#window-control-buttons）: Ｔ の右隣、縦センター揃え
+    // 中央ボタン: Ｔ の右隣
     const wcbW = wcb.offsetWidth || centerBtn.offsetWidth || 50;
     const wcbH = wcb.offsetHeight || centerBtn.offsetHeight || 28;
     let wcbLeft = restoreLeft + restoreW + GAP;
     let wcbTop  = restoreTop + (restoreH - wcbH) / 2;
 
-    // 水平方向のクランプ（念のため）
-    const vw = window.innerWidth;
     if (wcbLeft + wcbW > vw - margin) wcbLeft = vw - margin - wcbW;
     if (wcbLeft < margin) wcbLeft = margin;
     if (wcbTop < margin) wcbTop = margin;
@@ -434,7 +437,6 @@ function applyWindowControlButtonsLayout() {
     wcb.style.setProperty('bottom', 'auto', 'important');
     wcb.style.setProperty('transform', 'none', 'important');
 
-    // ★ 一度でも成功したら以降は removeProperty を呼ばない
     _wcbLayoutApplied = true;
 }
 
