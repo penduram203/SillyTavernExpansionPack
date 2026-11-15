@@ -51,12 +51,7 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
     const COMMON_RULE_CONTENT =
         '【絶対厳守ルール】\n' +
         '1. プレイヤーが入力した番号に対応する場面を描写する。\n' +
-        '2. {{char}}の台詞を日本のラノベ風にした上で、{{char}}の台詞だけで状況や心情を説明する\n' +
-        '3. 地の文を絶対に使わない\n' +
-        '3. {{user}}の台詞や独白を描写しない\n' +
-        '4. 描写の長さは必ず 約400文字 とすること。100文字や200文字といった短い本文は絶対禁止。\n' +
-        '5. 情景・人物の動き・心情・五感・会話を丁寧に書き、短くまとめてはいけない。\n' +
-        '6. 描写本文を書いたら、必ず空行を2行入れる。';
+        '2. これ以降はユーザーが自由にカスタムして下さい。';
 
     const DEFAULT_SETTINGS = {
         lastResortReload: false,
