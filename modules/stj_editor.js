@@ -1540,7 +1540,7 @@
         stjModalEl.style.top = '0px';
         stjModalEl.style.left = 'auto';
         stjModalEl.style.right = '0';
-        stjModalEl.style.width = 'calc(85vw - 280px)';
+        stjModalEl.style.width = '70.5vw';
         stjModalEl.style.minWidth = '500px';
         stjModalEl.style.height = '100vh';
         stjModalEl.style.zIndex = '10001';
