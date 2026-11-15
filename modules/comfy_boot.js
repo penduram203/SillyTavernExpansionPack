@@ -10,6 +10,8 @@
 //     4. /api/images/list をインターセプトし、動画を _thum.png に置換する
 //        （ST本体の getVideoThumbnail をスキップして高速化する）
 
+import './console_filter.js';   // ★ 先頭に追加（他の全モジュールより先にフィルタをインストール）
+
 (function installComfyBoot() {
     if (window.__gicComfyBootInstalled) return;
     window.__gicComfyBootInstalled = true;
