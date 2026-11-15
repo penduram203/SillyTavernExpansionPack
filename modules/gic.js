@@ -888,7 +888,7 @@ function getCurrentCharacterName() {
             position: fixed !important;
             left: 0 !important;
             top: 50% !important;
-            transform: scale(${GALLERY_PREVIEW_CLOSE_SCALE}) !important;
+            transform: scale(calc(${GALLERY_PREVIEW_CLOSE_SCALE} * var(--exp-scale, 1))) !important;
             transform-origin: left center !important;
             display: inline-block !important;
             opacity: 0 !important;
@@ -5616,7 +5616,7 @@ function fitPreviewToViewport(panel) {
         closeBtn.style.setProperty('position', 'fixed', 'important');
         closeBtn.style.setProperty('left', '0', 'important');
         closeBtn.style.setProperty('top', `calc(50% - ${Math.round(btnH / 2)}px)`, 'important');
-        closeBtn.style.setProperty('transform', `scale(${GALLERY_PREVIEW_CLOSE_SCALE})`, 'important');
+        closeBtn.style.setProperty('transform', `scale(calc(${GALLERY_PREVIEW_CLOSE_SCALE} * var(--exp-scale, 1)))`, 'important');
         closeBtn.style.setProperty('transform-origin', 'left center', 'important');
         closeBtn.style.setProperty('margin', '0', 'important');
         closeBtn.style.setProperty('z-index', '15001', 'important');
@@ -5686,7 +5686,7 @@ function fitPreviewToViewport(panel) {
             closeBtn.style.setProperty('position', 'fixed', 'important');
             closeBtn.style.setProperty('left', '0', 'important');
             closeBtn.style.setProperty('top', `calc(50% - ${Math.round(btnH / 2)}px)`, 'important');
-            closeBtn.style.setProperty('transform', `scale(${GALLERY_PREVIEW_CLOSE_SCALE})`, 'important');
+            
             closeBtn.style.setProperty('transform-origin', 'left center', 'important');
             closeBtn.style.setProperty('margin', '0', 'important');
             closeBtn.style.setProperty('z-index', '15001', 'important');
@@ -5840,7 +5840,7 @@ function fitVideoPreview(panel, pending) {
         closeBtn.style.setProperty('position', 'fixed', 'important');
         closeBtn.style.setProperty('left', '0', 'important');
         closeBtn.style.setProperty('top', `calc(50% - ${Math.round(btnH / 2)}px)`, 'important');
-        closeBtn.style.setProperty('transform', `scale(${GALLERY_PREVIEW_CLOSE_SCALE})`, 'important');
+        closeBtn.style.setProperty('transform', `scale(calc(${GALLERY_PREVIEW_CLOSE_SCALE} * var(--exp-scale, 1)))`, 'important');
         closeBtn.style.setProperty('transform-origin', 'left center', 'important');
         closeBtn.style.setProperty('margin', '0', 'important');
         closeBtn.style.setProperty('z-index', '15001', 'important');
