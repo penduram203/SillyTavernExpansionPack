@@ -2,12 +2,10 @@
 // フォントスケール（Font Scale）の上限を 2.0 に拡張し、
 // 解像度に応じて自動設定する拡張モジュール。
 //
-// ★ v2 修正:
-//   - 初回ダイアログを 1.5倍サイズ・太字に拡大
-//   - power_user.font_scale を複数パス（ctx.powerUserSettings / window.power_user /
-//     ctx.extensionSettings.power_user）で更新
-//   - --mainFontSize と slider の値を多段階で再適用（DOM再描画対策）
-//   - ユーザーが手動変更するまで --mainFontSize を守るガードループ
+// ★ v3 修正:
+//   - 解像度選択をドロップダウン形式に変更（ダイアログ縦幅を縮小）
+//   - ガードループ（1000ms毎）を撤去し、即時 + 200ms + 600ms + 2000ms + 4000ms
+//     の5段階再適用に変更（負荷軽減）
 
 (function () {
     'use strict';
@@ -34,8 +32,8 @@
         { label: '5120×2880 (5K)', w: 5120, h: 2880 },
     ];
 
+    // ★ v3: ガードループ用の目標値（手動変更検出のため保持）
     let _targetFontScale = null;
-    let _guardStarted = false;
 
     function getSTContext() {
         try {
@@ -84,7 +82,7 @@
     }
 
     // ============================================================
-    // Font Scale の適用（多重パス・多段階反映）
+    // Font Scale の適用（多重パス・5段階反映）
     // ============================================================
     function applyFontScale(scale) {
         let s = Number(scale);
@@ -123,7 +121,7 @@
         if (slider) slider.value = String(s);
         if (counter) counter.value = String(s);
 
-        // ④ ST の applyFontScale を呼ぶ（候補を全部試す）
+        // ④ ST の applyFontScale を呼ぶ
         const applyFns = [ctx?.applyFontScale, window.applyFontScale];
         for (const fn of applyFns) {
             if (typeof fn === 'function') {
@@ -141,67 +139,44 @@
             ctx.saveSettingsDebounced();
         }
 
-        // ⑦ 目標値として記録（ガードループ用）
+        // ⑦ 目標値として記録
         _targetFontScale = s;
-        startFontScaleGuard();
 
-        // ⑧ 遅延再適用（DOM再描画対策）
-        setTimeout(() => {
-            if (_targetFontScale !== s) return;
-            document.documentElement.style.setProperty('--mainFontSize', `${targetPx}px`);
-            if (slider) slider.value = String(s);
-            if (counter) counter.value = String(s);
-        }, 200);
-        setTimeout(() => {
-            if (_targetFontScale !== s) return;
-            document.documentElement.style.setProperty('--mainFontSize', `${targetPx}px`);
-            if (slider) slider.value = String(s);
-            if (counter) counter.value = String(s);
-        }, 600);
+        // ⑧ ★ v3: 5段階遅延再適用（ガードループ撤去に伴う負荷軽減）
+        //    ST の非同期再描画（loadSettings, getSettings, applyFontScale 等）に追従
+        const stages = [0, 200, 600, 2000, 4000];
+        for (const delay of stages) {
+            if (delay === 0) {
+                _reapplyFontScale(s, targetPx, slider, counter);
+            } else {
+                setTimeout(() => {
+                    if (_targetFontScale !== s) return;
+                    _reapplyFontScale(s, targetPx, slider, counter);
+                }, delay);
+            }
+        }
 
         console.log(`${LOG} Font Scale を ${s} に設定 (--mainFontSize = ${targetPx}px)`);
         return true;
     }
 
-    // ============================================================
-    // ガードループ: --mainFontSize / slider の値を目標値に保つ
-    //   ユーザーが手動で font_scale を変更したらガード解除
-    // ============================================================
-    function startFontScaleGuard() {
-        if (_guardStarted) return;
-        _guardStarted = true;
+    // 再適用ヘルパー（共通処理）
+    function _reapplyFontScale(s, targetPx, slider, counter) {
+        document.documentElement.style.setProperty('--mainFontSize', `${targetPx}px`);
 
-        setInterval(() => {
-            if (_targetFontScale === null) return;
+        const sliderNow = slider || document.getElementById('font_scale');
+        const counterNow = counter || document.getElementById('font_scale_counter');
 
-            const ctx = getSTContext();
-            const currentPU =
-                ctx?.powerUserSettings?.font_scale ??
-                ctx?.extensionSettings?.power_user?.font_scale ??
-                window.power_user?.font_scale ??
-                window.powerUserSettings?.font_scale;
-
-            if (typeof currentPU === 'number' && Math.abs(currentPU - _targetFontScale) > 0.01) {
-                console.log(`${LOG} ユーザーが手動で Font Scale を ${currentPU} に変更 → ガード解除`);
-                _targetFontScale = null;
-                return;
-            }
-
-            const expectedPx = `${ST_BASE_FONT_PX * _targetFontScale}px`;
-            const nowPx = document.documentElement.style.getPropertyValue('--mainFontSize');
-            if (nowPx !== expectedPx) {
-                document.documentElement.style.setProperty('--mainFontSize', expectedPx);
-            }
-
-            const slider = document.getElementById('font_scale');
-            if (slider && Math.abs(parseFloat(slider.value) - _targetFontScale) > 0.01) {
-                slider.value = String(_targetFontScale);
-            }
-        }, 1000);
+        if (sliderNow && Math.abs(parseFloat(sliderNow.value) - s) > 0.01) {
+            sliderNow.value = String(s);
+        }
+        if (counterNow && Math.abs(parseFloat(counterNow.value) - s) > 0.01) {
+            counterNow.value = String(s);
+        }
     }
 
     // ============================================================
-    // #font_scale 手動変更のキャプチャ（1.5超対応）
+    // #font_scale 手動変更のキャプチャ（1.5超対応 + ガード解除）
     // ============================================================
     function setupFontScaleInterceptor() {
         document.addEventListener('input', (e) => {
@@ -210,7 +185,9 @@
             const v = parseFloat(target.value);
             if (!Number.isFinite(v)) return;
 
+            // 手動変更を検出したら目標値をクリア
             if (_targetFontScale !== null && Math.abs(v - _targetFontScale) > 0.01) {
+                console.log(`${LOG} ユーザーが手動で Font Scale を ${v} に変更 → 遅延再適用を停止`);
                 _targetFontScale = null;
             }
 
@@ -239,7 +216,7 @@
     }
 
     // ============================================================
-    // 解像度ダイアログ（1.5倍サイズ・太字）
+    // 解像度ダイアログ（ドロップダウン形式 / 1.5倍サイズ・太字）
     // ============================================================
     function showResolutionDialog() {
         if (document.getElementById('exp-font-scale-dialog-overlay')) return;
@@ -309,73 +286,51 @@
         });
         box.appendChild(desc);
 
-        // ── 選択肢 ──
-        const optionsContainer = document.createElement('div');
-        Object.assign(optionsContainer.style, {
-            display: 'flex',
-            flexDirection: 'column',
-            gap: `${S(12)}px`,
-            marginBottom: `${S(28)}px`,
+        // ── ★ v3: ドロップダウン形式に変更 ──
+        const selectLabel = document.createElement('label');
+        Object.assign(selectLabel.style, {
+            display: 'block',
+            marginBottom: `${S(12)}px`,
+            fontSize: `${S(21)}px`,
+            fontWeight: '700',
+            color: '#e2e8f0',
         });
-        box.appendChild(optionsContainer);
+        selectLabel.textContent = '解像度:';
+        box.appendChild(selectLabel);
+
+        const select = document.createElement('select');
+        select.id = 'exp-fs-resolution-select';
+        Object.assign(select.style, {
+            width: '100%',
+            padding: `${S(15)}px ${S(18)}px`,
+            background: '#2d3748',
+            color: '#ffffff',
+            border: `${S(3)}px solid #4299e1`,
+            borderRadius: `${S(9)}px`,
+            fontSize: `${S(21)}px`,
+            fontWeight: '700',
+            cursor: 'pointer',
+            marginBottom: `${S(28)}px`,
+            boxSizing: 'border-box',
+            fontFamily: 'inherit',
+        });
 
         let selectedIdx = 2; // デフォルト: 1920×1080
-
         PRESETS.forEach((preset, idx) => {
-            const label = document.createElement('label');
-            Object.assign(label.style, {
-                display: 'flex',
-                alignItems: 'center',
-                gap: `${S(15)}px`,
-                padding: `${S(15)}px ${S(21)}px`,
-                background: idx === selectedIdx ? '#2d3748' : '#1a202c',
-                border: `${S(3)}px solid ${idx === selectedIdx ? '#4299e1' : '#4a5568'}`,
-                borderRadius: `${S(9)}px`,
-                cursor: 'pointer',
-                fontSize: `${S(21)}px`,
-                fontWeight: '700',
-                transition: 'background-color 0.15s ease, border-color 0.15s ease',
-            });
-
-            const radio = document.createElement('input');
-            radio.type = 'radio';
-            radio.name = 'exp-fs-resolution';
-            radio.value = String(idx);
-            radio.checked = idx === selectedIdx;
-            Object.assign(radio.style, {
-                width: `${S(24)}px`,
-                height: `${S(24)}px`,
-                cursor: 'pointer',
-                margin: '0',
-            });
-
-            const text = document.createElement('span');
-            text.textContent = preset.label;
-
-            const scaleInfo = document.createElement('span');
+            const opt = document.createElement('option');
+            opt.value = String(idx);
             const s = computeScale(preset.w, preset.h);
-            scaleInfo.textContent = `(scale ${s.toFixed(2)})`;
-            Object.assign(scaleInfo.style, {
-                marginLeft: 'auto',
-                fontSize: `${S(18)}px`,
-                fontWeight: '600',
-                color: '#a0aec0',
-            });
-
-            label.appendChild(radio);
-            label.appendChild(text);
-            label.appendChild(scaleInfo);
-
-            radio.addEventListener('change', () => {
-                selectedIdx = idx;
-                optionsContainer.querySelectorAll('label').forEach((l, i) => {
-                    l.style.background = i === idx ? '#2d3748' : '#1a202c';
-                    l.style.borderColor = i === idx ? '#4299e1' : '#4a5568';
-                });
-            });
-
-            optionsContainer.appendChild(label);
+            opt.textContent = `${preset.label}  —  scale ${s.toFixed(2)}`;
+            if (idx === selectedIdx) opt.selected = true;
+            select.appendChild(opt);
         });
+
+        select.addEventListener('change', () => {
+            selectedIdx = parseInt(select.value, 10);
+            if (!Number.isFinite(selectedIdx)) selectedIdx = 0;
+        });
+
+        box.appendChild(select);
 
         // ── 「再表示しない」チェックボックス ──
         const dontShowLabel = document.createElement('label');
