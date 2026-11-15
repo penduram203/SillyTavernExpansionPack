@@ -8264,9 +8264,8 @@ function positionUnregisterButton() {
     const vw = window.innerWidth;
     const vh = window.innerHeight;
 
-    // ★ Ｔボタンの左端を取得（削除/解除の左端をＴ列に揃える）
-    //   chat_window_onoff.js の WCB_LEFT_OFFSET_PX (=100) と連動させるため、
-    //   実効 DOM 位置を優先。未配置なら toggleRect.left - 100 をフォールバック。
+    // ★ T ボタンの左端を取得（削除/解除の左端を T 列に揃える）
+    //   未配置時のフォールバックは chat_window_onoff.js の WCB_LEFT_OFFSET_PX (=53)
     const restoreBtn = document.getElementById('restore-panel-button');
     let tLeft = null;
     if (restoreBtn) {
@@ -8274,22 +8273,19 @@ function positionUnregisterButton() {
         if (r.width > 0 && r.height > 0 && r.left >= 0) tLeft = r.left;
     }
     if (tLeft === null) {
-        tLeft = toggleRect.left - 100;
+        tLeft = toggleRect.left - 53;   // ★ 100 → 53
     }
 
-    // ── 解除ボタン: 💡 と同じ行、左端をＴに揃える ──
+    // ── 解除ボタン: 💡 と同じ行、左端を T に揃える ──
     if (unregBtn && unregBtn.classList.contains('gic-unregister-visible')) {
         const btnW = unregBtn.offsetWidth || 50;
         const btnH = unregBtn.offsetHeight || 50;
-
         let unregLeft = tLeft;
         let top = toggleRect.top + (toggleRect.height - btnH) / 2;
-
         if (unregLeft < margin) unregLeft = margin;
         if (unregLeft + btnW > vw - margin) unregLeft = vw - margin - btnW;
         if (top < margin) top = margin;
         if (top + btnH > vh - margin) top = vh - margin - btnH;
-
         unregBtn.style.setProperty('position', 'fixed', 'important');
         unregBtn.style.setProperty('left', Math.round(unregLeft) + 'px', 'important');
         unregBtn.style.setProperty('top', Math.round(top) + 'px', 'important');
@@ -8298,12 +8294,10 @@ function positionUnregisterButton() {
         unregBtn.style.setProperty('transform', 'none', 'important');
     }
 
-    // ── 削除ボタン: 🎨 と同じ行、左端をＴに揃える ──
+    // ── 削除ボタン: 🎨 と同じ行、左端を T に揃える ──
     if (delBtn && delBtn.classList.contains('gic-delete-image-visible')) {
         const btnW = delBtn.offsetWidth || 50;
         const btnH = delBtn.offsetHeight || 50;
-
-        // 🎨 の実効位置（縦位置を 🎨 に揃えるため）
         const galleryBtn = document.getElementById(GALLERY_BUTTON_ID);
         let galleryTop = toggleRect.top - 55;
         let galleryH = 50;
@@ -8314,15 +8308,12 @@ function positionUnregisterButton() {
                 galleryH = gr.height;
             }
         }
-
         let delLeft = tLeft;
         let top = galleryTop + (galleryH - btnH) / 2;
-
         if (delLeft < margin) delLeft = margin;
         if (delLeft + btnW > vw - margin) delLeft = vw - margin - btnW;
         if (top < margin) top = margin;
         if (top + btnH > vh - margin) top = vh - margin - btnH;
-
         delBtn.style.setProperty('position', 'fixed', 'important');
         delBtn.style.setProperty('left', Math.round(delLeft) + 'px', 'important');
         delBtn.style.setProperty('top', Math.round(top) + 'px', 'important');
