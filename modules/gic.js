@@ -5099,8 +5099,9 @@ function applyGalleryWindowLayout() {
 
             if (galleryBaseWidthCache.has(el)) {
                 const baseW = galleryBaseWidthCache.get(el);
-                const maxW = Math.max(100, vw - GALLERY_WINDOW_MAX_VIEWPORT_MARGIN);
-                const targetW = Math.min(maxW, Math.round(baseW + GALLERY_WINDOW_WIDTH_EXTRA));
+                const S = window.S || ((px) => px);
+                const maxW = Math.max(S(100), vw - S(GALLERY_WINDOW_MAX_VIEWPORT_MARGIN));
+                const targetW = Math.min(maxW, Math.round(S(baseW + GALLERY_WINDOW_WIDTH_EXTRA)));
                 el.style.setProperty('width', targetW + 'px', 'important');
                 el.style.setProperty('max-width', targetW + 'px', 'important');
             }
@@ -8845,11 +8846,11 @@ function exposeGicApi() {
         window.$.fn.nanogallery2 = function(options) {
             try {
                 if (options && typeof options === 'object' && !Array.isArray(options)) {
-                    // ★ 目標コンテナ幅: ST本来(480) + GALLERY_WINDOW_WIDTH_EXTRA(88) = 568
-                    const TARGET_W = 480 + GALLERY_WINDOW_WIDTH_EXTRA;
+                    // ★ 目標コンテナ幅: S(480 + 88) = 1920 で 568px、4K で 1136px
+                    const S = window.S || ((px) => px);
+                    const TARGET_W = S(480 + GALLERY_WINDOW_WIDTH_EXTRA);
 
                     // ★ nanogallery2 が参照する前にコンテナ幅を強制固定
-                    //   （min-width を付けることで applyGalleryWindowLayout の測定時にも揺れない）
                     const containerEl = this[0];
                     if (containerEl) {
                         try {
@@ -8865,13 +8866,11 @@ function exposeGicApi() {
                         options.galleryMaxRows = 4;
                     }
 
-                    // ★ thumbnailWidth = TARGET_W / 3 = 189px
-                    //   → 568 / 189 = 3.005 → floor 3列 ✓
-                    //   （floor/round どちらの計算方式でも 3 になる）
+                    // ★ thumbnailWidth = TARGET_W / 3、thumbnailHeight = S(180)
                     const thumbnailW = Math.floor(TARGET_W / 3);
                     console.log('[GIC] 🎯 3列強制: container=' + TARGET_W + 'px, thumbnailWidth=' + thumbnailW + 'px');
                     options.thumbnailWidth = thumbnailW + 'px';
-                    options.thumbnailHeight = 180;
+                    options.thumbnailHeight = S(180);
                 }
             } catch (e) { /* ignore */ }
             return orig.apply(this, arguments);
@@ -8890,9 +8889,11 @@ function exposeGicApi() {
 
     const forceWidth = (dg) => {
         if (!dg) return;
-        dg.style.setProperty('width', PARENT_W + 'px', 'important');
-        dg.style.setProperty('min-width', PARENT_W + 'px', 'important');
-        dg.style.setProperty('max-width', PARENT_W + 'px', 'important');
+        const S = window.S || ((px) => px);
+        const w = S(PARENT_W);
+        dg.style.setProperty('width', w + 'px', 'important');
+        dg.style.setProperty('min-width', w + 'px', 'important');
+        dg.style.setProperty('max-width', w + 'px', 'important');
         dg.style.setProperty('box-sizing', 'border-box', 'important');
     };
 
