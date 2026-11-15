@@ -7924,7 +7924,7 @@ function createUnregisterButton() {
     btn = document.createElement('button');
     btn.id = UNREGISTER_BUTTON_ID;
     btn.type = 'button';
-    btn.textContent = '登録解除';
+    btn.textContent = '解除';                                    // ★ 変更: 登録解除 → 解除
     btn.title = '現在表示中の画像をセルから登録解除する';
     btn.addEventListener('click', async (e) => {
         e.preventDefault();
@@ -8218,7 +8218,7 @@ function createDeleteImageButton() {
     btn = document.createElement('button');
     btn.id = DELETE_IMAGE_BUTTON_ID;
     btn.type = 'button';
-    btn.textContent = '画像削除';
+    btn.textContent = '削除';                                    // ★ 変更: 画像削除 → 削除
     btn.title = '現在表示中の画像をローカルディスクから削除する';
     btn.addEventListener('click', async (e) => {
         e.preventDefault();
