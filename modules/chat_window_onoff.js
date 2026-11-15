@@ -257,7 +257,11 @@ function applyChatLayout() {
 
     const sheldRect = sheld.getBoundingClientRect();
     const winW = window.innerWidth;
-    const contentWidth = 900;
+
+    // ★ チャット実効幅を画面幅の50%に（1920なら960、4Kなら1920）
+    //   旧値 contentWidth = 900 は 1920 基準で 46.875% の固定値だったため
+    //   4K で画面の23%にしかならず、画像との隙間が生じていた。
+    const contentWidth = Math.round(winW * 0.5);
 
     const sheldCenterX = sheldRect.left + sheldRect.width / 2;
     const paddingLeft = Math.max(0, sheldCenterX - contentWidth / 2);
