@@ -8267,7 +8267,8 @@ function positionUnregisterButton() {
         if (r.width > 0 && r.height > 0 && r.left >= 0) tLeft = r.left;
     }
     if (tLeft === null) {
-        tLeft = toggleRect.left - 53;   // ★ 100 → 53
+        const offset = window.S ? window.S(53) : 53;
+        tLeft = toggleRect.left - offset;
     }
 
     // ── 解除ボタン: 💡 と同じ行、左端を T に揃える ──
