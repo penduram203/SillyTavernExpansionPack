@@ -1486,7 +1486,7 @@ function getCurrentCharacterName() {
             left: -9999px;
             top: -9999px;
             height: 50px;
-            padding: 0 14px;
+            padding: 0 6px;
             background-color: #d4c11e;
             color: #1a202c;
             border: 1px solid #e38d14;
@@ -1544,7 +1544,7 @@ function getCurrentCharacterName() {
             left: -9999px;
             top: -9999px;
             height: 50px;
-            padding: 0 14px;
+            padding: 0 6px;
             background-color: #c53030;
             color: #ffffff;
             border: 1px solid #9b2c2c;
@@ -8244,7 +8244,6 @@ function positionUnregisterButton() {
     const unregBtn = document.getElementById(UNREGISTER_BUTTON_ID);
     const delBtn = document.getElementById(DELETE_IMAGE_BUTTON_ID);
     const toggleBtn = document.getElementById('toggle-chat-button');
-    const galleryBtn = document.getElementById(GALLERY_BUTTON_ID);
     if (!toggleBtn) return;
 
     const toggleRect = toggleBtn.getBoundingClientRect();
@@ -8265,32 +8264,29 @@ function positionUnregisterButton() {
     const vw = window.innerWidth;
     const vh = window.innerHeight;
 
-    // ── 🎨 の現在位置を取得（positionGalleryButton と同じロジックで算出） ──
-    //   🎨 は 💡 の真上に配置される。既に配置済みならその実効位置を使う。
-    let galleryLeft = toggleRect.left;
-    let galleryTop = toggleRect.top - (galleryBtn?.offsetHeight || 50) - gap;
-    let galleryH = galleryBtn?.offsetHeight || 50;
-    if (galleryBtn) {
-        const gr = galleryBtn.getBoundingClientRect();
-        if (gr.width > 0 && gr.height > 0 && gr.left >= 0 && gr.top >= 0) {
-            galleryLeft = gr.left;
-            galleryTop = gr.top;
-            galleryH = gr.height;
-        }
+    // ★ Ｔボタンの左端を取得（削除/解除の左端をＴ列に揃える）
+    //   chat_window_onoff.js の WCB_LEFT_OFFSET_PX (=100) と連動させるため、
+    //   実効 DOM 位置を優先。未配置なら toggleRect.left - 100 をフォールバック。
+    const restoreBtn = document.getElementById('restore-panel-button');
+    let tLeft = null;
+    if (restoreBtn) {
+        const r = restoreBtn.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0 && r.left >= 0) tLeft = r.left;
+    }
+    if (tLeft === null) {
+        tLeft = toggleRect.left - 100;
     }
 
-    // ── 登録解除ボタン: 💡 の左隣（同じ行） ──
-    let unregLeft = null;
-    let unregW = 0;
+    // ── 解除ボタン: 💡 と同じ行、左端をＴに揃える ──
     if (unregBtn && unregBtn.classList.contains('gic-unregister-visible')) {
-        unregW = unregBtn.offsetWidth || 90;
+        const btnW = unregBtn.offsetWidth || 50;
         const btnH = unregBtn.offsetHeight || 50;
 
-        unregLeft = toggleRect.left - unregW - gap;
+        let unregLeft = tLeft;
         let top = toggleRect.top + (toggleRect.height - btnH) / 2;
 
         if (unregLeft < margin) unregLeft = margin;
-        if (unregLeft + unregW > vw - margin) unregLeft = vw - margin - unregW;
+        if (unregLeft + btnW > vw - margin) unregLeft = vw - margin - btnW;
         if (top < margin) top = margin;
         if (top + btnH > vh - margin) top = vh - margin - btnH;
 
@@ -8302,13 +8298,24 @@ function positionUnregisterButton() {
         unregBtn.style.setProperty('transform', 'none', 'important');
     }
 
-    // ── 画像削除ボタン: 🎨 の左隣（同じ行） ──
+    // ── 削除ボタン: 🎨 と同じ行、左端をＴに揃える ──
     if (delBtn && delBtn.classList.contains('gic-delete-image-visible')) {
-        const btnW = delBtn.offsetWidth || 90;
+        const btnW = delBtn.offsetWidth || 50;
         const btnH = delBtn.offsetHeight || 50;
 
-        let delLeft = galleryLeft - btnW - gap;
-        // 🎨 の縦位置に揃える（縦センター）
+        // 🎨 の実効位置（縦位置を 🎨 に揃えるため）
+        const galleryBtn = document.getElementById(GALLERY_BUTTON_ID);
+        let galleryTop = toggleRect.top - 55;
+        let galleryH = 50;
+        if (galleryBtn) {
+            const gr = galleryBtn.getBoundingClientRect();
+            if (gr.width > 0 && gr.height > 0 && gr.left >= 0 && gr.top >= 0) {
+                galleryTop = gr.top;
+                galleryH = gr.height;
+            }
+        }
+
+        let delLeft = tLeft;
         let top = galleryTop + (galleryH - btnH) / 2;
 
         if (delLeft < margin) delLeft = margin;
