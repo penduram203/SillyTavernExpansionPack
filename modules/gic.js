@@ -8244,6 +8244,7 @@ function positionUnregisterButton() {
     const unregBtn = document.getElementById(UNREGISTER_BUTTON_ID);
     const delBtn = document.getElementById(DELETE_IMAGE_BUTTON_ID);
     const toggleBtn = document.getElementById('toggle-chat-button');
+    const galleryBtn = document.getElementById(GALLERY_BUTTON_ID);
     if (!toggleBtn) return;
 
     const toggleRect = toggleBtn.getBoundingClientRect();
@@ -8264,17 +8265,32 @@ function positionUnregisterButton() {
     const vw = window.innerWidth;
     const vh = window.innerHeight;
 
-    // ── 登録解除ボタン: toggle の左隣 ──
+    // ── 🎨 の現在位置を取得（positionGalleryButton と同じロジックで算出） ──
+    //   🎨 は 💡 の真上に配置される。既に配置済みならその実効位置を使う。
+    let galleryLeft = toggleRect.left;
+    let galleryTop = toggleRect.top - (galleryBtn?.offsetHeight || 50) - gap;
+    let galleryH = galleryBtn?.offsetHeight || 50;
+    if (galleryBtn) {
+        const gr = galleryBtn.getBoundingClientRect();
+        if (gr.width > 0 && gr.height > 0 && gr.left >= 0 && gr.top >= 0) {
+            galleryLeft = gr.left;
+            galleryTop = gr.top;
+            galleryH = gr.height;
+        }
+    }
+
+    // ── 登録解除ボタン: 💡 の左隣（同じ行） ──
     let unregLeft = null;
+    let unregW = 0;
     if (unregBtn && unregBtn.classList.contains('gic-unregister-visible')) {
-        const btnW = unregBtn.offsetWidth || 90;
+        unregW = unregBtn.offsetWidth || 90;
         const btnH = unregBtn.offsetHeight || 50;
 
-        unregLeft = toggleRect.left - btnW - gap;
+        unregLeft = toggleRect.left - unregW - gap;
         let top = toggleRect.top + (toggleRect.height - btnH) / 2;
 
         if (unregLeft < margin) unregLeft = margin;
-        if (unregLeft + btnW > vw - margin) unregLeft = vw - margin - btnW;
+        if (unregLeft + unregW > vw - margin) unregLeft = vw - margin - unregW;
         if (top < margin) top = margin;
         if (top + btnH > vh - margin) top = vh - margin - btnH;
 
@@ -8286,19 +8302,14 @@ function positionUnregisterButton() {
         unregBtn.style.setProperty('transform', 'none', 'important');
     }
 
-    // ── 画像削除ボタン: 登録解除ボタンの左隣 ──
+    // ── 画像削除ボタン: 🎨 の左隣（同じ行） ──
     if (delBtn && delBtn.classList.contains('gic-delete-image-visible')) {
         const btnW = delBtn.offsetWidth || 90;
         const btnH = delBtn.offsetHeight || 50;
 
-        let delLeft;
-        if (unregLeft !== null) {
-            delLeft = unregLeft - btnW - gap;
-        } else {
-            // 登録解除ボタンが非表示でも、toggle の左隣に配置
-            delLeft = toggleRect.left - btnW - gap;
-        }
-        let top = toggleRect.top + (toggleRect.height - btnH) / 2;
+        let delLeft = galleryLeft - btnW - gap;
+        // 🎨 の縦位置に揃える（縦センター）
+        let top = galleryTop + (galleryH - btnH) / 2;
 
         if (delLeft < margin) delLeft = margin;
         if (delLeft + btnW > vw - margin) delLeft = vw - margin - btnW;
