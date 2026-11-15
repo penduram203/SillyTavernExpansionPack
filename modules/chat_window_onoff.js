@@ -303,26 +303,33 @@ let _lastToggleBtnTop  = -1;
 //   - 垂直: 💡 の上端を vh - 150 に固定
 //   これにより 🎨/T/中央/削除/解除 も連動して固定される
 // ============================================================
+// ★ vw=1920 で left=250px になる比率
+const TOGGLE_LEFT_RATIO = 250 / 1920;   // ≈ 0.1302083
+// ★ 下端からの固定余白（vh に依存しない）
+const TOGGLE_BOTTOM_OFFSET_PX = 91;
+
 function applyToggleChatButtonLayout() {
     const btn = document.getElementById('toggle-chat-button');
     if (!btn) return;
 
+    const vw = window.innerWidth;
     const vh = window.innerHeight;
     const margin = 4;
 
-    // ★ 固定座標（チャットウィンドウ非依存）
-    //   参考値 inset: 871px auto auto 250px (1920x962 環境) と一致させる
-    //   - left: 250px 固定
-    //   - top : vh - 91 → 962-91 = 871
-    let left = 250;
-    let top  = Math.round(vh - 91);
+    // ★ 比率ベースに変更（解像度非依存）
+    //   1920px 幅 → 250px
+    //   2560px 幅 → 333px
+    //   3840px 幅 → 500px
+    let left = Math.round(vw * TOGGLE_LEFT_RATIO);
+    // ★ top は下端からの固定余白（絶対値）
+    //   962 高 → 871
+    //   2160 高 → 2069
+    let top = Math.round(vh - TOGGLE_BOTTOM_OFFSET_PX);
 
     const btnW = btn.offsetWidth || 50;
     const btnH = btn.offsetHeight || 50;
     if (left < margin) left = margin;
-    if (left + btnW > window.innerWidth - margin) {
-        left = window.innerWidth - margin - btnW;
-    }
+    if (left + btnW > vw - margin) left = vw - margin - btnW;
     if (top < margin) top = margin;
     if (top + btnH > vh - margin) top = vh - margin - btnH;
 
