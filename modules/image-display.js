@@ -774,7 +774,14 @@
 
     function applyChatNormalState() {
         const sheld = document.getElementById('sheld');
-        if (!sheld || !chatPreState) return;
+        if (!sheld) return;
+
+        // ★ chatPreState が無ければ現在位置から初期化
+        if (!chatPreState) {
+            ensureChatExplicitPosition();
+            if (!chatPreState) return;  // それでも取れなければ諦める
+        }
+
         sheld.classList.remove('idp-chat-maximized');
         sheld.style.removeProperty('--idp-form-max-width');
         sheld.style.setProperty('--idp-chat-left', Math.round(chatPreState.left) + 'px');
