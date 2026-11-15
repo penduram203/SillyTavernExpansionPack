@@ -1,5 +1,5 @@
 // font_scale_auto.js
-// v7.1-robust: ST の内部実装に依存しないバースト再適用方式
+// v7.2-robust: ST の内部実装に依存しないバースト再適用方式
 //
 // ★ 戦略:
 //   - キャプチャフェーズでユーザー意図を記録
@@ -14,6 +14,13 @@
 //     優先し、強制適用しない（showResolutionDialog の既読分岐）
 //   - スライダードラッグ中はバーストを抑止し、ST 本体の再適用との
 //     毎フレーム衝突による点滅を回避
+//
+// ★ v7.2 修正点:
+//   - ST が jQuery.trigger('input'|'change') で発火する合成イベントを
+//     e.isTrusted=false で判別して無視（意図フリップの根本原因を除去）
+//   - slider.value の setter をラップし、ST の遅延上書きをブロック
+//   - pointerup を target 非依存で必ずクリア（ドラッグ状態の取りこぼし防止）
+//   - 直近の trusted 入力から 100ms はバーストを休止（ST の処理に時間を与える）
 //
 
 (function () {
@@ -57,6 +64,10 @@
     let _userIntentScale = null;
     // ★ v7.1: スライダードラッグ中フラグ（ST との衝突を避けるためバーストを抑止）
     let _isDragging = false;
+    // ★ v7.2: 直近の信頼済み（isTrusted=true）ユーザー入力時刻
+    let _lastTrustedInputAt = 0;
+    // ★ v7.2: slider.value setter をラップ済みか
+    let _sliderGuardInstalled = false;
 
     function getSTContext() {
         try {
@@ -170,6 +181,8 @@
         // setTimeout 0: 同期イベントハンドラの直後に実行
         setTimeout(() => {
             if (_burstToken !== myToken) return;
+            // ★ v7.2: 直近の trusted 入力から 100ms 以内は ST に任せる
+            if (performance.now() - _lastTrustedInputAt < 100) return;
             _applyUserIntent(false);
         }, 0);
 
@@ -177,7 +190,10 @@
         const loop = () => {
             if (_burstToken !== myToken) return;
             frameCount++;
-            _applyUserIntent(false);
+            // ★ v7.2: trusted 入力直後はスキップ（ST の処理が落ち着くのを待つ）
+            if (performance.now() - _lastTrustedInputAt >= 100) {
+                _applyUserIntent(false);
+            }
             const elapsed = performance.now() - start;
             if (elapsed < 500 || frameCount < 30) {
                 requestAnimationFrame(loop);
@@ -187,26 +203,85 @@
     }
 
     // ============================================================
+    // ★ v7.2: slider.value の setter をラップし、
+    //   ユーザー意図と異なる書き込み（ST の遅延上書き）をブロックする
+    // ============================================================
+    function installSliderWriteGuard() {
+        if (_sliderGuardInstalled) return;
+        const slider = document.getElementById('font_scale');
+        if (!slider) return;
+
+        try {
+            const proto = Object.getPrototypeOf(slider);
+            const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+            if (!desc || !desc.set) return;
+
+            Object.defineProperty(slider, 'value', {
+                configurable: true,
+                get() {
+                    return desc.get.call(this);
+                },
+                set(v) {
+                    const newNum = parseFloat(v);
+                    // ユーザー意図が未確定、または一致していれば通す
+                    if (_userIntentScale === null ||
+                        !Number.isFinite(newNum) ||
+                        Math.abs(newNum - _userIntentScale) <= 0.01) {
+                        return desc.set.call(this, v);
+                    }
+                    // ドラッグ中なら通す（ユーザーが操作中は最優先）
+                    if (_isDragging) {
+                        return desc.set.call(this, v);
+                    }
+                    // それ以外（ST の遅延上書き）はブロック
+                    console.log(`${LOG} [guard] ST からの slider.value=${v} をブロック (intent=${_userIntentScale})`);
+                },
+            });
+            _sliderGuardInstalled = true;
+            console.log(`${LOG} slider.value setter ガードを設置しました`);
+        } catch (e) {
+            console.warn(`${LOG} slider.value ガード設置失敗:`, e);
+        }
+    }
+
+    // ============================================================
     // キャプチャフェーズ: ユーザー意図を記録 + 即時適用
     // ============================================================
     function setupFontScaleInterceptor() {
-        // ⓪ ドラッグ状態の追跡（スライダーのみ）
-        //   ドラッグ中はバーストを抑止し、ST 本体の再適用との毎フレーム衝突を避ける
+        // ★ v7.2: slider.value setter ガード設置
+        installSliderWriteGuard();
+
+        // ⓪ ドラッグ状態の追跡（スライダー・カウンター両対応、pointerId で追跡）
+        let _dragPointerId = null;
+
+        const isSliderTarget = (el) => {
+            if (!el) return false;
+            if (el.id === 'font_scale' || el.id === 'font_scale_counter') return true;
+            if (el.closest) return !!el.closest('#font_scale, #font_scale_counter');
+            return false;
+        };
+
         document.addEventListener('pointerdown', (e) => {
-            if (e.target?.id === 'font_scale') {
+            if (isSliderTarget(e.target)) {
                 _isDragging = true;
+                _dragPointerId = e.pointerId ?? null;
             }
         }, true);
+
+        // ★ v7.2: pointerup は target を問わず必ず _isDragging をクリア
         document.addEventListener('pointerup', (e) => {
-            if (e.target?.id === 'font_scale' && _isDragging) {
-                _isDragging = false;
-                // 離した瞬間に1回だけバースト
-                _scheduleEnforceBurst();
-            }
+            if (!_isDragging) return;
+            if (_dragPointerId !== null && e.pointerId !== undefined && e.pointerId !== _dragPointerId) return;
+            _isDragging = false;
+            _dragPointerId = null;
+            _scheduleEnforceBurst();
         }, true);
-        // pointerup が外で起きた場合の保険
-        document.addEventListener('pointercancel', (e) => {
-            if (e.target?.id === 'font_scale') _isDragging = false;
+
+        document.addEventListener('pointercancel', () => {
+            if (_isDragging) {
+                _isDragging = false;
+                _dragPointerId = null;
+            }
         }, true);
 
         // ① input イベント（スライダー・カウンター両対応）
@@ -215,18 +290,22 @@
             if (!target) return;
             if (target.id !== 'font_scale' && target.id !== 'font_scale_counter') return;
 
+            // ★ v7.2: 合成イベント（ST が jQuery.trigger('input') 等で発火）は無視
+            if (!e.isTrusted) {
+                console.log(`${LOG} [guard] 合成 input を無視 (${target.id}, value=${target.value})`);
+                return;
+            }
+
             const v = parseFloat(target.value);
             if (!Number.isFinite(v)) return;
 
-            // ユーザーの意図を更新
             if (_userIntentScale === null || Math.abs(v - _userIntentScale) > 0.01) {
                 console.log(`${LOG} ユーザーが手動で Font Scale を ${v} に変更 (${target.id})`);
             }
             _userIntentScale = v;
+            _lastTrustedInputAt = performance.now();
 
-            // 即時適用
             _applyUserIntent(true);
-            // ドラッグ中はバーストを起動しない（ST との衝突を避ける）
             if (!_isDragging) _scheduleEnforceBurst();
         }, true);
 
@@ -235,11 +314,17 @@
             const target = e.target;
             if (!target || target.id !== 'font_scale') return;
 
+            // ★ v7.2: 合成 change も無視
+            if (!e.isTrusted) {
+                console.log(`${LOG} [guard] 合成 change を無視 (${target.id}, value=${target.value})`);
+                return;
+            }
+
             const v = parseFloat(target.value);
             if (!Number.isFinite(v)) return;
             _userIntentScale = v;
+            _lastTrustedInputAt = performance.now();
             _applyUserIntent(true);
-            // pointerup で既にバーストが走っていても、change 後にもう一度だけ実行
             _scheduleEnforceBurst();
         }, true);
     }
@@ -595,10 +680,12 @@
         diagnose: () => {
             const ctx = getSTContext();
             return {
-                version: 'v7.1-robust',
+                version: 'v7.2-robust',
                 userIntent: _userIntentScale,
                 initApplyDone: _initApplyDone,
                 isDragging: _isDragging,
+                lastTrustedInputAgo: _lastTrustedInputAt === 0 ? null : Math.round(performance.now() - _lastTrustedInputAt),
+                sliderGuardInstalled: _sliderGuardInstalled,
                 powerUserSettings: ctx?.powerUserSettings?.font_scale,
                 extensionSettingsPowerUser: ctx?.extensionSettings?.power_user?.font_scale,
                 windowPowerUser: window.power_user?.font_scale,
@@ -615,6 +702,6 @@
         },
     };
 
-    console.log(`${LOG} ✅ installed (v7.1-robust)`);
-    console.log(`${LOG} v7.1 検出用マーカー: このメッセージが出ていれば v7.1 が動作中`);
+    console.log(`${LOG} ✅ installed (v7.2-robust)`);
+    console.log(`${LOG} v7.2 検出用マーカー: このメッセージが出ていれば v7.2 が動作中`);
 })();
