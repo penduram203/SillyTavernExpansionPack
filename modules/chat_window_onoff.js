@@ -312,8 +312,8 @@ function applyToggleChatButtonLayout() {
     const margin = 4;
 
     // ★ 固定座標（チャットウィンドウ非依存）
-    let left = Math.round(vw * 0.25);
-    let top  = Math.round(vh - 150);
+    let left = Math.round(vw * 0.25);   // 画面中央と左端の中間
+    let top  = vh - 100;                 // ★ 150 → 100 に変更（参考値 inset:862px@vh=962 と一致）
 
     const btnW = btn.offsetWidth || 50;
     const btnH = btn.offsetHeight || 50;
@@ -322,7 +322,6 @@ function applyToggleChatButtonLayout() {
     if (top < margin) top = margin;
     if (top + btnH > vh - margin) top = vh - margin - btnH;
 
-    // 同じ位置なら再設定スキップ
     if (left === _lastToggleBtnLeft && top === _lastToggleBtnTop) {
         window.__cwToggleLastLeft = left;
         window.__cwToggleLastTop  = top;
