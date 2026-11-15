@@ -1,17 +1,17 @@
 // font_scale_auto.js
-// v7.3-robust: ST の内部実装に依存しないバースト再適用方式
+// v7.4-robust: ST の内部実装に依存しないバースト再適用方式
 //
 // ★ 戦略:
 //   - キャプチャフェーズでユーザー意図を記録
 //   - power_user.font_scale を 4 パス全てに即時書き込み
 //   - setTimeout 0 + requestAnimationFrame で約 500ms バースト再適用
-//   - ズレ検出時は console.log で可視化
 //
 // ★ v7.1: 再起動時のユーザー設定尊重 / ドラッグ中バースト抑止
 // ★ v7.2: 合成イベント (isTrusted=false) フィルタ / slider.value setter ガード
-// ★ v7.3: _isDragging バイパスを撤去（点滅の根本原因）
-//         slider 差し替え検知 → ガード再設置
-//         ブロック時にスタックトレース出力
+// ★ v7.3: _isDragging バイパス撤去 / slider 差し替え検知
+// ★ v7.4: スライダードラッグ中は input を完全無視。
+//         pointermove から intent を算出し、rAF 補正ループで
+//         slider.value を強制維持。setAttribute('value') も監視。
 //
 
 (function () {
@@ -51,18 +51,16 @@
     const DEFAULT_IDX = 6;
 
     let _initApplyDone = false;
-    // ★ v7: ユーザーの意図したスケール（手動操作で常に上書き）
     let _userIntentScale = null;
-    // ★ v7.1: スライダードラッグ中フラグ（ST との衝突を避けるためバーストを抑止）
     let _isDragging = false;
-    // ★ v7.2: 直近の信頼済み（isTrusted=true）ユーザー入力時刻
     let _lastTrustedInputAt = 0;
-    // ★ v7.3: guard を設置済みの slider インスタンス追跡（差し替え対応）
     const _guardedSliders = new WeakSet();
-    // ★ v7.3: slider 差し替え検知オブザーバ
     let _sliderGuardObserver = null;
-    // ★ v7.3: verbose ログ（diagnose 用）
     let _verbose = false;
+    let _draggingSlider = false;
+    let _dragMonitorRaf = null;
+    let _dragPointerId = null;
+    let _sliderAttrObserver = null;
 
     function getSTContext() {
         try {
@@ -110,9 +108,6 @@
         mo.observe(document.body, { childList: true, subtree: true });
     }
 
-    // ============================================================
-    // ★ v7: ユーザー意図をすべてのパスに即時書き込み
-    // ============================================================
     function _applyUserIntent(silent = false) {
         if (_userIntentScale === null) return;
         const ctx = getSTContext();
@@ -120,10 +115,10 @@
         const px = `${ST_BASE_FONT_PX * intended}px`;
 
         const paths = [
-            { name: 'ctx.powerUserSettings',        obj: ctx?.powerUserSettings },
+            { name: 'ctx.powerUserSettings',            obj: ctx?.powerUserSettings },
             { name: 'ctx.extensionSettings.power_user', obj: ctx?.extensionSettings?.power_user },
-            { name: 'window.power_user',            obj: window.power_user },
-            { name: 'window.powerUserSettings',     obj: window.powerUserSettings },
+            { name: 'window.power_user',                obj: window.power_user },
+            { name: 'window.powerUserSettings',         obj: window.powerUserSettings },
         ];
 
         for (const { name, obj } of paths) {
@@ -142,8 +137,12 @@
         if (slider) {
             const cur = parseFloat(slider.value);
             if (Math.abs(cur - intended) > 0.01) {
-                if (_verbose) console.log(`${LOG} [apply] slider: ${cur} → ${intended}`);
-                slider.value = String(intended);
+                try {
+                    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')
+                        .set.call(slider, String(intended));
+                } catch (e) {
+                    slider.value = String(intended);
+                }
                 if (!silent) console.log(`${LOG} slider: ${cur} → ${intended} を強制`);
             }
         }
@@ -164,9 +163,6 @@
         }
     }
 
-    // ============================================================
-    // ★ v7: バースト再適用（500ms 間、~30 フレーム）
-    // ============================================================
     let _burstToken = 0;
     function _scheduleEnforceBurst() {
         const myToken = ++_burstToken;
@@ -193,11 +189,6 @@
         requestAnimationFrame(loop);
     }
 
-    // ============================================================
-    // ★ v7.2/v7.3: slider.value の setter をラップし、
-    //   ユーザー意図と異なる書き込み（ST の遅延上書き）をブロックする
-    //   v7.3: _isDragging バイパスを撤去（点滅の根本原因）
-    // ============================================================
     function installSliderWriteGuard() {
         const slider = document.getElementById('font_scale');
         if (!slider) return;
@@ -210,20 +201,17 @@
 
             Object.defineProperty(slider, 'value', {
                 configurable: true,
-                get() {
-                    return desc.get.call(this);
-                },
+                get() { return desc.get.call(this); },
                 set(v) {
+                    if (_verbose) {
+                        console.log(`${LOG} [setter] ${this.id} value "${v}" (intent=${_userIntentScale}, dragging=${_isDragging})`);
+                    }
                     const newNum = parseFloat(v);
                     if (_userIntentScale === null ||
                         !Number.isFinite(newNum) ||
                         Math.abs(newNum - _userIntentScale) <= 0.01) {
                         return desc.set.call(this, v);
                     }
-                    // ★ v7.3: ドラッグ中でもブロック。理由:
-                    //   Firefox の range input は focus 中に .value をプログラムから
-                    //   変更されると内部状態が desync し、次フレームで input(ST値) を
-                    //   isTrusted=true で発火する。これが「1.72 ↔ 2」の点滅の正体。
                     const caller = (() => {
                         try {
                             const stack = new Error().stack || '';
@@ -240,9 +228,6 @@
         }
     }
 
-    // ============================================================
-    // ★ v7.3: ST が #font_scale を差し替えたらガードを再設置する
-    // ============================================================
     function startSliderGuardObserver() {
         if (_sliderGuardObserver) return;
         _sliderGuardObserver = new MutationObserver(() => {
@@ -250,19 +235,35 @@
             if (slider && !_guardedSliders.has(slider)) {
                 console.log(`${LOG} [observer] #font_scale が差し替えられたためガードを再設置します`);
                 installSliderWriteGuard();
+                if (_sliderAttrObserver) { _sliderAttrObserver.disconnect(); _sliderAttrObserver = null; }
+                installSliderAttributeObserver();
             }
         });
         _sliderGuardObserver.observe(document.body, { childList: true, subtree: true });
         console.log(`${LOG} slider 差し替え監視を開始しました`);
     }
 
-    // ============================================================
-    // キャプチャフェーズ: ユーザー意図を記録 + 即時適用
-    // ============================================================
+    function installSliderAttributeObserver() {
+        const slider = document.getElementById('font_scale');
+        if (!slider || _sliderAttrObserver) return;
+        _sliderAttrObserver = new MutationObserver((mutations) => {
+            for (const m of mutations) {
+                if (m.attributeName !== 'value') continue;
+                if (_userIntentScale === null) continue;
+                const attrVal = parseFloat(slider.getAttribute('value'));
+                if (Number.isFinite(attrVal) && Math.abs(attrVal - _userIntentScale) > 0.01) {
+                    console.log(`${LOG} [attr-guard] setAttribute('value', ${attrVal}) を検知 (intent=${_userIntentScale})`);
+                    slider.setAttribute('value', String(_userIntentScale));
+                }
+            }
+        });
+        _sliderAttrObserver.observe(slider, { attributes: true, attributeFilter: ['value'] });
+        console.log(`${LOG} slider.value 属性監視を開始しました`);
+    }
+
     function setupFontScaleInterceptor() {
         installSliderWriteGuard();
-
-        let _dragPointerId = null;
+        installSliderAttributeObserver();
 
         const isSliderTarget = (el) => {
             if (!el) return false;
@@ -271,32 +272,88 @@
             return false;
         };
 
+        const startDragMonitor = () => {
+            if (_dragMonitorRaf !== null) return;
+            const tick = () => {
+                if (!_draggingSlider) {
+                    _dragMonitorRaf = null;
+                    return;
+                }
+                const slider = document.getElementById('font_scale');
+                if (slider && _userIntentScale !== null) {
+                    const cur = parseFloat(slider.value);
+                    if (Math.abs(cur - _userIntentScale) > 0.01) {
+                        try {
+                            Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')
+                                .set.call(slider, String(_userIntentScale));
+                            if (_verbose) console.log(`${LOG} [drag-monitor] slider was ${cur}, forced to ${_userIntentScale}`);
+                        } catch (e) { /* ignore */ }
+                    }
+                }
+                _dragMonitorRaf = requestAnimationFrame(tick);
+            };
+            _dragMonitorRaf = requestAnimationFrame(tick);
+        };
+
         document.addEventListener('pointerdown', (e) => {
-            if (isSliderTarget(e.target)) {
+            if (e.target?.id === 'font_scale') {
                 _isDragging = true;
+                _draggingSlider = true;
                 _dragPointerId = e.pointerId ?? null;
+                startDragMonitor();
+            } else if (e.target?.id === 'font_scale_counter') {
+                _isDragging = true;
             }
+        }, true);
+
+        document.addEventListener('pointermove', (e) => {
+            if (!_draggingSlider) return;
+            if (_dragPointerId !== null && e.pointerId !== undefined && e.pointerId !== _dragPointerId) return;
+            const slider = document.getElementById('font_scale');
+            if (!slider) return;
+            const rect = slider.getBoundingClientRect();
+            if (rect.width <= 0) return;
+            const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+            const min = parseFloat(slider.min) || 0.5;
+            const max = parseFloat(slider.max) || 2.0;
+            const step = parseFloat(slider.step) || 0.01;
+            const raw = min + (max - min) * ratio;
+            const v = Math.round(raw / step) * step;
+            const clamped = Math.max(min, Math.min(max, v));
+            if (_userIntentScale !== null && Math.abs(clamped - _userIntentScale) < 0.005) return;
+            _userIntentScale = clamped;
+            _lastTrustedInputAt = performance.now();
+            _applyUserIntent(true);
         }, true);
 
         document.addEventListener('pointerup', (e) => {
-            if (!_isDragging) return;
-            if (_dragPointerId !== null && e.pointerId !== undefined && e.pointerId !== _dragPointerId) return;
-            _isDragging = false;
-            _dragPointerId = null;
-            _scheduleEnforceBurst();
+            if (_draggingSlider) {
+                if (_dragPointerId !== null && e.pointerId !== undefined && e.pointerId !== _dragPointerId) return;
+                _isDragging = false;
+                _draggingSlider = false;
+                _dragPointerId = null;
+                _scheduleEnforceBurst();
+            } else if (_isDragging) {
+                _isDragging = false;
+                _scheduleEnforceBurst();
+            }
         }, true);
 
         document.addEventListener('pointercancel', () => {
-            if (_isDragging) {
-                _isDragging = false;
-                _dragPointerId = null;
-            }
+            _isDragging = false;
+            _draggingSlider = false;
+            _dragPointerId = null;
         }, true);
 
         document.addEventListener('input', (e) => {
             const target = e.target;
             if (!target) return;
             if (target.id !== 'font_scale' && target.id !== 'font_scale_counter') return;
+
+            if (_draggingSlider) {
+                if (_verbose) console.log(`${LOG} [guard] slider drag 中の input を無視 (value=${target.value})`);
+                return;
+            }
 
             if (!e.isTrusted) {
                 if (_verbose) console.log(`${LOG} [guard] 合成 input を無視 (${target.id}, value=${target.value})`);
@@ -311,7 +368,6 @@
             }
             _userIntentScale = v;
             _lastTrustedInputAt = performance.now();
-
             _applyUserIntent(true);
             if (!_isDragging) _scheduleEnforceBurst();
         }, true);
@@ -319,6 +375,7 @@
         document.addEventListener('change', (e) => {
             const target = e.target;
             if (!target || target.id !== 'font_scale') return;
+            if (_draggingSlider) return;
             if (!e.isTrusted) {
                 if (_verbose) console.log(`${LOG} [guard] 合成 change を無視 (${target.id}, value=${target.value})`);
                 return;
@@ -332,39 +389,27 @@
         }, true);
     }
 
-    // ============================================================
-    // Font Scale の適用（init 用・ダイアログ適用時用）
-    // ============================================================
     function applyFontScale(scale, options = {}) {
         const { fromInit = false } = options;
-
         if (fromInit && _initApplyDone) {
             console.log(`${LOG} init からの applyFontScale は既に実行済み。スキップ`);
             return true;
         }
         if (fromInit) _initApplyDone = true;
-
         let s = Number(scale);
         if (!Number.isFinite(s)) s = 1;
         s = Math.max(MIN_SCALE, Math.min(MAX_SCALE, s));
-
         _userIntentScale = s;
         _applyUserIntent(true);
-
         const ctx = getSTContext();
         if (typeof ctx?.saveSettingsDebounced === 'function') {
             ctx.saveSettingsDebounced();
         }
-
         _scheduleEnforceBurst();
-
         console.log(`${LOG} Font Scale を ${s} に設定 (fromInit=${fromInit})`);
         return true;
     }
 
-    // ============================================================
-    // 解像度ダイアログ
-    // ============================================================
     function showResolutionDialog() {
         if (document.getElementById('exp-font-scale-dialog-overlay')) return;
 
@@ -374,13 +419,11 @@
                 try {
                     const data = JSON.parse(saved);
                     const resolutionScale = computeScale(data.w, data.h);
-
                     const ctx = getSTContext();
                     const current =
                         ctx?.powerUserSettings?.font_scale ??
                         ctx?.extensionSettings?.power_user?.font_scale ??
                         window.power_user?.font_scale;
-
                     if (typeof current === 'number' && Math.abs(current - resolutionScale) >= 0.01) {
                         console.log(`${LOG} ST の font_scale (${current}) が解像度スケール (${resolutionScale}) と異なるため、ユーザー設定を尊重します`);
                         _userIntentScale = current;
@@ -394,97 +437,62 @@
         }
 
         const S = window.S || ((px) => px);
-
         const overlay = document.createElement('div');
         overlay.id = 'exp-font-scale-dialog-overlay';
         Object.assign(overlay.style, {
-            position: 'fixed',
-            top: '0', left: '0', right: '0', bottom: '0',
-            background: 'rgba(0, 0, 0, 0.8)',
-            zIndex: '2147483646',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: `${S(30)}px`,
-            boxSizing: 'border-box',
+            position: 'fixed', top: '0', left: '0', right: '0', bottom: '0',
+            background: 'rgba(0, 0, 0, 0.8)', zIndex: '2147483646',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: `${S(30)}px`, boxSizing: 'border-box',
             fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif',
         });
-
         const box = document.createElement('div');
         Object.assign(box.style, {
-            background: '#1a202c',
-            color: '#e2e8f0',
-            border: `${S(3)}px solid #4a5568`,
-            borderRadius: `${S(18)}px`,
+            background: '#1a202c', color: '#e2e8f0',
+            border: `${S(3)}px solid #4a5568`, borderRadius: `${S(18)}px`,
             padding: `${S(42)}px ${S(48)}px`,
             maxWidth: `min(${S(1200)}px, calc(100vw - 40px))`,
-            width: '100%',
-            boxShadow: `0 ${S(20)}px ${S(60)}px rgba(0, 0, 0, 0.85)`,
+            width: '100%', boxShadow: `0 ${S(20)}px ${S(60)}px rgba(0, 0, 0, 0.85)`,
             boxSizing: 'border-box',
         });
-
         const h2 = document.createElement('h2');
         h2.textContent = 'モニタ解像度を選択してください';
         Object.assign(h2.style, {
-            margin: `0 0 ${S(18)}px 0`,
-            fontSize: `${S(49.5)}px`,
-            fontWeight: '900',
-            color: '#ffffff',
-            letterSpacing: '0.02em',
+            margin: `0 0 ${S(18)}px 0`, fontSize: `${S(49.5)}px`,
+            fontWeight: '900', color: '#ffffff', letterSpacing: '0.02em',
         });
         box.appendChild(h2);
-
         const desc = document.createElement('p');
         desc.innerHTML = '選択した解像度に応じて、<strong style="color:#f6e05e;">フォントスケール</strong>を自動的に設定します。<br>（1920×1080 を基準として、スケール値を計算します）';
         Object.assign(desc.style, {
-            margin: `0 0 ${S(24)}px 0`,
-            fontSize: `${S(31.5)}px`,
-            fontWeight: '600',
-            lineHeight: '1.7',
-            color: '#cbd5e0',
+            margin: `0 0 ${S(24)}px 0`, fontSize: `${S(31.5)}px`,
+            fontWeight: '600', lineHeight: '1.7', color: '#cbd5e0',
         });
         box.appendChild(desc);
-
         const hint = document.createElement('p');
         hint.textContent = '↓のドロップダウンをクリックして解像度を選択して下さい';
         Object.assign(hint.style, {
-            margin: `0 0 ${S(15)}px 0`,
-            fontSize: `${S(31.5)}px`,
-            fontWeight: '900',
-            lineHeight: '1.5',
-            color: '#f6e05e',
+            margin: `0 0 ${S(15)}px 0`, fontSize: `${S(31.5)}px`,
+            fontWeight: '900', lineHeight: '1.5', color: '#f6e05e',
         });
         box.appendChild(hint);
-
         const selectLabel = document.createElement('label');
         Object.assign(selectLabel.style, {
-            display: 'block',
-            marginBottom: `${S(12)}px`,
-            fontSize: `${S(31.5)}px`,
-            fontWeight: '700',
-            color: '#e2e8f0',
+            display: 'block', marginBottom: `${S(12)}px`,
+            fontSize: `${S(31.5)}px`, fontWeight: '700', color: '#e2e8f0',
         });
         selectLabel.textContent = '解像度:';
         box.appendChild(selectLabel);
-
         const select = document.createElement('select');
         select.id = 'exp-fs-resolution-select';
         Object.assign(select.style, {
-            width: '100%',
-            padding: `${S(15)}px ${S(18)}px`,
-            background: '#2d3748',
-            color: '#ffffff',
-            border: `${S(3)}px solid #4299e1`,
-            borderRadius: `${S(9)}px`,
-            fontSize: `${S(31.5)}px`,
-            fontWeight: '700',
-            cursor: 'pointer',
-            marginBottom: `${S(28)}px`,
-            boxSizing: 'border-box',
-            fontFamily: 'inherit',
-            textOverflow: 'ellipsis',
+            width: '100%', padding: `${S(15)}px ${S(18)}px`,
+            background: '#2d3748', color: '#ffffff',
+            border: `${S(3)}px solid #4299e1`, borderRadius: `${S(9)}px`,
+            fontSize: `${S(31.5)}px`, fontWeight: '700', cursor: 'pointer',
+            marginBottom: `${S(28)}px`, boxSizing: 'border-box',
+            fontFamily: 'inherit', textOverflow: 'ellipsis',
         });
-
         let selectedIdx = DEFAULT_IDX;
         PRESETS.forEach((preset, idx) => {
             const opt = document.createElement('option');
@@ -494,220 +502,41 @@
             if (idx === selectedIdx) opt.selected = true;
             select.appendChild(opt);
         });
-
         select.addEventListener('change', () => {
             selectedIdx = parseInt(select.value, 10);
             if (!Number.isFinite(selectedIdx)) selectedIdx = 0;
         });
-
         box.appendChild(select);
-
         const dontShowLabel = document.createElement('label');
         Object.assign(dontShowLabel.style, {
-            display: 'flex',
-            alignItems: 'center',
-            gap: `${S(12)}px`,
-            fontSize: `${S(29.25)}px`,
-            fontWeight: '600',
-            color: '#cbd5e0',
-            cursor: 'pointer',
-            marginBottom: `${S(28)}px`,
+            display: 'flex', alignItems: 'center', gap: `${S(12)}px`,
+            fontSize: `${S(29.25)}px`, fontWeight: '600',
+            color: '#cbd5e0', cursor: 'pointer', marginBottom: `${S(28)}px`,
         });
         const dontShowInput = document.createElement('input');
         dontShowInput.type = 'checkbox';
         dontShowInput.id = 'exp-fs-dont-show';
         Object.assign(dontShowInput.style, {
-            width: `${S(30)}px`,
-            height: `${S(30)}px`,
-            cursor: 'pointer',
-            margin: '0',
+            width: `${S(30)}px`, height: `${S(30)}px`, cursor: 'pointer', margin: '0',
         });
         dontShowLabel.appendChild(dontShowInput);
         dontShowLabel.appendChild(document.createTextNode('このメッセージを再び表示しない'));
         box.appendChild(dontShowLabel);
-
         const note = document.createElement('p');
         note.textContent = 'フォントサイズは、ユーザー設定の「フォントスケール」からいつでも自由に変更できます。';
         Object.assign(note.style, {
-            margin: `0 0 ${S(28)}px 0`,
-            fontSize: `${S(27)}px`,
-            fontWeight: '600',
-            lineHeight: '1.6',
-            color: '#a0aec0',
-            fontStyle: 'italic',
+            margin: `0 0 ${S(28)}px 0`, fontSize: `${S(27)}px`,
+            fontWeight: '600', lineHeight: '1.6', color: '#a0aec0', fontStyle: 'italic',
         });
         box.appendChild(note);
-
         const btnRow = document.createElement('div');
         Object.assign(btnRow.style, {
-            display: 'flex',
-            justifyContent: 'flex-end',
-            gap: `${S(18)}px`,
+            display: 'flex', justifyContent: 'flex-end', gap: `${S(18)}px`,
         });
-
         const cancelBtn = document.createElement('button');
         cancelBtn.type = 'button';
         cancelBtn.textContent = 'キャンセル';
         Object.assign(cancelBtn.style, {
-            padding: `${S(15)}px ${S(36)}px`,
-            background: '#4a5568',
-            color: '#ffffff',
-            border: 'none',
-            borderRadius: `${S(9)}px`,
-            cursor: 'pointer',
-            fontSize: `${S(31.5)}px`,
-            fontWeight: '900',
-        });
-
-        const applyBtn = document.createElement('button');
-        applyBtn.type = 'button';
-        applyBtn.textContent = '適用';
-        Object.assign(applyBtn.style, {
-            padding: `${S(15)}px ${S(36)}px`,
-            background: '#2b6cb0',
-            color: '#ffffff',
-            border: 'none',
-            borderRadius: `${S(9)}px`,
-            cursor: 'pointer',
-            fontSize: `${S(31.5)}px`,
-            fontWeight: '900',
-        });
-
-        btnRow.appendChild(cancelBtn);
-        btnRow.appendChild(applyBtn);
-        box.appendChild(btnRow);
-
-        overlay.appendChild(box);
-        document.body.appendChild(overlay);
-
-        applyBtn.addEventListener('click', () => {
-            const preset = PRESETS[selectedIdx];
-            const scale = computeScale(preset.w, preset.h);
-
-            localStorage.setItem(RESOLUTION_KEY, JSON.stringify({
-                w: preset.w,
-                h: preset.h,
-                scale,
-                setAt: Date.now(),
-            }));
-            localStorage.setItem(RESOLUTION_LABEL_KEY, preset.label);
-
-            if (dontShowInput.checked) {
-                localStorage.setItem(DIALOG_SHOWN_KEY, 'true');
-            }
-
-            applyFontScale(scale);
-            overlay.remove();
-            console.log(`${LOG} 解像度 ${preset.label} → scale ${scale.toFixed(2)} を適用`);
-        });
-
-        cancelBtn.addEventListener('click', () => {
-            overlay.remove();
-        });
-    }
-
-    // ============================================================
-    // 初期化
-    // ============================================================
-    function init() {
-        setupMaxAttributeObserver();
-        setupFontScaleInterceptor();
-        startSliderGuardObserver();
-
-        let tries = 0;
-        const timer = setInterval(() => {
-            tries++;
-            if (document.getElementById('font_scale')) {
-                clearInterval(timer);
-                installSliderWriteGuard();
-                showResolutionDialog();
-            } else if (tries > 30) {
-                clearInterval(timer);
-                console.warn(`${LOG} #font_scale が見つかりませんでした`);
-            }
-        }, 200);
-    }
-
-    function bootstrap() {
-        let _bootStarted = false;
-        const startOnce = () => {
-            if (_bootStarted) return;
-            _bootStarted = true;
-            init();
-        };
-
-        const ctx = getSTContext();
-        if (ctx?.eventSource && ctx?.eventTypes?.APP_READY) {
-            ctx.eventSource.on(ctx.eventTypes.APP_READY, startOnce);
-            setTimeout(startOnce, 5000);
-        } else {
-            setTimeout(startOnce, 2000);
-        }
-    }
-
-    bootstrap();
-
-    // ============================================================
-    // 公開 API
-    // ============================================================
-    window.FontScaleAuto = {
-        applyScale: applyFontScale,
-        showDialog: showResolutionDialog,
-        resetDismissed: () => {
-            localStorage.removeItem(DIALOG_SHOWN_KEY);
-            localStorage.removeItem(RESOLUTION_KEY);
-            localStorage.removeItem(RESOLUTION_LABEL_KEY);
-            _initApplyDone = false;
-            console.log(`${LOG} 既読フラグと解像度設定をリセットしました`);
-        },
-        clearIntent: () => {
-            _userIntentScale = null;
-            console.log(`${LOG} ユーザー意図をクリアしました（自動上書き停止）`);
-        },
-        getCurrentScale: () => {
-            const ctx = getSTContext();
-            return ctx?.powerUserSettings?.font_scale ??
-                   ctx?.extensionSettings?.power_user?.font_scale ??
-                   window.power_user?.font_scale ??
-                   1;
-        },
-        getUserIntent: () => _userIntentScale,
-        getSavedResolution: () => {
-            try {
-                const raw = localStorage.getItem(RESOLUTION_KEY);
-                return raw ? JSON.parse(raw) : null;
-            } catch (e) { return null; }
-        },
-        enableVerbose: () => { _verbose = true; console.log(`${LOG} verbose ON`); },
-        disableVerbose: () => { _verbose = false; console.log(`${LOG} verbose OFF`); },
-        diagnose: () => {
-            const ctx = getSTContext();
-            const curSlider = document.getElementById('font_scale');
-            return {
-                version: 'v7.3-robust',
-                verbose: _verbose,
-                userIntent: _userIntentScale,
-                initApplyDone: _initApplyDone,
-                isDragging: _isDragging,
-                lastTrustedInputAgo: _lastTrustedInputAt === 0 ? null : Math.round(performance.now() - _lastTrustedInputAt),
-                sliderGuardInstalled: curSlider ? _guardedSliders.has(curSlider) : false,
-                fontScaleCount: document.querySelectorAll('#font_scale').length,
-                powerUserSettings: ctx?.powerUserSettings?.font_scale,
-                extensionSettingsPowerUser: ctx?.extensionSettings?.power_user?.font_scale,
-                windowPowerUser: window.power_user?.font_scale,
-                windowPowerUserSettings: window.powerUserSettings?.font_scale,
-                sliderValue: curSlider?.value,
-                sliderMax: curSlider?.getAttribute('max'),
-                counterValue: document.getElementById('font_scale_counter')?.value,
-                mainFontSize: document.documentElement.style.getPropertyValue('--mainFontSize'),
-            };
-        },
-        forceEnforce: () => {
-            _applyUserIntent(false);
-            console.log(`${LOG} 手動で強制適用しました`);
-        },
-    };
-
-    console.log(`${LOG} ✅ installed (v7.3-robust)`);
-    console.log(`${LOG} v7.3 検出用マーカー: このメッセージが出ていれば v7.3 が動作中`);
-})();
+            padding: `${S(15)}px ${S(36)}px`, background: '#4a5568', color: '#ffffff',
+            border: 'none', borderRadius: `${S(9)}px`, cursor: 'pointer',
+            fontSize: `${S(31.
