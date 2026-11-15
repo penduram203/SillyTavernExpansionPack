@@ -284,7 +284,18 @@ function applyChatLayout() {
 }
 
 // ============================================================
-// ★ 💡 ボタン位置: send_form の左隣に追従 + Ｔ用の余白を下に確保
+// ★ レイアウト定数
+// ============================================================
+// 削除/解除ボタンの概算幅（padding 0 8px + "削除"/"解除" の文字幅）
+const WCB_BTN_WIDTH_ESTIMATE = 48;
+const WCB_GAP = 5;
+// T ボタンと💡の相対距離（削除/解除ボタン幅 + gap で、右端ぴったりに揃う）
+const WCB_LEFT_OFFSET_PX = WCB_BTN_WIDTH_ESTIMATE + WCB_GAP;  // = 53
+// 🎨/💡 を左に寄せる量 = 旧オフセット(100) - 新オフセット(53)
+const ICON_LEFT_SHIFT_PX = 100 - WCB_LEFT_OFFSET_PX;  // = 47
+
+// ============================================================
+// ★ 💡 ボタン位置: send_form の左隣 + Ｔ用の下余白 + 削除/解除への寄せ
 // ============================================================
 function applyToggleChatButtonLayout() {
     const btn = document.getElementById('toggle-chat-button');
@@ -298,18 +309,16 @@ function applyToggleChatButtonLayout() {
     const rect = anchor.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return;
 
-    // ★ 新レイアウト対応: 💡 の下に Ｔ ボタンが来るため、
-    //   💡 を配置する時点で下に Ｔ の高さ + GAP の余白を確保する。
-    //   これがないと 💡 が viewport 下端に張り付き、Ｔ が画面外に出る。
+    // 💡 の下に T が来るため、下に T の高さ + GAP の余白を確保
     const restoreBtnEl = document.getElementById('restore-panel-button');
-    const reserveBelow = (restoreBtnEl?.offsetHeight || 32) + 5;  // T高さ + GAP
+    const reserveBelow = (restoreBtnEl?.offsetHeight || 32) + 5;
 
     const gap = 5;
     const btnW = btn.offsetWidth || 50;
     const btnH = btn.offsetHeight || 50;
 
-    // send_form の左隣、縦中央
-    let left = rect.left - btnW - gap;
+    // ★ 削除/解除ボタンの右隣に寄せるため、追加で左にシフト
+    let left = rect.left - btnW - gap - ICON_LEFT_SHIFT_PX;
     let top  = rect.top + (rect.height - btnH) / 2;
 
     const margin = 4;
@@ -318,7 +327,6 @@ function applyToggleChatButtonLayout() {
     if (left < margin) left = margin;
     if (left + btnW > vw - margin) left = vw - margin - btnW;
     if (top < margin) top = margin;
-    // ★ 下に reserveBelow 分の余白を確保するようクランプ
     if (top + btnH + reserveBelow > vh - margin) {
         top = vh - margin - reserveBelow - btnH;
     }
@@ -330,7 +338,6 @@ function applyToggleChatButtonLayout() {
     btn.style.setProperty('right', 'auto', 'important');
     btn.style.setProperty('bottom', 'auto', 'important');
     btn.style.setProperty('transform', 'none', 'important');
-    // ★ 追加: グローバル位置キャッシュ（gic.js の positionGalleryButton が参照）
     window.__cwToggleLastLeft = Math.round(left);
     window.__cwToggleLastTop  = Math.round(top);
 }
@@ -346,7 +353,7 @@ function applyToggleChatButtonLayout() {
 let _wcbLayoutApplied = false;
 
 // ★ 新レイアウト: T/中央を左にオフセットする量
-const WCB_LEFT_OFFSET_PX = 100;
+const WCB_LEFT_OFFSET_PX = 53;
 
 function applyWindowControlButtonsLayout() {
     const toggleBtn  = document.getElementById('toggle-chat-button');
