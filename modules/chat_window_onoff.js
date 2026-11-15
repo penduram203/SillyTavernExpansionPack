@@ -319,18 +319,18 @@ function applyToggleChatButtonLayout() {
     const vh = window.innerHeight;
     const margin = 4;
 
-    // ★ 比率ベースに変更（解像度非依存）
-    //   1920px 幅 → 250px
-    //   2560px 幅 → 333px
-    //   3840px 幅 → 500px
-    let left = Math.round(vw * 250 / 1920) - getIconLeftShiftPx();
-    // ★ top は下端からの固定余白（絶対値）
-    //   962 高 → 871
-    //   2160 高 → 2069
-    let top = Math.round(vh - TOGGLE_BOTTOM_OFFSET_PX);
+    // ★ 解像度スケーリング
+    const S = window.S || ((px) => px);
 
-    const btnW = btn.offsetWidth || 50;
-    const btnH = btn.offsetHeight || 50;
+    // left: 1920px 幅で 250px
+    let left = Math.round(vw * 250 / 1920);
+    // ★ top: 下端から S(91) 上
+    //   1920×962 → 2160-91=... ではなく 962-91=871
+    //   3840×2160 → 2160-S(91)=2160-182=1978
+    let top  = Math.round(vh - S(91));
+
+    const btnW = btn.offsetWidth || S(50);
+    const btnH = btn.offsetHeight || S(50);
     if (left < margin) left = margin;
     if (left + btnW > vw - margin) left = vw - margin - btnW;
     if (top < margin) top = margin;
