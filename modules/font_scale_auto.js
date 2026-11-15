@@ -1,26 +1,17 @@
 // font_scale_auto.js
-// v7.2-robust: ST の内部実装に依存しないバースト再適用方式
+// v7.3-robust: ST の内部実装に依存しないバースト再適用方式
 //
 // ★ 戦略:
 //   - キャプチャフェーズでユーザー意図を記録
 //   - power_user.font_scale を 4 パス全てに即時書き込み
 //   - setTimeout 0 + requestAnimationFrame で約 500ms バースト再適用
-//     （ST 本体の遅延上書きを捕捉）
 //   - ズレ検出時は console.log で可視化
-//   - init は 1 回のみ、タイマーなし
 //
-// ★ v7.1 修正点:
-//   - 再起動時、ST の現在値が解像度スケールと異なる場合はユーザー意図を
-//     優先し、強制適用しない（showResolutionDialog の既読分岐）
-//   - スライダードラッグ中はバーストを抑止し、ST 本体の再適用との
-//     毎フレーム衝突による点滅を回避
-//
-// ★ v7.2 修正点:
-//   - ST が jQuery.trigger('input'|'change') で発火する合成イベントを
-//     e.isTrusted=false で判別して無視（意図フリップの根本原因を除去）
-//   - slider.value の setter をラップし、ST の遅延上書きをブロック
-//   - pointerup を target 非依存で必ずクリア（ドラッグ状態の取りこぼし防止）
-//   - 直近の trusted 入力から 100ms はバーストを休止（ST の処理に時間を与える）
+// ★ v7.1: 再起動時のユーザー設定尊重 / ドラッグ中バースト抑止
+// ★ v7.2: 合成イベント (isTrusted=false) フィルタ / slider.value setter ガード
+// ★ v7.3: _isDragging バイパスを撤去（点滅の根本原因）
+//         slider 差し替え検知 → ガード再設置
+//         ブロック時にスタックトレース出力
 //
 
 (function () {
@@ -66,8 +57,12 @@
     let _isDragging = false;
     // ★ v7.2: 直近の信頼済み（isTrusted=true）ユーザー入力時刻
     let _lastTrustedInputAt = 0;
-    // ★ v7.2: slider.value setter をラップ済みか
-    let _sliderGuardInstalled = false;
+    // ★ v7.3: guard を設置済みの slider インスタンス追跡（差し替え対応）
+    const _guardedSliders = new WeakSet();
+    // ★ v7.3: slider 差し替え検知オブザーバ
+    let _sliderGuardObserver = null;
+    // ★ v7.3: verbose ログ（diagnose 用）
+    let _verbose = false;
 
     function getSTContext() {
         try {
@@ -96,7 +91,7 @@
             counter.setAttribute('max', '2.0');
             changed = true;
         }
-        if (changed) {
+        if (changed && _verbose) {
             console.log(`${LOG} #font_scale / #font_scale_counter の max を 2.0 に変更`);
         }
     }
@@ -147,6 +142,7 @@
         if (slider) {
             const cur = parseFloat(slider.value);
             if (Math.abs(cur - intended) > 0.01) {
+                if (_verbose) console.log(`${LOG} [apply] slider: ${cur} → ${intended}`);
                 slider.value = String(intended);
                 if (!silent) console.log(`${LOG} slider: ${cur} → ${intended} を強制`);
             }
@@ -170,7 +166,6 @@
 
     // ============================================================
     // ★ v7: バースト再適用（500ms 間、~30 フレーム）
-    //   ST 本体の遅延上書き（setTimeout / rAF / イベント連鎖）を捕捉
     // ============================================================
     let _burstToken = 0;
     function _scheduleEnforceBurst() {
@@ -178,19 +173,15 @@
         const start = performance.now();
         let frameCount = 0;
 
-        // setTimeout 0: 同期イベントハンドラの直後に実行
         setTimeout(() => {
             if (_burstToken !== myToken) return;
-            // ★ v7.2: 直近の trusted 入力から 100ms 以内は ST に任せる
             if (performance.now() - _lastTrustedInputAt < 100) return;
             _applyUserIntent(false);
         }, 0);
 
-        // rAF バースト: 500ms 間（または 30 フレーム）継続
         const loop = () => {
             if (_burstToken !== myToken) return;
             frameCount++;
-            // ★ v7.2: trusted 入力直後はスキップ（ST の処理が落ち着くのを待つ）
             if (performance.now() - _lastTrustedInputAt >= 100) {
                 _applyUserIntent(false);
             }
@@ -203,13 +194,14 @@
     }
 
     // ============================================================
-    // ★ v7.2: slider.value の setter をラップし、
+    // ★ v7.2/v7.3: slider.value の setter をラップし、
     //   ユーザー意図と異なる書き込み（ST の遅延上書き）をブロックする
+    //   v7.3: _isDragging バイパスを撤去（点滅の根本原因）
     // ============================================================
     function installSliderWriteGuard() {
-        if (_sliderGuardInstalled) return;
         const slider = document.getElementById('font_scale');
         if (!slider) return;
+        if (_guardedSliders.has(slider)) return;
 
         try {
             const proto = Object.getPrototypeOf(slider);
@@ -223,35 +215,53 @@
                 },
                 set(v) {
                     const newNum = parseFloat(v);
-                    // ユーザー意図が未確定、または一致していれば通す
                     if (_userIntentScale === null ||
                         !Number.isFinite(newNum) ||
                         Math.abs(newNum - _userIntentScale) <= 0.01) {
                         return desc.set.call(this, v);
                     }
-                    // ドラッグ中なら通す（ユーザーが操作中は最優先）
-                    if (_isDragging) {
-                        return desc.set.call(this, v);
-                    }
-                    // それ以外（ST の遅延上書き）はブロック
-                    console.log(`${LOG} [guard] ST からの slider.value=${v} をブロック (intent=${_userIntentScale})`);
+                    // ★ v7.3: ドラッグ中でもブロック。理由:
+                    //   Firefox の range input は focus 中に .value をプログラムから
+                    //   変更されると内部状態が desync し、次フレームで input(ST値) を
+                    //   isTrusted=true で発火する。これが「1.72 ↔ 2」の点滅の正体。
+                    const caller = (() => {
+                        try {
+                            const stack = new Error().stack || '';
+                            return stack.split('\n')[2]?.trim() || 'unknown';
+                        } catch (_) { return 'unknown'; }
+                    })();
+                    console.log(`${LOG} [guard] ST からの slider.value=${v} をブロック (intent=${_userIntentScale}) caller=${caller}`);
                 },
             });
-            _sliderGuardInstalled = true;
-            console.log(`${LOG} slider.value setter ガードを設置しました`);
+            _guardedSliders.add(slider);
+            console.log(`${LOG} slider.value setter ガードを設置しました (${document.querySelectorAll('#font_scale').length} 個の #font_scale)`);
         } catch (e) {
             console.warn(`${LOG} slider.value ガード設置失敗:`, e);
         }
     }
 
     // ============================================================
+    // ★ v7.3: ST が #font_scale を差し替えたらガードを再設置する
+    // ============================================================
+    function startSliderGuardObserver() {
+        if (_sliderGuardObserver) return;
+        _sliderGuardObserver = new MutationObserver(() => {
+            const slider = document.getElementById('font_scale');
+            if (slider && !_guardedSliders.has(slider)) {
+                console.log(`${LOG} [observer] #font_scale が差し替えられたためガードを再設置します`);
+                installSliderWriteGuard();
+            }
+        });
+        _sliderGuardObserver.observe(document.body, { childList: true, subtree: true });
+        console.log(`${LOG} slider 差し替え監視を開始しました`);
+    }
+
+    // ============================================================
     // キャプチャフェーズ: ユーザー意図を記録 + 即時適用
     // ============================================================
     function setupFontScaleInterceptor() {
-        // ★ v7.2: slider.value setter ガード設置
         installSliderWriteGuard();
 
-        // ⓪ ドラッグ状態の追跡（スライダー・カウンター両対応、pointerId で追跡）
         let _dragPointerId = null;
 
         const isSliderTarget = (el) => {
@@ -268,7 +278,6 @@
             }
         }, true);
 
-        // ★ v7.2: pointerup は target を問わず必ず _isDragging をクリア
         document.addEventListener('pointerup', (e) => {
             if (!_isDragging) return;
             if (_dragPointerId !== null && e.pointerId !== undefined && e.pointerId !== _dragPointerId) return;
@@ -284,23 +293,21 @@
             }
         }, true);
 
-        // ① input イベント（スライダー・カウンター両対応）
         document.addEventListener('input', (e) => {
             const target = e.target;
             if (!target) return;
             if (target.id !== 'font_scale' && target.id !== 'font_scale_counter') return;
 
-            // ★ v7.2: 合成イベント（ST が jQuery.trigger('input') 等で発火）は無視
             if (!e.isTrusted) {
-                console.log(`${LOG} [guard] 合成 input を無視 (${target.id}, value=${target.value})`);
+                if (_verbose) console.log(`${LOG} [guard] 合成 input を無視 (${target.id}, value=${target.value})`);
                 return;
             }
 
             const v = parseFloat(target.value);
             if (!Number.isFinite(v)) return;
 
-            if (_userIntentScale === null || Math.abs(v - _userIntentScale) > 0.01) {
-                console.log(`${LOG} ユーザーが手動で Font Scale を ${v} に変更 (${target.id})`);
+            if (_verbose || _userIntentScale === null || Math.abs(v - _userIntentScale) > 0.01) {
+                console.log(`${LOG} ユーザーが手動で Font Scale を ${v} に変更 (${target.id}) intent=${_userIntentScale}`);
             }
             _userIntentScale = v;
             _lastTrustedInputAt = performance.now();
@@ -309,17 +316,13 @@
             if (!_isDragging) _scheduleEnforceBurst();
         }, true);
 
-        // ② change イベント（スライダーリリース時）
         document.addEventListener('change', (e) => {
             const target = e.target;
             if (!target || target.id !== 'font_scale') return;
-
-            // ★ v7.2: 合成 change も無視
             if (!e.isTrusted) {
-                console.log(`${LOG} [guard] 合成 change を無視 (${target.id}, value=${target.value})`);
+                if (_verbose) console.log(`${LOG} [guard] 合成 change を無視 (${target.id}, value=${target.value})`);
                 return;
             }
-
             const v = parseFloat(target.value);
             if (!Number.isFinite(v)) return;
             _userIntentScale = v;
@@ -353,7 +356,6 @@
             ctx.saveSettingsDebounced();
         }
 
-        // バースト再適用（init 時も含む）
         _scheduleEnforceBurst();
 
         console.log(`${LOG} Font Scale を ${s} に設定 (fromInit=${fromInit})`);
@@ -373,7 +375,6 @@
                     const data = JSON.parse(saved);
                     const resolutionScale = computeScale(data.w, data.h);
 
-                    // ST が現在保持している font_scale を取得
                     const ctx = getSTContext();
                     const current =
                         ctx?.powerUserSettings?.font_scale ??
@@ -381,12 +382,10 @@
                         window.power_user?.font_scale;
 
                     if (typeof current === 'number' && Math.abs(current - resolutionScale) >= 0.01) {
-                        // ユーザーが手動で変更した値（解像度スケールと異なる）を尊重する
                         console.log(`${LOG} ST の font_scale (${current}) が解像度スケール (${resolutionScale}) と異なるため、ユーザー設定を尊重します`);
                         _userIntentScale = current;
                         _initApplyDone = true;
                     } else {
-                        // 初回と同じ扱い（未設定 or 解像度スケールと一致）
                         applyFontScale(resolutionScale, { fromInit: true });
                     }
                 } catch (e) { /* ignore */ }
@@ -613,12 +612,14 @@
     function init() {
         setupMaxAttributeObserver();
         setupFontScaleInterceptor();
+        startSliderGuardObserver();
 
         let tries = 0;
         const timer = setInterval(() => {
             tries++;
             if (document.getElementById('font_scale')) {
                 clearInterval(timer);
+                installSliderWriteGuard();
                 showResolutionDialog();
             } else if (tries > 30) {
                 clearInterval(timer);
@@ -677,21 +678,26 @@
                 return raw ? JSON.parse(raw) : null;
             } catch (e) { return null; }
         },
+        enableVerbose: () => { _verbose = true; console.log(`${LOG} verbose ON`); },
+        disableVerbose: () => { _verbose = false; console.log(`${LOG} verbose OFF`); },
         diagnose: () => {
             const ctx = getSTContext();
+            const curSlider = document.getElementById('font_scale');
             return {
-                version: 'v7.2-robust',
+                version: 'v7.3-robust',
+                verbose: _verbose,
                 userIntent: _userIntentScale,
                 initApplyDone: _initApplyDone,
                 isDragging: _isDragging,
                 lastTrustedInputAgo: _lastTrustedInputAt === 0 ? null : Math.round(performance.now() - _lastTrustedInputAt),
-                sliderGuardInstalled: _sliderGuardInstalled,
+                sliderGuardInstalled: curSlider ? _guardedSliders.has(curSlider) : false,
+                fontScaleCount: document.querySelectorAll('#font_scale').length,
                 powerUserSettings: ctx?.powerUserSettings?.font_scale,
                 extensionSettingsPowerUser: ctx?.extensionSettings?.power_user?.font_scale,
                 windowPowerUser: window.power_user?.font_scale,
                 windowPowerUserSettings: window.powerUserSettings?.font_scale,
-                sliderValue: document.getElementById('font_scale')?.value,
-                sliderMax: document.getElementById('font_scale')?.getAttribute('max'),
+                sliderValue: curSlider?.value,
+                sliderMax: curSlider?.getAttribute('max'),
                 counterValue: document.getElementById('font_scale_counter')?.value,
                 mainFontSize: document.documentElement.style.getPropertyValue('--mainFontSize'),
             };
@@ -702,6 +708,6 @@
         },
     };
 
-    console.log(`${LOG} ✅ installed (v7.2-robust)`);
-    console.log(`${LOG} v7.2 検出用マーカー: このメッセージが出ていれば v7.2 が動作中`);
+    console.log(`${LOG} ✅ installed (v7.3-robust)`);
+    console.log(`${LOG} v7.3 検出用マーカー: このメッセージが出ていれば v7.3 が動作中`);
 })();
