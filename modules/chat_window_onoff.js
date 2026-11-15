@@ -677,7 +677,6 @@ function setupAllButtonsHover() {
         if (x < 0 || y < 0) { clearAll(); return; }
 
         // フルスクリーン系オーバーレイ中は抑止
-        // （tsp-open はサイドパネルのため許容: T で閉じる操作が必要）
         if (document.body.classList.contains('gallery-open') ||
             document.body.classList.contains('stj-editor-open') ||
             document.body.classList.contains('variable-battle-active')) {
@@ -688,9 +687,12 @@ function setupAllButtonsHover() {
         const zone = computeZone();
         if (!zone) return;
 
+        // ★ 右側のみ MARGIN を加算しない
+        //   （🎨/💡 の右端より右にはホバー範囲を広げない）
+        const RIGHT_MARGIN = 0;
         const inside =
-            x >= zone.left   - MARGIN && x <= zone.right  + MARGIN &&
-            y >= zone.top    - MARGIN && y <= zone.bottom + MARGIN;
+            x >= zone.left   - MARGIN      && x <= zone.right  + RIGHT_MARGIN &&
+            y >= zone.top    - MARGIN      && y <= zone.bottom + MARGIN;
 
         if (inside === isInZone) return;
         isInZone = inside;
