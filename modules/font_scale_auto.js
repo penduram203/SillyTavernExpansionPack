@@ -2,13 +2,12 @@
 // フォントスケール（Font Scale）の上限を 2.0 に拡張し、
 // 解像度に応じて自動設定する拡張モジュール。
 //
-// ★ v5 修正:
-//   - bootstrap() の double-init を startOnce ガードで防止
-//     （APP_READY 発火後、setTimeout(init, 5000) が init を再度実行して
-//      applyFontScale が 2回呼ばれ、ユーザーのスライダー変更を上書きしていた）
-//   - applyFontScale に fromInit オプションを追加（二重適用の防御）
-//   - font_scale_counter の input も監視対象に追加
-//   - 5120×1440 / 5120×2160 / 5120×2880 / 6016×3384 / 7680×4320 を除外
+// ★ v6 修正:
+//   - ST本体の ctx.applyFontScale を wrap し、power_user.font_scale を
+//     常に尊重（1.5 クランプ回避 + slider 強制同期）
+//   - 私の applyFontScale の遅延再適用タイマー（stages）を撤去
+//     （ユーザー操作後に自動上書きする唯一のコードだった）
+//   - wrap を init の最初に実行（他の処理より先に）
 
 (function () {
     'use strict';
@@ -26,7 +25,6 @@
     const MIN_SCALE = 0.5;
     const MAX_SCALE = 2.0;
 
-    // ★ v5: 5K 以上の解像度を除外（15 個）
     const PRESETS = [
         { label: '1280×720 (HD)',          w: 1280, h: 720 },
         { label: '1280×800 (WXGA)',        w: 1280, h: 800 },
@@ -45,9 +43,8 @@
         { label: '3840×2400 (WQUXGA)',     w: 3840, h: 2400 },
     ];
 
-    const DEFAULT_IDX = 6;  // 1920×1080
+    const DEFAULT_IDX = 6;
 
-    // ★ v5: init からの applyFontScale は 1 回だけ実行
     let _initApplyDone = false;
     let _targetFontScale = null;
 
@@ -64,6 +61,68 @@
         if (!Number.isFinite(w) || w <= 0) return 1;
         const raw = w / BASE_W;
         return Math.max(MIN_SCALE, Math.min(MAX_SCALE, raw));
+    }
+
+    // ============================================================
+    // ★ v6: ST本体の applyFontScale を wrap
+    //   - 元の関数を呼んだ後、power_user.font_scale を読み直して
+    //     --mainFontSize と slider/counter を強制同期
+    //   - これにより 1.5 クランプを回避し、ユーザーの値が維持される
+    // ============================================================
+    function wrapApplyFontScale() {
+        const ctx = getSTContext();
+        if (!ctx) return false;
+        if (window.__expApplyFontScaleWrapped) return true;
+
+        const orig = ctx.applyFontScale;
+        if (typeof orig !== 'function') {
+            // window 側の applyFontScale も確認
+            if (typeof window.applyFontScale === 'function' && !window.__expApplyFontScaleWinWrapped) {
+                window.__expApplyFontScaleWinWrapped = true;
+                const origWin = window.applyFontScale;
+                window.applyFontScale = function () {
+                    try { origWin.call(this); } catch (e) { /* ignore */ }
+                    _syncFromPowerUser();
+                };
+                console.log(`${LOG} window.applyFontScale をラップしました`);
+                return true;
+            }
+            return false;
+        }
+
+        window.__expApplyFontScaleWrapped = true;
+        ctx.applyFontScale = function () {
+            try { orig.call(this); } catch (e) { /* ignore */ }
+            _syncFromPowerUser();
+        };
+        console.log(`${LOG} ctx.applyFontScale をラップしました`);
+        return true;
+    }
+
+    function _syncFromPowerUser() {
+        try {
+            const ctx = getSTContext();
+            const s =
+                ctx?.powerUserSettings?.font_scale ??
+                ctx?.extensionSettings?.power_user?.font_scale ??
+                window.power_user?.font_scale ??
+                window.powerUserSettings?.font_scale;
+            if (typeof s !== 'number' || !Number.isFinite(s) || s <= 0) return;
+
+            document.documentElement.style.setProperty(
+                '--mainFontSize',
+                `${ST_BASE_FONT_PX * s}px`
+            );
+
+            const slider = document.getElementById('font_scale');
+            const counter = document.getElementById('font_scale_counter');
+            if (slider && Math.abs(parseFloat(slider.value) - s) > 0.01) {
+                slider.value = String(s);
+            }
+            if (counter && Math.abs(parseFloat(counter.value) - s) > 0.01) {
+                counter.value = String(s);
+            }
+        } catch (e) { /* ignore */ }
     }
 
     function enforceMaxAttribute() {
@@ -99,7 +158,7 @@
 
     // ============================================================
     // Font Scale の適用
-    // ★ v5: fromInit オプションで二重適用を防止
+    // ★ v6: 遅延再適用タイマー（stages）を撤去
     // ============================================================
     function applyFontScale(scale, options = {}) {
         const { fromInit = false } = options;
@@ -146,7 +205,7 @@
         if (slider) slider.value = String(s);
         if (counter) counter.value = String(s);
 
-        // ④ ST の applyFontScale を呼ぶ
+        // ④ ST の applyFontScale を呼ぶ（wrap により内部で再同期される）
         const applyFns = [ctx?.applyFontScale, window.applyFontScale];
         for (const fn of applyFns) {
             if (typeof fn === 'function') {
@@ -154,7 +213,7 @@
             }
         }
 
-        // ⑤ ST が上書きした場合の保険として再設定
+        // ⑤ 再設定（念のため）
         document.documentElement.style.setProperty('--mainFontSize', `${targetPx}px`);
         if (slider) slider.value = String(s);
         if (counter) counter.value = String(s);
@@ -164,43 +223,21 @@
             ctx.saveSettingsDebounced();
         }
 
-        // ⑦ 目標値として記録
+        // ⑦ 目標値として記録（ユーザー操作検出用・デバッグ用）
         _targetFontScale = s;
 
-        // ⑧ 5段階遅延再適用
-        const stages = [0, 200, 600, 2000, 4000];
-        for (const delay of stages) {
-            if (delay === 0) {
-                _reapplyFontScale(s, targetPx, slider, counter);
-            } else {
-                setTimeout(() => {
-                    if (_targetFontScale !== s) return;
-                    _reapplyFontScale(s, targetPx, slider, counter);
-                }, delay);
-            }
-        }
+        // ★ v6: 遅延再適用タイマー（stages）を撤去
+        //   ユーザーが手動変更した後、遅延タイマーで slider を元に戻す
+        //   事故を防ぐため、初回適用時の1回のみに限定する。
 
         console.log(`${LOG} Font Scale を ${s} に設定 (--mainFontSize = ${targetPx}px, fromInit=${fromInit})`);
         return true;
     }
 
-    function _reapplyFontScale(s, targetPx, slider, counter) {
-        document.documentElement.style.setProperty('--mainFontSize', `${targetPx}px`);
-
-        const sliderNow = slider || document.getElementById('font_scale');
-        const counterNow = counter || document.getElementById('font_scale_counter');
-
-        if (sliderNow && Math.abs(parseFloat(sliderNow.value) - s) > 0.01) {
-            sliderNow.value = String(s);
-        }
-        if (counterNow && Math.abs(parseFloat(counterNow.value) - s) > 0.01) {
-            counterNow.value = String(s);
-        }
-    }
-
     // ============================================================
-    // 手動変更のキャプチャ（スライダー + カウンター両対応）
-    // ★ v5: font_scale_counter も監視対象に追加
+    // 手動変更のキャプチャ
+    //   ★ v6: _targetFontScale を null にするだけで、以降は何もしない
+    //         （ST の applyFontScale wrap が値を維持する）
     // ============================================================
     function setupFontScaleInterceptor() {
         document.addEventListener('input', (e) => {
@@ -211,9 +248,8 @@
             const v = parseFloat(target.value);
             if (!Number.isFinite(v)) return;
 
-            // 手動変更を検出したら目標値をクリア
             if (_targetFontScale !== null && Math.abs(v - _targetFontScale) > 0.01) {
-                console.log(`${LOG} ユーザーが手動で Font Scale を ${v} に変更 (${target.id}) → 遅延再適用を停止`);
+                console.log(`${LOG} ユーザーが手動で Font Scale を ${v} に変更 (${target.id}) → 自動上書きを停止`);
                 _targetFontScale = null;
             }
 
@@ -253,7 +289,6 @@
             if (saved) {
                 try {
                     const data = JSON.parse(saved);
-                    // ★ v5: fromInit を渡して二重適用防止
                     applyFontScale(computeScale(data.w, data.h), { fromInit: true });
                 } catch (e) { /* ignore */ }
             }
@@ -463,7 +498,6 @@
                 localStorage.setItem(DIALOG_SHOWN_KEY, 'true');
             }
 
-            // ダイアログからの適用は fromInit=false（明示的なユーザー操作）
             applyFontScale(scale);
             overlay.remove();
             console.log(`${LOG} 解像度 ${preset.label} → scale ${scale.toFixed(2)} を適用`);
@@ -478,6 +512,15 @@
     // 初期化
     // ============================================================
     function init() {
+        // ★ v6: wrap を最初に実行（他の処理より先に）
+        if (!wrapApplyFontScale()) {
+            // ctx がまだ準備できていない場合は後でリトライ
+            const retryTimer = setInterval(() => {
+                if (wrapApplyFontScale()) clearInterval(retryTimer);
+            }, 500);
+            setTimeout(() => clearInterval(retryTimer), 10000);
+        }
+
         setupMaxAttributeObserver();
         setupFontScaleInterceptor();
 
@@ -494,7 +537,6 @@
         }, 200);
     }
 
-    // ★ v5: double-init 防止
     function bootstrap() {
         let _bootStarted = false;
         const startOnce = () => {
@@ -527,10 +569,9 @@
             _initApplyDone = false;
             console.log(`${LOG} 既読フラグと解像度設定をリセットしました`);
         },
-        // ★ v5: 遅延再適用を手動停止（緊急用）
         stopReapply: () => {
             _targetFontScale = null;
-            console.log(`${LOG} 遅延再適用を手動で停止しました`);
+            console.log(`${LOG} 目標値をクリアしました`);
         },
         getCurrentScale: () => {
             const ctx = getSTContext();
@@ -551,6 +592,8 @@
             return {
                 targetScale: _targetFontScale,
                 initApplyDone: _initApplyDone,
+                wrappedCtx: !!window.__expApplyFontScaleWrapped,
+                wrappedWin: !!window.__expApplyFontScaleWinWrapped,
                 powerUserSettings: ctx?.powerUserSettings?.font_scale,
                 extensionSettingsPowerUser: ctx?.extensionSettings?.power_user?.font_scale,
                 windowPowerUser: window.power_user?.font_scale,
@@ -564,5 +607,5 @@
         },
     };
 
-    console.log(`${LOG} installed (v5)`);
+    console.log(`${LOG} installed (v6)`);
 })();
