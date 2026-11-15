@@ -284,7 +284,7 @@ function applyChatLayout() {
 }
 
 // ============================================================
-// ★ 💡 ボタン位置: send_form の左隣に追従
+// ★ 💡 ボタン位置: send_form の左隣に追従 + Ｔ用の余白を下に確保
 // ============================================================
 function applyToggleChatButtonLayout() {
     const btn = document.getElementById('toggle-chat-button');
@@ -297,6 +297,12 @@ function applyToggleChatButtonLayout() {
 
     const rect = anchor.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return;
+
+    // ★ 新レイアウト対応: 💡 の下に Ｔ ボタンが来るため、
+    //   💡 を配置する時点で下に Ｔ の高さ + GAP の余白を確保する。
+    //   これがないと 💡 が viewport 下端に張り付き、Ｔ が画面外に出る。
+    const restoreBtnEl = document.getElementById('restore-panel-button');
+    const reserveBelow = (restoreBtnEl?.offsetHeight || 32) + 5;  // T高さ + GAP
 
     const gap = 5;
     const btnW = btn.offsetWidth || 50;
@@ -312,7 +318,11 @@ function applyToggleChatButtonLayout() {
     if (left < margin) left = margin;
     if (left + btnW > vw - margin) left = vw - margin - btnW;
     if (top < margin) top = margin;
-    if (top + btnH > vh - margin) top = vh - margin - btnH;
+    // ★ 下に reserveBelow 分の余白を確保するようクランプ
+    if (top + btnH + reserveBelow > vh - margin) {
+        top = vh - margin - reserveBelow - btnH;
+    }
+    if (top < margin) top = margin;
 
     btn.style.setProperty('position', 'fixed', 'important');
     btn.style.setProperty('left', Math.round(left) + 'px', 'important');
@@ -371,6 +381,8 @@ function applyWindowControlButtonsLayout() {
     }
 
     const GAP = 5;
+    const margin = 4;
+    const vh = window.innerHeight;
 
     // ★ 新レイアウト:
     //   行1: 画像削除  🎨       （gic.js が担当）
@@ -385,7 +397,15 @@ function applyWindowControlButtonsLayout() {
 
     // Ｔ ボタン: 💡 の真下、左端揃え
     const restoreLeft = toggleRect.left;
-    const restoreTop  = toggleRect.top + toggleRect.height + GAP;
+    let   restoreTop  = toggleRect.top + toggleRect.height + GAP;
+
+    // ★ 安全クランプ: 万一 💡 が下端にいても Ｔ を画面内に収める
+    if (restoreTop + restoreH > vh - margin) {
+        restoreTop = vh - margin - restoreH;
+    }
+    if (restoreTop < margin) {
+        restoreTop = margin;
+    }
 
     restoreBtn.style.setProperty('position', 'fixed', 'important');
     restoreBtn.style.setProperty('left', Math.round(restoreLeft) + 'px', 'important');
@@ -397,8 +417,15 @@ function applyWindowControlButtonsLayout() {
     // 中央ボタン（#window-control-buttons）: Ｔ の右隣、縦センター揃え
     const wcbW = wcb.offsetWidth || centerBtn.offsetWidth || 50;
     const wcbH = wcb.offsetHeight || centerBtn.offsetHeight || 28;
-    const wcbLeft = restoreLeft + restoreW + GAP;
-    const wcbTop  = restoreTop + (restoreH - wcbH) / 2;
+    let wcbLeft = restoreLeft + restoreW + GAP;
+    let wcbTop  = restoreTop + (restoreH - wcbH) / 2;
+
+    // 水平方向のクランプ（念のため）
+    const vw = window.innerWidth;
+    if (wcbLeft + wcbW > vw - margin) wcbLeft = vw - margin - wcbW;
+    if (wcbLeft < margin) wcbLeft = margin;
+    if (wcbTop < margin) wcbTop = margin;
+    if (wcbTop + wcbH > vh - margin) wcbTop = vh - margin - wcbH;
 
     wcb.style.setProperty('position', 'fixed', 'important');
     wcb.style.setProperty('left', Math.round(wcbLeft) + 'px', 'important');
@@ -711,3 +738,37 @@ setupAllButtonsHover();
         cleanup();
     }
 })();
+
+window.debugButtonPositions = function () {
+    const ids = [
+        'toggle-chat-button',
+        'gic-open-gallery-button',
+        'restore-panel-button',
+        'window-control-buttons',
+        'center-button',
+        'gic-unregister-button',
+        'gic-delete-image-button',
+    ];
+    const out = {};
+    for (const id of ids) {
+        const el = document.getElementById(id);
+        if (!el) { out[id] = null; continue; }
+        const r = el.getBoundingClientRect();
+        const cs = window.getComputedStyle(el);
+        out[id] = {
+            rect: {
+                left: Math.round(r.left),
+                top: Math.round(r.top),
+                width: Math.round(r.width),
+                height: Math.round(r.height),
+            },
+            display: cs.display,
+            visibility: cs.visibility,
+            opacity: cs.opacity,
+            inlineLeft: el.style.getPropertyValue('left') || '(auto)',
+            inlineTop: el.style.getPropertyValue('top') || '(auto)',
+            viewport: { w: window.innerWidth, h: window.innerHeight },
+        };
+    }
+    return out;
+};
