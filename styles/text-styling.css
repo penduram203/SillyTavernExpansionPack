@@ -1,4 +1,9 @@
-/* text-styling.css */ 
+/* text-styling.css */
+/* ============================================================
+   ★ 解像度スケーリング対応 (cssvar モード)
+   1920×962 基準。サイズ系の px は calc(var(--exp-scale, 1) * Npx)。
+   border-width(1px) と z-index はそのまま。
+   ============================================================ */
 :root {
   /* p タグ（通常テキスト）用変数 */
   --p-font-size: 100%;
@@ -34,15 +39,18 @@
   position: fixed;
   top: 300px;
   left: 5px;
-  width: 480px;
-  min-height: 200px;
+  width: calc(var(--exp-scale, 1) * 480px);
+  min-height: calc(var(--exp-scale, 1) * 200px);
   border: 1px solid #444;
   background-color: #222;
-  border-radius: 5px;
+  border-radius: calc(var(--exp-scale, 1) * 5px);
   overflow: hidden;
   z-index: 15;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-  padding: 15px;
+  box-shadow:
+    0 calc(var(--exp-scale, 1) * 4px)
+    calc(var(--exp-scale, 1) * 12px)
+    rgba(0,0,0,0.5);
+  padding: calc(var(--exp-scale, 1) * 15px);
   box-sizing: border-box;
 }
 
@@ -51,20 +59,24 @@
 }
 
 #text-styling-header {
-  height: 30px;
+  height: calc(var(--exp-scale, 1) * 30px);
   background-color: #333;
   color: #fff;
-  font-size: 13px;
+  font-size: calc(var(--exp-scale, 1) * 13px);
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: bold;
   user-select: none;
-  margin: -15px -15px 15px -15px;
+  margin:
+    calc(var(--exp-scale, 1) * -15px)
+    calc(var(--exp-scale, 1) * -15px)
+    calc(var(--exp-scale, 1) * 15px)
+    calc(var(--exp-scale, 1) * -15px);
 }
 
 .tab-container {
-  margin-bottom: 15px;
+  margin-bottom: calc(var(--exp-scale, 1) * 15px);
 }
 
 .tab-buttons {
@@ -73,15 +85,17 @@
 }
 
 .tab-button {
-  padding: 8px 12px;
+  padding:
+    calc(var(--exp-scale, 1) * 8px)
+    calc(var(--exp-scale, 1) * 12px);
   cursor: pointer;
   background-color: #2a2a2a;
   border: none;
   color: #aaa;
-  border-top-left-radius: 4px;
-  border-top-right-radius: 4px;
-  font-size: 13px;
-  margin-right: 2px;
+  border-top-left-radius: calc(var(--exp-scale, 1) * 4px);
+  border-top-right-radius: calc(var(--exp-scale, 1) * 4px);
+  font-size: calc(var(--exp-scale, 1) * 13px);
+  margin-right: calc(var(--exp-scale, 1) * 2px);
 }
 
 .tab-button.active {
@@ -92,12 +106,12 @@
 
 .tab-content {
   display: none;
-  padding: 15px;
+  padding: calc(var(--exp-scale, 1) * 15px);
   border: 1px solid #444;
   border-top: none;
   background-color: #333;
-  border-bottom-left-radius: 4px;
-  border-bottom-right-radius: 4px;
+  border-bottom-left-radius: calc(var(--exp-scale, 1) * 4px);
+  border-bottom-right-radius: calc(var(--exp-scale, 1) * 4px);
 }
 
 .tab-content.active {
@@ -112,15 +126,15 @@
 .enable-styling-toggle {
   display: flex;
   align-items: center;
-  margin-bottom: 15px;
+  margin-bottom: calc(var(--exp-scale, 1) * 15px);
   background-color: #2a2a2a;
-  padding: 8px;
-  border-radius: 4px;
+  padding: calc(var(--exp-scale, 1) * 8px);
+  border-radius: calc(var(--exp-scale, 1) * 4px);
 }
 
 .enable-styling-toggle label {
-  margin: 0 0 0 8px;
-  font-size: 14px;
+  margin: 0 0 0 calc(var(--exp-scale, 1) * 8px);
+  font-size: calc(var(--exp-scale, 1) * 14px);
   font-weight: bold;
   cursor: pointer;
 }
@@ -128,16 +142,16 @@
 .columns-container {
   display: flex;
   flex-wrap: wrap;
-  gap: 15px;
+  gap: calc(var(--exp-scale, 1) * 15px);
 }
 
 .column {
   flex: 1;
-  min-width: 200px;
+  min-width: calc(var(--exp-scale, 1) * 200px);
 }
 
 .text-styling-control-group {
-  margin-bottom: 12px;
+  margin-bottom: calc(var(--exp-scale, 1) * 12px);
 }
 
 .text-styling-control-group:last-child {
@@ -146,9 +160,9 @@
 
 .text-styling-control-group label {
   display: block;
-  margin-bottom: 6px;
+  margin-bottom: calc(var(--exp-scale, 1) * 6px);
   color: #ddd;
-  font-size: 12px;
+  font-size: calc(var(--exp-scale, 1) * 12px);
 }
 
 .text-styling-control-group input[type="color"],
@@ -158,11 +172,11 @@
 
 .text-styling-value-display {
   display: inline-block;
-  width: 40px;
+  width: calc(var(--exp-scale, 1) * 40px);
   text-align: right;
-  margin-left: 10px;
+  margin-left: calc(var(--exp-scale, 1) * 10px);
   color: #bbb;
-  font-size: 11px;
+  font-size: calc(var(--exp-scale, 1) * 11px);
 }
 
 /* ============================================================
@@ -252,8 +266,8 @@
 }
 
 #sheldheader {
-  font-size: 2em !important;
-  right: 50px !important;
+  font-size: calc(var(--exp-scale, 1) * 2em) !important;
+  right: calc(var(--exp-scale, 1) * 50px) !important;
   opacity: 1.0 !important;
   background-color: #000000 !important;
 }
@@ -290,8 +304,8 @@ html body.no-blur #send_form #nonQRFormItems {
    ============================================================ */
 #window-control-buttons {
   position: fixed !important;
-  left: 45px !important;      /* Tボタン右端(1+32=33px) + 余白(12px) */
-  bottom: 11px !important;    /* Tボタンの視覚的な底辺(3+8=11px)に揃える */
+  left: calc(var(--exp-scale, 1) * 45px) !important;
+  bottom: calc(var(--exp-scale, 1) * 11px) !important;
   display: flex !important;
   flex-direction: row !important;
   align-items: center !important;
@@ -337,7 +351,7 @@ html body.no-blur #send_form #nonQRFormItems {
   transition: opacity 0.15s ease !important;
 }
 
-/* 外観統一 */
+/* 外観統一（★ 解像度スケーリング） */
 #custom-button,
 #maximize-button,
 #half-maximize-button,
@@ -348,11 +362,13 @@ html body.no-blur #send_form #nonQRFormItems {
   background-image: none !important;
   color: #ffffff !important;
   border: 1px solid #666 !important;
-  padding: 6px 12px !important;
-  font-size: 12px !important;
+  padding:
+    calc(var(--exp-scale, 1) * 6px)
+    calc(var(--exp-scale, 1) * 12px) !important;
+  font-size: calc(var(--exp-scale, 1) * 12px) !important;
   font-family: inherit !important;
   font-weight: normal !important;
-  border-radius: 4px !important;
+  border-radius: calc(var(--exp-scale, 1) * 4px) !important;
   text-shadow: none !important;
   box-shadow: none !important;
   line-height: normal !important;
@@ -384,22 +400,28 @@ body.gic-buttons-wake #manual-settings-button:hover {
 #restore-panel-button {
   /* 位置 */
   position: fixed;
-  left: 10px;
-  bottom: 3px;
-  transform: translate(-9px, -8px) !important;
+  left: calc(var(--exp-scale, 1) * 10px);
+  bottom: calc(var(--exp-scale, 1) * 3px);
+  transform: translate(
+    calc(var(--exp-scale, 1) * -9px),
+    calc(var(--exp-scale, 1) * -8px)
+  ) !important;
   z-index: 15;
 
-  /* サイズ・外観 */
-  width: 32px !important;
-  height: 32px !important;
+  /* サイズ・外観（★ 解像度スケーリング） */
+  width:  calc(var(--exp-scale, 1) * 32px) !important;
+  height: calc(var(--exp-scale, 1) * 32px) !important;
   padding: 0 !important;
   box-sizing: border-box !important;
   background-color: #444 !important;
   background-image: none !important;
   color: #ffffff !important;
   border: 1px solid #666 !important;
-  border-radius: 4px !important;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.5) !important;
+  border-radius: calc(var(--exp-scale, 1) * 4px) !important;
+  box-shadow:
+    0 calc(var(--exp-scale, 1) * 2px)
+    calc(var(--exp-scale, 1) * 8px)
+    rgba(0,0,0,0.5) !important;
 
   /* レイアウト */
   display: flex !important;
@@ -408,7 +430,7 @@ body.gic-buttons-wake #manual-settings-button:hover {
 
   /* フォント */
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif !important;
-  font-size: 18px !important;
+  font-size: calc(var(--exp-scale, 1) * 18px) !important;
   font-weight: 900 !important;
   line-height: 1 !important;
   letter-spacing: 0 !important;
