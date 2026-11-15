@@ -442,6 +442,15 @@
     mediaContainer.style.height = '100%';
     imageContainer.appendChild(mediaContainer);
 
+    // ★ 左右モード時に画像を右寄せするためのヘルパー
+    function _setMediaObjectPosition(pos) {
+        try {
+            mediaContainer.querySelectorAll(':scope > img, :scope > video').forEach(el => {
+                el.style.setProperty('object-position', pos, 'important');
+            });
+        } catch (e) { /* ignore */ }
+    }
+    
     const resizeHandle = document.createElement('div');
     resizeHandle.id = 'resize-handle';
     imageContainer.appendChild(resizeHandle);
@@ -1363,7 +1372,9 @@
             }));
         } catch (e) { /* ignore */ }
         
-
+        // ★ split mode では右寄せ
+        const objPos = (currentMode === 'halfMaximized') ? 'right center' : 'center center';
+        
         if (isVideoUrl(newUrl)) {
             const videoElement = document.createElement('video');
             videoElement.src = newUrl;
@@ -1375,6 +1386,7 @@
             videoElement.style.width = '100%';
             videoElement.style.height = '100%';
             videoElement.style.objectFit = 'contain';
+            videoElement.style.objectPosition = objPos;   // ★ 追加
             videoElement.onerror = () => handleMediaError(videoElement, newUrl);
             mediaContainer.innerHTML = '';
             mediaContainer.appendChild(videoElement);
@@ -1394,6 +1406,7 @@
             imgElement.style.width = '100%';
             imgElement.style.height = '100%';
             imgElement.style.objectFit = 'contain';
+            imgElement.style.objectPosition = objPos;   // ★ 追加
             imgElement.onerror = () => handleMediaError(imgElement, newUrl);
             imgElement.onload = () => {
                 console.log(`[ImageDisplay] img 読み込み成功: ${imgElement.naturalWidth}x${imgElement.naturalHeight} (${urlForLoad.slice(0, 80)})`);
@@ -2033,6 +2046,7 @@
         halfMaximizeButton.classList.remove('disabled'); halfMaximizeButton.classList.add('enabled');
         customButton.classList.remove('disabled'); customButton.classList.add('enabled');
         currentMode = 'normal';
+        _setMediaObjectPosition('center center');
         updateSizeButtons();
         syncHeaderPosition();
         syncHeaderVisibility();
@@ -2055,6 +2069,7 @@
         halfMaximizeButton.classList.remove('disabled'); halfMaximizeButton.classList.add('enabled');
         customButton.classList.remove('disabled'); customButton.classList.add('enabled');
         currentMode = 'maximized';
+        _setMediaObjectPosition('center center');
         updateSizeButtons();
         syncHeaderPosition();
         syncHeaderVisibility();
@@ -2077,6 +2092,7 @@
         halfMaximizeButton.classList.remove('enabled'); halfMaximizeButton.classList.add('disabled');
         customButton.classList.remove('disabled'); customButton.classList.add('enabled');
         currentMode = 'halfMaximized';
+        _setMediaObjectPosition('center center');
         updateSizeButtons();
         syncHeaderPosition();
         syncHeaderVisibility();
