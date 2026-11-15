@@ -1,4 +1,4 @@
-/* stj_editor.css */ 
+/* stj_editor.css */
 /* ============================================================
    モーダルウィンドウ
    ============================================================ */
@@ -8,14 +8,14 @@
   top: 0;
   left: auto;
   right: 0;
-  width: calc(85vw - 280px);
-  min-width: 500px;
+  width: calc(85vw - var(--exp-scale, 1) * 280px);
+  min-width: calc(var(--exp-scale, 1) * 500px);
   height: 100vh;
   background-color: #2d3748;
   border: 1px solid #4a5568;
-  border-radius: 8px;
-  padding: 20px 20px 90px 9px;
-  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+  border-radius: calc(var(--exp-scale, 1) * 8px);
+  padding: calc(var(--exp-scale, 1) * 20px) calc(var(--exp-scale, 1) * 20px) calc(var(--exp-scale, 1) * 90px) calc(var(--exp-scale, 1) * 9px);
+  box-shadow: 0 calc(var(--exp-scale, 1) * 4px) calc(var(--exp-scale, 1) * 6px) rgba(0,0,0,0.1);
   z-index: 10001;
   overflow-y: auto;
   overflow-x: auto;
@@ -23,24 +23,24 @@
 }
 
 .stj-input-group {
-  margin-bottom: 15px;
+  margin-bottom: calc(var(--exp-scale, 1) * 15px);
   position: relative;
 }
 .stj-input-group label {
   display: block;
-  margin-bottom: 4px;
-  font-size: 14px;
+  margin-bottom: calc(var(--exp-scale, 1) * 4px);
+  font-size: calc(var(--exp-scale, 1) * 14px);
   color: #e2e8f0;
   font-weight: 500;
 }
 .stj-input-group input, .stj-input-group select {
   width: 100%;
-  padding: 8px;
+  padding: calc(var(--exp-scale, 1) * 8px);
   background-color: #4a5568;
   border: 1px solid #718096;
-  border-radius: 4px;
+  border-radius: calc(var(--exp-scale, 1) * 4px);
   color: white;
-  font-size: 14px;
+  font-size: calc(var(--exp-scale, 1) * 14px);
   box-sizing: border-box;
 }
 
@@ -50,37 +50,37 @@
   left: auto;
   right: 0;
   bottom: 0;
-  width: calc(85vw - 280px);
-  min-width: 500px;
+  width: calc(85vw - var(--exp-scale, 1) * 280px);
+  min-width: calc(var(--exp-scale, 1) * 500px);
   z-index: 100;
 
   display: flex;
   justify-content: flex-start;
   align-items: center;
-  gap: 16px;
+  gap: calc(var(--exp-scale, 1) * 16px);
 
   margin: 0;
-  padding: 15px 20px 15px 9px;
+  padding: calc(var(--exp-scale, 1) * 15px) calc(var(--exp-scale, 1) * 20px) calc(var(--exp-scale, 1) * 15px) calc(var(--exp-scale, 1) * 9px);
   background-color: #2d3748;
   border-top: 1px solid #4a5568;
-  border-bottom-left-radius: 8px;
-  border-bottom-right-radius: 8px;
+  border-bottom-left-radius: calc(var(--exp-scale, 1) * 8px);
+  border-bottom-right-radius: calc(var(--exp-scale, 1) * 8px);
   box-sizing: border-box;
 }
 .stj-button-group button {
-  padding: 10px 20px;
+  padding: calc(var(--exp-scale, 1) * 10px) calc(var(--exp-scale, 1) * 20px);
   border: none;
-  border-radius: 4px;
+  border-radius: calc(var(--exp-scale, 1) * 4px);
   cursor: pointer;
   font-weight: bold;
-  font-size: 14px;
+  font-size: calc(var(--exp-scale, 1) * 14px);
 }
 .stj-button-group > div,
 .stj-button-group-main {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 8px;
+  gap: calc(var(--exp-scale, 1) * 8px);
   flex-wrap: wrap;
 }
 
@@ -104,20 +104,20 @@
 /* ===== リアルタイムテスト ===== */
 #stj_test_section {
   position: sticky;
-  top: -25px;
+  top: calc(var(--exp-scale, 1) * -25px);
   z-index: 100;
   background: #1e1e1e;
   border: 1px solid #555;
-  padding: 6px 10px;
-  margin-bottom: 12px;
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+  padding: calc(var(--exp-scale, 1) * 6px) calc(var(--exp-scale, 1) * 10px);
+  margin-bottom: calc(var(--exp-scale, 1) * 12px);
+  border-radius: calc(var(--exp-scale, 1) * 6px);
+  box-shadow: 0 calc(var(--exp-scale, 1) * 4px) calc(var(--exp-scale, 1) * 12px) rgba(0,0,0,0.6);
 }
 #stj_test_section .stj-test-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin: 0 0 4px 0;
+  gap: calc(var(--exp-scale, 1) * 12px);
+  margin: 0 0 calc(var(--exp-scale, 1) * 4px) 0;
   flex-wrap: wrap;
   line-height: 1.2;
 }
@@ -125,35 +125,35 @@
   font-weight: bold;
   color: #64b5f6;
   margin: 0;
-  font-size: 17px;
+  font-size: calc(var(--exp-scale, 1) * 17px);
 }
 #stj_char_name_display {
-  font-size: 18px;
+  font-size: calc(var(--exp-scale, 1) * 18px);
   font-weight: 900;
   color: #ffffff;
-  letter-spacing: 0.5px;
+  letter-spacing: calc(var(--exp-scale, 1) * 0.5px);
   text-shadow:
     1px 0 0 #000, -1px 0 0 #000, 0 1px 0 #000, 0 -1px 0 #000,
     1px 1px 0 #000, -1px 1px 0 #000, 1px -1px 0 #000, -1px -1px 0 #000;
   white-space: nowrap;
 }
 #stj_test_section .stj-help-btn {
-  padding: 3px 14px;
-  font-size: 14px;
+  padding: calc(var(--exp-scale, 1) * 3px) calc(var(--exp-scale, 1) * 14px);
+  font-size: calc(var(--exp-scale, 1) * 14px);
   font-weight: bold;
   background-color: #4a5568;
   color: #ffffff;
   border: 2px solid #ff9696;
-  border-radius: 6px;
+  border-radius: calc(var(--exp-scale, 1) * 6px);
   cursor: pointer;
 }
 #stj_test_section .stj-syntax-guide {
   display: none;
-  margin: 0 0 8px 0;
-  padding: 12px 16px;
+  margin: 0 0 calc(var(--exp-scale, 1) * 8px) 0;
+  padding: calc(var(--exp-scale, 1) * 12px) calc(var(--exp-scale, 1) * 16px);
   background-color: rgba(100, 181, 246, 0.08);
   border-left: 4px solid #64b5f6;
-  border-radius: 6px;
+  border-radius: calc(var(--exp-scale, 1) * 6px);
   color: #e2e8f0;
   max-height: 55vh;
   overflow-y: auto;
@@ -161,18 +161,18 @@
 #stj_test_section .stj-syntax-guide.stj-help-visible { display: block; }
 #stj_test_input {
   width: 100%;
-  height: 28px;
+  height: calc(var(--exp-scale, 1) * 28px);
   background: #1e1e1e;
   color: #fff;
   border: 1px solid #444;
-  border-radius: 4px;
-  padding: 3px 8px;
+  border-radius: calc(var(--exp-scale, 1) * 4px);
+  padding: calc(var(--exp-scale, 1) * 3px) calc(var(--exp-scale, 1) * 8px);
   box-sizing: border-box;
-  font-size: 15px;
+  font-size: calc(var(--exp-scale, 1) * 15px);
 }
 #stj_test_result {
-  margin-top: 4px;
-  font-size: 15px;
+  margin-top: calc(var(--exp-scale, 1) * 4px);
+  font-size: calc(var(--exp-scale, 1) * 15px);
   font-weight: bold;
   color: #aed581;
 }
@@ -180,13 +180,13 @@
 /* ===== 上部エリア ===== */
 .stj-top-section {
   display: flex;
-  gap: 20px;
-  margin-bottom: 25px;
+  gap: calc(var(--exp-scale, 1) * 20px);
+  margin-bottom: calc(var(--exp-scale, 1) * 25px);
   align-items: stretch;
 }
 .stj-special-container {
   display: flex;
-  gap: 20px;
+  gap: calc(var(--exp-scale, 1) * 20px);
   flex: 0 0 auto;
   justify-content: flex-start;
   align-items: flex-start;
@@ -194,32 +194,32 @@
 .stj-info-panel {
   flex: 1 1 auto;
   min-width: 0;
-  padding: 16px 22px;
+  padding: calc(var(--exp-scale, 1) * 16px) calc(var(--exp-scale, 1) * 22px);
   background-color: #1a202c;
-  border-radius: 8px;
+  border-radius: calc(var(--exp-scale, 1) * 8px);
   color: #e2e8f0;
   align-self: stretch;
-  min-height: 290px;
+  min-height: calc(var(--exp-scale, 1) * 290px);
   display: flex;
   flex-direction: column;
   justify-content: center;
 }
 .stj-info-note {
-  font-size: 15px;
+  font-size: calc(var(--exp-scale, 1) * 15px);
   color: #fbbf24;
-  margin-bottom: 14px;
+  margin-bottom: calc(var(--exp-scale, 1) * 14px);
   font-weight: bold;
 }
 .stj-info-guide h4 {
-  margin: 0 0 10px 0;
-  font-size: 17px;
+  margin: 0 0 calc(var(--exp-scale, 1) * 10px) 0;
+  font-size: calc(var(--exp-scale, 1) * 17px);
   color: #64b5f6;
   font-weight: bold;
 }
 .stj-info-guide ul {
   margin: 0;
-  padding-left: 22px;
-  font-size: 15px;
+  padding-left: calc(var(--exp-scale, 1) * 22px);
+  font-size: calc(var(--exp-scale, 1) * 15px);
   line-height: 1.7;
 }
 .stj-info-guide b { color: #aed581; }
@@ -228,15 +228,15 @@
 .stj-special-item {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: calc(var(--exp-scale, 1) * 6px);
   align-items: center;
   box-sizing: border-box;
   cursor: pointer;
 }
 .stj-special-label {
-  font-size: 20px;
+  font-size: calc(var(--exp-scale, 1) * 20px);
   font-weight: 900;
-  letter-spacing: 1.5px;
+  letter-spacing: calc(var(--exp-scale, 1) * 1.5px);
   color: #ffffff;
   text-shadow:
     2px 0 0 #000, -2px 0 0 #000, 0 2px 0 #000, 0 -2px 0 #000,
@@ -246,21 +246,21 @@
 }
 .stj-special-preview {
   position: relative;
-  width: 260px;
-  height: 260px;
+  width: calc(var(--exp-scale, 1) * 260px);
+  height: calc(var(--exp-scale, 1) * 260px);
   flex-shrink: 0;
-  border-radius: 8px;
+  border-radius: calc(var(--exp-scale, 1) * 8px);
 }
 
 /* ===== キーワードセル ===== */
 .stj-keyword-item {
   position: relative;
-  width: 260px;
-  height: 260px;
+  width: calc(var(--exp-scale, 1) * 260px);
+  height: calc(var(--exp-scale, 1) * 260px);
   padding: 0;
   box-sizing: border-box;
   background-color: #1a202c;
-  border-radius: 8px;
+  border-radius: calc(var(--exp-scale, 1) * 8px);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -272,42 +272,42 @@
 /* ===== キーワードグリッド（5列） ===== */
 .stj-grid-container {
   display: grid;
-  grid-template-columns: repeat(5, 260px);
+  grid-template-columns: repeat(5, calc(var(--exp-scale, 1) * 260px));
   column-gap: 0;
-  row-gap: 8px;
+  row-gap: calc(var(--exp-scale, 1) * 8px);
   width: max-content;
-  min-width: 1300px;
+  min-width: calc(var(--exp-scale, 1) * 1300px);
   margin: 0 auto;
 }
 
 /* ===== ❌削除ボタン（セル一覧用） ===== */
 .stj-delete-row {
   position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 36px;
-  height: 36px;
+  top: calc(var(--exp-scale, 1) * 2px);
+  left: calc(var(--exp-scale, 1) * 2px);
+  width: calc(var(--exp-scale, 1) * 36px);
+  height: calc(var(--exp-scale, 1) * 36px);
   padding: 0;
   background-color: #e53e3e;
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: calc(var(--exp-scale, 1) * 4px);
   cursor: pointer;
   font-weight: bold;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size: calc(var(--exp-scale, 1) * 18px);
   z-index: 15;
 }
 
 /* ===== プレビュー枠 ===== */
 .stj-image-preview {
-  width: 260px;
-  height: 260px;
+  width: calc(var(--exp-scale, 1) * 260px);
+  height: calc(var(--exp-scale, 1) * 260px);
   background-color: #1a202c;
   border: 2px dashed #0d1117;
-  border-radius: 8px;
+  border-radius: calc(var(--exp-scale, 1) * 8px);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -327,9 +327,9 @@
 .stj-image-preview video { pointer-events: none; user-select: none; }
 .stj-preview-text {
   color: #a0aec0;
-  font-size: 14px;
+  font-size: calc(var(--exp-scale, 1) * 14px);
   text-align: center;
-  padding: 10px;
+  padding: calc(var(--exp-scale, 1) * 10px);
   width: 100%;
   position: absolute;
   top: 50%;
@@ -349,10 +349,10 @@
   left: 0;
   right: 0;
   bottom: auto;
-  padding: 6px 8px 6px 44px;
+  padding: calc(var(--exp-scale, 1) * 6px) calc(var(--exp-scale, 1) * 8px) calc(var(--exp-scale, 1) * 6px) calc(var(--exp-scale, 1) * 44px);
   background: rgba(0, 0, 0, 0.7);
   color: white;
-  font-size: 20px;
+  font-size: calc(var(--exp-scale, 1) * 20px);
   font-weight: bold;
   text-align: center;
   white-space: nowrap;
@@ -376,7 +376,7 @@
 .stj-keyword-item.stj-dragging .stj-image-preview {
   border-color: #ff8c00;
   border-style: solid;
-  box-shadow: 0 0 16px rgba(255, 140, 0, 0.85);
+  box-shadow: 0 0 calc(var(--exp-scale, 1) * 16px) rgba(255, 140, 0, 0.85);
   opacity: 0.35;
 }
 
@@ -385,8 +385,8 @@
 .stj-special-item.stj-drag-over {
   outline: 4px solid #ff2d2d;
   outline-offset: -4px;
-  box-shadow: 0 0 0 2px rgba(255, 45, 45, 0.4), 0 0 20px rgba(255, 45, 45, 0.7);
-  border-radius: 8px;
+  box-shadow: 0 0 0 2px rgba(255, 45, 45, 0.4), 0 0 calc(var(--exp-scale, 1) * 20px) rgba(255, 45, 45, 0.7);
+  border-radius: calc(var(--exp-scale, 1) * 8px);
 }
 .stj-keyword-item.stj-drag-over .stj-image-preview,
 .stj-special-item.stj-drag-over .stj-image-preview {
@@ -403,15 +403,15 @@
     left: 0;
     pointer-events: none;
     z-index: 100001;
-    padding: 6px 14px;
-    border-radius: 6px;
-    font-size: 14px;
+    padding: calc(var(--exp-scale, 1) * 6px) calc(var(--exp-scale, 1) * 14px);
+    border-radius: calc(var(--exp-scale, 1) * 6px);
+    font-size: calc(var(--exp-scale, 1) * 14px);
     font-weight: bold;
     font-family: inherit;
     color: #ffffff;
     white-space: nowrap;
     user-select: none;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+    box-shadow: 0 calc(var(--exp-scale, 1) * 4px) calc(var(--exp-scale, 1) * 12px) rgba(0, 0, 0, 0.6);
     border: 2px solid #ffffff;
     transition: background-color 0.1s ease, color 0.1s ease;
     display: none;
@@ -434,14 +434,14 @@
     outline-offset: -4px;
     box-shadow:
         0 0 0 2px rgba(255, 45, 45, 0.4),
-        0 0 24px rgba(255, 45, 45, 0.9);
-    border-radius: 8px;
+        0 0 calc(var(--exp-scale, 1) * 24px) rgba(255, 45, 45, 0.9);
+    border-radius: calc(var(--exp-scale, 1) * 8px);
     animation: stj-swap-pulse 0.8s ease-in-out infinite;
 }
 
 @keyframes stj-swap-pulse {
-    0%, 100% { box-shadow: 0 0 0 2px rgba(255, 45, 45, 0.4), 0 0 24px rgba(255, 45, 45, 0.9); }
-    50%      { box-shadow: 0 0 0 2px rgba(255, 45, 45, 0.2), 0 0 36px rgba(255, 45, 45, 1.0); }
+    0%, 100% { box-shadow: 0 0 0 2px rgba(255, 45, 45, 0.4), 0 0 calc(var(--exp-scale, 1) * 24px) rgba(255, 45, 45, 0.9); }
+    50%      { box-shadow: 0 0 0 2px rgba(255, 45, 45, 0.2), 0 0 calc(var(--exp-scale, 1) * 36px) rgba(255, 45, 45, 1.0); }
 }
 
 /* ★ インジケーターバー本体: 幅を太く・「＋」記号・強い発光 */
@@ -451,34 +451,34 @@
     position: absolute;
     top: 0;
     bottom: 0;
-    width: 28px;
+    width: calc(var(--exp-scale, 1) * 28px);
     background: linear-gradient(180deg, #ffeb3b 0%, #ffc107 50%, #ffeb3b 100%);
     z-index: 26;
     pointer-events: none;
     box-shadow:
-        inset 0 0 14px 3px rgba(255, 255, 255, 1),
-        inset 0 0 4px 1px rgba(255, 193, 7, 1),
-        0 0 18px 6px rgba(255, 235, 59, 0.85),
-        0 0 32px 12px rgba(255, 193, 7, 0.55);
+        inset 0 0 calc(var(--exp-scale, 1) * 14px) calc(var(--exp-scale, 1) * 3px) rgba(255, 255, 255, 1),
+        inset 0 0 calc(var(--exp-scale, 1) * 4px) calc(var(--exp-scale, 1) * 1px) rgba(255, 193, 7, 1),
+        0 0 calc(var(--exp-scale, 1) * 18px) calc(var(--exp-scale, 1) * 6px) rgba(255, 235, 59, 0.85),
+        0 0 calc(var(--exp-scale, 1) * 32px) calc(var(--exp-scale, 1) * 12px) rgba(255, 193, 7, 0.55);
     animation: stj-insert-pulse 0.8s ease-in-out infinite;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 22px;
+    font-size: calc(var(--exp-scale, 1) * 22px);
     font-weight: 900;
     color: #000000;
     line-height: 1;
-    text-shadow: 0 0 4px rgba(255, 255, 255, 0.9);
+    text-shadow: 0 0 calc(var(--exp-scale, 1) * 4px) rgba(255, 255, 255, 0.9);
 }
 
 .stj-keyword-item.stj-insert-before::after {
     left: 0;
-    border-radius: 0 6px 6px 0;
+    border-radius: 0 calc(var(--exp-scale, 1) * 6px) calc(var(--exp-scale, 1) * 6px) 0;
 }
 
 .stj-keyword-item.stj-insert-after::after {
     right: 0;
-    border-radius: 6px 0 0 6px;
+    border-radius: calc(var(--exp-scale, 1) * 6px) 0 0 calc(var(--exp-scale, 1) * 6px);
 }
 
 /* ★ シフト発生領域を示す半透明グラデーション
@@ -495,12 +495,12 @@
 }
 
 .stj-keyword-item.stj-insert-before::before {
-    left: 28px;
+    left: calc(var(--exp-scale, 1) * 28px);
     background: linear-gradient(90deg, rgba(255, 193, 7, 0.45) 0%, rgba(255, 193, 7, 0) 100%);
 }
 
 .stj-keyword-item.stj-insert-after::before {
-    right: 28px;
+    right: calc(var(--exp-scale, 1) * 28px);
     background: linear-gradient(270deg, rgba(255, 193, 7, 0.45) 0%, rgba(255, 193, 7, 0) 100%);
 }
 
@@ -528,8 +528,8 @@
 
 /* ===== 一括削除候補（前面表示） ===== */
 .stj-keyword-item.stj-marked-for-delete {
-  box-shadow: 0 0 0 2px rgba(255, 45, 45, 0.4), 0 0 20px rgba(255, 45, 45, 0.7);
-  border-radius: 8px;
+  box-shadow: 0 0 0 2px rgba(255, 45, 45, 0.4), 0 0 calc(var(--exp-scale, 1) * 20px) rgba(255, 45, 45, 0.7);
+  border-radius: calc(var(--exp-scale, 1) * 8px);
 }
 
 .stj-keyword-item.stj-marked-for-delete::after {
@@ -540,7 +540,7 @@
   right: 0;
   bottom: 0;
   border: 4px solid #ff2d2d;
-  border-radius: 8px;
+  border-radius: calc(var(--exp-scale, 1) * 8px);
   pointer-events: none;
   z-index: 30;
   box-sizing: border-box;
@@ -565,18 +565,18 @@
   display: none;
   justify-content: center;
   align-items: center;
-  padding: 20px;
+  padding: calc(var(--exp-scale, 1) * 20px);
   box-sizing: border-box;
 }
 .stj-cell-modal.visible { display: flex; }
 
 .stj-cell-modal-content {
-  width: min(780px, calc(100vw - 40px), calc(100vh - 40px));
-  height: min(780px, calc(100vw - 40px), calc(100vh - 40px));
+  width: min(calc(var(--exp-scale, 1) * 780px), calc(100vw - var(--exp-scale, 1) * 40px), calc(100vh - var(--exp-scale, 1) * 40px));
+  height: min(calc(var(--exp-scale, 1) * 780px), calc(100vw - var(--exp-scale, 1) * 40px), calc(100vh - var(--exp-scale, 1) * 40px));
   background: #1a202c;
   border: 2px solid #4a5568;
-  border-radius: 8px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8);
+  border-radius: calc(var(--exp-scale, 1) * 8px);
+  box-shadow: 0 calc(var(--exp-scale, 1) * 10px) calc(var(--exp-scale, 1) * 40px) rgba(0, 0, 0, 0.8);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -584,13 +584,13 @@
 
 /* ★ ヘッダー: 決定→キャンセル→キーワード→選択肢 の順 */
 .stj-cell-modal-header {
-  height: 60px;
-  min-height: 60px;
-  max-height: 60px;
+  height: calc(var(--exp-scale, 1) * 60px);
+  min-height: calc(var(--exp-scale, 1) * 60px);
+  max-height: calc(var(--exp-scale, 1) * 60px);
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 8px;
+  gap: calc(var(--exp-scale, 1) * 6px);
+  padding: 0 calc(var(--exp-scale, 1) * 8px);
   background: #2d3748;
   border-bottom: 1px solid #4a5568;
   flex-shrink: 0;
@@ -598,42 +598,42 @@
 }
 
 .stj-cell-modal-apply {
-  height: 44px;
-  padding: 0 18px;
+  height: calc(var(--exp-scale, 1) * 44px);
+  padding: 0 calc(var(--exp-scale, 1) * 18px);
   background: #e0e0e0;
   color: #000;
   border: 1px solid #aaa;
-  border-radius: 4px;
+  border-radius: calc(var(--exp-scale, 1) * 4px);
   cursor: pointer;
-  font-size: 16px;
+  font-size: calc(var(--exp-scale, 1) * 16px);
   font-weight: bold;
   flex-shrink: 0;
 }
 .stj-cell-modal-apply:hover { background: #c8c8c8; }
 
 .stj-cell-modal-cancel {
-  height: 44px;
-  padding: 0 18px;
+  height: calc(var(--exp-scale, 1) * 44px);
+  padding: 0 calc(var(--exp-scale, 1) * 18px);
   background: #4a5568;
   color: white;
   border: 1px solid #718096;
-  border-radius: 4px;
+  border-radius: calc(var(--exp-scale, 1) * 4px);
   cursor: pointer;
-  font-size: 16px;
+  font-size: calc(var(--exp-scale, 1) * 16px);
   font-weight: bold;
   flex-shrink: 0;
 }
 .stj-cell-modal-cancel:hover { background: #2d3748; }
 
 .stj-cell-modal-keyword {
-  width: 300px;
-  height: 44px;
-  padding: 0 12px;
+  width: calc(var(--exp-scale, 1) * 300px);
+  height: calc(var(--exp-scale, 1) * 44px);
+  padding: 0 calc(var(--exp-scale, 1) * 12px);
   background: #1a202c;
   color: white;
   border: 1px solid #718096;
-  border-radius: 4px;
-  font-size: 20px;
+  border-radius: calc(var(--exp-scale, 1) * 4px);
+  font-size: calc(var(--exp-scale, 1) * 20px);
   box-sizing: border-box;
   flex-shrink: 0;
 }
@@ -641,14 +641,14 @@
 
 /* ★ 選択肢ボタン: 濃い青背景・白文字・黒縁取り */
 .stj-cell-modal-choices {
-  height: 44px;
-  padding: 0 16px;
+  height: calc(var(--exp-scale, 1) * 44px);
+  padding: 0 calc(var(--exp-scale, 1) * 16px);
   background: #1e40af;
   color: #ffffff;
   border: 1px solid #1e3a8a;
-  border-radius: 4px;
+  border-radius: calc(var(--exp-scale, 1) * 4px);
   cursor: pointer;
-  font-size: 16px;
+  font-size: calc(var(--exp-scale, 1) * 16px);
   font-weight: bold;
   flex-shrink: 0;
   white-space: nowrap;
@@ -677,9 +677,9 @@
   flex: 1;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  grid-auto-rows: 244px;
-  gap: 2px;
-  padding: 2px;
+  grid-auto-rows: calc(var(--exp-scale, 1) * 244px);
+  gap: calc(var(--exp-scale, 1) * 2px);
+  padding: calc(var(--exp-scale, 1) * 2px);
   background: #0d1117;
   min-height: 0;
   overflow-y: auto;
@@ -690,7 +690,7 @@
 .stj-cell-modal-slot {
   background: #1a202c;
   border: 2px dashed #2d3748;
-  border-radius: 4px;
+  border-radius: calc(var(--exp-scale, 1) * 4px);
   position: relative;
   display: flex;
   align-items: center;
@@ -724,40 +724,40 @@
   top: 50% !important;
   left: 50% !important;
   transform: translate(-50%, -50%) !important;
-  width: 200px !important;
-  height: 200px !important;
+  width: calc(var(--exp-scale, 1) * 200px) !important;
+  height: calc(var(--exp-scale, 1) * 200px) !important;
   max-width: 100% !important;
   max-height: 100% !important;
   object-fit: contain !important;
   background: #000 !important;
-  border-radius: 4px !important;
+  border-radius: calc(var(--exp-scale, 1) * 4px) !important;
   display: block !important;
   pointer-events: auto !important;
   cursor: zoom-in !important;
 }
 
-/* ===== ❌（右下）登録解除ボタン ===== */
+/* ===== ❌（左上）登録解除ボタン ===== */
 .stj-cell-modal-slot-remove {
   position: absolute;
-  top: 4px;
-  left: 4px;
+  top: calc(var(--exp-scale, 1) * 4px);
+  left: calc(var(--exp-scale, 1) * 4px);
   bottom: auto;
   right: auto;
-  width: 32px;
-  height: 32px;
+  width: calc(var(--exp-scale, 1) * 32px);
+  height: calc(var(--exp-scale, 1) * 32px);
   padding: 0;
   background: #e53e3e;
   color: white;
   border: 2px solid white;
-  border-radius: 4px;
+  border-radius: calc(var(--exp-scale, 1) * 4px);
   cursor: pointer;
-  font-size: 20px;
+  font-size: calc(var(--exp-scale, 1) * 20px);
   font-weight: bold;
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 10;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 calc(var(--exp-scale, 1) * 2px) calc(var(--exp-scale, 1) * 8px) rgba(0, 0, 0, 0.5);
 }
 .stj-cell-modal-slot-remove:hover {
   background: #c53030;
@@ -774,26 +774,26 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  padding: 20px;
+  padding: calc(var(--exp-scale, 1) * 20px);
   box-sizing: border-box;
 }
 
 .stj-choices-popup-box {
   background: #1a202c;
   border: 2px solid #4a5568;
-  border-radius: 8px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.85);
-  padding: 20px 28px;
-  max-width: min(900px, 90vw);
+  border-radius: calc(var(--exp-scale, 1) * 8px);
+  box-shadow: 0 calc(var(--exp-scale, 1) * 10px) calc(var(--exp-scale, 1) * 40px) rgba(0, 0, 0, 0.85);
+  padding: calc(var(--exp-scale, 1) * 20px) calc(var(--exp-scale, 1) * 28px);
+  max-width: min(calc(var(--exp-scale, 1) * 900px), 90vw);
   max-height: 80vh;
   overflow-y: auto;
   color: #e2e8f0;
-  font-size: 15px;
+  font-size: calc(var(--exp-scale, 1) * 15px);
   line-height: 1.7;
 }
 
 .stj-choices-popup-line {
-  padding: 8px 0;
+  padding: calc(var(--exp-scale, 1) * 8px) 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   white-space: pre-wrap;
   word-break: break-word;
@@ -827,7 +827,7 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  padding: 20px;
+  padding: calc(var(--exp-scale, 1) * 20px);
   box-sizing: border-box;
   cursor: zoom-out;
 }
@@ -842,30 +842,30 @@
   cursor: default !important;
   pointer-events: auto !important;
   user-select: none;
-  border-radius: 4px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8);
+  border-radius: calc(var(--exp-scale, 1) * 4px);
+  box-shadow: 0 calc(var(--exp-scale, 1) * 10px) calc(var(--exp-scale, 1) * 40px) rgba(0, 0, 0, 0.8);
 }
 
 /* ★ 拡大表示時の閉じるボタン */
 .stj-media-zoom-close {
   position: absolute !important;
-  top: 20px !important;
-  right: 20px !important;
-  width: 44px !important;
-  height: 44px !important;
+  top: calc(var(--exp-scale, 1) * 20px) !important;
+  right: calc(var(--exp-scale, 1) * 20px) !important;
+  width: calc(var(--exp-scale, 1) * 44px) !important;
+  height: calc(var(--exp-scale, 1) * 44px) !important;
   padding: 0 !important;
   background: #e53e3e !important;
   color: #ffffff !important;
   border: 2px solid #ffffff !important;
-  border-radius: 4px !important;
+  border-radius: calc(var(--exp-scale, 1) * 4px) !important;
   cursor: pointer !important;
-  font-size: 24px !important;
+  font-size: calc(var(--exp-scale, 1) * 24px) !important;
   font-weight: bold !important;
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
   z-index: 22001 !important;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6) !important;
+  box-shadow: 0 calc(var(--exp-scale, 1) * 2px) calc(var(--exp-scale, 1) * 8px) rgba(0, 0, 0, 0.6) !important;
 }
 .stj-media-zoom-close:hover {
   background: #c53030 !important;
@@ -890,14 +890,14 @@ body.stj-zoom-active #gic-bulk-toast {
   position: fixed;
   top: 50%; left: 50%;
   transform: translate(-50%, -50%) scale(0.9);
-  padding: 30px 60px;
+  padding: calc(var(--exp-scale, 1) * 30px) calc(var(--exp-scale, 1) * 60px);
   background-color: rgba(0, 0, 0, 0.85);
   color: white;
-  font-size: 32px;
+  font-size: calc(var(--exp-scale, 1) * 32px);
   font-weight: bold;
-  border-radius: 12px;
+  border-radius: calc(var(--exp-scale, 1) * 12px);
   z-index: 10002;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 calc(var(--exp-scale, 1) * 10px) calc(var(--exp-scale, 1) * 30px) rgba(0, 0, 0, 0.5);
   opacity: 0;
   transition: all 0.3s ease-out;
   pointer-events: none;
@@ -928,46 +928,46 @@ body.stj-zoom-active #gic-bulk-toast {
 #stj_confirm_dialog .stj-confirm-box {
   background-color: #2d3748;
   border: 2px solid #4a5568;
-  border-radius: 12px;
-  padding: 30px 40px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+  border-radius: calc(var(--exp-scale, 1) * 12px);
+  padding: calc(var(--exp-scale, 1) * 30px) calc(var(--exp-scale, 1) * 40px);
+  box-shadow: 0 calc(var(--exp-scale, 1) * 10px) calc(var(--exp-scale, 1) * 30px) rgba(0, 0, 0, 0.7);
   text-align: center;
-  min-width: 320px;
+  min-width: calc(var(--exp-scale, 1) * 320px);
 }
 #stj_confirm_dialog .stj-confirm-message {
-  font-size: 20px;
+  font-size: calc(var(--exp-scale, 1) * 20px);
   font-weight: bold;
   color: #ffffff;
-  margin-bottom: 25px;
+  margin-bottom: calc(var(--exp-scale, 1) * 25px);
   white-space: nowrap;
 }
 #stj_confirm_dialog .stj-confirm-buttons {
   display: flex;
-  gap: 15px;
+  gap: calc(var(--exp-scale, 1) * 15px);
   justify-content: center;
 }
 #stj_confirm_dialog .stj-confirm-buttons button {
-  padding: 10px 30px;
+  padding: calc(var(--exp-scale, 1) * 10px) calc(var(--exp-scale, 1) * 30px);
   border: none;
-  border-radius: 6px;
-  font-size: 16px;
+  border-radius: calc(var(--exp-scale, 1) * 6px);
+  font-size: calc(var(--exp-scale, 1) * 16px);
   font-weight: bold;
   cursor: pointer;
-  min-width: 90px;
+  min-width: calc(var(--exp-scale, 1) * 90px);
 }
 #stj_confirm_dialog .stj-confirm-yes { background-color: #e53e3e; color: #ffffff; }
 #stj_confirm_dialog .stj-confirm-no { background-color: #4a5568; color: #ffffff; }
 #stj_message_dialog .stj-message-box {
   background-color: #2d3748;
   border: 2px solid #48bb78;
-  border-radius: 12px;
-  padding: 30px 50px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7), 0 0 30px rgba(72, 187, 120, 0.5);
+  border-radius: calc(var(--exp-scale, 1) * 12px);
+  padding: calc(var(--exp-scale, 1) * 30px) calc(var(--exp-scale, 1) * 50px);
+  box-shadow: 0 calc(var(--exp-scale, 1) * 10px) calc(var(--exp-scale, 1) * 30px) rgba(0, 0, 0, 0.7), 0 0 calc(var(--exp-scale, 1) * 30px) rgba(72, 187, 120, 0.5);
   text-align: center;
-  min-width: 320px;
+  min-width: calc(var(--exp-scale, 1) * 320px);
 }
 #stj_message_dialog .stj-message-text {
-  font-size: 20px;
+  font-size: calc(var(--exp-scale, 1) * 20px);
   font-weight: bold;
   color: #ffffff;
   white-space: nowrap;
@@ -977,12 +977,13 @@ body.stj-zoom-active #gic-bulk-toast {
 .stj-drag-ghost {
   position: fixed;
   top: 0; left: 0;
-  width: 260px; height: 260px;
+  width: calc(var(--exp-scale, 1) * 260px);
+  height: calc(var(--exp-scale, 1) * 260px);
   pointer-events: none;
   z-index: 100000;
-  border-radius: 8px;
+  border-radius: calc(var(--exp-scale, 1) * 8px);
   border: 3px solid #ff8c00;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.75), 0 0 24px rgba(255, 140, 0, 0.85);
+  box-shadow: 0 calc(var(--exp-scale, 1) * 8px) calc(var(--exp-scale, 1) * 24px) rgba(0, 0, 0, 0.75), 0 0 calc(var(--exp-scale, 1) * 24px) rgba(255, 140, 0, 0.85);
   overflow: hidden;
   background-color: #1a202c;
   opacity: 0.5;
@@ -997,15 +998,15 @@ body.stj-zoom-active #gic-bulk-toast {
 .stj-drag-ghost::before {
   content: "移動中";
   position: absolute;
-  bottom: 8px;
+  bottom: calc(var(--exp-scale, 1) * 8px);
   left: 50%;
   transform: translateX(-50%);
-  padding: 3px 12px;
+  padding: calc(var(--exp-scale, 1) * 3px) calc(var(--exp-scale, 1) * 12px);
   background: rgba(255, 140, 0, 0.9);
   color: #ffffff;
-  font-size: 13px;
+  font-size: calc(var(--exp-scale, 1) * 13px);
   font-weight: bold;
-  border-radius: 4px;
+  border-radius: calc(var(--exp-scale, 1) * 4px);
   z-index: 2;
   pointer-events: none;
   white-space: nowrap;
@@ -1013,19 +1014,19 @@ body.stj-zoom-active #gic-bulk-toast {
 
 /* ===== レスポンシブ ===== */
 @media (max-width: 1120px) {
-  .stj-grid-container { grid-template-columns: repeat(4, 260px); min-width: 1040px; }
+  .stj-grid-container { grid-template-columns: repeat(4, calc(var(--exp-scale, 1) * 260px)); min-width: calc(var(--exp-scale, 1) * 1040px); }
   .stj-top-section { flex-direction: column; }
   .stj-info-panel { width: 100%; min-height: auto; }
 }
 @media (max-width: 860px) {
-  .stj-grid-container { grid-template-columns: repeat(3, 260px); min-width: 780px; }
+  .stj-grid-container { grid-template-columns: repeat(3, calc(var(--exp-scale, 1) * 260px)); min-width: calc(var(--exp-scale, 1) * 780px); }
 }
 @media (max-width: 600px) {
-  .stj-grid-container { grid-template-columns: repeat(2, 260px); min-width: 520px; }
+  .stj-grid-container { grid-template-columns: repeat(2, calc(var(--exp-scale, 1) * 260px)); min-width: calc(var(--exp-scale, 1) * 520px); }
   .stj-special-container { flex-direction: column; }
-  .stj-button-group { flex-direction: column; gap: 10px; }
+  .stj-button-group { flex-direction: column; gap: calc(var(--exp-scale, 1) * 10px); }
   .stj-button-group > div,
   .stj-button-group-main { justify-content: center; }
-  .stj-cell-modal-header { flex-wrap: wrap; height: auto; max-height: none; min-height: 60px; padding: 4px 8px; }
+  .stj-cell-modal-header { flex-wrap: wrap; height: auto; max-height: none; min-height: calc(var(--exp-scale, 1) * 60px); padding: calc(var(--exp-scale, 1) * 4px) calc(var(--exp-scale, 1) * 8px); }
   .stj-cell-modal-keyword { width: 100%; }
 }
