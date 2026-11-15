@@ -294,52 +294,51 @@ const WCB_LEFT_OFFSET_PX = WCB_BTN_WIDTH_ESTIMATE + WCB_GAP;  // = 53
 // 🎨/💡 を左に寄せる量 = 旧オフセット(100) - 新オフセット(53)
 const ICON_LEFT_SHIFT_PX = 100 - WCB_LEFT_OFFSET_PX;  // = 47
 
+// ★ 固定位置用のキャッシュ（無駄な style 操作を避ける）
+let _lastToggleBtnLeft = -1;
+let _lastToggleBtnTop  = -1;
 // ============================================================
-// ★ 💡 ボタン位置: send_form の左隣 + Ｔ用の下余白 + 削除/解除への寄せ
+// ★ 💡 ボタン位置: 固定座標（チャットウィンドウ位置に非依存）
+//   - 水平: vw * 0.25 (画面中央と左端の中間)
+//   - 垂直: 💡 の上端を vh - 150 に固定
+//   これにより 🎨/T/中央/削除/解除 も連動して固定される
 // ============================================================
 function applyToggleChatButtonLayout() {
     const btn = document.getElementById('toggle-chat-button');
     if (!btn) return;
 
-    const anchor = document.getElementById('send_form') ||
-                   document.getElementById('form_sheld') ||
-                   document.getElementById('send_textarea');
-    if (!anchor) return;
-
-    const rect = anchor.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
-
-    // 💡 の下に T が来るため、下に T の高さ + GAP の余白を確保
-    const restoreBtnEl = document.getElementById('restore-panel-button');
-    const reserveBelow = (restoreBtnEl?.offsetHeight || 32) + 5;
-
-    const gap = 5;
-    const btnW = btn.offsetWidth || 50;
-    const btnH = btn.offsetHeight || 50;
-
-    // ★ 削除/解除ボタンの右隣に寄せるため、追加で左にシフト
-    let left = rect.left - btnW - gap - ICON_LEFT_SHIFT_PX;
-    let top  = rect.top + (rect.height - btnH) / 2;
-
-    const margin = 4;
     const vw = window.innerWidth;
     const vh = window.innerHeight;
+    const margin = 4;
+
+    // ★ 固定座標（チャットウィンドウ非依存）
+    let left = Math.round(vw * 0.25);
+    let top  = Math.round(vh - 150);
+
+    const btnW = btn.offsetWidth || 50;
+    const btnH = btn.offsetHeight || 50;
     if (left < margin) left = margin;
     if (left + btnW > vw - margin) left = vw - margin - btnW;
     if (top < margin) top = margin;
-    if (top + btnH + reserveBelow > vh - margin) {
-        top = vh - margin - reserveBelow - btnH;
+    if (top + btnH > vh - margin) top = vh - margin - btnH;
+
+    // 同じ位置なら再設定スキップ
+    if (left === _lastToggleBtnLeft && top === _lastToggleBtnTop) {
+        window.__cwToggleLastLeft = left;
+        window.__cwToggleLastTop  = top;
+        return;
     }
-    if (top < margin) top = margin;
+    _lastToggleBtnLeft = left;
+    _lastToggleBtnTop  = top;
 
     btn.style.setProperty('position', 'fixed', 'important');
-    btn.style.setProperty('left', Math.round(left) + 'px', 'important');
-    btn.style.setProperty('top', Math.round(top) + 'px', 'important');
+    btn.style.setProperty('left', left + 'px', 'important');
+    btn.style.setProperty('top', top + 'px', 'important');
     btn.style.setProperty('right', 'auto', 'important');
     btn.style.setProperty('bottom', 'auto', 'important');
     btn.style.setProperty('transform', 'none', 'important');
-    window.__cwToggleLastLeft = Math.round(left);
-    window.__cwToggleLastTop  = Math.round(top);
+    window.__cwToggleLastLeft = left;
+    window.__cwToggleLastTop  = top;
 }
 
 // ============================================================
