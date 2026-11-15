@@ -400,8 +400,6 @@
         style.id = 'idp-halfmax-objectpos-css';
         style.textContent = `
             /* 左右モード（half-maximized）時は画像を右寄せ */
-            #image-display-container.half-maximized #media-element-container,
-            #image-display-container.half-maximized #media-element-container *,
             #image-display-container.half-maximized #media-element-container > img,
             #image-display-container.half-maximized #media-element-container > video {
                 object-position: right center !important;
