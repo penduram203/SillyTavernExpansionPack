@@ -1,14 +1,18 @@
 // chat_window_onoff.js
 // このファイルは SillyTavern の公式拡張機能ローダー（動的 import）経由で読み込まれる前提。
 // classic <script> タグでの直接読み込みは行わないこと（export構文が構文エラーになるため）。
+//
+// ★ 解像度スケーリング対応 (cssvar モード):
+//   1920×962 基準で設計。他の解像度では --exp-scale / window.S() で比例スケール。
+//   - 💡 ボタン位置: left = vw * 250/1920, top = vh - S(91)
+//   - T/中央: 💡 の真下・左 getWcbLeftOffsetPx()
+//   - 全 GAP / サイズ fallback は window.S() 経由
 
 const MODULE_NAME = 'chat_window_onoff';
 const OLD_STORAGE_KEY = 'chatWindowHiddenState';
 
 // ============================================================
 // ★ 設定準備完了フラグ（Settings not ready 対策）
-//   SillyTavern の SETTINGS_LOADED 前は saveSettingsDebounced を呼ばず、
-//   準備完了後に保留分をまとめて保存する。
 // ============================================================
 let _stSettingsReady = false;
 let _pendingSaveRequested = false;
@@ -39,7 +43,6 @@ function _markSettingsReady() {
             }
         }
     } catch (e) { /* ignore */ }
-    // 保険: SETTINGS_LOADED が取れない環境でも 3 秒後に準備完了扱い
     setTimeout(_markSettingsReady, 3000);
 })();
 
@@ -70,11 +73,35 @@ const GALLERY_HIDDEN_SELECTORS = [
 ];
 
 const BUTTON_WAKE_WIDTH = 110;
-// ★ 💡/🎨 が背景生成ボタンの上に来るので、wake ゾーンを拡張
 const BUTTON_WAKE_HEIGHT = 150;
-
 const MANUAL_SETTINGS_EXTRA_W = 160;
 
+// ============================================================
+// ★ レイアウト定数（解像度スケーリング用）
+// ============================================================
+// 💡 の固定位置: 1920px 幅で left=250px
+const TOGGLE_LEFT_BASE = 250;
+const TOGGLE_LEFT_BASE_VW = 1920;
+// 💡 の下端からの固定余白: 1920×962 で top = vh - 91
+// （4K では vh - S(91) にスケール）
+const TOGGLE_BOTTOM_OFFSET_BASE = 91;
+
+// 削除/解除ボタンの概算幅（padding 0 S(8)px + "削除"/"解除" の文字幅）
+const WCB_BTN_WIDTH_ESTIMATE = 48;
+const WCB_GAP = 5;
+
+function getWcbLeftOffsetPx() {
+    const base = WCB_BTN_WIDTH_ESTIMATE + WCB_GAP;   // 53
+    return window.S ? window.S(base) : base;
+}
+
+// 💡 ボタン位置のキャッシュ（無駄な style 操作を避ける）
+let _lastToggleBtnLeft = -1;
+let _lastToggleBtnTop  = -1;
+
+// ============================================================
+// 設定
+// ============================================================
 function getSettings() {
     const context = SillyTavern.getContext();
 
@@ -88,7 +115,6 @@ function getSettings() {
         const oldState = localStorage.getItem(OLD_STORAGE_KEY);
         if (oldState !== null) {
             settings.isHidden = (oldState === 'true');
-            // ★ ガード付き保存（準備前は保留）
             safeSaveSettingsDebounced();
             localStorage.removeItem(OLD_STORAGE_KEY);
             console.log('[Chat Window On/Off] 旧localStorageからextensionSettingsへの移行を完了しました。');
@@ -104,7 +130,6 @@ function saveSettings(settings) {
     try {
         const context = SillyTavern.getContext();
         context.extensionSettings[MODULE_NAME] = settings;
-        // ★ ガード付き保存（準備前は保留）
         safeSaveSettingsDebounced();
     } catch (e) {
         console.error('[Chat Window On/Off] 設定の保存に失敗:', e);
@@ -284,33 +309,15 @@ function applyChatLayout() {
 }
 
 // ============================================================
-// ★ レイアウト定数
-// ============================================================
-// 削除/解除ボタンの概算幅（padding 0 8px + "削除"/"解除" の文字幅）
-const WCB_BTN_WIDTH_ESTIMATE = 48;
-const WCB_GAP = 5;
-function getWcbLeftOffsetPx() {
-    return window.S ? window.S(WCB_BTN_WIDTH_ESTIMATE + WCB_GAP) : (WCB_BTN_WIDTH_ESTIMATE + WCB_GAP);
-}
-function getIconLeftShiftPx() {
-    const base = 100;
-    return window.S ? (window.S(base) - getWcbLeftOffsetPx()) : (base - (WCB_BTN_WIDTH_ESTIMATE + WCB_GAP));
-}
-
-// ★ 固定位置用のキャッシュ（無駄な style 操作を避ける）
-let _lastToggleBtnLeft = -1;
-let _lastToggleBtnTop  = -1;
-// ============================================================
 // ★ 💡 ボタン位置: 固定座標（チャットウィンドウ位置に非依存）
-//   - 水平: vw * 0.25 (画面中央と左端の中間)
-//   - 垂直: 💡 の上端を vh - 150 に固定
-//   これにより 🎨/T/中央/削除/解除 も連動して固定される
+//
+//   - left: vw * 250 / 1920  (1920px 幅で 250px)
+//   - top : vh - S(91)       (962 高で 871px)
+//
+//   S() = window.S (resolution_scale.js)。未ロード時は恒等関数。
+//   left を比率化、top を S(91) でスケールすることで
+//   1920 / 2560 / 3840 どの解像度でも比率通りの位置になる。
 // ============================================================
-// ★ vw=1920 で left=250px になる比率
-const TOGGLE_LEFT_RATIO = 250 / 1920;   // ≈ 0.1302083
-// ★ 下端からの固定余白（vh に依存しない）
-const TOGGLE_BOTTOM_OFFSET_PX = 91;
-
 function applyToggleChatButtonLayout() {
     const btn = document.getElementById('toggle-chat-button');
     if (!btn) return;
@@ -319,15 +326,12 @@ function applyToggleChatButtonLayout() {
     const vh = window.innerHeight;
     const margin = 4;
 
-    // ★ 解像度スケーリング
     const S = window.S || ((px) => px);
 
-    // left: 1920px 幅で 250px
-    let left = Math.round(vw * 250 / 1920);
-    // ★ top: 下端から S(91) 上
-    //   1920×962 → 2160-91=... ではなく 962-91=871
-    //   3840×2160 → 2160-S(91)=2160-182=1978
-    let top  = Math.round(vh - S(91));
+    // left: 1920px 幅で 250px になる比率
+    let left = Math.round(vw * TOGGLE_LEFT_BASE / TOGGLE_LEFT_BASE_VW);
+    // top: 下端から S(91)px 上
+    let top  = Math.round(vh - S(TOGGLE_BOTTOM_OFFSET_BASE));
 
     const btnW = btn.offsetWidth || S(50);
     const btnH = btn.offsetHeight || S(50);
@@ -336,6 +340,7 @@ function applyToggleChatButtonLayout() {
     if (top < margin) top = margin;
     if (top + btnH > vh - margin) top = vh - margin - btnH;
 
+    // 位置が変わらなければ style 再設定をスキップ（無駄な再レイアウトを抑止）
     if (left === _lastToggleBtnLeft && top === _lastToggleBtnTop) {
         window.__cwToggleLastLeft = left;
         window.__cwToggleLastTop  = top;
@@ -350,17 +355,17 @@ function applyToggleChatButtonLayout() {
     btn.style.setProperty('right', 'auto', 'important');
     btn.style.setProperty('bottom', 'auto', 'important');
     btn.style.setProperty('transform', 'none', 'important');
+
+    // グローバル位置キャッシュ（gic.js の positionGalleryButton が参照）
     window.__cwToggleLastLeft = left;
     window.__cwToggleLastTop  = top;
 }
 
 // ============================================================
 // ★ T（#restore-panel-button）と 中央（#window-control-buttons）の配置
-//   - T は「画像削除」ボタンの左端に合わせる
-//   - 中央は T の右隣
-//   - 🎨 は従来通り 💡 の真上
-//   - toggle が display:none の間は inline スタイルを消さない
-//     （ギャラリー / STJエディタ開閉時の一瞬のズレを防ぐ）
+//   - T   = 💡 の真下・左 getWcbLeftOffsetPx()
+//   - 中央 = T の右隣・T の縦センター
+//   - GAP / 各サイズ fallback は window.S() でスケール
 // ============================================================
 let _wcbLayoutApplied = false;
 
@@ -379,6 +384,7 @@ function applyWindowControlButtonsLayout() {
         });
     };
 
+    // ── toggle が display:none / visibility:hidden の間は触らない ──
     const toggleCs = window.getComputedStyle(toggleBtn);
     const toggleHidden =
         toggleCs.display === 'none' ||
@@ -398,35 +404,23 @@ function applyWindowControlButtonsLayout() {
         return;
     }
 
-    const GAP = 5;
+    const S = window.S || ((px) => px);
+    const GAP = S(5);
     const margin = 4;
     const vh = window.innerHeight;
     const vw = window.innerWidth;
 
-    // ★ 新レイアウト:
-    //   行1: 画像削除  🎨       （gic.js が担当）
-    //   行2: 登録解除  💡       （gic.js が担当 / 💡 は applyToggleChatButtonLayout）
-    //   行3: Ｔ      中央      （本関数が担当）
-    //
-    //   Ｔ   = 💡 の真下かつ左に 100px オフセット
-    //   中央 = Ｔ の右隣、Ｔ の縦センター揃え
+    const restoreW = restoreBtn.offsetWidth || S(32);
+    const restoreH = restoreBtn.offsetHeight || S(32);
 
-    const restoreW = restoreBtn.offsetWidth || 32;
-    const restoreH = restoreBtn.offsetHeight || 32;
-
-    // ★ Ｔ の X: 💡 の左端から 100px 左へ
+    // ── T の X: 💡 の左端から getWcbLeftOffsetPx() 左へ ──
     let restoreLeft = toggleRect.left - getWcbLeftOffsetPx();
-    // 画面左端を超えないようクランプ
     if (restoreLeft < margin) restoreLeft = margin;
 
-    // Ｔ の Y: 💡 の真下
+    // ── T の Y: 💡 の真下（GAP もスケール済み） ──
     let restoreTop = toggleRect.top + toggleRect.height + GAP;
-    if (restoreTop + restoreH > vh - margin) {
-        restoreTop = vh - margin - restoreH;
-    }
-    if (restoreTop < margin) {
-        restoreTop = margin;
-    }
+    if (restoreTop + restoreH > vh - margin) restoreTop = vh - margin - restoreH;
+    if (restoreTop < margin) restoreTop = margin;
 
     restoreBtn.style.setProperty('position', 'fixed', 'important');
     restoreBtn.style.setProperty('left', Math.round(restoreLeft) + 'px', 'important');
@@ -435,9 +429,9 @@ function applyWindowControlButtonsLayout() {
     restoreBtn.style.setProperty('bottom', 'auto', 'important');
     restoreBtn.style.setProperty('transform', 'none', 'important');
 
-    // 中央ボタン: Ｔ の右隣
-    const wcbW = wcb.offsetWidth || centerBtn.offsetWidth || 50;
-    const wcbH = wcb.offsetHeight || centerBtn.offsetHeight || 28;
+    // ── 中央ボタン: T の右隣・T の縦センター ──
+    const wcbW = wcb.offsetWidth || centerBtn.offsetWidth || S(50);
+    const wcbH = wcb.offsetHeight || centerBtn.offsetHeight || S(28);
     let wcbLeft = restoreLeft + restoreW + GAP;
     let wcbTop  = restoreTop + (restoreH - wcbH) / 2;
 
@@ -453,14 +447,12 @@ function applyWindowControlButtonsLayout() {
     wcb.style.setProperty('bottom', 'auto', 'important');
     wcb.style.setProperty('transform', 'none', 'important');
 
+    // ★ 一度でも成功したら以降は removeProperty を呼ばない
     _wcbLayoutApplied = true;
 }
 
 // ============================================================
-// ★ body のクラス変化（gallery-open / stj-editor-open の解除等）で
-//    即座に T/中央 を再同期する。
-//    inline スタイルは消えていないので通常は何も起きないが、
-//    念のための保険。
+// ★ body のクラス変化で T/中央 を再同期（保険）
 // ============================================================
 (function installWcbClassSync() {
     if (window.__wcbClassSyncInstalled) return;
@@ -482,22 +474,25 @@ function applyWindowControlButtonsLayout() {
     });
 })();
 
-// 【変更後】
 setInterval(() => {
     applyChatLayout();
     applyToggleChatButtonLayout();
-    applyWindowControlButtonsLayout();   // ★ 追加
+    applyWindowControlButtonsLayout();
 }, 500);
 
 window.addEventListener('resize', () => {
+    // 位置キャッシュを無効化して比率計算を強制再実行
+    _lastToggleBtnLeft = -1;
+    _lastToggleBtnTop  = -1;
     applyChatLayout();
     applyToggleChatButtonLayout();
-    applyWindowControlButtonsLayout();   // ★ 追加
+    applyWindowControlButtonsLayout();
 });
 
 setTimeout(() => {
     applyChatLayout();
     applyToggleChatButtonLayout();
+    applyWindowControlButtonsLayout();
 }, 100);
 
 try {
@@ -642,9 +637,13 @@ setupGalleryButtonObserver();
 // ★ 統合ホバーゾーン: 全ボタンを内包する矩形領域内にマウスが入ると
 //   全ボタンを同時に表示する。
 //   後方互換のため chat-bulb-hover / gic-buttons-wake も同時に付与する。
+//
+//   ★ 右側のみ MARGIN を加算しない
+//     （🎨/💡 の右端より右にはホバー範囲を広げない）
 // ============================================================
 function setupAllButtonsHover() {
-    const MARGIN = 30;   // ★ 広めの矩形
+    const MARGIN = 30;
+    const RIGHT_MARGIN = 0;   // ★ 右側のみ余白なし
 
     let isInZone = false;
     let lastX = -1, lastY = -1;
@@ -699,12 +698,12 @@ function setupAllButtonsHover() {
         const zone = computeZone();
         if (!zone) return;
 
-        // ★ 右側のみ MARGIN を加算しない
-        //   （🎨/💡 の右端より右にはホバー範囲を広げない）
-        const RIGHT_MARGIN = 0;
+        // ★ 右側のみ RIGHT_MARGIN (= 0)
         const inside =
-            x >= zone.left   - MARGIN      && x <= zone.right  + RIGHT_MARGIN &&
-            y >= zone.top    - MARGIN      && y <= zone.bottom + MARGIN;
+            x >= zone.left   - MARGIN &&
+            x <= zone.right  + RIGHT_MARGIN &&
+            y >= zone.top    - MARGIN &&
+            y <= zone.bottom + MARGIN;
 
         if (inside === isInZone) return;
         isInZone = inside;
@@ -729,7 +728,7 @@ function setupAllButtonsHover() {
     // ボタン移動・再生成に追従
     setInterval(() => { if (lastX >= 0) update(lastX, lastY); }, 150);
 
-    console.log('[Chat Window On/Off] 🔍 統合ホバーゾーンを開始しました (margin=30px)');
+    console.log('[Chat Window On/Off] 🔍 統合ホバーゾーンを開始しました (margin=30px, right=0)');
 }
 
 setupAllButtonsHover();
@@ -758,37 +757,3 @@ setupAllButtonsHover();
         cleanup();
     }
 })();
-
-window.debugButtonPositions = function () {
-    const ids = [
-        'toggle-chat-button',
-        'gic-open-gallery-button',
-        'restore-panel-button',
-        'window-control-buttons',
-        'center-button',
-        'gic-unregister-button',
-        'gic-delete-image-button',
-    ];
-    const out = {};
-    for (const id of ids) {
-        const el = document.getElementById(id);
-        if (!el) { out[id] = null; continue; }
-        const r = el.getBoundingClientRect();
-        const cs = window.getComputedStyle(el);
-        out[id] = {
-            rect: {
-                left: Math.round(r.left),
-                top: Math.round(r.top),
-                width: Math.round(r.width),
-                height: Math.round(r.height),
-            },
-            display: cs.display,
-            visibility: cs.visibility,
-            opacity: cs.opacity,
-            inlineLeft: el.style.getPropertyValue('left') || '(auto)',
-            inlineTop: el.style.getPropertyValue('top') || '(auto)',
-            viewport: { w: window.innerWidth, h: window.innerHeight },
-        };
-    }
-    return out;
-};
