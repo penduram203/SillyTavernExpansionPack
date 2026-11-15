@@ -312,8 +312,10 @@ function applyToggleChatButtonLayout() {
     const margin = 4;
 
     // ★ 固定座標（チャットウィンドウ非依存）
-    let left = Math.round(vw * 0.25);   // vw=1600 → 400
-    let top  = Math.round(vh - 90);      // ★ vh=962 → 872（参考値 inset: 872px auto auto 400px と一致）
+    //   left = vw * 5/24   → 1920px 幅で 400px（参考値 inset: 872px auto auto 400px と一致）
+    //   top  = vh - 90     → 962px 高で 872px
+    let left = Math.round(vw * 5 / 24);
+    let top  = Math.round(vh - 90);
 
     const btnW = btn.offsetWidth || 50;
     const btnH = btn.offsetHeight || 50;
