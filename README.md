@@ -29,7 +29,7 @@ SillyTavern の「拡張機能をインストール」から本リポジトリ�
 
 | 項目 | 内容 |
 |---|---|
-| OS | Zorin OS（Ubuntu 系 Linux） |
+| OS | Zorin OS（Ubuntu 系 Linux）　Windowsでも多分動くと思います |
 | ブラウザ | Firefox（最新版） |
 | SillyTavern | 1.12 以降推奨 |
 | 言語モデル | KoboldCpp / OpenAI / Google AI Studio（Gemini）等 |
@@ -616,7 +616,7 @@ SillyTavernExpansionPack/
 
 ## ライセンス
 
-MIT License（予定）。
+MIT License
 
 本パックは SillyTavern 本体とは独立した拡張機能です。
 SillyTavern 本体のライセンス（AGPL-3.0）には従いません。
