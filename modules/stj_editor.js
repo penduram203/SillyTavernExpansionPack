@@ -3794,6 +3794,139 @@ function _restoreImageMapFromBagState(charName) {
     }
 }
 
+// ★ 値が空かどうか判定
+function _isEmptyImageValue(v) {
+    if (v === null || v === undefined) return true;
+    if (Array.isArray(v)) return v.length === 0;
+    if (typeof v === 'string') return v.trim() === '';
+    return false;
+}
+
+// ★ 配列/文字列のファイル数を数える
+function _countImageFiles(v) {
+    if (Array.isArray(v)) return v.length;
+    if (typeof v === 'string' && v) return 1;
+    return 0;
+}
+
+// ★ 画像ファイル名から key を抽出
+//   命名規則: {charName}_{key}_{timestamp}.ext  (key 無しは default)
+//   timestamp: YYYY-MM-DD@HHhMMmSSsMMMms
+function _parseImageFileKey(charName, fileName) {
+    if (!fileName || typeof fileName !== 'string') return null;
+    const base = fileName.replace(/\.(png|jpe?g|webp|gif|avif|bmp)$/i, '');
+    const tsMatch = base.match(/_(\d{4}-\d{2}-\d{2}@\d{2}h\d{2}m\d{2}s\d{3}ms)$/);
+    if (!tsMatch) return null;
+    const beforeTs = base.slice(0, base.length - tsMatch[0].length);
+    if (beforeTs === charName) return '__default__';
+    const prefix = `${charName}_`;
+    if (!beforeTs.startsWith(prefix)) return null;
+    const rest = beforeTs.slice(prefix.length);
+    if (rest === '') return '__default__';
+    if (/^\d+$/.test(rest)) return rest;
+    return null;
+}
+
+// ★ ディスク上の画像一覧を key ごとにグループ化
+//   結果: { "000": ["user/images/...png", ...], "default": [...], ... }
+const _diskScanCache = new Map(); // charName -> { data, ts }
+const DISK_SCAN_TTL_MS = 5000;
+
+async function _scanImagesFromDisk(charName) {
+    if (!charName) return {};
+
+    const cached = _diskScanCache.get(charName);
+    if (cached && Date.now() - cached.ts < DISK_SCAN_TTL_MS) {
+        return cached.data;
+    }
+
+    try {
+        const origFetch = window.__gicOriginalFetch || window.fetch;
+        let headers = { 'Content-Type': 'application/json' };
+        try {
+            const ctx = getSTContext();
+            if (ctx && typeof ctx.getRequestHeaders === 'function') {
+                const h = ctx.getRequestHeaders();
+                if (h && typeof h === 'object') headers = h;
+            }
+        } catch (e) { /* ignore */ }
+
+        const resp = await origFetch.call(window, '/api/images/list', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ folder: charName }),
+        });
+        if (!resp.ok) return {};
+        const files = await resp.json();
+        if (!Array.isArray(files)) return {};
+
+        const grouped = {};
+        for (const f of files) {
+            if (typeof f !== 'string') continue;
+            if (/_thum\.png$/i.test(f)) continue;      // 動画サムネ
+            if (/_img_thum\.png$/i.test(f)) continue;  // 画像サムネ
+            const key = _parseImageFileKey(charName, f);
+            if (!key) continue;
+            if (!grouped[key]) grouped[key] = [];
+            grouped[key].push(`user/images/${charName}/${f}`);
+        }
+
+        const summary = Object.entries(grouped)
+            .map(([k, v]) => `${k}:${v.length}`).join(', ');
+        console.log(
+            `[STJ Editor] 📂 ディスクスキャン "${charName}": ` +
+            `${Object.keys(grouped).length} キー (${summary})`
+        );
+
+        _diskScanCache.set(charName, { data: grouped, ts: Date.now() });
+        return grouped;
+    } catch (e) {
+        console.warn('[STJ Editor] _scanImagesFromDisk error:', e);
+        return {};
+    }
+}
+
+// ★ ディスクスキャン結果のキャッシュを破棄（画像追加/削除後に呼ぶ）
+function _invalidateDiskScanCache(charName) {
+    if (charName) _diskScanCache.delete(charName);
+    else _diskScanCache.clear();
+}
+
+// ★ 統合復元: bag_state（優先）+ ディスクスキャン（補完）
+async function _restoreImageMapUnified(charName) {
+    const restored = {};
+
+    // ① bag_state を authority として採用
+    //    （ファイル名の key 部分が欠落していても復元できる）
+    const bagMap = _restoreImageMapFromBagState(charName);
+    if (bagMap) {
+        for (const [k, v] of Object.entries(bagMap)) {
+            restored[k] = v;
+        }
+    }
+
+    // ② ディスクスキャンで補完（bag_state に無いキーのみ）
+    const diskMap = await _scanImagesFromDisk(charName);
+    for (const [k, v] of Object.entries(diskMap)) {
+        if (k === '__default__') {
+            if (!('default' in restored) || _isEmptyImageValue(restored['default'])) {
+                restored['default'] = v;
+            }
+        } else {
+            if (!(k in restored) || _isEmptyImageValue(restored[k])) {
+                restored[k] = v;
+            }
+        }
+    }
+
+    const keys = Object.keys(restored);
+    console.log(
+        `[STJ Editor] 🔄 統合復元 "${charName}": ${keys.length} キー ` +
+        `[${keys.join(', ')}]`
+    );
+    return restored;
+}
+    
 // ★ 特定キーの bag_state ファイル一覧を取得
 function _getBagStateFilesForKeyword(charName, keyword) {
     try {
@@ -3832,44 +3965,28 @@ async function syncLorebookEntriesToImageMap() {
     let imageMap = getCurrentImageMapFromCharData(charName);
     if (!imageMap) imageMap = {};
 
-    // ★ imageMap が空、または全キーが空配列の時は bag_state から復元を試行
-    const imageMapEntryCount = Object.keys(imageMap).length;
-    const hasAnyNonEmpty = Object.values(imageMap).some(v => {
-        if (Array.isArray(v)) return v.length > 0;
-        return typeof v === 'string' && v.length > 0;
-    });
-    if (imageMapEntryCount === 0 || !hasAnyNonEmpty) {
-        console.warn(
-            `[STJ Editor] syncLorebook: imageMap が空または全キー空 ` +
-            `(entries=${imageMapEntryCount}) → bag_state から復元を試行`
-        );
-        const restored = _restoreImageMapFromBagState(charName);
-        if (restored) {
-            // 既存の構造は残して、値だけ埋める
-            for (const [k, v] of Object.entries(restored)) {
-                if (!(k in imageMap) || _isEmptyImageValue(imageMap[k])) {
-                    imageMap[k] = v;
-                }
-            }
-        }
-    }
-
     // ロアブックの全エントリから存在キーを収集
     const existingKeys = new Set();
     const autoCreateKeys = new Set();
-
     for (const entry of list) {
         if (!entry) continue;
         const comment = (typeof entry.comment === 'string' ? entry.comment.trim() : '');
         const keys = getEntryKeys(entry);
         const firstKey = keys.length > 0 ? String(keys[0]).trim() : '';
-
         if (comment && !isCommonRuleName(comment)) existingKeys.add(comment);
         if (firstKey) existingKeys.add(firstKey);
-
         if (comment && firstKey && comment === firstKey && !isCommonRuleName(comment)) {
             autoCreateKeys.add(comment);
         }
+    }
+
+    // ★ 空のキーが1つでもあれば統合復元を準備
+    const hasEmptyKeys = Object.entries(imageMap).some(
+        ([k, v]) => !UNREGISTER_EXCLUDED_KEYS.has(k) && _isEmptyImageValue(v)
+    );
+    let restoreData = {};
+    if (hasEmptyKeys) {
+        restoreData = await _restoreImageMapUnified(charName);
     }
 
     // 残骸削除（ロアブックに存在しないキーのみ）
@@ -3882,32 +3999,36 @@ async function syncLorebookEntriesToImageMap() {
         }
     }
 
-    // 新規追加 + 既存キーで空配列のものは bag_state から復元
+    // 新規追加 + 既存空配列の復元
     const addedKeys = [];
     const restoredKeys = [];
-    for (const keyword of autoCreateKeys) {
-        if (!Object.prototype.hasOwnProperty.call(imageMap, keyword)) {
-            // 新規 → bag_state に値があればそれで初期化、なければ []
-            const bagVal = _getBagStateFilesForKeyword(charName, keyword);
-            imageMap[keyword] = bagVal.length > 0
-                ? (bagVal.length === 1 ? bagVal[0] : bagVal)
-                : [];
+    const allKeysToProcess = new Set([...autoCreateKeys, ...existingKeys]);
+    for (const keyword of allKeysToProcess) {
+        if (!keyword || UNREGISTER_EXCLUDED_KEYS.has(keyword)) continue;
+        if (isCommonRuleName(keyword)) continue;
+
+        const exists = Object.prototype.hasOwnProperty.call(imageMap, keyword);
+        const rv = restoreData[keyword];
+        const hasRestore = rv && !_isEmptyImageValue(rv);
+
+        if (!exists) {
+            imageMap[keyword] = hasRestore ? rv : [];
             addedKeys.push(keyword);
-            if (bagVal.length > 0) restoredKeys.push(keyword);
-            console.log(
-                `[STJ Editor] 🆕 セル自動作成: "${keyword}" (world="${worldName}", ` +
-                `bag_state 復元=${bagVal.length}件)`
-            );
-        } else if (_isEmptyImageValue(imageMap[keyword])) {
-            // 既存だが空 → bag_state から復元
-            const bagVal = _getBagStateFilesForKeyword(charName, keyword);
-            if (bagVal.length > 0) {
-                imageMap[keyword] = bagVal.length === 1 ? bagVal[0] : bagVal;
+            if (hasRestore) {
                 restoredKeys.push(keyword);
                 console.log(
-                    `[STJ Editor] 🔄 空配列を bag_state から復元: "${keyword}" (${bagVal.length}件)`
+                    `[STJ Editor] 🆕 セル自動作成(復元): "${keyword}" ` +
+                    `(${_countImageFiles(rv)}件)`
                 );
+            } else {
+                console.log(`[STJ Editor] 🆕 セル自動作成: "${keyword}" (復元データなし)`);
             }
+        } else if (_isEmptyImageValue(imageMap[keyword]) && hasRestore) {
+            imageMap[keyword] = rv;
+            restoredKeys.push(keyword);
+            console.log(
+                `[STJ Editor] 🔄 空配列を復元: "${keyword}" (${_countImageFiles(rv)}件)`
+            );
         }
     }
 
@@ -3926,8 +4047,8 @@ async function syncLorebookEntriesToImageMap() {
         }
 
         console.log(
-            `[STJ Editor] ✅ 同期完了: 追加=${addedKeys.length}, 削除=${removedKeys.length}, ` +
-            `bag_state復元=${restoredKeys.length}`
+            `[STJ Editor] ✅ 同期完了: 追加=${addedKeys.length}, ` +
+            `削除=${removedKeys.length}, 復元=${restoredKeys.length}`
         );
     }
 
@@ -4145,39 +4266,65 @@ function setupLorebookEntryWatcher() {
             },
             // ★ 手動でロアブック↔セルを同期（デバッグ・復旧用）
             syncLorebookEntries: () => syncLorebookEntriesToImageMap(),
-            // ★ 追加: image_display_extension を bag_state から一括復元
-            restoreFromBagState: async function () {
+            // ★ image_display_extension を bag_state + ディスクスキャンから一括復元
+            restoreAllKeys: async function () {
                 const charName = detectCharacterNameFromDOM();
                 if (!charName) return { ok: false, message: 'no charName' };
+
                 try {
                     const ctx = getSTContext();
                     const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
                     if (!char || char.name !== charName) {
                         return { ok: false, message: 'char mismatch' };
+            }
+
+                    const imageMap = getCurrentImageMapFromCharData(charName) || {};
+
+                    // キャッシュ破棄して最新のディスク状態を取得
+                    _invalidateDiskScanCache(charName);
+                    const restoreData = await _restoreImageMapUnified(charName);
+
+                    if (Object.keys(restoreData).length === 0) {
+                        return { ok: false, message: 'no restore data (bag_state/disk both empty)' };
                     }
-                    const currentMap = getCurrentImageMapFromCharData(charName) || {};
-                    const restored = _restoreImageMapFromBagState(charName);
-                    if (!restored) {
-                        return { ok: false, message: 'bag_state has no data' };
-                    }
-                    let merged = 0;
-                    for (const [k, v] of Object.entries(restored)) {
-                        if (!(k in currentMap) || _isEmptyImageValue(currentMap[k])) {
-                            currentMap[k] = v;
-                            merged++;
+
+                    const restoredKeys = [];
+                    const detail = {};
+                    for (const [k, v] of Object.entries(restoreData)) {
+                        const cur = imageMap[k];
+                        if (_isEmptyImageValue(cur)) {
+                            imageMap[k] = v;
+                            restoredKeys.push(k);
+                            detail[k] = _countImageFiles(v);
                         }
                     }
-                    if (merged === 0) {
-                        return { ok: true, merged: 0, message: 'no keys needed restore' };
+
+                    if (restoredKeys.length === 0) {
+                        return {
+                            ok: true, restored: 0,
+                            message: 'no empty keys to restore',
+                            availableKeys: Object.keys(restoreData),
+                        };
                     }
-                    saveImageMapToCharData(charName, currentMap);
-                    // UI 反映
+
+                    saveImageMapToCharData(charName, imageMap);
+
                     if (stjModalEl && stjModalEl.style.display === 'block') {
-                        populateFormFromImageMap(currentMap);
+                        populateFormFromImageMap(imageMap);
                         autoSave({ immediate: true });
                     }
-                    console.log(`[STJ Editor] 🔄 restoreFromBagState: ${merged} キー復元`);
-                    return { ok: true, merged, charName };
+
+                    console.log(
+                        `[STJ Editor] ✅ restoreAllKeys: ${restoredKeys.length} キー復元`,
+                        detail
+                    );
+                    return {
+                        ok: true,
+                        restored: restoredKeys.length,
+                        keys: restoredKeys,
+                        detail,
+                        charName,
+                    };
                 } catch (e) {
                     return { ok: false, error: String(e) };
                 }
