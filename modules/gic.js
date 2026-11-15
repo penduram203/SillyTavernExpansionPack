@@ -5542,7 +5542,10 @@ function fitPreviewToViewport(panel) {
 
         const fitScale = Math.min(availableW / nw, availableH / nh);
         const desiredScale = fitScale * GALLERY_PREVIEW_SCALE_MULTIPLIER;
-        const maxScaleByWidth = GALLERY_PREVIEW_MAX_WIDTH / nw;
+        // ★ 4K/高解像度対応: 最大幅を --exp-scale でスケール
+        //   1920×962 では 1440px、4K では 2880px
+        const S_preview = window.S || ((px) => px);
+        const maxScaleByWidth = S_preview(GALLERY_PREVIEW_MAX_WIDTH) / nw;
         const finalScale = Math.min(desiredScale, maxScaleByWidth);
 
         const finalW = Math.max(1, Math.floor(nw * finalScale));
