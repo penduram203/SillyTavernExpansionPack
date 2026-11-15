@@ -1526,12 +1526,27 @@ function buildExpansionSection(uid, worldName, data, onChange) {
             console.warn(`${LOG} テンプレートは最大99個までです`);
             return;
         }
-        // ★ 新規テンプレートの解像度は必ず 1280x720
-        data.templates.push({
+
+        // ★ 追加ボタン押下時点の「現在編集対象のテンプレート」を複製する。
+        //   ランダム選択中でも _currentIndex は _activeRandomIndex に解決済み
+        //   （resolveEditIndex / loadPromptIntoTextareas で更新される）。
+        const srcTpl = data.templates[_currentIndex] || {
             img_prompt: '',
             negative_prompt: '',
             resolution: LEX_DEFAULT_RESOLUTION,
-        });
+        };
+        const copiedResolution =
+            (typeof srcTpl.resolution === 'string' && srcTpl.resolution.trim())
+                ? srcTpl.resolution.trim()
+                : LEX_DEFAULT_RESOLUTION;
+
+        const newTpl = {
+            img_prompt: typeof srcTpl.img_prompt === 'string' ? srcTpl.img_prompt : '',
+            negative_prompt: typeof srcTpl.negative_prompt === 'string' ? srcTpl.negative_prompt : '',
+            resolution: copiedResolution,
+        };
+        data.templates.push(newTpl);
+
         const newIdx = data.templates.length - 1;
         data.selectedTemplate = String(newIdx);
         _activeRandomIndex = null;
@@ -1539,7 +1554,10 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         rebuildTemplateOptions(String(newIdx));
         loadPromptIntoTextareas();
         onChange(data);
-        debugLog(`uid=${uid}: テンプレート ${newIdx} を追加 (解像度=${LEX_DEFAULT_RESOLUTION})`);
+        debugLog(
+            `uid=${uid}: テンプレート ${newIdx} を追加 ` +
+            `(コピー元=${newIdx - 1}, 解像度=${copiedResolution})`
+        );
     });
 
     // ── イベント: template 削除 ──
