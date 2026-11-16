@@ -76,7 +76,7 @@
 
             // === GIC: バナー（ギャラリー上部の赤枠） ===
             'gic.banner.bulk_mode': 'Bulk selection mode — click images to select',
-            'gic.banner.bulk_selected': 'Bulk selecting — {count} image(s) (🗑 to delete / drag to register together)',
+            'gic.banner.bulk_selected': 'Bulk selecting — {count} image(s) (drag to register together)',
             
             // === GIC: 確認 ===
             'gic.confirm.bulk_delete': 'Delete the {count} selected image(s)?\nThis operation cannot be undone.',
