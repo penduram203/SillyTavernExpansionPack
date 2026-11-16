@@ -1437,7 +1437,7 @@ function getCurrentCharacterName() {
             cursor: pointer !important;
             opacity: 1 !important;
             pointer-events: auto !important;
-            box-shadow: 0 0 8px rgba(250, 0, 0, 0.1) !important;
+            box-shadow: 0 0 8px rgba(250, 0, 0, 0.9) !important;
         }
         #gic-header-delete-button.gic-header-delete-active:hover {
             background-color: #ec1717 !important;
