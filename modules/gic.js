@@ -1607,6 +1607,36 @@ function getCurrentCharacterName() {
             color: #ffcccc !important;
             border: 1px solid #884444 !important;
         }
+
+        /* ============================================================
+           ★ 解像度スケーリング: ギャラリーヘッダーの各要素
+           ============================================================ */
+        #gic-header-right-group {
+            gap: calc(var(--exp-scale, 1) * 6px) !important;
+        }
+        .dragTitle .gallery-sort-select {
+            font-size: calc(var(--exp-scale, 1) * 14px) !important;
+            height: calc(var(--exp-scale, 1) * 28px) !important;
+            min-height: calc(var(--exp-scale, 1) * 28px) !important;
+            padding: 0 calc(var(--exp-scale, 1) * 6px) !important;
+            border-radius: calc(var(--exp-scale, 1) * 4px) !important;
+            box-sizing: border-box !important;
+        }
+        .dragTitle > .flex-container > .menu_button.menu_button_icon {
+            font-size: calc(var(--exp-scale, 1) * 14px) !important;
+            height: calc(var(--exp-scale, 1) * 28px) !important;
+            min-height: calc(var(--exp-scale, 1) * 28px) !important;
+            padding: 0 calc(var(--exp-scale, 1) * 8px) !important;
+            border-radius: calc(var(--exp-scale, 1) * 4px) !important;
+            box-sizing: border-box !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            gap: calc(var(--exp-scale, 1) * 4px) !important;
+        }
+        .dragTitle > .flex-container > .menu_button.menu_button_icon > i,
+        .dragTitle > .flex-container > .menu_button.menu_button_icon > div {
+            font-size: calc(var(--exp-scale, 1) * 12px) !important;
+        }
         
     `;
     document.head.appendChild(style);
@@ -6152,6 +6182,7 @@ function updateHeaderDeleteButtonState() {
 }
 
 function updateBulkDeleteButton() {
+    const S = window.S || ((px) => px);
     const btn = document.getElementById('gic-bulk-delete-button');
     const refreshBtn = document.getElementById('gic-refresh-gallery-button');
     const floatingBtn = document.getElementById('gic-floating-bulk-exit');
@@ -6164,17 +6195,13 @@ function updateBulkDeleteButton() {
         btn.classList.remove('gic-bulk-delete-disabled');
         btn.disabled = false;
         btn.textContent = text;
-        // ★ 幅固定を再保証（DOM 再構築時に style が消えるケース対策）
-        btn.style.setProperty('min-width', '100px', 'important');
+        btn.style.setProperty('min-width', S(100) + 'px', 'important');
         btn.style.setProperty('box-sizing', 'border-box', 'important');
         btn.style.setProperty('text-align', 'center', 'important');
     }
     if (floatingBtn) {
         floatingBtn.textContent = text;
     }
-    // ★ 一括選択モード中は更新ボタンを非表示・クリック不能にする
-    //    refresh ボタンは createRefreshButton() で display: inline-flex !important が
-    //    インライン設定されているため、ここで上書きする必要がある
     if (refreshBtn) {
         if (_bulkDeleteMode) {
             refreshBtn.style.setProperty('display', 'none', 'important');
@@ -6201,17 +6228,22 @@ function updateBulkDeleteBanner() {
 function createBulkDeleteButton() {
     let btn = document.getElementById('gic-bulk-delete-button');
     if (btn) return btn;
+
+    const S = window.S || ((px) => px);
+
     btn = document.createElement('button');
     btn.id = 'gic-bulk-delete-button';
     btn.type = 'button';
     btn.className = 'gic-bulk-delete-button';
     btn.textContent = '一括選択';
     btn.title = '一括選択モードの開始／終了';
-    // ★ 幅を固定して、テキスト変化（一括選択 ⇄ 選択終了 (N)）で
-    //    header の flex レイアウトが変わり後続ボタンがずれるのを防ぐ
-    btn.style.setProperty('min-width', '100px', 'important');
+    btn.style.setProperty('min-width', S(100) + 'px', 'important');
     btn.style.setProperty('box-sizing', 'border-box', 'important');
     btn.style.setProperty('text-align', 'center', 'important');
+    btn.style.setProperty('height', S(28) + 'px', 'important');
+    btn.style.setProperty('font-size', S(12) + 'px', 'important');
+    btn.style.setProperty('padding', `0 ${S(8)}px`, 'important');
+    btn.style.setProperty('border-radius', S(4) + 'px', 'important');
     btn.addEventListener('click', (e) => {
         e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
         if (_bulkDeleteMode) {
@@ -6232,6 +6264,8 @@ function createRefreshButton() {
     let btn = document.getElementById('gic-refresh-gallery-button');
     if (btn) return btn;
 
+    const S = window.S || ((px) => px);
+
     btn = document.createElement('button');
     btn.id = 'gic-refresh-gallery-button';
     btn.type = 'button';
@@ -6239,20 +6273,20 @@ function createRefreshButton() {
     btn.textContent = '🔄 更新';
     btn.title = 'ギャラリーを手動で更新（キャッシュをクリアして再読込）';
 
-    btn.style.setProperty('min-width', '90px', 'important');
-    btn.style.setProperty('height', '28px', 'important');
-    btn.style.setProperty('padding', '0 8px', 'important');
+    btn.style.setProperty('min-width', S(90) + 'px', 'important');
+    btn.style.setProperty('height', S(28) + 'px', 'important');
+    btn.style.setProperty('padding', `0 ${S(8)}px`, 'important');
     btn.style.setProperty('margin', '0', 'important');
     btn.style.setProperty('flex', '0 0 auto', 'important');
     btn.style.setProperty('display', 'inline-flex', 'important');
     btn.style.setProperty('align-items', 'center', 'important');
     btn.style.setProperty('justify-content', 'center', 'important');
-    btn.style.setProperty('font-size', '12px', 'important');
+    btn.style.setProperty('font-size', S(12) + 'px', 'important');
     btn.style.setProperty('font-weight', 'bold', 'important');
     btn.style.setProperty('color', '#ffffff', 'important');
     btn.style.setProperty('background-color', '#2c5282', 'important');
     btn.style.setProperty('border', '1px solid #63b3ed', 'important');
-    btn.style.setProperty('border-radius', '4px', 'important');
+    btn.style.setProperty('border-radius', S(4) + 'px', 'important');
     btn.style.setProperty('cursor', 'pointer', 'important');
     btn.style.setProperty('white-space', 'nowrap', 'important');
     btn.style.setProperty('box-sizing', 'border-box', 'important');
@@ -6339,12 +6373,29 @@ function createHeaderDeleteButton() {
     let btn = document.getElementById('gic-header-delete-button');
     if (btn) return btn;
 
+    const S = window.S || ((px) => px);
+
     btn = document.createElement('button');
     btn.id = 'gic-header-delete-button';
     btn.type = 'button';
     btn.className = 'gic-header-delete-button menu_button';
     btn.textContent = '🗑 削除';
     btn.title = '一括選択モードを開始すると使えます';
+
+    btn.style.setProperty('min-width', S(90) + 'px', 'important');
+    btn.style.setProperty('height', S(28) + 'px', 'important');
+    btn.style.setProperty('padding', `0 ${S(8)}px`, 'important');
+    btn.style.setProperty('margin', '0', 'important');
+    btn.style.setProperty('flex', '0 0 auto', 'important');
+    btn.style.setProperty('display', 'inline-flex', 'important');
+    btn.style.setProperty('align-items', 'center', 'important');
+    btn.style.setProperty('justify-content', 'center', 'important');
+    btn.style.setProperty('font-size', S(12) + 'px', 'important');
+    btn.style.setProperty('font-weight', 'bold', 'important');
+    btn.style.setProperty('color', '#ffffff', 'important');
+    btn.style.setProperty('border-radius', S(4) + 'px', 'important');
+    btn.style.setProperty('white-space', 'nowrap', 'important');
+    btn.style.setProperty('box-sizing', 'border-box', 'important');
 
     btn.addEventListener('click', (e) => {
         e.preventDefault();
@@ -6817,12 +6868,15 @@ function setupBulkDelete() {
         rowObserver.observe(controls.folderRow, { childList: true, subtree: true });
     }
 }
+
 function restructureGalleryHeader() {
     const gallery = document.getElementById('gallery');
     if (!gallery) return;
 
     const dragTitle = gallery.querySelector('.dragTitle');
     if (!dragTitle) return;
+
+    const S = window.S || ((px) => px);
 
     // "image gallery" テキストの span を削除
     dragTitle.querySelectorAll(':scope > span').forEach(span => {
@@ -6842,7 +6896,6 @@ function restructureGalleryHeader() {
         flexContainer = dragTitle.querySelector(':scope > .flex-container.alignItemsCenter');
     }
 
-    // ★ dragTitle を flex に
     dragTitle.style.setProperty('display', 'flex', 'important');
     dragTitle.style.setProperty('flex-direction', 'row', 'important');
     dragTitle.style.setProperty('flex-wrap', 'nowrap', 'important');
@@ -6850,7 +6903,6 @@ function restructureGalleryHeader() {
     dragTitle.style.setProperty('width', '100%', 'important');
     dragTitle.style.setProperty('box-sizing', 'border-box', 'important');
 
-    // ★ 右寄せグループ: [flexContainer(不可視), refreshBtn, bulkBtn, headerDeleteBtn]
     let rightGroup = dragTitle.querySelector(':scope > #gic-header-right-group');
     if (!rightGroup) {
         rightGroup = document.createElement('div');
@@ -6862,32 +6914,28 @@ function restructureGalleryHeader() {
     rightGroup.style.setProperty('flex-wrap', 'nowrap', 'important');
     rightGroup.style.setProperty('align-items', 'center', 'important');
     rightGroup.style.setProperty('justify-content', 'flex-end', 'important');
-    rightGroup.style.setProperty('gap', '6px', 'important');
+    rightGroup.style.setProperty('gap', S(6) + 'px', 'important');
     rightGroup.style.setProperty('flex', '0 0 auto', 'important');
     rightGroup.style.setProperty('width', 'fit-content', 'important');
     rightGroup.style.setProperty('margin-left', 'auto', 'important');
-    rightGroup.style.setProperty('margin-right', '15px', 'important');
+    rightGroup.style.setProperty('margin-right', S(15) + 'px', 'important');
     rightGroup.style.setProperty('box-sizing', 'border-box', 'important');
 
-    // ★ 更新ボタン・ヘッダー削除ボタンを用意
     const refreshBtn      = createRefreshButton();
     const headerDeleteBtn = createHeaderDeleteButton();
 
-    // 要素を右寄せグループへ移動
     [flexContainer, refreshBtn, bulkBtn, headerDeleteBtn].forEach(el => {
         if (el && el.parentNode !== rightGroup) {
             rightGroup.appendChild(el);
         }
     });
 
-    // ★ 更新ボタンを bulkBtn の左隣に強制配置
     if (refreshBtn && bulkBtn) {
         if (refreshBtn.nextElementSibling !== bulkBtn) {
             rightGroup.insertBefore(refreshBtn, bulkBtn);
         }
     }
 
-    // ★ ヘッダー削除ボタンを bulkBtn の直後に強制配置
     if (bulkBtn && headerDeleteBtn) {
         if (headerDeleteBtn.previousElementSibling !== bulkBtn) {
             rightGroup.insertBefore(headerDeleteBtn, bulkBtn.nextSibling);
@@ -6895,7 +6943,6 @@ function restructureGalleryHeader() {
         }
     }
 
-    // flexContainer を幅0に縮小
     if (flexContainer) {
         flexContainer.style.setProperty('flex', '0 0 auto', 'important');
         flexContainer.style.setProperty('width', '0', 'important');
@@ -6906,7 +6953,6 @@ function restructureGalleryHeader() {
         flexContainer.style.setProperty('overflow', 'hidden', 'important');
     }
 
-    // 非表示にするヘッダー要素
     [folderInput, checkBtn, recycleBtn].forEach(el => {
         if (!el) return;
         el.style.setProperty('display', 'none', 'important');
@@ -6917,12 +6963,11 @@ function restructureGalleryHeader() {
         el.setAttribute('draggable', 'false');
     });
 
-    // bulkBtn のスタイル
     if (bulkBtn) {
         bulkBtn.style.setProperty('position', 'relative', 'important');
         bulkBtn.style.setProperty('z-index', '200', 'important');
         bulkBtn.style.setProperty('pointer-events', 'auto', 'important');
-        bulkBtn.style.setProperty('min-width', '100px', 'important');
+        bulkBtn.style.setProperty('min-width', S(100) + 'px', 'important');
         bulkBtn.style.setProperty('box-sizing', 'border-box', 'important');
         bulkBtn.style.setProperty('text-align', 'center', 'important');
         bulkBtn.style.setProperty('margin', '0', 'important');
@@ -6931,7 +6976,6 @@ function restructureGalleryHeader() {
         bulkBtn.style.setProperty('vertical-align', 'middle', 'important');
     }
 
-    // 更新ボタンのスタイル
     if (refreshBtn) {
         refreshBtn.style.setProperty('position', 'relative', 'important');
         refreshBtn.style.setProperty('z-index', '200', 'important');
@@ -6940,7 +6984,6 @@ function restructureGalleryHeader() {
         refreshBtn.style.setProperty('flex', '0 0 auto', 'important');
     }
 
-    // ヘッダー削除ボタンのスタイル
     if (headerDeleteBtn) {
         headerDeleteBtn.style.setProperty('position', 'relative', 'important');
         headerDeleteBtn.style.setProperty('z-index', '200', 'important');
@@ -6948,10 +6991,8 @@ function restructureGalleryHeader() {
         headerDeleteBtn.style.setProperty('flex', '0 0 auto', 'important');
     }
 
-    // 状態を同期
     updateHeaderDeleteButtonState();
 
-    // 空の flex-container を削除
     gallery.querySelectorAll('.flex-container.alignItemsCenter').forEach(c => {
         if (c === flexContainer) return;
         if (c.children.length === 0 && !c.textContent.trim()) {
