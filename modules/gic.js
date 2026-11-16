@@ -1114,6 +1114,13 @@ function getCurrentCharacterName() {
         .gic-bulk-delete-button:hover {
             background-color: #4299e1 !important;
         }
+        body.gic-bulk-delete-mode .gic-bulk-delete-button {
+            background-color: #1a365d !important;
+            border-color: #2b6cb0 !important;
+        }
+        body.gic-bulk-delete-mode .gic-bulk-delete-button:hover {
+            background-color: #2c5282 !important;
+        }
 
         .gic-bulk-delete-button.gic-bulk-delete-disabled {
             opacity: 0.3 !important;
@@ -1425,14 +1432,16 @@ function getCurrentCharacterName() {
             transition: background-color 0.15s ease, opacity 0.15s ease !important;
         }
         #gic-header-delete-button.gic-header-delete-active {
-            background-color: #c53030 !important;
-            border-color: #fc8181 !important;
+            background-color: #dc2626 !important;
+            border-color: #fecaca !important;
             cursor: pointer !important;
             opacity: 1 !important;
             pointer-events: auto !important;
+            box-shadow: 0 0 8px rgba(220, 38, 38, 0.7) !important;
         }
         #gic-header-delete-button.gic-header-delete-active:hover {
-            background-color: #e53e3e !important;
+            background-color: #ef4444 !important;
+            box-shadow: 0 0 12px rgba(239, 68, 68, 0.9) !important;
         }
 
         /* ネイティブの🗑（Delete mode）ボタンは常に非表示 */
@@ -6142,6 +6151,7 @@ function updateHeaderDeleteButtonState() {
 
 function updateBulkDeleteButton() {
     const btn = document.getElementById('gic-bulk-delete-button');
+    const refreshBtn = document.getElementById('gic-refresh-gallery-button');
     const floatingBtn = document.getElementById('gic-floating-bulk-exit');
 
     const text = _bulkDeleteMode
@@ -6159,6 +6169,18 @@ function updateBulkDeleteButton() {
     }
     if (floatingBtn) {
         floatingBtn.textContent = text;
+    }
+    // ★ 一括選択モード中は更新ボタンを非表示・クリック不能にする
+    //    refresh ボタンは createRefreshButton() で display: inline-flex !important が
+    //    インライン設定されているため、ここで上書きする必要がある
+    if (refreshBtn) {
+        if (_bulkDeleteMode) {
+            refreshBtn.style.setProperty('display', 'none', 'important');
+            refreshBtn.style.setProperty('pointer-events', 'none', 'important');
+        } else {
+            refreshBtn.style.setProperty('display', 'inline-flex', 'important');
+            refreshBtn.style.setProperty('pointer-events', 'auto', 'important');
+        }
     }
     updateHeaderDeleteButtonState();
 }
