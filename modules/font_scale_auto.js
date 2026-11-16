@@ -231,28 +231,94 @@
         }
     }
 
+    // ユーザーがスライダーをドラッグ中か
+    let _dragging = false;
+
+    function finishDrag(reason) {
+        if (!_dragging) return;
+        _dragging = false;
+
+        const slider = document.getElementById('font_scale');
+        if (!slider) return;
+
+        // ブラウザ自身が決めた最終値をそのまま採用（ピクセル計算はしない）
+        let v = parseFloat(slider.value);
+        if (!Number.isFinite(v)) return;
+        v = Math.max(MIN_SCALE, Math.min(MAX_SCALE, v));
+
+        vlog(`ドラッグ終了 (${reason}): ${v}`);
+
+        // 数値欄も同期
+        setNativeValue(document.getElementById('font_scale_counter'), v);
+        setMainFontSize(v);
+
+        // ST 自身のハンドラに 1 回だけ反映・保存させる（合成イベントなので suppress 対象外）
+        try {
+            slider.dispatchEvent(new Event('input', { bubbles: true }));
+        } catch (e) { /* ignore */ }
+        try {
+            const ctx = getSTContext();
+            if (typeof ctx?.saveSettingsDebounced === 'function') ctx.saveSettingsDebounced();
+        } catch (e) { /* ignore */ }
+    }
+
     function setupUserInteractionListeners() {
-        ['pointerdown', 'mousedown', 'touchstart', 'keydown', 'wheel'].forEach(type => {
+        // ── ドラッグ開始 ──
+        const onDown = (e) => {
+            if (!isFontScaleTarget(e.target)) return;
+            markUserTouched(e.type);
+            if (e.target.id === 'font_scale') _dragging = true;
+        };
+        ['pointerdown', 'mousedown', 'touchstart'].forEach(type => {
+            document.addEventListener(type, onDown, { capture: true, passive: true });
+        });
+
+        // ── ドラッグ終了 ──
+        ['pointerup', 'mouseup', 'touchend', 'pointercancel'].forEach(type => {
+            window.addEventListener(type, () => finishDrag(type), { capture: true });
+        });
+        window.addEventListener('blur', () => finishDrag('blur'));
+
+        // ── その他のユーザー操作（キーボード・ホイール） ──
+        ['keydown', 'wheel'].forEach(type => {
             document.addEventListener(type, (e) => {
                 if (isFontScaleTarget(e.target)) markUserTouched(type);
             }, { capture: true, passive: true });
         });
 
-        // ユーザーが動かした値は「そのまま」--mainFontSize に反映するだけ。
-        // 値を書き換えたり、強制したりはしない。
-        const onUserValue = (e) => {
-            if (!e.isTrusted) return;
+        // ── input: ドラッグ中は ST に渡さない（レイアウト変動によるループ防止） ──
+        document.addEventListener('input', (e) => {
+            if (!e.isTrusted) return;               // 合成イベントは素通し
             const t = e.target;
             if (!isFontScaleTarget(t)) return;
-            markUserTouched(e.type);
+            markUserTouched('input');
+
             const v = parseFloat(t.value);
             if (!Number.isFinite(v)) return;
             const clamped = Math.max(MIN_SCALE, Math.min(MAX_SCALE, v));
+
+            if (_dragging && t.id === 'font_scale') {
+                // ST のハンドラへ伝播させない。数値欄だけ表示用に更新
+                e.stopImmediatePropagation();
+                setNativeValue(document.getElementById('font_scale_counter'), clamped);
+                return;
+            }
+
+            // 数値欄の直接入力・キーボード操作などは従来どおり反映
             setMainFontSize(clamped);
             vlog(`ユーザー入力 (${t.id}): ${clamped}`);
-        };
-        document.addEventListener('input', onUserValue, true);
-        document.addEventListener('change', onUserValue, true);
+        }, true);
+
+        // change は値を書き換えず、フォントサイズ追従のみ
+        document.addEventListener('change', (e) => {
+            if (!e.isTrusted) return;
+            const t = e.target;
+            if (!isFontScaleTarget(t)) return;
+            markUserTouched('change');
+            if (_dragging && t.id === 'font_scale') return;   // ドラッグ中は finishDrag に任せる
+            const v = parseFloat(t.value);
+            if (Number.isFinite(v)) setMainFontSize(Math.max(MIN_SCALE, Math.min(MAX_SCALE, v)));
+        }, true);
     }
 
     // ============================================================
