@@ -6275,6 +6275,52 @@ function positionFloatingBulkButton() {
     btn.style.setProperty('z-index', '2147483647', 'important');
 }
 
+// ============================================================
+// ★ ギャラリーヘッダー用「🗑 削除」ボタン
+//   更新ボタン・一括選択ボタンの右隣に配置される。
+//   クリック動作は installBulkDeleteDocumentHandlers() の
+//   window click ハンドラが処理する（TRASH_SELECTOR の
+//   button[title*="削除"] に該当）。
+// ============================================================
+function createHeaderDeleteButton() {
+    let btn = document.getElementById('gic-header-delete-button');
+    if (btn) return btn;
+
+    btn = document.createElement('button');
+    btn.id = 'gic-header-delete-button';
+    btn.type = 'button';
+    btn.className = 'gic-header-delete-button menu_button';
+    btn.textContent = '🗑 削除';
+    btn.title = '選択した画像を削除（先に一括選択で画像を選択してください）';
+
+    btn.style.setProperty('min-width', '90px', 'important');
+    btn.style.setProperty('height', '28px', 'important');
+    btn.style.setProperty('padding', '0 8px', 'important');
+    btn.style.setProperty('margin', '0', 'important');
+    btn.style.setProperty('flex', '0 0 auto', 'important');
+    btn.style.setProperty('display', 'inline-flex', 'important');
+    btn.style.setProperty('align-items', 'center', 'important');
+    btn.style.setProperty('justify-content', 'center', 'important');
+    btn.style.setProperty('font-size', '12px', 'important');
+    btn.style.setProperty('font-weight', 'bold', 'important');
+    btn.style.setProperty('color', '#ffffff', 'important');
+    btn.style.setProperty('background-color', '#c53030', 'important');
+    btn.style.setProperty('border', '1px solid #fc8181', 'important');
+    btn.style.setProperty('border-radius', '4px', 'important');
+    btn.style.setProperty('cursor', 'pointer', 'important');
+    btn.style.setProperty('white-space', 'nowrap', 'important');
+    btn.style.setProperty('box-sizing', 'border-box', 'important');
+
+    btn.addEventListener('mouseenter', () => {
+        btn.style.setProperty('background-color', '#e53e3e', 'important');
+    });
+    btn.addEventListener('mouseleave', () => {
+        btn.style.setProperty('background-color', '#c53030', 'important');
+    });
+
+    return btn;
+}
+
 function placeBulkDeleteButton(controls) {
     const { folderInput, folderRow, dropdown, header, checkIcon } = controls;
     const btn = createBulkDeleteButton();
@@ -6783,7 +6829,7 @@ function restructureGalleryHeader() {
     dragTitle.style.setProperty('width', '100%', 'important');
     dragTitle.style.setProperty('box-sizing', 'border-box', 'important');
 
-    // ★ 右寄せグループ: [flexContainer(不可視), bulkBtn, trashBtn]
+    // ★ 右寄せグループ: [flexContainer(不可視), refreshBtn, bulkBtn, headerDeleteBtn, trashBtn]
     let rightGroup = dragTitle.querySelector(':scope > #gic-header-right-group');
     if (!rightGroup) {
         rightGroup = document.createElement('div');
@@ -6802,11 +6848,12 @@ function restructureGalleryHeader() {
     rightGroup.style.setProperty('margin-right', '70px', 'important');
     rightGroup.style.setProperty('box-sizing', 'border-box', 'important');
 
-    // ★ 更新ボタンを用意
-    const refreshBtn = createRefreshButton();
+    // ★ 更新ボタン・削除ボタンを用意
+    const refreshBtn      = createRefreshButton();
+    const headerDeleteBtn = createHeaderDeleteButton();
 
-    // 要素を右寄せグループへ移動（順序: flexContainer → refreshBtn → bulkBtn → trashBtn）
-    [flexContainer, refreshBtn, bulkBtn, trashBtn].forEach(el => {
+    // 要素を右寄せグループへ移動
+    [flexContainer, refreshBtn, bulkBtn, headerDeleteBtn, trashBtn].forEach(el => {
         if (el && el.parentNode !== rightGroup) {
             rightGroup.appendChild(el);
         }
@@ -6819,15 +6866,22 @@ function restructureGalleryHeader() {
         }
     }
 
-    // ★ 🗑ボタンを一括選択ボタンの直後に強制配置
-    //    STが再生成・別の場所へ挿入した場合でも、必ず bulkBtn の右隣にする
-    if (bulkBtn && trashBtn) {
-        if (trashBtn.previousElementSibling !== bulkBtn) {
-            rightGroup.insertBefore(trashBtn, bulkBtn.nextSibling);
-            console.log('[GIC] 🗑ボタンを一括選択ボタンの右隣に再配置');
+    // ★ ヘッダー削除ボタンを bulkBtn の直後に強制配置
+    if (bulkBtn && headerDeleteBtn) {
+        if (headerDeleteBtn.previousElementSibling !== bulkBtn) {
+            rightGroup.insertBefore(headerDeleteBtn, bulkBtn.nextSibling);
+            console.log('[GIC] 🗑 ヘッダー削除ボタンを一括選択ボタンの右隣に再配置');
         }
     }
-    
+
+    // ★ ネイティブ 🗑ボタンをヘッダー削除ボタンの直後に強制配置
+    if (headerDeleteBtn && trashBtn) {
+        if (trashBtn.previousElementSibling !== headerDeleteBtn) {
+            rightGroup.insertBefore(trashBtn, headerDeleteBtn.nextSibling);
+            console.log('[GIC] 🗑 ネイティブ削除ボタンをヘッダー削除ボタンの右隣に再配置');
+        }
+    }
+
     // flexContainer を幅0に縮小（子要素は既に非表示）
     if (flexContainer) {
         flexContainer.style.setProperty('flex', '0 0 auto', 'important');
@@ -6872,7 +6926,16 @@ function restructureGalleryHeader() {
         refreshBtn.style.setProperty('margin', '0', 'important');
         refreshBtn.style.setProperty('flex', '0 0 auto', 'important');
     }
-    
+
+    // ヘッダー削除ボタンのスタイル
+    if (headerDeleteBtn) {
+        headerDeleteBtn.style.setProperty('position', 'relative', 'important');
+        headerDeleteBtn.style.setProperty('z-index', '200', 'important');
+        headerDeleteBtn.style.setProperty('pointer-events', 'auto', 'important');
+        headerDeleteBtn.style.setProperty('margin', '0', 'important');
+        headerDeleteBtn.style.setProperty('flex', '0 0 auto', 'important');
+    }
+
     // trashBtn のスタイル
     if (trashBtn) {
         trashBtn.style.setProperty('position', 'relative', 'important');
