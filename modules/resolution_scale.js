@@ -61,6 +61,9 @@
     //   #sheld 内の font-size を --exp-scale 倍する。
     //   - --mainFontSize を #sheld スコープでのみ上書き（外部 UI に影響しない）
     //   - #sheld 自身の font-size も直接設定（子孫の継承を保証）
+    //   - フォントスケール（--exp-original-mainFontSize）とは掛け合わせない。
+    //     基準を固定 15px にすることで、解像度スケーリングのみが #sheld 内で
+    //     作用する（フォントスケールによる二重拡大の防止）。
     // ============================================================
     (function injectChatContentScaling() {
         if (document.getElementById('exp-chat-scaling-css')) return;
@@ -72,10 +75,10 @@
                 --exp-original-mainFontSize: var(--mainFontSize, 15px);
             }
 
-            /* #sheld 内のテキストを scale 倍 */
+            /* #sheld 内のテキストは解像度係数のみでスケーリング（フォントスケール非適用） */
             #sheld {
-                font-size: calc(var(--exp-original-mainFontSize) * var(--exp-scale, 1)) !important;
-                --mainFontSize: calc(var(--exp-original-mainFontSize) * var(--exp-scale, 1));
+                font-size: calc(15px * var(--exp-scale, 1)) !important;
+                --mainFontSize: calc(15px * var(--exp-scale, 1));
             }
 
             /* キャラクター一覧のキャラクター名を解像度に応じてスケーリング（2倍）
