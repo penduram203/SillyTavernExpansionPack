@@ -6864,7 +6864,7 @@ function restructureGalleryHeader() {
     rightGroup.style.setProperty('flex', '0 0 auto', 'important');
     rightGroup.style.setProperty('width', 'fit-content', 'important');
     rightGroup.style.setProperty('margin-left', 'auto', 'important');
-    rightGroup.style.setProperty('margin-right', '0px', 'important');
+    rightGroup.style.setProperty('margin-right', '15px', 'important');
     rightGroup.style.setProperty('box-sizing', 'border-box', 'important');
 
     // ★ 更新ボタン・ヘッダー削除ボタンを用意
