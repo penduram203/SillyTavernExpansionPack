@@ -89,6 +89,45 @@
             .character_select .ch_name {
                 font-size: calc(15px * var(--exp-scale, 1) * 2) !important;
             }
+
+            /* ロアブック編集画面の上部ボタン（Random_Prompt_Wildcard / キャラ推奨LoRA） */
+            #rpw-button-container {
+                display: flex;
+                flex-wrap: wrap;
+                gap: calc(8px * var(--exp-scale, 1));
+                margin: calc(8px * var(--exp-scale, 1)) 0;
+            }
+            #rpw-button-container > button,
+            #rpw-open-button,
+            #crl-open-button {
+                font-size: calc(14px * var(--exp-scale, 1)) !important;
+                padding: calc(6px * var(--exp-scale, 1)) calc(12px * var(--exp-scale, 1)) !important;
+                line-height: 1.4 !important;
+                height: auto !important;
+                min-height: 0 !important;
+            }
+
+            /* ロアブック編集画面のワールド選択（select2）
+               テキスト欄の高さ・フォントサイズ・矢印サイズを解像度に追従させる */
+            .select2-container:has(#select2-world_editor_select-container) .select2-selection--single {
+                height: calc(32px * var(--exp-scale, 1)) !important;
+                min-height: calc(32px * var(--exp-scale, 1)) !important;
+                padding: 0 !important;
+            }
+            .select2-container:has(#select2-world_editor_select-container) .select2-selection--single .select2-selection__rendered {
+                font-size: calc(14px * var(--exp-scale, 1)) !important;
+                line-height: calc(32px * var(--exp-scale, 1)) !important;
+                padding-left: calc(8px * var(--exp-scale, 1)) !important;
+                padding-right: calc(20px * var(--exp-scale, 1)) !important;
+            }
+            .select2-container:has(#select2-world_editor_select-container) .select2-selection--single .select2-selection__arrow {
+                height: calc(30px * var(--exp-scale, 1)) !important;
+                right: calc(3px * var(--exp-scale, 1)) !important;
+                width: calc(20px * var(--exp-scale, 1)) !important;
+            }
+            .select2-container:has(#select2-world_editor_select-container) .select2-selection--single .select2-selection__arrow b {
+                margin-top: calc(-2px * var(--exp-scale, 1)) !important;
+            }
         `;
         document.head.appendChild(style);
         console.log(`${LOG} chat content scaling CSS injected`);
