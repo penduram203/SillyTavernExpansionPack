@@ -1,5 +1,5 @@
 // gic.js
-
+import './i18n.js';
 import './comfy_boot.js';
 import './gic_lorebook.js';
 import { eventSource, event_types, saveChat, printMessages, getRequestHeaders } from '../../../../../script.js';
