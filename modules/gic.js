@@ -1112,7 +1112,7 @@ function getCurrentCharacterName() {
             transition: background-color 0.15s ease, opacity 0.15s ease !important;
         }
         .gic-bulk-delete-button:hover {
-            background-color: #4299e1 !important;
+            background-color: #3239e1 !important;
         }
         body.gic-bulk-delete-mode .gic-bulk-delete-button {
             background-color: #0202c9 !important;
