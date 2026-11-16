@@ -128,6 +128,48 @@
             .select2-container:has(#select2-world_editor_select-container) .select2-selection--single .select2-selection__arrow b {
                 margin-top: calc(-2px * var(--exp-scale, 1)) !important;
             }
+
+            /* 画像削除確認ダイアログ（gic.js が生成する #gic-delete-confirm-dialog）
+               インラインスタイルを !important で上書きし、解像度に追従させる */
+            #gic-delete-confirm-dialog {
+                padding: calc(20px * var(--exp-scale, 1)) !important;
+            }
+            #gic-delete-confirm-dialog > div {
+                border-width: calc(3px * var(--exp-scale, 1)) !important;
+                border-radius: calc(12px * var(--exp-scale, 1)) !important;
+                padding: calc(32px * var(--exp-scale, 1)) calc(40px * var(--exp-scale, 1)) !important;
+                max-width: calc(600px * var(--exp-scale, 1)) !important;
+                min-width: calc(420px * var(--exp-scale, 1)) !important;
+            }
+            /* 警告文 */
+            #gic-delete-confirm-dialog > div > div:nth-child(1) {
+                font-size: calc(20px * var(--exp-scale, 1)) !important;
+                margin-bottom: calc(16px * var(--exp-scale, 1)) !important;
+            }
+            /* 見出し「本当に削除しますか？」 */
+            #gic-delete-confirm-dialog > div > div:nth-child(2) {
+                font-size: calc(26px * var(--exp-scale, 1)) !important;
+                margin-bottom: calc(20px * var(--exp-scale, 1)) !important;
+            }
+            /* ファイル名表示欄 */
+            #gic-delete-confirm-dialog > div > div:nth-child(3) {
+                font-size: calc(13px * var(--exp-scale, 1)) !important;
+                padding: calc(8px * var(--exp-scale, 1)) calc(12px * var(--exp-scale, 1)) !important;
+                border-radius: calc(4px * var(--exp-scale, 1)) !important;
+                margin-bottom: calc(24px * var(--exp-scale, 1)) !important;
+            }
+            /* ボタン行 */
+            #gic-delete-confirm-dialog > div > div:nth-child(4) {
+                gap: calc(16px * var(--exp-scale, 1)) !important;
+            }
+            /* はい / いいえ ボタン */
+            #gic-delete-confirm-dialog > div > div:nth-child(4) > button {
+                padding: calc(14px * var(--exp-scale, 1)) calc(40px * var(--exp-scale, 1)) !important;
+                font-size: calc(18px * var(--exp-scale, 1)) !important;
+                border-width: calc(2px * var(--exp-scale, 1)) !important;
+                border-radius: calc(6px * var(--exp-scale, 1)) !important;
+                min-width: calc(120px * var(--exp-scale, 1)) !important;
+            }
         `;
         document.head.appendChild(style);
         console.log(`${LOG} chat content scaling CSS injected`);
