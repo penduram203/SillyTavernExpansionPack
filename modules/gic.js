@@ -1420,14 +1420,14 @@ function getCurrentCharacterName() {
             font-size: 12px !important;
             font-weight: bold !important;
             color: #ffffff !important;
-            background-color: #fa5568 !important;
+            background-color: #ff0000 !important;
             border: 1px solid #718096 !important;
             border-radius: 4px !important;
             cursor: not-allowed !important;
             user-select: none !important;
             box-sizing: border-box !important;
             white-space: nowrap !important;
-            opacity: 0.5 !important;
+            opacity: 0.1 !important;
             pointer-events: none !important;
             transition: background-color 0.15s ease, opacity 0.15s ease !important;
         }
