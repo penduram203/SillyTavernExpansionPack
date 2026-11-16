@@ -1100,8 +1100,8 @@ function getCurrentCharacterName() {
             font-size: 12px !important;
             font-weight: bold !important;
             color: #ffffff !important;
-            background-color: #d9534f !important;
-            border: 1px solid #b52b27 !important;
+            background-color: #2c5282 !important;
+            border: 1px solid #63b3ed !important;
             border-radius: 4px !important;
             cursor: pointer !important;
             user-select: none !important;
@@ -1112,7 +1112,7 @@ function getCurrentCharacterName() {
             transition: background-color 0.15s ease, opacity 0.15s ease !important;
         }
         .gic-bulk-delete-button:hover {
-            background-color: #c9302c !important;
+            background-color: #4299e1 !important;
         }
 
         .gic-bulk-delete-button.gic-bulk-delete-disabled {
@@ -1145,13 +1145,6 @@ function getCurrentCharacterName() {
             z-index: 2147483646;
             pointer-events: none;
             box-sizing: border-box;
-        }
-
-        body.gic-bulk-delete-mode .fa-trash,
-        body.gic-bulk-delete-mode [class*="fa-trash"],
-        body.gic-bulk-delete-mode [class*="trash"] {
-            color: #ff3b30 !important;
-            text-shadow: 0 0 6px rgba(255, 59, 48, 0.9) !important;
         }
 
         body.gic-bulk-delete-mode .nGY2GThumbnail,
@@ -1408,18 +1401,47 @@ function getCurrentCharacterName() {
             visibility: hidden !important;
         }
 
-        body.gic-bulk-delete-mode #gallery .dragTitle {
-            visibility: hidden !important;
+        /* ヘッダー削除ボタン: 通常は灰色・無効、一括選択モードで赤・有効 */
+        #gic-header-delete-button {
+            margin: 0 !important;
+            flex: 0 0 auto !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            height: 28px !important;
+            padding: 0 8px !important;
+            font-size: 12px !important;
+            font-weight: bold !important;
+            color: #ffffff !important;
+            background-color: #4a5568 !important;
+            border: 1px solid #718096 !important;
+            border-radius: 4px !important;
+            cursor: not-allowed !important;
+            user-select: none !important;
+            box-sizing: border-box !important;
+            white-space: nowrap !important;
+            opacity: 0.5 !important;
             pointer-events: none !important;
+            transition: background-color 0.15s ease, opacity 0.15s ease !important;
+        }
+        #gic-header-delete-button.gic-header-delete-active {
+            background-color: #c53030 !important;
+            border-color: #fc8181 !important;
+            cursor: pointer !important;
+            opacity: 1 !important;
+            pointer-events: auto !important;
+        }
+        #gic-header-delete-button.gic-header-delete-active:hover {
+            background-color: #e53e3e !important;
         }
 
-        body.gic-bulk-delete-mode #gic-header-right-group [title="Delete mode"],
-        body.gic-bulk-delete-mode #gic-header-right-group .fa-trash,
-        body.gic-bulk-delete-mode #gic-header-right-group [class*="fa-trash"],
-        body.gic-bulk-delete-mode #gallery .dragTitle [title="Delete mode"],
-        body.gic-bulk-delete-mode #gallery .dragTitle [class*="fa-trash"] {
-            visibility: visible !important;
-            pointer-events: auto !important;
+        /* ネイティブの🗑（Delete mode）ボタンは常に非表示 */
+        #gallery .right_menu_button[title="Delete mode"],
+        #gallery .right_menu_button[title*="Delete" i],
+        #gallery .right_menu_button[title*="削除"],
+        #gallery .right_menu_button.fa-trash,
+        #gallery .right_menu_button[class*="fa-trash"] {
+            display: none !important;
         }
 
         body.gic-bulk-delete-mode #gallery::before {
@@ -6035,12 +6057,7 @@ function enterBulkDeleteMode() {
     showBulkDeleteToast('一括選択モード — 画像クリックで選択');
     updateBulkDeleteButton();
     updateBulkDeleteBanner();
-
-    // ★ ネイティブ 🗑 ボタンを表示・有効化
-    setNativeTrashButtonVisible(true);
-
-    ensureFloatingBulkButton();
-    requestAnimationFrame(() => positionFloatingBulkButton());
+    updateHeaderDeleteButtonState();
 }
 
 function exitBulkDeleteMode() {
@@ -6051,9 +6068,7 @@ function exitBulkDeleteMode() {
     document.querySelectorAll('.gic-bulk-selected').forEach(el => el.classList.remove('gic-bulk-selected'));
     showBulkDeleteToast('一括選択モードを終了しました');
     updateBulkDeleteButton();
-
-    // ★ ネイティブ 🗑 ボタンを非表示・無効化
-    setNativeTrashButtonVisible(false);
+    updateHeaderDeleteButtonState();
 
     // ★ page switch 状態もリセット
     if (isPageSwitchStale()) forceResetPageSwitch('exit bulk mode');
@@ -6110,6 +6125,21 @@ function toggleBulkSelection(itemEl, evt) {
     updateBulkDeleteBanner();
 }
 
+function updateHeaderDeleteButtonState() {
+    const btn = document.getElementById('gic-header-delete-button');
+    if (!btn) return;
+
+    if (_bulkDeleteMode) {
+        btn.classList.add('gic-header-delete-active');
+        btn.title = _bulkDeleteSelected.size > 0
+            ? `選択中の ${_bulkDeleteSelected.size} 枚を削除`
+            : '先に画像を選択してください';
+    } else {
+        btn.classList.remove('gic-header-delete-active');
+        btn.title = '一括選択モードを開始すると使えます';
+    }
+}
+
 function updateBulkDeleteButton() {
     const btn = document.getElementById('gic-bulk-delete-button');
     const floatingBtn = document.getElementById('gic-floating-bulk-exit');
@@ -6130,6 +6160,7 @@ function updateBulkDeleteButton() {
     if (floatingBtn) {
         floatingBtn.textContent = text;
     }
+    updateHeaderDeleteButtonState();
 }
 
 function updateBulkDeleteBanner() {
@@ -6277,10 +6308,8 @@ function positionFloatingBulkButton() {
 
 // ============================================================
 // ★ ギャラリーヘッダー用「🗑 削除」ボタン
-//   更新ボタン・一括選択ボタンの右隣に配置される。
-//   クリック動作は installBulkDeleteDocumentHandlers() の
-//   window click ハンドラが処理する（TRASH_SELECTOR の
-//   button[title*="削除"] に該当）。
+//   通常は灰色・無効。一括選択モード中のみ赤・有効になる。
+//   クリックで executeBulkDelete() を呼ぶ（内部で window.confirm）。
 // ============================================================
 function createHeaderDeleteButton() {
     let btn = document.getElementById('gic-header-delete-button');
@@ -6291,31 +6320,17 @@ function createHeaderDeleteButton() {
     btn.type = 'button';
     btn.className = 'gic-header-delete-button menu_button';
     btn.textContent = '🗑 削除';
-    btn.title = '選択した画像を削除（先に一括選択で画像を選択してください）';
+    btn.title = '一括選択モードを開始すると使えます';
 
-    btn.style.setProperty('min-width', '90px', 'important');
-    btn.style.setProperty('height', '28px', 'important');
-    btn.style.setProperty('padding', '0 8px', 'important');
-    btn.style.setProperty('margin', '0', 'important');
-    btn.style.setProperty('flex', '0 0 auto', 'important');
-    btn.style.setProperty('display', 'inline-flex', 'important');
-    btn.style.setProperty('align-items', 'center', 'important');
-    btn.style.setProperty('justify-content', 'center', 'important');
-    btn.style.setProperty('font-size', '12px', 'important');
-    btn.style.setProperty('font-weight', 'bold', 'important');
-    btn.style.setProperty('color', '#ffffff', 'important');
-    btn.style.setProperty('background-color', '#c53030', 'important');
-    btn.style.setProperty('border', '1px solid #fc8181', 'important');
-    btn.style.setProperty('border-radius', '4px', 'important');
-    btn.style.setProperty('cursor', 'pointer', 'important');
-    btn.style.setProperty('white-space', 'nowrap', 'important');
-    btn.style.setProperty('box-sizing', 'border-box', 'important');
-
-    btn.addEventListener('mouseenter', () => {
-        btn.style.setProperty('background-color', '#e53e3e', 'important');
-    });
-    btn.addEventListener('mouseleave', () => {
-        btn.style.setProperty('background-color', '#c53030', 'important');
+    btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!_bulkDeleteMode) return;
+        if (_bulkDeleteSelected.size === 0) {
+            showBulkDeleteToast('削除する画像を選択してください');
+            return;
+        }
+        executeBulkDelete();
     });
 
     return btn;
@@ -6730,22 +6745,7 @@ function installBulkDeleteDocumentHandlers() {
         if (Date.now() < (window.__gicNoLayoutUntil || 0)) return;
         if (!inGallery(e.target)) return;
 
-        const isBulkBtn = e.target.closest('.gic-bulk-delete-button');
-        const trash = e.target.closest(TRASH_SELECTOR);
-        if (!isBulkBtn && trash && !trash.classList.contains('dragClose')) {
-            e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
-            const now = Date.now();
-            if (now - _lastTrashToggleAt < TRASH_TOGGLE_DEBOUNCE_MS) return;
-            _lastTrashToggleAt = now;
-            if (_bulkDeleteSelected.size > 0) {
-                executeBulkDelete();
-            } else if (_bulkDeleteMode) {
-                showBulkDeleteToast('削除する画像を選択してください');
-            } else {
-                showBulkDeleteToast('先に「一括選択」ボタンで画像を選択してください');
-            }
-            return;
-        }
+        // ヘッダー削除ボタンは createHeaderDeleteButton() の直接クリックハンドラで処理する
         if (_bulkDeleteMode) {
             if (e.target.closest(SKIP_UI_SELECTOR)) return;
             const item = findItem(e.target, e.clientX, e.clientY);
@@ -6769,9 +6769,7 @@ function setupBulkDelete() {
     const controls = findGalleryHeaderControls();
     placeBulkDeleteButton(controls);
 
-    // ★ ネイティブ 🗑 ボタンの表示状態を _bulkDeleteMode に同期
-    //   ギャラリーDOMが再構築されても、この周期呼び出しで状態が復元される
-    setNativeTrashButtonVisible(_bulkDeleteMode);
+    // ネイティブ 🗑 ボタンは CSS で常時非表示のため、ここでの同期は不要
 
     if (!_bulkDeleteHeaderObserver && controls.header) {
         _bulkDeleteHeaderObserver = new MutationObserver(() => {
@@ -6813,7 +6811,6 @@ function restructureGalleryHeader() {
     const folderInput = gallery.querySelector('.gallery-folder-input');
     const bulkBtn     = document.getElementById('gic-bulk-delete-button');
     const checkBtn    = gallery.querySelector('.right_menu_button[title="Change gallery folder"]');
-    const trashBtn    = gallery.querySelector('.right_menu_button[title="Delete mode"]');
     const recycleBtn  = gallery.querySelector('.right_menu_button[title="Restore gallery folder"]');
 
     let flexContainer = folderInput?.closest('.flex-container.alignItemsCenter') || null;
@@ -6821,7 +6818,7 @@ function restructureGalleryHeader() {
         flexContainer = dragTitle.querySelector(':scope > .flex-container.alignItemsCenter');
     }
 
-    // ★ dragTitle を flex に（rightGroup の margin-left:auto を効かせるため）
+    // ★ dragTitle を flex に
     dragTitle.style.setProperty('display', 'flex', 'important');
     dragTitle.style.setProperty('flex-direction', 'row', 'important');
     dragTitle.style.setProperty('flex-wrap', 'nowrap', 'important');
@@ -6829,7 +6826,7 @@ function restructureGalleryHeader() {
     dragTitle.style.setProperty('width', '100%', 'important');
     dragTitle.style.setProperty('box-sizing', 'border-box', 'important');
 
-    // ★ 右寄せグループ: [flexContainer(不可視), refreshBtn, bulkBtn, headerDeleteBtn, trashBtn]
+    // ★ 右寄せグループ: [flexContainer(不可視), refreshBtn, bulkBtn, headerDeleteBtn]
     let rightGroup = dragTitle.querySelector(':scope > #gic-header-right-group');
     if (!rightGroup) {
         rightGroup = document.createElement('div');
@@ -6848,12 +6845,12 @@ function restructureGalleryHeader() {
     rightGroup.style.setProperty('margin-right', '70px', 'important');
     rightGroup.style.setProperty('box-sizing', 'border-box', 'important');
 
-    // ★ 更新ボタン・削除ボタンを用意
+    // ★ 更新ボタン・ヘッダー削除ボタンを用意
     const refreshBtn      = createRefreshButton();
     const headerDeleteBtn = createHeaderDeleteButton();
 
     // 要素を右寄せグループへ移動
-    [flexContainer, refreshBtn, bulkBtn, headerDeleteBtn, trashBtn].forEach(el => {
+    [flexContainer, refreshBtn, bulkBtn, headerDeleteBtn].forEach(el => {
         if (el && el.parentNode !== rightGroup) {
             rightGroup.appendChild(el);
         }
@@ -6874,15 +6871,7 @@ function restructureGalleryHeader() {
         }
     }
 
-    // ★ ネイティブ 🗑ボタンをヘッダー削除ボタンの直後に強制配置
-    if (headerDeleteBtn && trashBtn) {
-        if (trashBtn.previousElementSibling !== headerDeleteBtn) {
-            rightGroup.insertBefore(trashBtn, headerDeleteBtn.nextSibling);
-            console.log('[GIC] 🗑 ネイティブ削除ボタンをヘッダー削除ボタンの右隣に再配置');
-        }
-    }
-
-    // flexContainer を幅0に縮小（子要素は既に非表示）
+    // flexContainer を幅0に縮小
     if (flexContainer) {
         flexContainer.style.setProperty('flex', '0 0 auto', 'important');
         flexContainer.style.setProperty('width', '0', 'important');
@@ -6931,27 +6920,14 @@ function restructureGalleryHeader() {
     if (headerDeleteBtn) {
         headerDeleteBtn.style.setProperty('position', 'relative', 'important');
         headerDeleteBtn.style.setProperty('z-index', '200', 'important');
-        headerDeleteBtn.style.setProperty('pointer-events', 'auto', 'important');
         headerDeleteBtn.style.setProperty('margin', '0', 'important');
         headerDeleteBtn.style.setProperty('flex', '0 0 auto', 'important');
     }
 
-    // trashBtn のスタイル
-    if (trashBtn) {
-        trashBtn.style.setProperty('position', 'relative', 'important');
-        trashBtn.style.setProperty('z-index', '200', 'important');
-        trashBtn.style.setProperty('margin', '0', 'important');
-        trashBtn.style.setProperty('flex', '0 0 auto', 'important');
-        // ★ 一括選択モード中は visibility/opacity を強制的に可視化
-        //    （親 .dragTitle の visibility: hidden を inline !important で打ち消す）
-        if (_bulkDeleteMode) {
-            trashBtn.style.setProperty('visibility', 'visible', 'important');
-            trashBtn.style.setProperty('opacity', '1', 'important');
-            trashBtn.style.setProperty('pointer-events', 'auto', 'important');
-        }
-    }
+    // 状態を同期
+    updateHeaderDeleteButtonState();
 
-    // 空の flex-container を削除（flexContainer は残す）
+    // 空の flex-container を削除
     gallery.querySelectorAll('.flex-container.alignItemsCenter').forEach(c => {
         if (c === flexContainer) return;
         if (c.children.length === 0 && !c.textContent.trim()) {
@@ -7471,7 +7447,6 @@ function setupGalleryObserverForGic() {
         syncGalleryButtonVisibility();
         applyGalleryLayout();
         hideGalleryUploadMessage();
-        if (_bulkDeleteMode) positionFloatingBulkButton();
     }, 150);
 
     syncGalleryButtonVisibility();
