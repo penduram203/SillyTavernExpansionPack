@@ -1131,23 +1131,24 @@ function getCurrentCharacterName() {
 
         body.gic-bulk-delete-mode #gallery {
             position: fixed !important;
-            outline: 5px solid #ff3b30 !important;
-            outline-offset: -5px !important;
-            box-shadow: 0 0 24px rgba(255, 59, 48, 0.6) inset !important;
+            outline: calc(var(--exp-scale, 1) * 5px) solid #ff3b30 !important;
+            outline-offset: calc(var(--exp-scale, 1) * -5px) !important;
+            box-shadow: 0 0 calc(var(--exp-scale, 1) * 24px) rgba(255, 59, 48, 0.6) inset !important;
         }
 
         body.gic-bulk-delete-mode #gallery::before {
-            content: var(--gic-bulk-banner-text, '一括選択モード — 画像クリックで選択');
+            content: var(--gic-bulk-banner-text, 'Bulk selection mode — click images to select');
             position: absolute;
             top: 0;
             left: 0;
             right: 0;
-            padding: 6px 12px;
+            padding: calc(var(--exp-scale, 1) * 6px) calc(var(--exp-scale, 1) * 12px);
             background-color: #ff3b30;
             color: #ffffff;
-            font-size: 13px;
+            font-size: calc(var(--exp-scale, 1) * 13px);
             font-weight: bold;
             font-family: sans-serif;
+            line-height: 1.4;
             text-align: center;
             z-index: 2147483646;
             pointer-events: none;
@@ -6085,6 +6086,29 @@ function urlToServerPath(url) {
     return path;
 }
 
+function setGallerySortContainerVisible(visible) {
+    const gallery = document.getElementById('gallery');
+    if (!gallery) return;
+    const dragTitle = gallery.querySelector('.dragTitle');
+    if (!dragTitle) return;
+    const sortContainer = dragTitle.querySelector(
+        ':scope > .flex-container.alignItemsCenter:not(#gic-header-right-group)'
+    );
+    if (!sortContainer) return;
+
+    if (visible) {
+        sortContainer.style.removeProperty('display');
+        sortContainer.style.removeProperty('visibility');
+        sortContainer.style.removeProperty('pointer-events');
+        sortContainer.style.removeProperty('opacity');
+    } else {
+        sortContainer.style.setProperty('display', 'none', 'important');
+        sortContainer.style.setProperty('visibility', 'hidden', 'important');
+        sortContainer.style.setProperty('pointer-events', 'none', 'important');
+        sortContainer.style.setProperty('opacity', '0', 'important');
+    }
+}
+
 function enterBulkDeleteMode() {
     if (_bulkDeleteMode) return;
     if (isPageSwitchStale()) forceResetPageSwitch('enter bulk mode');
@@ -6100,6 +6124,7 @@ function enterBulkDeleteMode() {
     updateBulkDeleteButton();
     updateBulkDeleteBanner();
     updateHeaderDeleteButtonState();
+    setGallerySortContainerVisible(false);
 }
 
 function exitBulkDeleteMode() {
@@ -6114,6 +6139,7 @@ function exitBulkDeleteMode() {
     );
     updateBulkDeleteButton();
     updateHeaderDeleteButtonState();
+    setGallerySortContainerVisible(true);
 
     if (isPageSwitchStale()) forceResetPageSwitch('exit bulk mode');
     console.log('[GIC-Bulk] 一括選択モード終了');
@@ -6902,12 +6928,9 @@ function restructureGalleryHeader() {
 
     const S = window.S || ((px) => px);
 
-    // "image gallery" テキストの span を削除
     dragTitle.querySelectorAll(':scope > span').forEach(span => {
         const txt = (span.textContent || '').trim();
-        if (/^image\s*gallery$/i.test(txt)) {
-            span.remove();
-        }
+        if (/^image\s*gallery$/i.test(txt)) span.remove();
     });
 
     const folderInput = gallery.querySelector('.gallery-folder-input');
@@ -6949,22 +6972,14 @@ function restructureGalleryHeader() {
     const headerDeleteBtn = createHeaderDeleteButton();
 
     [flexContainer, refreshBtn, bulkBtn, headerDeleteBtn].forEach(el => {
-        if (el && el.parentNode !== rightGroup) {
-            rightGroup.appendChild(el);
-        }
+        if (el && el.parentNode !== rightGroup) rightGroup.appendChild(el);
     });
 
-    if (refreshBtn && bulkBtn) {
-        if (refreshBtn.nextElementSibling !== bulkBtn) {
-            rightGroup.insertBefore(refreshBtn, bulkBtn);
-        }
+    if (refreshBtn && bulkBtn && refreshBtn.nextElementSibling !== bulkBtn) {
+        rightGroup.insertBefore(refreshBtn, bulkBtn);
     }
-
-    if (bulkBtn && headerDeleteBtn) {
-        if (headerDeleteBtn.previousElementSibling !== bulkBtn) {
-            rightGroup.insertBefore(headerDeleteBtn, bulkBtn.nextSibling);
-            console.log('[GIC] 🗑 ヘッダー削除ボタンを一括選択ボタンの右隣に再配置');
-        }
+    if (bulkBtn && headerDeleteBtn && headerDeleteBtn.previousElementSibling !== bulkBtn) {
+        rightGroup.insertBefore(headerDeleteBtn, bulkBtn.nextSibling);
     }
 
     if (flexContainer) {
@@ -6987,11 +7002,16 @@ function restructureGalleryHeader() {
         el.setAttribute('draggable', 'false');
     });
 
+    // ★ 各ボタンの寸法を毎回 S() で再適用（解像度変化に追従）
     if (bulkBtn) {
         bulkBtn.style.setProperty('position', 'relative', 'important');
         bulkBtn.style.setProperty('z-index', '200', 'important');
         bulkBtn.style.setProperty('pointer-events', 'auto', 'important');
-        bulkBtn.style.setProperty('min-width', S(80) + 'px', 'important');
+        bulkBtn.style.setProperty('min-width', S(100) + 'px', 'important');
+        bulkBtn.style.setProperty('height', S(28) + 'px', 'important');
+        bulkBtn.style.setProperty('padding', `0 ${S(8)}px`, 'important');
+        bulkBtn.style.setProperty('font-size', S(12) + 'px', 'important');
+        bulkBtn.style.setProperty('border-radius', S(4) + 'px', 'important');
         bulkBtn.style.setProperty('box-sizing', 'border-box', 'important');
         bulkBtn.style.setProperty('text-align', 'center', 'important');
         bulkBtn.style.setProperty('margin', '0', 'important');
@@ -7006,6 +7026,12 @@ function restructureGalleryHeader() {
         refreshBtn.style.setProperty('pointer-events', 'auto', 'important');
         refreshBtn.style.setProperty('margin', '0', 'important');
         refreshBtn.style.setProperty('flex', '0 0 auto', 'important');
+        refreshBtn.style.setProperty('display', 'inline-flex', 'important');
+        refreshBtn.style.setProperty('min-width', S(90) + 'px', 'important');
+        refreshBtn.style.setProperty('height', S(28) + 'px', 'important');
+        refreshBtn.style.setProperty('padding', `0 ${S(8)}px`, 'important');
+        refreshBtn.style.setProperty('font-size', S(12) + 'px', 'important');
+        refreshBtn.style.setProperty('border-radius', S(4) + 'px', 'important');
     }
 
     if (headerDeleteBtn) {
@@ -7013,15 +7039,40 @@ function restructureGalleryHeader() {
         headerDeleteBtn.style.setProperty('z-index', '200', 'important');
         headerDeleteBtn.style.setProperty('margin', '0', 'important');
         headerDeleteBtn.style.setProperty('flex', '0 0 auto', 'important');
+        headerDeleteBtn.style.setProperty('display', 'inline-flex', 'important');
+        headerDeleteBtn.style.setProperty('min-width', S(90) + 'px', 'important');
+        headerDeleteBtn.style.setProperty('height', S(28) + 'px', 'important');
+        headerDeleteBtn.style.setProperty('padding', `0 ${S(8)}px`, 'important');
+        headerDeleteBtn.style.setProperty('font-size', S(12) + 'px', 'important');
+        headerDeleteBtn.style.setProperty('border-radius', S(4) + 'px', 'important');
     }
+
+    // 解像度スケールでサイズが決まる要素（ソートセレクト等）にも追従させる
+    dragTitle.querySelectorAll(':scope > .flex-container.alignItemsCenter:not(#gic-header-right-group) .gallery-sort-select').forEach(el => {
+        el.style.setProperty('font-size', S(14) + 'px', 'important');
+        el.style.setProperty('height', S(28) + 'px', 'important');
+        el.style.setProperty('min-height', S(28) + 'px', 'important');
+        el.style.setProperty('padding', `0 ${S(6)}px`, 'important');
+        el.style.setProperty('border-radius', S(4) + 'px', 'important');
+        el.style.setProperty('box-sizing', 'border-box', 'important');
+    });
+    dragTitle.querySelectorAll(':scope > .flex-container.alignItemsCenter:not(#gic-header-right-group) .menu_button.menu_button_icon').forEach(el => {
+        el.style.setProperty('font-size', S(14) + 'px', 'important');
+        el.style.setProperty('height', S(28) + 'px', 'important');
+        el.style.setProperty('min-height', S(28) + 'px', 'important');
+        el.style.setProperty('padding', `0 ${S(8)}px`, 'important');
+        el.style.setProperty('border-radius', S(4) + 'px', 'important');
+        el.style.setProperty('box-sizing', 'border-box', 'important');
+        el.style.setProperty('display', 'inline-flex', 'important');
+        el.style.setProperty('align-items', 'center', 'important');
+        el.style.setProperty('gap', S(4) + 'px', 'important');
+    });
 
     updateHeaderDeleteButtonState();
 
     gallery.querySelectorAll('.flex-container.alignItemsCenter').forEach(c => {
         if (c === flexContainer) return;
-        if (c.children.length === 0 && !c.textContent.trim()) {
-            c.remove();
-        }
+        if (c.children.length === 0 && !c.textContent.trim()) c.remove();
     });
 }
 
@@ -9153,6 +9204,11 @@ function initializeGIC() {
         refreshUnregisterButtonState();
     });
 
+    window.addEventListener('resize', () => {
+        if (!isGalleryOpen()) return;
+        try { restructureGalleryHeader(); } catch (e) { /* ignore */ }
+    });
+    
     // ★ ImageDisplay の背景が切り替わった時に更新
     //   ImageDisplayExtension には change イベントが無いため、
     //   ポーリングで補完するが、手動切替時は下記でも検知できる
