@@ -78,14 +78,16 @@
                 --mainFontSize: calc(var(--exp-original-mainFontSize) * var(--exp-scale, 1));
             }
 
-            /* キャラクター一覧のキャラクター名を解像度に応じてスケーリング（2倍） */
+            /* キャラクター一覧のキャラクター名を解像度に応じてスケーリング（2倍）
+               フォントスケール（--exp-original-mainFontSize）とは掛け合わせず、
+               解像度係数 --exp-scale のみで拡大する（二重拡大の防止） */
             #rm_print_characters_block .character_select .character_name_block .ch_name,
             #rm_print_characters_block .character_select .ch_name,
             #rm_print_characters_block .character_name_block .ch_name,
             #rm_print_characters_block .ch_name,
             .character_select .character_name_block .ch_name,
             .character_select .ch_name {
-                font-size: calc(var(--exp-original-mainFontSize, 15px) * var(--exp-scale, 1) * 2) !important;
+                font-size: calc(15px * var(--exp-scale, 1) * 2) !important;
             }
         `;
         document.head.appendChild(style);
