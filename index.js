@@ -2,6 +2,7 @@
 // SillyTavern Expansion Pack
 //   各拡張をモジュールとして読み込むエントリポイント
 // ============================================================
+import './modules/extensions_collapse.js';
 
 import './modules/random_prompt_wildcard.js';
 
