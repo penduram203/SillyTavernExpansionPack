@@ -1115,11 +1115,11 @@ function getCurrentCharacterName() {
             background-color: #4299e1 !important;
         }
         body.gic-bulk-delete-mode .gic-bulk-delete-button {
-            background-color: #1a365d !important;
+            background-color: #0202c9 !important;
             border-color: #2b6cb0 !important;
         }
         body.gic-bulk-delete-mode .gic-bulk-delete-button:hover {
-            background-color: #2c5282 !important;
+            background-color: #205afa !important;
         }
 
         .gic-bulk-delete-button.gic-bulk-delete-disabled {
