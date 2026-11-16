@@ -31,7 +31,7 @@
             'common.updating': 'Updating…',
 
             // === GIC: ボタン ===
-            'gic.button.unregister': 'Release',
+            'gic.button.unregister': 'Unlink',
             'gic.button.delete': 'Delete',
             'gic.button.refresh': '🔄 Refresh',
             'gic.button.refreshing': 'Updating…',
