@@ -1432,7 +1432,7 @@ function getCurrentCharacterName() {
             transition: background-color 0.15s ease, opacity 0.15s ease !important;
         }
         #gic-header-delete-button.gic-header-delete-active {
-            background-color: #dc2626 !important;
+            background-color: #fc1717 !important;
             border-color: #fecaca !important;
             cursor: pointer !important;
             opacity: 1 !important;
@@ -1440,7 +1440,7 @@ function getCurrentCharacterName() {
             box-shadow: 0 0 8px rgba(220, 38, 38, 0.7) !important;
         }
         #gic-header-delete-button.gic-header-delete-active:hover {
-            background-color: #ef4444 !important;
+            background-color: #8c0707 !important;
             box-shadow: 0 0 12px rgba(239, 68, 68, 0.9) !important;
         }
 
