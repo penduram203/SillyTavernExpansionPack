@@ -85,7 +85,7 @@
             #rm_print_characters_block .ch_name,
             .character_select .character_name_block .ch_name,
             .character_select .ch_name {
-                font-size: calc(var(--exp-original-mainFontSize, 15px) * var(--exp-scale, 1) * 2) !important;
+                font-size: calc(var(--exp-original-mainFontSize, 15px) * var(--exp-scale, 1) * 1) !important;
             }
         `;
         document.head.appendChild(style);
