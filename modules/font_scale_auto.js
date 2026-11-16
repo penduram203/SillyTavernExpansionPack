@@ -485,7 +485,7 @@
         const dontShowInput = document.createElement('input');
         dontShowInput.type = 'checkbox';
         dontShowInput.id = 'exp-fs-dont-show';
-        dontShowInput.checked = true;   // デフォルトでチェック済み（毎回の再表示・再上書きを防ぐ）
+        dontShowInput.checked = false;   // デフォルトでチェック済み（毎回の再表示・再上書きを防ぐ）
         Object.assign(dontShowInput.style, {
             width: `${S(30)}px`, height: `${S(30)}px`, cursor: 'pointer', margin: '0',
         });
