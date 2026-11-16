@@ -6210,7 +6210,7 @@ function updateBulkDeleteButton() {
         btn.classList.remove('gic-bulk-delete-disabled');
         btn.disabled = false;
         btn.textContent = text;
-        btn.style.setProperty('min-width', S(100) + 'px', 'important');
+        btn.style.setProperty('min-width', S(80) + 'px', 'important');
         btn.style.setProperty('box-sizing', 'border-box', 'important');
         btn.style.setProperty('text-align', 'center', 'important');
     }
@@ -6251,7 +6251,7 @@ function createBulkDeleteButton() {
     btn.className = 'gic-bulk-delete-button';
     btn.textContent = _t('gic.button.bulk_select', '一括選択');
     btn.title = _t('gic.title.bulk_toggle', '一括選択モードの開始／終了');
-    btn.style.setProperty('min-width', S(100) + 'px', 'important');
+    btn.style.setProperty('min-width', S(80) + 'px', 'important');
     btn.style.setProperty('box-sizing', 'border-box', 'important');
     btn.style.setProperty('text-align', 'center', 'important');
     btn.style.setProperty('height', S(28) + 'px', 'important');
@@ -6285,7 +6285,7 @@ function createRefreshButton() {
     btn.textContent = _t('gic.button.refresh', '🔄 更新');
     btn.title = _t('gic.title.refresh', 'ギャラリーを手動で更新（キャッシュをクリアして再読込）');
 
-    btn.style.setProperty('min-width', S(90) + 'px', 'important');
+    btn.style.setProperty('min-width', S(60) + 'px', 'important');
     btn.style.setProperty('height', S(28) + 'px', 'important');
     btn.style.setProperty('padding', `0 ${S(8)}px`, 'important');
     btn.style.setProperty('margin', '0', 'important');
@@ -6395,7 +6395,7 @@ function createHeaderDeleteButton() {
     btn.textContent = `🗑 ${_t('common.delete', '削除')}`;
     btn.title = _t('gic.title.delete_header_disabled', '一括選択モードを開始すると使えます');
 
-    btn.style.setProperty('min-width', S(90) + 'px', 'important');
+    btn.style.setProperty('min-width', S(60) + 'px', 'important');
     btn.style.setProperty('height', S(28) + 'px', 'important');
     btn.style.setProperty('padding', `0 ${S(8)}px`, 'important');
     btn.style.setProperty('margin', '0', 'important');
@@ -6988,7 +6988,7 @@ function restructureGalleryHeader() {
         bulkBtn.style.setProperty('position', 'relative', 'important');
         bulkBtn.style.setProperty('z-index', '200', 'important');
         bulkBtn.style.setProperty('pointer-events', 'auto', 'important');
-        bulkBtn.style.setProperty('min-width', S(100) + 'px', 'important');
+        bulkBtn.style.setProperty('min-width', S(80) + 'px', 'important');
         bulkBtn.style.setProperty('box-sizing', 'border-box', 'important');
         bulkBtn.style.setProperty('text-align', 'center', 'important');
         bulkBtn.style.setProperty('margin', '0', 'important');
