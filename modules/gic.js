@@ -6231,10 +6231,13 @@ function updateBulkDeleteBanner() {
     if (!_bulkDeleteMode) return;
     const gallery = document.getElementById('gallery');
     if (!gallery) return;
+    const _t = (k, fb, p) => window.ExpI18n?.t(k, fb, p) ?? fb;
     const count = _bulkDeleteSelected.size;
     const text = count > 0
-        ? `一括選択中 — ${count} 枚（🗑 で削除 / ドラッグでまとめて登録）`
-        : '一括選択モード — 画像クリックで選択';
+        ? _t('gic.banner.bulk_selected',
+             `一括選択中 — ${count} 枚（🗑 で削除 / ドラッグでまとめて登録）`,
+             { count })
+        : _t('gic.banner.bulk_mode', '一括選択モード — 画像クリックで選択');
     gallery.style.setProperty('--gic-bulk-banner-text', `"${text}"`);
 }
 
@@ -9119,6 +9122,7 @@ function initializeGIC() {
             try {
                 updateBulkDeleteButton();
                 updateHeaderDeleteButtonState();
+                updateBulkDeleteBanner();
                 const rb = document.getElementById('gic-refresh-gallery-button');
                 if (rb && !rb.disabled) rb.textContent = _t('gic.button.refresh', '🔄 更新');
                 const ub = document.getElementById('gic-unregister-button');
