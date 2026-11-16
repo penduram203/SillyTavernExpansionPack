@@ -192,22 +192,34 @@
     }
 
     function detectLanguage() {
+        // ① <html lang="..."> を最優先（ST が UI 言語に合わせて更新する）
+        try {
+            const htmlLang = (document.documentElement.getAttribute('lang') || '').toLowerCase().trim();
+            if (htmlLang) {
+                if (htmlLang.startsWith('ja')) return 'ja';
+                return 'en';
+            }
+        } catch (e) { /* ignore */ }
+
+        // ② power_user.user_language
         try {
             const ctx = getSTContext();
             const raw = ctx?.power_user?.user_language
                      ?? ctx?.powerUserSettings?.user_language
                      ?? window.power_user?.user_language;
             if (raw) {
-                const s = String(raw).toLowerCase();
+                const s = String(raw).toLowerCase().trim();
                 if (s.startsWith('ja')) return 'ja';
                 return 'en';
             }
         } catch (e) { /* ignore */ }
-        // ST context が未準備の時はブラウザ言語で暫定判定
+
+        // ③ navigator.language フォールバック
         try {
             const navLang = String(navigator.language || 'en').toLowerCase();
             if (navLang.startsWith('ja')) return 'ja';
         } catch (e) { /* ignore */ }
+
         return 'en';
     }
 
@@ -240,7 +252,7 @@
         }
         return () => {};
     }
-
+    
     function pollLanguageChange() {
         const next = detectLanguage();
         if (next !== _currentLang) {
@@ -252,7 +264,14 @@
             applyAllTranslations();
         }
     }
-    setInterval(pollLanguageChange, 1000);
+    setInterval(pollLanguageChange, 500);
+
+    // ★ <html lang="..."> の変化を直接監視（ST の言語切替を即検知）
+    (function watchHtmlLang() {
+        if (!document.documentElement) return;
+        const mo = new MutationObserver(() => pollLanguageChange());
+        mo.observe(document.documentElement, { attributes: true, attributeFilter: ['lang'] });
+    })();
 
     // ------------------------------------------------------------
     // data-exp-i18n 属性による自動翻訳
@@ -340,9 +359,29 @@
         const startOnce = () => {
             if (started) return;
             started = true;
+            const prev = _currentLang;
             _currentLang = detectLanguage();
             startObserver();
-            console.log(`${LOG} started (lang=${_currentLang})`);
+            applyAllTranslations();
+            // ★ 言語が変わっていたらリスナーにも通知する
+            //   （gic.js 等のボタンラベルが英語に切り替わる）
+            if (_currentLang !== prev) {
+                for (const cb of _listeners) {
+                    try { cb(_currentLang); } catch (e) { console.warn(`${LOG} listener error:`, e); }
+                }
+            }
+            // ★ 診断ログ: 何を見て判定したか
+            try {
+                const ctx = getSTContext();
+                console.log(
+                    `${LOG} started (lang=${_currentLang}) ` +
+                    `[html.lang="${document.documentElement.getAttribute('lang') || ''}", ` +
+                    `user_language="${ctx?.power_user?.user_language ?? ''}", ` +
+                    `navigator="${navigator.language}"]`
+                );
+            } catch (e) {
+                console.log(`${LOG} started (lang=${_currentLang})`);
+            }
         };
 
         const ctx = getSTContext();
