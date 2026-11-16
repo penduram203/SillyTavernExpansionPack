@@ -74,6 +74,10 @@
             'gic.toast.bulk_no_selection': 'No images are selected for deletion.',
             'gic.toast.bulk_select_first': 'Please select images using the "Bulk Select" button first.',
 
+            // === GIC: バナー（ギャラリー上部の赤枠） ===
+            'gic.banner.bulk_mode': 'Bulk selection mode — click images to select',
+            'gic.banner.bulk_selected': 'Bulk selecting — {count} image(s) (🗑 to delete / drag to register together)',
+            
             // === GIC: 確認 ===
             'gic.confirm.bulk_delete': 'Delete the {count} selected image(s)?\nThis operation cannot be undone.',
 
@@ -153,6 +157,10 @@
             'gic.toast.bulk_no_selection': '削除する画像が選択されていません',
             'gic.toast.bulk_select_first': '先に「一括選択」ボタンで画像を選択してください',
 
+            // === GIC: バナー（ギャラリー上部の赤枠） ===
+            'gic.banner.bulk_mode': '一括選択モード — 画像クリックで選択',
+            'gic.banner.bulk_selected': '一括選択中 — {count} 枚（🗑 で削除 / ドラッグでまとめて登録）',
+            
             // === GIC: 確認 ===
             'gic.confirm.bulk_delete': '選択した {count} 枚の画像を削除しますか？\nこの操作は取り消せません。',
 
