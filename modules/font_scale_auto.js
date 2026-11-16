@@ -1,12 +1,14 @@
 // font_scale_auto.js
-// v8.0-simple: ユーザー操作と一切競合しない設計
+// v8.2: ドラッグ中の最終観測値を採用 + 離した直後の書き換えを防止
 //
 // ★ 設計
 //   - ダイアログで決めた解像度スケールは「起動直後の数秒だけ」適用する
-//     （ST の起動時設定読込との競合対策）
 //   - ユーザーがスライダー/カウンターに触れた瞬間に自動適用は完全停止
-//   - ドラッグ判定・ピクセル計算・setter ガード・強制ループは全廃
-//   - 値の適用は ST 自身の input ハンドラ経由（設定保存も ST に任せる）
+//   - ドラッグ中は ST に input を渡さない（レイアウト変動による点滅ループ防止）
+//   - ドラッグ終了時は「ドラッグ中に最後に観測した値」を採用する
+//     （離した瞬間の slider.value は書き換えられている可能性があるため読まない）
+//   - 離した直後の change を一定時間 ST に渡さず、反映後は短時間だけ値を監視して
+//     ずれていたら採用値で書き戻す
 //   - 「再表示しない」はデフォルトでチェック済み
 //
 
@@ -28,6 +30,10 @@
     // 起動直後にダイアログ値を再適用するタイミング(ms)。ユーザー操作で即キャンセルされる
     const STARTUP_REAPPLY_DELAYS_MS = [300, 1000, 2500];
 
+    // ドラッグ終了後に change を ST に渡さない期間 / 値を監視する期間(ms)
+    const POST_DRAG_BLOCK_CHANGE_MS = 400;
+    const POST_DRAG_SETTLE_MS = 600;
+
     const PRESETS = [
         { label: '1280×720 (HD)',          w: 1280, h: 720 },
         { label: '1280×800 (WXGA)',        w: 1280, h: 800 },
@@ -48,11 +54,19 @@
     const DEFAULT_IDX = 6;
 
     let _verbose = false;
-    // ユーザーがスライダー/カウンターに触れたか（true なら自動適用は一切しない）
+    // ユーザーがスライダー/カウンターに触れたか（true なら起動時の自動適用は一切しない）
     let _userTouched = false;
     // 起動直後に再適用する予定のスケール（null なら予定なし）
     let _startupScale = null;
     let _startupTimers = [];
+
+    // ── ドラッグ状態 ──
+    let _dragging = false;
+    let _lastDragValue = null;        // ドラッグ中に最後に観測した値
+    let _blockChangeUntil = 0;        // この時刻まで trusted な change を ST に渡さない
+    let _settleTarget = null;         // 反映後に監視する採用値
+    let _settleUntil = 0;
+    let _settleRAF = null;
 
     function vlog(...a) { if (_verbose) console.log(LOG, ...a); }
 
@@ -68,6 +82,14 @@
     function computeScale(w) {
         if (!Number.isFinite(w) || w <= 0) return 1;
         return Math.max(MIN_SCALE, Math.min(MAX_SCALE, w / BASE_W));
+    }
+
+    function clampScale(v) {
+        return Math.max(MIN_SCALE, Math.min(MAX_SCALE, v));
+    }
+
+    function round2(v) {
+        return Math.round(v * 100) / 100;
     }
 
     // ============================================================
@@ -141,8 +163,6 @@
 
     // ============================================================
     // 起動時: ST が保持している値を UI に反映
-    //   max=1.5 の状態で ST が slider.value=2.0 を設定すると 1.5 に
-    //   クランプされるため、max を広げた後に power_user の値で再同期する
     // ============================================================
     function syncUiFromSettings() {
         if (_userTouched) return;
@@ -171,7 +191,7 @@
         setMainFontSize(scale);
 
         if (dispatch && slider) {
-            // 合成イベント(isTrusted=false)なので、こちらの trusted リスナーは反応しない
+            // 合成イベント(isTrusted=false)なので、こちらの trusted リスナーは素通しする
             try { slider.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) { /* ignore */ }
         }
 
@@ -190,7 +210,7 @@
     function applyFontScale(scale) {
         let s = Number(scale);
         if (!Number.isFinite(s)) s = 1;
-        s = Math.max(MIN_SCALE, Math.min(MAX_SCALE, s));
+        s = clampScale(s);
 
         // ダイアログ適用は「ユーザーの明示操作」なので、触れた扱いをリセットして適用する
         _userTouched = false;
@@ -216,8 +236,7 @@
     }
 
     // ============================================================
-    // ユーザー操作の検出 → 自動適用を即停止
-    //   pointerdown / keydown / wheel / trusted input / change
+    // ユーザー操作の検出 → 起動時の自動適用を即停止
     // ============================================================
     function isFontScaleTarget(el) {
         return !!el && (el.id === 'font_scale' || el.id === 'font_scale_counter');
@@ -227,39 +246,74 @@
         if (!_userTouched) {
             _userTouched = true;
             cancelStartupReapply();
-            vlog(`ユーザー操作を検知 (${reason}) → 自動適用を停止`);
+            vlog(`ユーザー操作を検知 (${reason}) → 起動時の自動適用を停止`);
         }
     }
 
-    // ユーザーがスライダーをドラッグ中か
-    let _dragging = false;
+    // ============================================================
+    // ドラッグ終了後の監視（採用値からずれていたら書き戻す）
+    // ============================================================
+    function stopSettleWatch() {
+        _settleTarget = null;
+        _settleUntil = 0;
+        if (_settleRAF) { cancelAnimationFrame(_settleRAF); _settleRAF = null; }
+    }
 
+    function startSettleWatch(target) {
+        stopSettleWatch();
+        _settleTarget = target;
+        _settleUntil = performance.now() + POST_DRAG_SETTLE_MS;
+
+        const loop = () => {
+            _settleRAF = null;
+            if (_settleTarget === null || _dragging) return;
+            if (performance.now() > _settleUntil) { stopSettleWatch(); return; }
+
+            const slider = document.getElementById('font_scale');
+            const counter = document.getElementById('font_scale_counter');
+            const sv = parseFloat(slider?.value);
+            const cv = parseFloat(counter?.value);
+            const pv = getCurrentScale();
+            const off =
+                (Number.isFinite(sv) && Math.abs(sv - _settleTarget) > 0.005) ||
+                (Number.isFinite(cv) && Math.abs(cv - _settleTarget) > 0.005) ||
+                (Number.isFinite(pv) && Math.abs(pv - _settleTarget) > 0.005);
+            if (off) {
+                vlog(`書き換えを検知 → ${_settleTarget} に書き戻し (slider=${sv}, counter=${cv}, power_user=${pv})`);
+                applyScaleNow(_settleTarget, false);
+            }
+            _settleRAF = requestAnimationFrame(loop);
+        };
+        _settleRAF = requestAnimationFrame(loop);
+    }
+
+    // ============================================================
+    // ドラッグ終了
+    //   ドラッグ中に最後に観測した値を採用する（離した瞬間の slider.value は読まない）
+    // ============================================================
     function finishDrag(reason) {
         if (!_dragging) return;
         _dragging = false;
 
         const slider = document.getElementById('font_scale');
-        if (!slider) return;
+        if (!slider) { _lastDragValue = null; return; }
 
-        // ブラウザ自身が決めた最終値をそのまま採用（ピクセル計算はしない）
-        let v = parseFloat(slider.value);
+        let v = _lastDragValue;
+        _lastDragValue = null;
+        if (!Number.isFinite(v)) v = parseFloat(slider.value);   // input が一度も来なかった場合のみ
         if (!Number.isFinite(v)) return;
-        v = Math.max(MIN_SCALE, Math.min(MAX_SCALE, v));
+        v = round2(clampScale(v));
 
-        vlog(`ドラッグ終了 (${reason}): ${v}`);
+        vlog(`ドラッグ終了 (${reason}): 採用値=${v}, 離した時の slider.value=${slider.value}`);
 
-        // 数値欄も同期
-        setNativeValue(document.getElementById('font_scale_counter'), v);
-        setMainFontSize(v);
+        // 離した直後の change が ST に値を書き換えさせないようブロック
+        _blockChangeUntil = performance.now() + POST_DRAG_BLOCK_CHANGE_MS;
 
-        // ST 自身のハンドラに 1 回だけ反映・保存させる（合成イベントなので suppress 対象外）
-        try {
-            slider.dispatchEvent(new Event('input', { bubbles: true }));
-        } catch (e) { /* ignore */ }
-        try {
-            const ctx = getSTContext();
-            if (typeof ctx?.saveSettingsDebounced === 'function') ctx.saveSettingsDebounced();
-        } catch (e) { /* ignore */ }
+        // ST 自身に 1 回だけ反映・保存させる
+        applyScaleNow(v, true);
+
+        // 反映後の短時間は値を監視する
+        startSettleWatch(v);
     }
 
     function setupUserInteractionListeners() {
@@ -267,7 +321,12 @@
         const onDown = (e) => {
             if (!isFontScaleTarget(e.target)) return;
             markUserTouched(e.type);
-            if (e.target.id === 'font_scale') _dragging = true;
+            stopSettleWatch();                       // 新しい操作が始まったら監視は止める
+            if (e.target.id === 'font_scale') {
+                _dragging = true;
+                _lastDragValue = parseFloat(e.target.value);
+                if (!Number.isFinite(_lastDragValue)) _lastDragValue = null;
+            }
         };
         ['pointerdown', 'mousedown', 'touchstart'].forEach(type => {
             document.addEventListener(type, onDown, { capture: true, passive: true });
@@ -279,28 +338,33 @@
         });
         window.addEventListener('blur', () => finishDrag('blur'));
 
-        // ── その他のユーザー操作（キーボード・ホイール） ──
+        // ── キーボード・ホイール ──
         ['keydown', 'wheel'].forEach(type => {
             document.addEventListener(type, (e) => {
-                if (isFontScaleTarget(e.target)) markUserTouched(type);
+                if (isFontScaleTarget(e.target)) {
+                    markUserTouched(type);
+                    stopSettleWatch();
+                }
             }, { capture: true, passive: true });
         });
 
-        // ── input: ドラッグ中は ST に渡さない（レイアウト変動によるループ防止） ──
+        // ── input ──
         document.addEventListener('input', (e) => {
-            if (!e.isTrusted) return;               // 合成イベントは素通し
+            if (!e.isTrusted) return;                // 自前の合成イベントは素通し
             const t = e.target;
             if (!isFontScaleTarget(t)) return;
             markUserTouched('input');
 
             const v = parseFloat(t.value);
             if (!Number.isFinite(v)) return;
-            const clamped = Math.max(MIN_SCALE, Math.min(MAX_SCALE, v));
+            const clamped = clampScale(v);
 
             if (_dragging && t.id === 'font_scale') {
-                // ST のハンドラへ伝播させない。数値欄だけ表示用に更新
+                // ドラッグ中の最終観測値を記録し、ST には渡さない（点滅ループ防止）
+                _lastDragValue = clamped;
                 e.stopImmediatePropagation();
-                setNativeValue(document.getElementById('font_scale_counter'), clamped);
+                setNativeValue(document.getElementById('font_scale_counter'), round2(clamped));
+                vlog(`ドラッグ中の値: ${clamped}`);
                 return;
             }
 
@@ -309,15 +373,22 @@
             vlog(`ユーザー入力 (${t.id}): ${clamped}`);
         }, true);
 
-        // change は値を書き換えず、フォントサイズ追従のみ
+        // ── change ──
         document.addEventListener('change', (e) => {
             if (!e.isTrusted) return;
             const t = e.target;
             if (!isFontScaleTarget(t)) return;
             markUserTouched('change');
-            if (_dragging && t.id === 'font_scale') return;   // ドラッグ中は finishDrag に任せる
+
+            // ドラッグ中・ドラッグ直後のネイティブ change は ST に渡さない
+            if (t.id === 'font_scale' && (_dragging || performance.now() < _blockChangeUntil)) {
+                e.stopImmediatePropagation();
+                vlog(`change をブロック (value=${t.value})`);
+                return;
+            }
+
             const v = parseFloat(t.value);
-            if (Number.isFinite(v)) setMainFontSize(Math.max(MIN_SCALE, Math.min(MAX_SCALE, v)));
+            if (Number.isFinite(v)) setMainFontSize(clampScale(v));
         }, true);
     }
 
@@ -414,7 +485,7 @@
         const dontShowInput = document.createElement('input');
         dontShowInput.type = 'checkbox';
         dontShowInput.id = 'exp-fs-dont-show';
-        dontShowInput.checked = true;   // ★ デフォルトでチェック済み（毎回の再表示・再上書きを防ぐ）
+        dontShowInput.checked = true;   // デフォルトでチェック済み（毎回の再表示・再上書きを防ぐ）
         Object.assign(dontShowInput.style, {
             width: `${S(30)}px`, height: `${S(30)}px`, cursor: 'pointer', margin: '0',
         });
@@ -545,8 +616,11 @@
             const counter = document.getElementById('font_scale_counter');
             const ctx = getSTContext();
             return {
-                version: 'v8.0-simple',
+                version: 'v8.2',
                 userTouched: _userTouched,
+                dragging: _dragging,
+                lastDragValue: _lastDragValue,
+                settleTarget: _settleTarget,
                 startupScale: _startupScale,
                 currentScale: getCurrentScale(),
                 powerUserSettings: ctx?.powerUserSettings?.font_scale,
@@ -555,6 +629,7 @@
                 sliderValue: slider?.value,
                 sliderMin: slider?.getAttribute('min'),
                 sliderMax: slider?.getAttribute('max'),
+                sliderStep: slider?.getAttribute('step'),
                 counterValue: counter?.value,
                 mainFontSize: document.documentElement.style.getPropertyValue('--mainFontSize'),
             };
@@ -567,5 +642,5 @@
         },
     };
 
-    console.log(`${LOG} ✅ installed (v8.0-simple)`);
+    console.log(`${LOG} ✅ installed (v8.2)`);
 })();
