@@ -6087,15 +6087,16 @@ function urlToServerPath(url) {
 
 function enterBulkDeleteMode() {
     if (_bulkDeleteMode) return;
-
-    // ★ 念のため page switch 状態をリセット
     if (isPageSwitchStale()) forceResetPageSwitch('enter bulk mode');
 
     _bulkDeleteMode = true;
     _bulkDeleteSelected.clear();
     document.body.classList.add('gic-bulk-delete-mode');
     console.log('[GIC-Bulk] 一括選択モード開始');
-    showBulkDeleteToast('一括選択モード — 画像クリックで選択');
+    showBulkDeleteToast(
+        (window.ExpI18n?.t('gic.toast.bulk_started', '一括選択モード — 画像クリックで選択'))
+        || '一括選択モード — 画像クリックで選択'
+    );
     updateBulkDeleteButton();
     updateBulkDeleteBanner();
     updateHeaderDeleteButtonState();
@@ -6107,13 +6108,14 @@ function exitBulkDeleteMode() {
     _bulkDeleteSelected.clear();
     document.body.classList.remove('gic-bulk-delete-mode');
     document.querySelectorAll('.gic-bulk-selected').forEach(el => el.classList.remove('gic-bulk-selected'));
-    showBulkDeleteToast('一括選択モードを終了しました');
+    showBulkDeleteToast(
+        (window.ExpI18n?.t('gic.toast.bulk_ended', '一括選択モードを終了しました'))
+        || '一括選択モードを終了しました'
+    );
     updateBulkDeleteButton();
     updateHeaderDeleteButtonState();
 
-    // ★ page switch 状態もリセット
     if (isPageSwitchStale()) forceResetPageSwitch('exit bulk mode');
-
     console.log('[GIC-Bulk] 一括選択モード終了');
 }
 
@@ -6170,26 +6172,39 @@ function updateHeaderDeleteButtonState() {
     const btn = document.getElementById('gic-header-delete-button');
     if (!btn) return;
 
+    const _t = (k, fb, p) => window.ExpI18n?.t(k, fb, p) ?? fb;
+
     if (_bulkDeleteMode) {
         btn.classList.add('gic-header-delete-active');
-        btn.title = _bulkDeleteSelected.size > 0
-            ? `選択中の ${_bulkDeleteSelected.size} 枚を削除`
-            : '先に画像を選択してください';
+        if (_bulkDeleteSelected.size > 0) {
+            btn.title = _t('gic.title.delete_header_ready',
+                `選択中の ${_bulkDeleteSelected.size} 枚を削除`,
+                { count: _bulkDeleteSelected.size });
+        } else {
+            btn.title = _t('gic.title.delete_header_select_first', '先に画像を選択してください');
+        }
     } else {
         btn.classList.remove('gic-header-delete-active');
-        btn.title = '一括選択モードを開始すると使えます';
+        btn.title = _t('gic.title.delete_header_disabled', '一括選択モードを開始すると使えます');
     }
 }
 
 function updateBulkDeleteButton() {
+    const _t = (k, fb, p) => window.ExpI18n?.t(k, fb, p) ?? fb;
     const S = window.S || ((px) => px);
     const btn = document.getElementById('gic-bulk-delete-button');
     const refreshBtn = document.getElementById('gic-refresh-gallery-button');
     const floatingBtn = document.getElementById('gic-floating-bulk-exit');
 
-    const text = _bulkDeleteMode
-        ? (_bulkDeleteSelected.size > 0 ? `選択終了 (${_bulkDeleteSelected.size})` : '選択終了')
-        : '一括選択';
+    let text;
+    if (!_bulkDeleteMode) {
+        text = _t('gic.button.bulk_select', '一括選択');
+    } else if (_bulkDeleteSelected.size > 0) {
+        text = _t('gic.button.bulk_end_count', `選択終了 (${_bulkDeleteSelected.size})`,
+                  { count: _bulkDeleteSelected.size });
+    } else {
+        text = _t('gic.button.bulk_end', '選択終了');
+    }
 
     if (btn) {
         btn.classList.remove('gic-bulk-delete-disabled');
@@ -6199,9 +6214,7 @@ function updateBulkDeleteButton() {
         btn.style.setProperty('box-sizing', 'border-box', 'important');
         btn.style.setProperty('text-align', 'center', 'important');
     }
-    if (floatingBtn) {
-        floatingBtn.textContent = text;
-    }
+    if (floatingBtn) floatingBtn.textContent = text;
     if (refreshBtn) {
         if (_bulkDeleteMode) {
             refreshBtn.style.setProperty('display', 'none', 'important');
@@ -6229,14 +6242,15 @@ function createBulkDeleteButton() {
     let btn = document.getElementById('gic-bulk-delete-button');
     if (btn) return btn;
 
+    const _t = (k, fb) => window.ExpI18n?.t(k, fb) ?? fb;
     const S = window.S || ((px) => px);
 
     btn = document.createElement('button');
     btn.id = 'gic-bulk-delete-button';
     btn.type = 'button';
     btn.className = 'gic-bulk-delete-button';
-    btn.textContent = '一括選択';
-    btn.title = '一括選択モードの開始／終了';
+    btn.textContent = _t('gic.button.bulk_select', '一括選択');
+    btn.title = _t('gic.title.bulk_toggle', '一括選択モードの開始／終了');
     btn.style.setProperty('min-width', S(100) + 'px', 'important');
     btn.style.setProperty('box-sizing', 'border-box', 'important');
     btn.style.setProperty('text-align', 'center', 'important');
@@ -6246,11 +6260,8 @@ function createBulkDeleteButton() {
     btn.style.setProperty('border-radius', S(4) + 'px', 'important');
     btn.addEventListener('click', (e) => {
         e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
-        if (_bulkDeleteMode) {
-            exitBulkDeleteMode();
-        } else {
-            enterBulkDeleteMode();
-        }
+        if (_bulkDeleteMode) exitBulkDeleteMode();
+        else enterBulkDeleteMode();
     });
     return btn;
 }
@@ -6264,14 +6275,15 @@ function createRefreshButton() {
     let btn = document.getElementById('gic-refresh-gallery-button');
     if (btn) return btn;
 
+    const _t = (k, fb) => window.ExpI18n?.t(k, fb) ?? fb;
     const S = window.S || ((px) => px);
 
     btn = document.createElement('button');
     btn.id = 'gic-refresh-gallery-button';
     btn.type = 'button';
     btn.className = 'gic-refresh-gallery-button menu_button';
-    btn.textContent = '🔄 更新';
-    btn.title = 'ギャラリーを手動で更新（キャッシュをクリアして再読込）';
+    btn.textContent = _t('gic.button.refresh', '🔄 更新');
+    btn.title = _t('gic.title.refresh', 'ギャラリーを手動で更新（キャッシュをクリアして再読込）');
 
     btn.style.setProperty('min-width', S(90) + 'px', 'important');
     btn.style.setProperty('height', S(28) + 'px', 'important');
@@ -6307,7 +6319,7 @@ function createRefreshButton() {
         if (btn.disabled) return;
 
         btn.disabled = true;
-        btn.textContent = '更新中…';
+        btn.textContent = _t('gic.button.refreshing', '更新中…');
         btn.style.setProperty('opacity', '0.6', 'important');
         btn.style.setProperty('cursor', 'wait', 'important');
 
@@ -6317,7 +6329,7 @@ function createRefreshButton() {
             console.warn('[GIC] 手動リフレッシュエラー:', err);
         } finally {
             btn.disabled = false;
-            btn.textContent = '🔄 更新';
+            btn.textContent = _t('gic.button.refresh', '🔄 更新');
             btn.style.setProperty('opacity', '1', 'important');
             btn.style.setProperty('cursor', 'pointer', 'important');
         }
@@ -6373,14 +6385,15 @@ function createHeaderDeleteButton() {
     let btn = document.getElementById('gic-header-delete-button');
     if (btn) return btn;
 
+    const _t = (k, fb) => window.ExpI18n?.t(k, fb) ?? fb;
     const S = window.S || ((px) => px);
 
     btn = document.createElement('button');
     btn.id = 'gic-header-delete-button';
     btn.type = 'button';
     btn.className = 'gic-header-delete-button menu_button';
-    btn.textContent = '🗑 削除';
-    btn.title = '一括選択モードを開始すると使えます';
+    btn.textContent = `🗑 ${_t('common.delete', '削除')}`;
+    btn.title = _t('gic.title.delete_header_disabled', '一括選択モードを開始すると使えます');
 
     btn.style.setProperty('min-width', S(90) + 'px', 'important');
     btn.style.setProperty('height', S(28) + 'px', 'important');
@@ -6402,7 +6415,8 @@ function createHeaderDeleteButton() {
         e.stopPropagation();
         if (!_bulkDeleteMode) return;
         if (_bulkDeleteSelected.size === 0) {
-            showBulkDeleteToast('削除する画像を選択してください');
+            showBulkDeleteToast(window.ExpI18n?.t('gic.toast.bulk_no_selection',
+                '削除する画像が選択されていません') ?? '削除する画像が選択されていません');
             return;
         }
         executeBulkDelete();
@@ -6543,13 +6557,20 @@ async function tryDeleteImage(rawPath) {
 }
 
 async function executeBulkDelete() {
+    const _t = (k, fb, p) => window.ExpI18n?.t(k, fb, p) ?? fb;
+
     if (_bulkDeleteSelected.size === 0) {
         console.warn('[GIC-Bulk] 選択された画像がありません');
-        showBulkDeleteToast('削除する画像が選択されていません');
+        showBulkDeleteToast(_t('gic.toast.bulk_no_selection', '削除する画像が選択されていません'));
         return;
     }
     const count = _bulkDeleteSelected.size;
-    if (!window.confirm(`選択した ${count} 枚の画像を削除しますか？\nこの操作は取り消せません。`)) return;
+    const confirmMsg = _t(
+        'gic.confirm.bulk_delete',
+        `選択した ${count} 枚の画像を削除しますか？\nこの操作は取り消せません。`,
+        { count }
+    );
+    if (!window.confirm(confirmMsg)) return;
 
     const paths = [];
     _bulkDeleteSelected.forEach(path => { if (path) paths.push(path); });
@@ -8142,11 +8163,13 @@ function createUnregisterButton() {
     let btn = document.getElementById(UNREGISTER_BUTTON_ID);
     if (btn) return btn;
 
+    const _t = (k, fb) => window.ExpI18n?.t(k, fb) ?? fb;
+
     btn = document.createElement('button');
     btn.id = UNREGISTER_BUTTON_ID;
     btn.type = 'button';
-    btn.textContent = '解除';                                    // ★ 変更: 登録解除 → 解除
-    btn.title = '現在表示中の画像をセルから登録解除する';
+    btn.textContent = _t('gic.button.unregister', '解除');
+    btn.title = _t('gic.title.unregister', '現在表示中の画像をセルから登録解除する');
     btn.addEventListener('click', async (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -8156,13 +8179,13 @@ function createUnregisterButton() {
         try {
             const ok = await unregisterCurrentImage();
             if (ok) {
-                showBottomToast('画像の登録が解除されました');
+                showBottomToast(_t('gic.toast.unregistered', '画像の登録が解除されました'));
             } else {
-                showBottomToast('登録解除に失敗しました', { type: 'error' });
+                showBottomToast(_t('gic.toast.unregister_failed', '登録解除に失敗しました'), { type: 'error' });
             }
         } catch (err) {
             console.warn('[GIC] 登録解除エラー:', err);
-            showBottomToast('登録解除に失敗しました', { type: 'error' });
+            showBottomToast(_t('gic.toast.unregister_failed', '登録解除に失敗しました'), { type: 'error' });
         } finally {
             btn.disabled = false;
         }
@@ -8178,113 +8201,80 @@ function createUnregisterButton() {
 // ============================================================
 function showDeleteConfirmDialog(fileName) {
     return new Promise((resolve) => {
+        const _t = (k, fb) => window.ExpI18n?.t(k, fb) ?? fb;
+
         const existing = document.getElementById(DELETE_CONFIRM_DIALOG_ID);
         if (existing) existing.remove();
 
         const overlay = document.createElement('div');
         overlay.id = DELETE_CONFIRM_DIALOG_ID;
         Object.assign(overlay.style, {
-            position: 'fixed',
-            top: '0', left: '0', right: '0', bottom: '0',
-            background: 'rgba(0, 0, 0, 0.75)',
-            zIndex: '2147483647',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '20px',
-            boxSizing: 'border-box',
+            position: 'fixed', top: '0', left: '0', right: '0', bottom: '0',
+            background: 'rgba(0, 0, 0, 0.75)', zIndex: '2147483647',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '20px', boxSizing: 'border-box',
         });
 
         const box = document.createElement('div');
         Object.assign(box.style, {
-            background: '#1a202c',
-            border: '3px solid #e53e3e',
-            borderRadius: '12px',
-            padding: '32px 40px',
-            maxWidth: '600px',
-            minWidth: '420px',
+            background: '#1a202c', border: '3px solid #e53e3e', borderRadius: '12px',
+            padding: '32px 40px', maxWidth: '600px', minWidth: '420px',
             boxShadow: '0 20px 60px rgba(0, 0, 0, 0.9), 0 0 0 2px rgba(229, 62, 62, 0.4)',
             textAlign: 'center',
             fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif',
-            color: '#e2e8f0',
-            boxSizing: 'border-box',
+            color: '#e2e8f0', boxSizing: 'border-box',
         });
 
         const title = document.createElement('div');
-        title.textContent = '画像登録が解除され画像ファイル自体も削除されます';
+        title.textContent = _t('gic.dialog.delete.title',
+            '画像登録が解除され画像ファイル自体も削除されます');
         Object.assign(title.style, {
-            fontSize: '20px',
-            fontWeight: 'bold',
-            color: '#fc8181',
-            marginBottom: '16px',
-            lineHeight: '1.4',
+            fontSize: '20px', fontWeight: 'bold', color: '#fc8181',
+            marginBottom: '16px', lineHeight: '1.4',
         });
         box.appendChild(title);
 
         const subtitle = document.createElement('div');
-        subtitle.textContent = '本当に削除しますか？';
+        subtitle.textContent = _t('gic.dialog.delete.subtitle', '本当に削除しますか？');
         Object.assign(subtitle.style, {
-            fontSize: '26px',
-            fontWeight: 'bold',
-            color: '#ffffff',
-            marginBottom: '20px',
+            fontSize: '26px', fontWeight: 'bold', color: '#ffffff', marginBottom: '20px',
         });
         box.appendChild(subtitle);
 
         const fileEl = document.createElement('div');
         fileEl.textContent = fileName || '';
         Object.assign(fileEl.style, {
-            fontSize: '13px',
-            fontFamily: 'monospace',
-            color: '#a0aec0',
-            background: '#0d1117',
-            padding: '8px 12px',
-            borderRadius: '4px',
-            marginBottom: '24px',
-            wordBreak: 'break-all',
-            border: '1px solid #4a5568',
+            fontSize: '13px', fontFamily: 'monospace', color: '#a0aec0',
+            background: '#0d1117', padding: '8px 12px', borderRadius: '4px',
+            marginBottom: '24px', wordBreak: 'break-all', border: '1px solid #4a5568',
         });
         box.appendChild(fileEl);
 
         const buttonRow = document.createElement('div');
         Object.assign(buttonRow.style, {
-            display: 'flex',
-            gap: '16px',
-            justifyContent: 'center',
+            display: 'flex', gap: '16px', justifyContent: 'center',
         });
 
         const yesBtn = document.createElement('button');
         yesBtn.type = 'button';
-        yesBtn.textContent = 'はい';
+        yesBtn.textContent = _t('gic.dialog.delete.yes', 'はい');
         Object.assign(yesBtn.style, {
-            padding: '14px 40px',
-            background: '#e53e3e',
-            color: '#ffffff',
-            border: '2px solid #fc8181',
-            borderRadius: '6px',
-            fontSize: '18px',
-            fontWeight: 'bold',
-            cursor: 'pointer',
-            minWidth: '120px',
-            fontFamily: 'inherit',
+            padding: '14px 40px', background: '#e53e3e', color: '#ffffff',
+            border: '2px solid #fc8181', borderRadius: '6px',
+            fontSize: '18px', fontWeight: 'bold', cursor: 'pointer',
+            minWidth: '120px', fontFamily: 'inherit',
         });
         yesBtn.addEventListener('mouseenter', () => { yesBtn.style.background = '#c53030'; });
         yesBtn.addEventListener('mouseleave', () => { yesBtn.style.background = '#e53e3e'; });
 
         const noBtn = document.createElement('button');
         noBtn.type = 'button';
-        noBtn.textContent = 'いいえ';
+        noBtn.textContent = _t('gic.dialog.delete.no', 'いいえ');
         Object.assign(noBtn.style, {
-            padding: '14px 40px',
-            background: '#4a5568',
-            color: '#ffffff',
-            border: '2px solid #718096',
-            borderRadius: '6px',
-            fontSize: '18px',
-            fontWeight: 'bold',
-            cursor: 'pointer',
-            minWidth: '120px',
-            fontFamily: 'inherit',
+            padding: '14px 40px', background: '#4a5568', color: '#ffffff',
+            border: '2px solid #718096', borderRadius: '6px',
+            fontSize: '18px', fontWeight: 'bold', cursor: 'pointer',
+            minWidth: '120px', fontFamily: 'inherit',
         });
         noBtn.addEventListener('mouseenter', () => { noBtn.style.background = '#2d3748'; });
         noBtn.addEventListener('mouseleave', () => { noBtn.style.background = '#4a5568'; });
@@ -8292,24 +8282,14 @@ function showDeleteConfirmDialog(fileName) {
         buttonRow.appendChild(yesBtn);
         buttonRow.appendChild(noBtn);
         box.appendChild(buttonRow);
-
         overlay.appendChild(box);
 
         let _settled = false;
         const cleanup = (result) => {
             if (_settled) return;
             _settled = true;
-
-            // ★ capture: true で登録したリスナーは、removeEventListener にも
-            //   capture: true を渡さないと削除されない。
-            //   これが原因で、ダイアログを閉じた後も keydown が残り、
-            //   Enter キーが stopPropagation されてチャット生成が無反応になっていた。
             document.removeEventListener('keydown', onKey, true);
-
             try { overlay.remove(); } catch (e) { /* ignore */ }
-
-            // ★ フォーカスを document.body に戻す
-            //   （ボタンにフォーカスが残っていると、以降のキー入力が阻害される場合がある）
             setTimeout(() => {
                 try {
                     if (document.activeElement && overlay.contains(document.activeElement)) {
@@ -8317,42 +8297,25 @@ function showDeleteConfirmDialog(fileName) {
                     }
                 } catch (e) { /* ignore */ }
             }, 0);
-
             resolve(result);
         };
 
         function onKey(e) {
             if (e.key === 'Escape') {
-                e.preventDefault();
-                e.stopImmediatePropagation();
-                cleanup(false);
+                e.preventDefault(); e.stopImmediatePropagation(); cleanup(false);
             } else if (e.key === 'Enter') {
-                e.preventDefault();
-                e.stopImmediatePropagation();
-                cleanup(true);
+                e.preventDefault(); e.stopImmediatePropagation(); cleanup(true);
             }
         }
 
-        yesBtn.addEventListener('click', (e) => {
-            e.preventDefault(); e.stopPropagation();
-            cleanup(true);
-        });
-        noBtn.addEventListener('click', (e) => {
-            e.preventDefault(); e.stopPropagation();
-            cleanup(false);
-        });
-        overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) cleanup(false);
-        });
+        yesBtn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); cleanup(true); });
+        noBtn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); cleanup(false); });
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(false); });
 
-        // ★ capture: true で登録（他のリスナーより先に処理する）
         document.addEventListener('keydown', onKey, true);
-
         document.body.appendChild(overlay);
 
-        setTimeout(() => {
-            try { noBtn.focus(); } catch (e) { /* ignore */ }
-        }, 50);
+        setTimeout(() => { try { noBtn.focus(); } catch (e) { /* ignore */ } }, 50);
     });
 }
 
@@ -8436,11 +8399,13 @@ function createDeleteImageButton() {
     let btn = document.getElementById(DELETE_IMAGE_BUTTON_ID);
     if (btn) return btn;
 
+    const _t = (k, fb) => window.ExpI18n?.t(k, fb) ?? fb;
+
     btn = document.createElement('button');
     btn.id = DELETE_IMAGE_BUTTON_ID;
     btn.type = 'button';
-    btn.textContent = '削除';                                    // ★ 変更: 画像削除 → 削除
-    btn.title = '現在表示中の画像をローカルディスクから削除する';
+    btn.textContent = _t('gic.button.delete', '削除');
+    btn.title = _t('gic.title.delete', '現在表示中の画像をローカルディスクから削除する');
     btn.addEventListener('click', async (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -8451,7 +8416,7 @@ function createDeleteImageButton() {
             await deleteCurrentImage();
         } catch (err) {
             console.warn('[GIC] 画像削除エラー:', err);
-            showBottomToast('画像の削除に失敗しました', { type: 'error' });
+            showBottomToast(_t('gic.toast.delete_failed', '画像の削除に失敗しました'), { type: 'error' });
         } finally {
             btn.disabled = false;
         }
@@ -9146,6 +9111,36 @@ function exposeGicApi() {
 function initializeGIC() {
     console.log('[GIC] 初期化開始');
     loadPersistedState();
+    
+    // ★ 言語変更を監視してボタンラベルを再翻訳
+    if (window.ExpI18n?.onLanguageChange) {
+        window.ExpI18n.onLanguageChange(() => {
+            const _t = (k, fb) => window.ExpI18n.t(k, fb);
+            try {
+                updateBulkDeleteButton();
+                updateHeaderDeleteButtonState();
+                const rb = document.getElementById('gic-refresh-gallery-button');
+                if (rb && !rb.disabled) rb.textContent = _t('gic.button.refresh', '🔄 更新');
+                const ub = document.getElementById('gic-unregister-button');
+                if (ub) {
+                    ub.textContent = _t('gic.button.unregister', '解除');
+                    ub.title = _t('gic.title.unregister', '現在表示中の画像をセルから登録解除する');
+                }
+                const db = document.getElementById('gic-delete-image-button');
+                if (db) {
+                    db.textContent = _t('gic.button.delete', '削除');
+                    db.title = _t('gic.title.delete', '現在表示中の画像をローカルディスクから削除する');
+                }
+                const hdb = document.getElementById('gic-header-delete-button');
+                if (hdb) hdb.textContent = `🗑 ${_t('common.delete', '削除')}`;
+                const gb = document.getElementById('gic-open-gallery-button');
+                if (gb) gb.title = _t('gic.title.gallery_open', 'SillyTavern公式ギャラリーを開く');
+            } catch (e) {
+                console.warn('[GIC] language change refresh error:', e);
+            }
+        });
+    }
+    
     installBulkDeleteDocumentHandlers();
 
     // ★ 画像マップ更新時に登録解除ボタン状態を即座に更新
