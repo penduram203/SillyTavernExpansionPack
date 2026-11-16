@@ -1100,7 +1100,7 @@ function getCurrentCharacterName() {
             font-size: 12px !important;
             font-weight: bold !important;
             color: #ffffff !important;
-            background-color: #2c5282 !important;
+            background-color: #0e2dc7 !important;
             border: 1px solid #63b3ed !important;
             border-radius: 4px !important;
             cursor: pointer !important;
