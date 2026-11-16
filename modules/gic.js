@@ -1427,7 +1427,7 @@ function getCurrentCharacterName() {
             user-select: none !important;
             box-sizing: border-box !important;
             white-space: nowrap !important;
-            opacity: 1.0 !important;
+            opacity: 0.1 !important;
             pointer-events: none !important;
             transition: background-color 0.15s ease, opacity 0.15s ease !important;
         }
@@ -1438,9 +1438,11 @@ function getCurrentCharacterName() {
             opacity: 1 !important;
             pointer-events: auto !important;
             box-shadow: 0 0 8px rgba(250, 0, 0, 0.9) !important;
+            filter: grayscale(0.1) !important;
         }
         #gic-header-delete-button.gic-header-delete-active:hover {
             background-color: #ec1717 !important;
+            filter: grayscale(0.1) !important;
             box-shadow: 0 0 12px rgba(239, 68, 68, 0.9) !important;
         }
 
