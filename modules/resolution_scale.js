@@ -81,7 +81,7 @@
             /* キャラクター一覧のキャラクター名を解像度に応じてスケーリング */
             .character_select .ch_name,
             #rm_print_characters_block .ch_name {
-                font-size: calc(var(--exp-original-mainFontSize, 15px) * var(--exp-scale, 2)) !important;
+                font-size: calc(var(--exp-original-mainFontSize, 15px) * var(--exp-scale, 20)) !important;
             }
         `;
         document.head.appendChild(style);
