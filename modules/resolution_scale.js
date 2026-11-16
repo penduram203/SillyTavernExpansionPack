@@ -77,6 +77,12 @@
                 font-size: calc(var(--exp-original-mainFontSize) * var(--exp-scale, 1)) !important;
                 --mainFontSize: calc(var(--exp-original-mainFontSize) * var(--exp-scale, 1));
             }
+
+            /* キャラクター一覧のキャラクター名を解像度に応じてスケーリング */
+            .character_select .ch_name,
+            #rm_print_characters_block .ch_name {
+                font-size: calc(var(--exp-original-mainFontSize, 15px) * var(--exp-scale, 1)) !important;
+            }
         `;
         document.head.appendChild(style);
         console.log(`${LOG} chat content scaling CSS injected`);
