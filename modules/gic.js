@@ -1427,7 +1427,7 @@ function getCurrentCharacterName() {
             user-select: none !important;
             box-sizing: border-box !important;
             white-space: nowrap !important;
-            opacity: 0.1 !important;
+            opacity: 1.0 !important;
             pointer-events: none !important;
             transition: background-color 0.15s ease, opacity 0.15s ease !important;
         }
