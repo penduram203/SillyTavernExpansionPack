@@ -830,14 +830,17 @@ function initTextStyling() {
 
         // ★ 保存されたレイアウトモードを適用（保存はしない）
         setLayoutMode(currentLayoutMode, { skipSave: true });
-        // ★ 言語変更に追従して UI を再翻訳
-        try {
-            if (window.ExpI18n?.onLanguageChange) {
+        // ★ ExpI18n のロード完了を待ってから、初回翻訳 + 言語変更リスナー登録
+        (function bindI18n(tries = 0) {
+            if (window.ExpI18n?.t && window.ExpI18n?.onLanguageChange) {
+                try { retranslateTextStylingUI(); } catch (e) { /* ignore */ }
                 window.ExpI18n.onLanguageChange(() => {
                     try { retranslateTextStylingUI(); } catch (e) { /* ignore */ }
                 });
+                return;
             }
-        } catch (e) { /* ignore */ }
+            if (tries < 50) setTimeout(() => bindI18n(tries + 1), 200);
+        })();
 
         // ★ ウィンドウリサイズ時にレイアウトを再適用
         //   （4K ⇄ 1920 切替時も 50vw が再計算される）
