@@ -45,6 +45,15 @@
 //   - contentHeightRatio の既定値を 0.6 → 0.45 に変更（現在の5行 → 4行相当）
 //   - v3 設定の contentHeightRatio=0.6 は v4 移行時に自動で 0.45 に更新
 
+import './i18n.js';
+
+function _t(k, fb, p) {
+    try { if (window.ExpI18n?.t) return window.ExpI18n.t(k, fb, p); } catch (e) {}
+    let s = fb !== undefined ? String(fb) : k;
+    if (p) for (const kk of Object.keys(p)) s = s.split(`{${kk}}`).join(String(p[kk]));
+    return s;
+}
+
 import {
     extension_settings,
     getContext,
@@ -1326,28 +1335,28 @@ function buildExpansionSection(uid, worldName, data, onChange) {
 
     const templateSelect = document.createElement('select');
     templateSelect.className = 'lbe-template-select text_pole';
-    templateSelect.title = 'プロンプトのテンプレートを切り替える';
+    templateSelect.title = _t('lbe.template.title', 'プロンプトのテンプレートを切り替える');
     templateLabelRow.appendChild(templateSelect);
 
     const templateAddBtn = document.createElement('button');
     templateAddBtn.type = 'button';
     templateAddBtn.className = 'lbe-template-add menu_button';
-    templateAddBtn.textContent = '追加';
-    templateAddBtn.title = '新しいテンプレートを追加';
+    templateAddBtn.textContent = _t('lbe.template.add', '追加');
+    templateAddBtn.title = _t('lbe.template.add_title', '新しいテンプレートを追加');
     templateLabelRow.appendChild(templateAddBtn);
 
     const templateDelBtn = document.createElement('button');
     templateDelBtn.type = 'button';
     templateDelBtn.className = 'lbe-template-del menu_button';
-    templateDelBtn.textContent = '削除';
-    templateDelBtn.title = '現在のテンプレートを削除';
+    templateDelBtn.textContent = _t('lbe.template.del', '削除');
+    templateDelBtn.title = _t('lbe.template.del_title', '現在のテンプレートを削除');
     templateLabelRow.appendChild(templateDelBtn);
 
     section.appendChild(templateLabelRow);
 
     // ── 解像度オプション（SD 拡張の対応解像度から動的生成 + ランダム） ──
     const RESOLUTION_OPTIONS = getResolutionOptionsForLex().concat([
-        { value: 'random', label: 'ランダム' },
+        { value: 'random', label: _t('lbe.random', 'ランダム') },
     ]);
 
     const isResolutionValid = (v) => RESOLUTION_OPTIONS.some(o => o.value === v);
@@ -1370,7 +1379,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
 
     const resolutionSelect = document.createElement('select');
     resolutionSelect.className = 'lbe-resolution-select text_pole';
-    resolutionSelect.title = 'このエントリで画像を生成する際の解像度';
+    resolutionSelect.title = _t('lbe.resolution.title', 'このエントリで画像を生成する際の解像度');
     for (const opt of RESOLUTION_OPTIONS) {
         const o = document.createElement('option');
         o.value = opt.value;
@@ -1414,7 +1423,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         });
         const rnd = document.createElement('option');
         rnd.value = 'random';
-        rnd.textContent = 'ランダム';
+        rnd.textContent = _t('lbe.random', 'ランダム');
         templateSelect.appendChild(rnd);
         templateSelect.value = selectedValue;
     };
@@ -1428,11 +1437,11 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         negTextarea.classList.toggle('lbe-prompt-readonly', isRandom);
         resolutionSelect.classList.toggle('lbe-prompt-readonly', isRandom);
         const msg = isRandom
-            ? 'ランダム選択中は編集できません。具体的なテンプレートを選んでください'
+            ? _t('lbe.readonly_random', 'ランダム選択中は編集できません。具体的なテンプレートを選んでください')
             : '';
         imgTextarea.title = msg;
         negTextarea.title = msg;
-        resolutionSelect.title = msg || 'このエントリで画像を生成する際の解像度';
+        resolutionSelect.title = msg || _t('lbe.resolution.title', 'このエントリで画像を生成する際の解像度');
     };
 
     const loadPromptIntoTextareas = () => {
@@ -1572,7 +1581,11 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         }
         const idx = parseInt(data.selectedTemplate, 10);
         if (!Number.isFinite(idx) || idx < 0 || idx >= data.templates.length) return;
-        if (!confirm(`テンプレート「${idx}」を削除しますか？\nこの操作は取り消せません。`)) return;
+        if (!confirm(_t(
+            'lbe.template.del_confirm',
+             'テンプレート「{n}」を削除しますか？\nこの操作は取り消せません。',
+            { n: idx }
+        ))) return;
         data.templates.splice(idx, 1);
         data.selectedTemplate = '0';
         _activeRandomIndex = null;
@@ -1596,11 +1609,11 @@ function buildExpansionSection(uid, worldName, data, onChange) {
     const updateValuePlaceholder = (input, type) => {
         if (!input) return;
         if (type === 'number') {
-            input.placeholder = '例: 594, 122224, +60, -599';
-            input.title = '絶対値 または 増減値（+60 / -599 など）';
+            input.placeholder = _t('lbe.var.value_ph_num', '例: 594, 122224, +60, -599');
+            input.title = _t('lbe.var.value_title_num', '絶対値 または 増減値（+60 / -599 など）');
         } else {
-            input.placeholder = '例: テキスト';
-            input.title = '任意の文字列';
+            input.placeholder = _t('lbe.var.value_ph_str', '例: テキスト');
+            input.title = _t('lbe.var.value_title_str', '任意の文字列');
         }
     };
 
@@ -1615,14 +1628,14 @@ function buildExpansionSection(uid, worldName, data, onChange) {
 
             const typeSelect = document.createElement('select');
             typeSelect.className = 'lbe-variable-type text_pole';
-            typeSelect.title = '変数の型';
+            typeSelect.title = _t('lbe.var.type_title', '変数の型');
 
             const optNumber = document.createElement('option');
             optNumber.value = 'number';
-            optNumber.textContent = '数値';
+            optNumber.textContent = _t('lbe.var.number', '数値');
             const optString = document.createElement('option');
             optString.value = 'string';
-            optString.textContent = '文字列';
+            optString.textContent = _t('lbe.var.string', '文字列');
             typeSelect.appendChild(optNumber);
             typeSelect.appendChild(optString);
             typeSelect.value = v.type === 'number' ? 'number' : 'string';
@@ -1631,7 +1644,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
             const nameInput = document.createElement('input');
             nameInput.type = 'text';
             nameInput.className = 'lbe-variable-name text_pole';
-            nameInput.placeholder = '変数名';
+            nameInput.placeholder = _t('lbe.var.name_ph', '変数名');
             nameInput.value = v.name || '';
             nameInput.addEventListener('input', () => {
                 v.name = nameInput.value;
@@ -1660,7 +1673,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
             delBtn.type = 'button';
             delBtn.className = 'lbe-variable-del menu_button';
             delBtn.textContent = '✕';
-            delBtn.title = 'この変数を削除';
+            delBtn.title = _t('lbe.var.del_title', 'この変数を削除');
             delBtn.addEventListener('click', () => {
                 data.variables.splice(idx, 1);
                 renderVariables();
@@ -1674,7 +1687,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         const addBtn = document.createElement('button');
         addBtn.type = 'button';
         addBtn.className = 'lbe-variable-add menu_button';
-        addBtn.textContent = '＋ 変数を追加';
+        addBtn.textContent = _t('lbe.var.add', '＋ 変数を追加');
         addBtn.addEventListener('click', () => {
             if (!Array.isArray(data.variables)) data.variables = [];
             data.variables.push({ type: 'string', name: '', value: '' });
@@ -1729,7 +1742,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
             const textInput = document.createElement('input');
             textInput.type = 'text';
             textInput.className = 'lbe-choice-text text_pole';
-            textInput.placeholder = '選択肢の内容 (例: 一人の小柄な女子が近づいてきた)';
+            textInput.placeholder = _t('lbe.choice.text_ph', '選択肢の内容 (例: 一人の小柄な女子が近づいてきた)');
             textInput.value = choice.text || '';
             textInput.addEventListener('input', () => {
                 choice.text = textInput.value;
@@ -1741,7 +1754,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
             delBtn.type = 'button';
             delBtn.className = 'lbe-choice-del menu_button';
             delBtn.textContent = '✕';
-            delBtn.title = 'この選択肢を削除';
+            delBtn.title = _t('lbe.choice.del_title', 'この選択肢を削除');
             delBtn.addEventListener('click', () => {
                 data.choices.splice(idx, 1);
                 renderChoices();
@@ -1755,7 +1768,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         const addBtn = document.createElement('button');
         addBtn.type = 'button';
         addBtn.className = 'lbe-choice-add menu_button';
-        addBtn.textContent = '＋ 選択肢を追加';
+        addBtn.textContent = _t('lbe.choice.add', '＋ 選択肢を追加');
         addBtn.addEventListener('click', () => {
             let next = '001';
             if (data.choices.length > 0) {
@@ -1812,7 +1825,7 @@ function reorganizeEntryLayout(entryEl) {
     const edit = entryEl.querySelector('.world_entry_edit');
     if (!edit) return;
 
-    const existingToggle = edit.querySelector(':scope > ' + TOGGLE_BTN_CLASS);
+    const existingToggle = edit.querySelector(':scope > .' + TOGGLE_BTN_CLASS);
     if (existingToggle) {
         return;
     }
@@ -1847,7 +1860,7 @@ function reorganizeEntryLayout(entryEl) {
     const togglables = [];
     let node = firstFlex.nextElementSibling;
     while (node) {
-        togglables.push(node);
+        if (!node.classList.contains(TOGGLE_BTN_CLASS)) togglables.push(node);
         node = node.nextElementSibling;
     }
 
@@ -1861,7 +1874,7 @@ function reorganizeEntryLayout(entryEl) {
     toggleBtn.setAttribute('tabindex', '0');
 
     const labelEl = document.createElement('strong');
-    labelEl.textContent = '詳細設定 (キャラクター設定・追加マッチング等)';
+    labelEl.textContent = _t('lbe.extras_toggle', '詳細設定 (キャラクター設定・追加マッチング等)');
     toggleBtn.appendChild(labelEl);
 
     const iconEl = document.createElement('i');
@@ -1967,7 +1980,7 @@ async function injectExpansionSections() {
             break;
         }
         const edit = entryEl.querySelector('.world_entry_edit');
-        if (edit && !edit.querySelector(':scope > ' + TOGGLE_BTN_CLASS)) {
+        if (edit && !edit.querySelector(':scope > .' + TOGGLE_BTN_CLASS)) {
             needsWork = true;
             break;
         }
@@ -2409,6 +2422,16 @@ async function init() {
         injectExpansionSections().catch(() => {});
     }, 1000);
 
+    try {
+        window.ExpI18n?.onLanguageChange?.(() => {
+            document.querySelectorAll('.' + UI_SECTION_CLASS).forEach(el => el.remove());
+            document.querySelectorAll('.' + TOGGLE_BTN_CLASS + ' > strong').forEach(s => {
+                s.textContent = _t('lbe.extras_toggle', '詳細設定 (キャラクター設定・追加マッチング等)');
+            });
+            injectExpansionSections().catch(() => {});
+        });
+    } catch (e) {}    
+    
     console.log(LOG, '初期化完了');
 }
 
@@ -2668,7 +2691,7 @@ window.LorebookExpansion = {
     collapseAll: () => {
         document.querySelectorAll('.world_entry_edit').forEach(edit => {
             edit.classList.add(COLLAPSED_CLASS);
-            const icon = edit.querySelector(':scope > ' + TOGGLE_BTN_CLASS + ' .' + TOGGLE_ICON_CLASS);
+            const icon = edit.querySelector(':scope > .' + TOGGLE_BTN_CLASS + ' .' + TOGGLE_ICON_CLASS);
             if (icon) {
                 icon.classList.remove('fa-circle-chevron-up');
                 icon.classList.add('fa-circle-chevron-down');
@@ -2679,7 +2702,7 @@ window.LorebookExpansion = {
     expandAll: () => {
         document.querySelectorAll('.world_entry_edit').forEach(edit => {
             edit.classList.remove(COLLAPSED_CLASS);
-            const icon = edit.querySelector(':scope > ' + TOGGLE_BTN_CLASS + ' .' + TOGGLE_ICON_CLASS);
+            const icon = edit.querySelector(':scope > .' + TOGGLE_BTN_CLASS + ' .' + TOGGLE_ICON_CLASS);
             if (icon) {
                 icon.classList.remove('fa-circle-chevron-down');
                 icon.classList.add('fa-circle-chevron-up');
