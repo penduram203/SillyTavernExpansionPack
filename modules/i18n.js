@@ -210,7 +210,40 @@
             'fsa.dialog.note': 'You can always change the font size from "Font Scale" in the user settings.',
             'fsa.dialog.cancel': 'Cancel',
             'fsa.dialog.apply': 'Apply',
+
+            // === Lorebook Expansion ===
+            'lbe.extras_toggle': 'Advanced settings (character settings, extra matching, etc.)',
+
+            'lbe.template.title': 'Switch the prompt template',
+            'lbe.template.add': 'Add',
+            'lbe.template.add_title': 'Add a new template',
+            'lbe.template.del': 'Delete',
+            'lbe.template.del_title': 'Delete the current template',
+            'lbe.template.del_confirm': 'Delete template "{n}"?\nThis cannot be undone.',
+
+            'lbe.random': 'Random',
+            'lbe.resolution.title': 'Resolution used when generating images for this entry',
+            'lbe.readonly_random': 'Cannot edit while Random is selected. Choose a specific template.',
+
+            'lbe.img_ph': 'e.g. 5girls:1.4, school sailor uniform, miniskirt, sitting on chair, looking at viewer, school, classroom, smile, femdom',
+            'lbe.neg_ph': 'e.g. bad hands, extra fingers, lowres, ugly, blurry, watermark',
+
+            'lbe.var.number': 'Number',
+            'lbe.var.string': 'String',
+            'lbe.var.type_title': 'Variable type',
+            'lbe.var.name_ph': 'Variable name',
+            'lbe.var.del_title': 'Delete this variable',
+            'lbe.var.add': '＋ Add variable',
+            'lbe.var.value_ph_num': 'e.g. 594, 122224, +60, -599',
+            'lbe.var.value_title_num': 'Absolute value or delta (e.g. +60 / -599)',
+            'lbe.var.value_ph_str': 'e.g. text',
+            'lbe.var.value_title_str': 'Any string',
+
+            'lbe.choice.text_ph': 'Choice text (e.g. A small girl approaches)',
+            'lbe.choice.del_title': 'Delete this choice',
+            'lbe.choice.add': '＋ Add choice',
         },
+ 
         ja: {
             // === 共通 ===
             'common.yes': 'はい',
@@ -402,6 +435,38 @@
             'fsa.dialog.note': 'フォントサイズは、ユーザー設定の「フォントスケール」からいつでも自由に変更できます。',
             'fsa.dialog.cancel': 'キャンセル',
             'fsa.dialog.apply': '適用',
+
+            // === Lorebook Expansion ===
+            'lbe.extras_toggle': '詳細設定 (キャラクター設定・追加マッチング等)',
+
+            'lbe.template.title': 'プロンプトのテンプレートを切り替える',
+            'lbe.template.add': '追加',
+            'lbe.template.add_title': '新しいテンプレートを追加',
+            'lbe.template.del': '削除',
+            'lbe.template.del_title': '現在のテンプレートを削除',
+            'lbe.template.del_confirm': 'テンプレート「{n}」を削除しますか？\nこの操作は取り消せません。',
+
+            'lbe.random': 'ランダム',
+            'lbe.resolution.title': 'このエントリで画像を生成する際の解像度',
+            'lbe.readonly_random': 'ランダム選択中は編集できません。具体的なテンプレートを選んでください',
+
+            'lbe.img_ph': '例: 5girls:1.4, schoo sailor uniform, miniskirt, sitting on chair, looking at viewer, school, classroom, smile, femdom',
+            'lbe.neg_ph': '例: bad hands, extra fingers, lowres, ugly, blurry, watermark',
+
+            'lbe.var.number': '数値',
+            'lbe.var.string': '文字列',
+            'lbe.var.type_title': '変数の型',
+            'lbe.var.name_ph': '変数名',
+            'lbe.var.del_title': 'この変数を削除',
+            'lbe.var.add': '＋ 変数を追加',
+            'lbe.var.value_ph_num': '例: 594, 122224, +60, -599',
+            'lbe.var.value_title_num': '絶対値 または 増減値（+60 / -599 など）',
+            'lbe.var.value_ph_str': '例: テキスト',
+            'lbe.var.value_title_str': '任意の文字列',
+
+            'lbe.choice.text_ph': '選択肢の内容 (例: 一人の小柄な女子が近づいてきた)',
+            'lbe.choice.del_title': 'この選択肢を削除',
+            'lbe.choice.add': '＋ 選択肢を追加',
         },
     };
 
