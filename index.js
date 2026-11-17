@@ -33,6 +33,8 @@ import './modules/text-styling.js';
 import './modules/Lorebook_Expansion.js';
 
 // ---- Generate Image Controller ----
+// ★ gic.js の canvas サムネ生成より先にスケール処理を登録する
+import './modules/gallery_thumbnail_resolution.js';
 // ★ gic.js が gic_lorebook.js を import するため、こちらからは gic.js のみ import すれば OK
 import './modules/gic.js';
 
