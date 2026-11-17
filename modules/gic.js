@@ -4834,6 +4834,8 @@ async function copyPromptToClipboard(text) {
 }
 
 function createPromptOverlay(panel) {
+    const _t = (k, fb) => window.ExpI18n?.t(k, fb) ?? fb;
+
     const overlay = document.createElement('div');
     overlay.className = PROMPT_OVERLAY_CLASS;
     overlay.style.cssText = `
@@ -4855,7 +4857,7 @@ function createPromptOverlay(panel) {
     // ── キーワードラベル（機能なし） ──
     const keywordBtn = document.createElement('div');
     keywordBtn.className = 'gic-keyword-label-btn';
-    keywordBtn.textContent = 'キーワード';
+    keywordBtn.textContent = _t('gic.prompt.keyword', 'キーワード');
     keywordBtn.style.cssText = `
         align-self: flex-start;
         padding: 6px 12px;
@@ -4894,7 +4896,7 @@ function createPromptOverlay(panel) {
     `;
     overlay.appendChild(keywordText);
 
-    // ── コピーボタン群（3つを1行に） ──
+    // ── コピーボタン群 ──
     const copyRow = document.createElement('div');
     copyRow.className = 'gic-copy-row';
     copyRow.style.cssText = `
@@ -4926,29 +4928,33 @@ function createPromptOverlay(panel) {
     };
 
     // プロンプトをコピー
-    const copyBtn = makeButton('プロンプトをコピー', 'gic-prompt-copy');
+    const copyBtn = makeButton(_t('gic.prompt.copy_prompt', 'プロンプトをコピー'), 'gic-prompt-copy');
     copyBtn.addEventListener('click', async (e) => {
         e.stopPropagation(); e.preventDefault();
         const p = overlay.querySelector('.gic-prompt-panel');
         const text = p ? (p.textContent || '') : '';
         const ok = await copyPromptToClipboard(text);
-        showCopyToast(ok ? 'プロンプトをコピーしました' : 'コピーに失敗しました');
+        showCopyToast(ok
+            ? _t('gic.toast.copy_prompt', 'プロンプトをコピーしました')
+            : _t('gic.toast.copy_failed', 'コピーに失敗しました'));
     });
     copyRow.appendChild(copyBtn);
 
     // ネガティブをコピー
-    const copyNegBtn = makeButton('ネガティブをコピー', 'gic-negative-prompt-copy');
+    const copyNegBtn = makeButton(_t('gic.prompt.copy_negative', 'ネガティブをコピー'), 'gic-negative-prompt-copy');
     copyNegBtn.addEventListener('click', async (e) => {
         e.stopPropagation(); e.preventDefault();
         const p = overlay.querySelector('.gic-negative-prompt-panel');
         const text = p ? (p.textContent || '') : '';
         const ok = await copyPromptToClipboard(text);
-        showCopyToast(ok ? 'ネガティブプロンプトをコピーしました' : 'コピーに失敗しました');
+        showCopyToast(ok
+            ? _t('gic.toast.copy_negative', 'ネガティブプロンプトをコピーしました')
+            : _t('gic.toast.copy_failed', 'コピーに失敗しました'));
     });
     copyRow.appendChild(copyNegBtn);
 
-    // 両方コピー（positive\n\nnegative）
-    const copyBothBtn = makeButton('両方コピー', 'gic-both-prompt-copy');
+    // 両方コピー
+    const copyBothBtn = makeButton(_t('gic.prompt.copy_both', '両方コピー'), 'gic-both-prompt-copy');
     copyBothBtn.addEventListener('click', async (e) => {
         e.stopPropagation(); e.preventDefault();
         const p = overlay.querySelector('.gic-prompt-panel');
@@ -4957,7 +4963,9 @@ function createPromptOverlay(panel) {
         const negText = (n && n.style.display !== 'none') ? (n.textContent || '') : '';
         const combined = [posText, negText].filter(Boolean).join('\n\n');
         const ok = await copyPromptToClipboard(combined);
-        showCopyToast(ok ? 'プロンプトとネガティブをコピーしました' : 'コピーに失敗しました');
+        showCopyToast(ok
+            ? _t('gic.toast.copy_both', 'プロンプトとネガティブをコピーしました')
+            : _t('gic.toast.copy_failed', 'コピーに失敗しました'));
     });
     copyRow.appendChild(copyBothBtn);
 
@@ -7023,15 +7031,21 @@ function restructureGalleryHeader() {
     if (refreshBtn) {
         refreshBtn.style.setProperty('position', 'relative', 'important');
         refreshBtn.style.setProperty('z-index', '200', 'important');
-        refreshBtn.style.setProperty('pointer-events', 'auto', 'important');
         refreshBtn.style.setProperty('margin', '0', 'important');
         refreshBtn.style.setProperty('flex', '0 0 auto', 'important');
-        refreshBtn.style.setProperty('display', 'inline-flex', 'important');
         refreshBtn.style.setProperty('min-width', S(90) + 'px', 'important');
         refreshBtn.style.setProperty('height', S(28) + 'px', 'important');
         refreshBtn.style.setProperty('padding', `0 ${S(8)}px`, 'important');
         refreshBtn.style.setProperty('font-size', S(12) + 'px', 'important');
         refreshBtn.style.setProperty('border-radius', S(4) + 'px', 'important');
+        // ★ 一括選択モード中は更新ボタンを非表示・クリック不能にする
+        if (_bulkDeleteMode) {
+            refreshBtn.style.setProperty('display', 'none', 'important');
+            refreshBtn.style.setProperty('pointer-events', 'none', 'important');
+        } else {
+            refreshBtn.style.setProperty('display', 'inline-flex', 'important');
+            refreshBtn.style.setProperty('pointer-events', 'auto', 'important');
+        }
     }
 
     if (headerDeleteBtn) {
@@ -9189,6 +9203,22 @@ function initializeGIC() {
                 const hdb = document.getElementById('gic-header-delete-button');
                 if (hdb) hdb.textContent = `🗑 ${_t('common.delete', '削除')}`;
                 const gb = document.getElementById('gic-open-gallery-button');
+                
+                // ★ 開いているプロンプトオーバーレイのラベルも再翻訳
+                document.querySelectorAll('.gic-prompt-overlay').forEach(ov => {
+                    const kw = ov.querySelector('.gic-keyword-label-btn');
+                    if (kw) kw.textContent = _t('gic.prompt.keyword', 'キーワード');
+                    const cp = ov.querySelector('.gic-prompt-copy');
+                    if (cp) cp.textContent = _t('gic.prompt.copy_prompt', 'プロンプトをコピー');
+                    const cn = ov.querySelector('.gic-negative-prompt-copy');
+                    if (cn) cn.textContent = _t('gic.prompt.copy_negative', 'ネガティブをコピー');
+                    const cb = ov.querySelector('.gic-both-prompt-copy');
+                    if (cb) cb.textContent = _t('gic.prompt.copy_both', '両方コピー');
+                });
+
+                // ★ 一括選択バナーも再翻訳
+                updateBulkDeleteBanner();
+                
                 if (gb) gb.title = _t('gic.title.gallery_open', 'SillyTavern公式ギャラリーを開く');
             } catch (e) {
                 console.warn('[GIC] language change refresh error:', e);
