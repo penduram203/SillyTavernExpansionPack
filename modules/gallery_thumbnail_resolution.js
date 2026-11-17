@@ -1,7 +1,5 @@
+// gallery_thumbnail_resolution.js
 // Resolution-aware thumbnail output and settings shortcut for the GIC gallery.
-// GIC's existing image/video thumbnail generators draw into 260px canvases.
-// Preserve their logical drawing coordinates while increasing only the backing
-// store resolution, based on the resolution explicitly selected in the dialog.
 (function installGalleryThumbnailResolution() {
     'use strict';
 
@@ -17,9 +15,6 @@
     const MIN_SCALE = 1;
     const MAX_SCALE = 2;
 
-    // Capture the real browser descriptors before installing our wrappers.
-    // Calling a patched descriptor from its own setter recurses and corrupts
-    // canvas output (the earlier implementation caused black thumbnails).
     const nativeWidth = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'width');
     const nativeHeight = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'height');
     const nativeGetContext = HTMLCanvasElement.prototype.getContext;
@@ -34,7 +29,7 @@
             if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) {
                 return { width, height };
             }
-        } catch (e) { /* use baseline when the saved choice is missing or invalid */ }
+        } catch (e) { /* fallback */ }
         return { width: BASE_WIDTH, height: BASE_HEIGHT };
     }
 
@@ -45,8 +40,6 @@
     }
 
     function isGicThumbnailSize(width, height) {
-        // Image thumbnails are 260x260. Video thumbnails preserve aspect ratio
-        // and have their longest edge capped at 260px.
         return Math.max(width, height) === BASE_SIZE;
     }
 
@@ -110,6 +103,7 @@
         return;
     }
 
+    // --- ユーザー設定メニューへの「解像度確認ボタン」追加 ---
     function placeSettingsButton() {
         const languageBlock = document.getElementById('UI-language-block');
         if (!languageBlock?.parentElement) return;
@@ -119,10 +113,12 @@
             button = document.createElement('button');
             button.id = SETTINGS_BUTTON_ID;
             button.type = 'button';
-            button.className = 'menu_button';
+            button.className = 'menu_button menu_button_iconic';
             button.textContent = '解像度確認';
             button.title = 'モニタ解像度を選び直し、サムネイルの生成サイズを更新します';
-            button.style.cssText = 'margin-left:8px;white-space:nowrap;cursor:pointer;align-self:center;padding:4px 10px;font-size:13px;';
+            // スタイル調整（STのボタンデザインに調和させつつマージンを確保）
+            button.style.cssText = 'margin-left: 10px; padding: 6px 12px; cursor: pointer; align-self: center; font-weight: bold; white-space: nowrap;';
+            
             button.addEventListener('click', () => {
                 if (typeof window.FontScaleAuto?.showDialog === 'function') {
                     window.FontScaleAuto.showDialog();
@@ -172,8 +168,7 @@
 
         try {
             if (savedScale !== scaleKey) {
-                // The old fixed-size blobs cannot be enlarged without losing
-                // detail. Clear them so GIC regenerates from original media.
+                // 解像度スケール変更時は既存キャッシュをクリアし、新解像度で再生成させる
                 await window.GicApi.clearThumbCache?.();
                 await window.GicApi.clearImageCache?.();
                 try { localStorage.setItem(THUMBNAIL_SCALE_KEY, scaleKey); } catch (e) { /* ignore */ }
@@ -201,8 +196,6 @@
         }
     }, 500);
 
-    // The font dialog writes localStorage in this tab (which does not emit a
-    // storage event), so poll for its saved resolution as well.
     setInterval(refreshCachesForResolution, 500);
     window.addEventListener('storage', (event) => {
         if (event.key === RESOLUTION_KEY) refreshCachesForResolution();
