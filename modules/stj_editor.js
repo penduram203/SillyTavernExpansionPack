@@ -1,6 +1,18 @@
 // stj_editor.js
 (function() {
     const MODULE_NAME = 'stj_editor';
+
+    // ★ 多言語対応ヘルパー（window.ExpI18n が読まれていなくても安全）
+    function _t(k, fb, p) {
+        try {
+            if (window.ExpI18n?.t) return window.ExpI18n.t(k, fb, p);
+        } catch (e) { /* ignore */ }
+        let s = (fb !== undefined) ? String(fb) : k;
+        if (p && typeof p === 'object') {
+            for (const kk of Object.keys(p)) s = s.split(`{${kk}}`).join(String(p[kk]));
+        }
+        return s;
+    }
     // ★ gic.js と共有する定数（gic.js 側は独立して定義しているが、
     //   stj_editor.js から sync 関数内で参照するためここでも定義する）
     const UNREGISTER_EXCLUDED_KEYS = new Set(['default', 'thumbnail']);
@@ -186,11 +198,13 @@
     }
 
     function showKeywordDuplicateWarning(keyword) {
-        const message = `既に同じキーワードが設定されています: 「${keyword}」`;
+        const message = _t('stj.keyword_dup_msg',
+            `既に同じキーワードが設定されています: 「${keyword}」`,
+            { keyword });
 
         try {
             if (typeof window.toastr !== 'undefined' && typeof window.toastr.warning === 'function') {
-                window.toastr.warning(message, 'キーワード重複', {
+                window.toastr.warning(message, _t('stj.keyword_dup_toast_title', 'キーワード重複'), {
                     timeOut: 3000,
                     positionClass: 'toast-top-center',
                 });
@@ -205,22 +219,13 @@
         alertDiv.id = 'stj_kw_dup_alert';
         alertDiv.textContent = message;
         Object.assign(alertDiv.style, {
-            position: 'fixed',
-            top: '50%',
-            left: '50%',
-            transform: 'translate(-50%, -50%)',
-            padding: '16px 28px',
-            background: 'rgba(220, 38, 38, 0.95)',
-            color: '#fff',
-            fontSize: '16px',
-            fontWeight: 'bold',
-            borderRadius: '8px',
-            boxShadow: '0 8px 30px rgba(0,0,0,0.6)',
-            zIndex: '25000',
-            pointerEvents: 'none',
-            textAlign: 'center',
-            maxWidth: '90vw',
-            border: '2px solid #fff',
+            position: 'fixed', top: '50%', left: '50%',
+            transform: 'translate(-50%, -50%)', padding: '16px 28px',
+            background: 'rgba(220, 38, 38, 0.95)', color: '#fff',
+            fontSize: '16px', fontWeight: 'bold', borderRadius: '8px',
+            boxShadow: '0 8px 30px rgba(0,0,0,0.6)', zIndex: '25000',
+            pointerEvents: 'none', textAlign: 'center',
+            maxWidth: '90vw', border: '2px solid #fff',
         });
         document.body.appendChild(alertDiv);
         setTimeout(() => {
@@ -552,7 +557,7 @@
 
         btn.classList.remove('stj-choices-disabled');
         btn.disabled = false;
-        btn.title = `選択肢を表示 (${choices.length}件)`;
+        btn.title = _t('stj.choices.button_title', `選択肢を表示 (${choices.length}件)`, { count: choices.length });
     }
 
     async function showChoicesPopup() {
@@ -594,7 +599,7 @@
             const choiceEntry = findEntryByKeyword(entries, num);
             const content = choiceEntry ? String(choiceEntry.content || '').trim() : '';
             rows.push({
-                label: '選択肢',
+                label: _t('stj.choices.label', '選択肢'),
                 num,
                 text: content || (typeof c.text === 'string' ? c.text : ''),
             });
@@ -1267,10 +1272,10 @@
         }
         let text, mode;
         if (zone.type === 'swap') {
-            text = '⇄ 場所交代';
+            text = _t('stj.drag.swap', '⇄ 場所交代');
             mode = 'swap';
         } else {
-            text = '⬇ 隙間挿入';
+            text = _t('stj.drag.insert', '⬇ 隙間挿入');
             mode = 'insert';
         }
         if (badge.textContent !== text) badge.textContent = text;
@@ -1342,7 +1347,7 @@
             ghost.appendChild(cloned);
         } else {
             const fallback = document.createElement('div');
-            fallback.textContent = 'プレビュー';
+            fallback.textContent = _t('stj.preview.placeholder', 'プレビュー');
             fallback.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#a0aec0;font-size:14px;pointer-events:none;';
             ghost.appendChild(fallback);
         }
@@ -1634,10 +1639,10 @@
         modal.innerHTML = `
             <div class="stj-cell-modal-content">
                 <div class="stj-cell-modal-header">
-                    <button type="button" class="stj-cell-modal-apply">決定</button>
-                    <button type="button" class="stj-cell-modal-cancel">キャンセル</button>
-                    <input type="text" class="stj-cell-modal-keyword" placeholder="キーワード">
-                    <button type="button" class="stj-cell-modal-choices stj-choices-disabled" disabled title="">選択肢</button>
+                    <button type="button" class="stj-cell-modal-apply">${_t('stj.cell_modal.apply', '決定')}</button>
+                    <button type="button" class="stj-cell-modal-cancel">${_t('stj.cell_modal.cancel', 'キャンセル')}</button>
+                    <input type="text" class="stj-cell-modal-keyword" placeholder="${_t('stj.cell_modal.keyword_placeholder', 'キーワード')}">
+                    <button type="button" class="stj-cell-modal-choices stj-choices-disabled" disabled title="">${_t('stj.choices.button', '選択肢')}</button>
                 </div>
                 <div class="stj-cell-modal-grid"></div>
             </div>
@@ -1767,7 +1772,7 @@
                 if (dup) {
                     kwInput.style.borderColor = '#e53e3e';
                     kwInput.style.boxShadow = '0 0 0 2px rgba(229, 62, 62, 0.4)';
-                    kwInput.title = '既に同じキーワードが設定されています';
+                    kwInput.title = _t('stj.keyword_dup_title_attr', '既に同じキーワードが設定されています');
                 }
             }
         }
@@ -1860,7 +1865,9 @@
 
         if (removedFiles.length > 0) {
             showDeleteConfirmDialog(
-                `${removedFiles.length}枚の画像をキーワードから登録解除しますか？`,
+                _t('stj.confirm.unregister_images_msg',
+                   `${removedFiles.length}枚の画像をキーワードから登録解除しますか？`,
+                   { count: removedFiles.length }),
                 () => { doApplyCellModal(); },
                 () => { /* いいえ: モーダルに留まる */ }
             );
@@ -1943,7 +1950,7 @@
             const slot = document.createElement('div');
             slot.className = 'stj-cell-modal-slot';
             slot.dataset.index = String(i);
-            slot.innerHTML = `<button type="button" class="stj-cell-modal-slot-remove" title="登録解除">×</button>`;
+            slot.innerHTML = `<button type="button" class="stj-cell-modal-slot-remove" title="${_t('stj.cell_modal.slot_remove_title', '登録解除')}">×</button>`;
             grid.appendChild(slot);
         }
 
@@ -2359,7 +2366,7 @@
                 e.stopPropagation();
                 if (isBulkDeleteMode || isDialogActive) return;
                 showDeleteConfirmDialog(
-                    '本当に一括削除しますか？',
+                    _t('stj.confirm.bulk_delete_msg', '本当に一括削除しますか？'),
                     () => {
                         isDialogActive = false;
                         if (delCancelBtn) delCancelBtn.disabled = false;
