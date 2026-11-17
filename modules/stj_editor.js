@@ -2412,7 +2412,8 @@
         });
 
         if (!text) {
-            testResult.innerHTML = '判定結果: <span style="color: #aaa; font-weight: normal;">文章を入力するとヒットするキーワードが表示されます</span>';
+            testResult.innerHTML = `${_t('stj.test.result_prefix', '判定結果')}: ` +
+                `<span style="color: #aaa; font-weight: normal;">${_t('stj.test.empty_hint', '文章を入力するとヒットするキーワードが表示されます')}</span>`;
             return;
         }
 
@@ -2437,15 +2438,20 @@
             } catch (e) { /* ignore */ }
         }
 
+        const prefix = _t('stj.test.result_prefix', '判定結果');
+
         if (matched) {
-            testResult.innerHTML = `判定結果: <span style="color: #64b5f6; font-size: 16px;">「${matched.keyword}」</span> にマッチしました！ (ファイル: ${matched.imageName || '未指定'})`;
+            const fileDisp = matched.imageName || _t('stj.test.file_unspecified', '未指定');
+            testResult.innerHTML = `${prefix}: ` +
+                `<span style="color: #64b5f6; font-size: 16px;">${_t('stj.test.matched', `「${matched.keyword}」 にマッチしました！ (ファイル: ${fileDisp})`, { keyword: matched.keyword, file: fileDisp })}</span>`;
             matched.element.style.border = '2px solid #64b5f6';
             matched.element.style.backgroundColor = 'rgba(100, 181, 246, 0.15)';
         } else {
             const defaultCell = document.querySelector('.stj-special-item:nth-child(1)');
             const defaultImages = defaultCell ? getCellImages(defaultCell) : [];
             const defDisplay = defaultImages[0] || 'defa';
-            testResult.innerHTML = `判定結果: <span style="color: #ffb74d;">一致するキーワードがありません（デフォルト「${defDisplay}」が適用されます）</span>`;
+            testResult.innerHTML = `${prefix}: ` +
+                `<span style="color: #ffb74d;">${_t('stj.test.no_match', `一致するキーワードがありません（デフォルト「${defDisplay}」が適用されます）`, { default: defDisplay })}</span>`;
         }
     }
 
@@ -2458,7 +2464,7 @@
         newItem.setAttribute('data-keyword', '');
         newItem.innerHTML = `
             <div class="stj-image-preview" id="stj_preview_${itemCount}" style="position: relative;">
-                <div class="stj-preview-text">プレビュー</div>
+                <div class="stj-preview-text">${_t('stj.preview.placeholder', 'プレビュー')}</div>
             </div>
             <div class="stj-keyword-display"></div>
             <button class="stj-delete-row">×</button>
@@ -2728,11 +2734,13 @@
         if (!placeholder) {
             placeholder = document.createElement('div');
             placeholder.className = 'stj-preview-text';
-            placeholder.textContent = 'プレビュー';
+            placeholder.textContent = _t('stj.preview.placeholder', 'プレビュー');
             previewEl.insertBefore(placeholder, previewEl.firstChild);
         }
         if (!placeholder.dataset.originalText) {
-            placeholder.dataset.originalText = (placeholder.textContent || 'プレビュー').trim() || 'プレビュー';
+            placeholder.dataset.originalText =
+                (placeholder.textContent || _t('stj.preview.placeholder', 'プレビュー')).trim()
+                || _t('stj.preview.placeholder', 'プレビュー');
         }
 
         const removeMedia = () => previewEl.querySelectorAll(':scope > img, :scope > video, :scope > .stj-video-badge').forEach(el => {
@@ -2748,7 +2756,7 @@
             placeholder.style.removeProperty('display');
         };
         const placeholderShowError = () => {
-            placeholder.textContent = 'ファイルが見つかりません';
+            placeholder.textContent = _t('stj.preview.missing_file', 'ファイルが見つかりません');
             placeholder.classList.add('stj-preview-error');
             placeholder.style.removeProperty('display');
         };
@@ -2805,7 +2813,7 @@
 
         const loadingEl = document.createElement('div');
         loadingEl.className = 'stj-preview-loading';
-        loadingEl.textContent = '読み込み中...';
+        loadingEl.textContent = _t('stj.preview.loading', '読み込み中...');
         Object.assign(loadingEl.style, {
             position: 'absolute', top: '50%', left: '50%',
             transform: 'translate(-50%, -50%)', color: '#e2e8f0',
@@ -3224,7 +3232,7 @@
         newItem.setAttribute('data-keyword', data.keyword || '');
         newItem.innerHTML = `
             <div class="stj-image-preview" id="stj_preview_${index}" style="position: relative;">
-                <div class="stj-preview-text">プレビュー</div>
+                <div class="stj-preview-text">${_t('stj.preview.placeholder', 'プレビュー')}</div>
             </div>
             <div class="stj-keyword-display"></div>
             <button class="stj-delete-row">×</button>
@@ -3245,12 +3253,12 @@
     function buildSyntaxGuideHtml() {
         return `
             <div class="stj-guide-section">
-                <div class="stj-guide-section-title">🔧 基本演算子</div>
+                <div class="stj-guide-section-title">${_t('stj.syntax.title', '🔧 基本演算子')}</div>
                 <ul class="stj-guide-list">
-                    <li><code class="stj-op">+</code> <b>AND</b>（全て含む）<div class="stj-op-ex">例：<code>山+川</code> → 「山」と「川」の両方が含まれる時にマッチ</div></li>
-                    <li><code class="stj-op">,</code> <b>OR</b>（いずれか含む）<div class="stj-op-ex">例：<code>山,川</code> → 「山」または「川」のどちらかが含まれる時にマッチ</div></li>
-                    <li><code class="stj-op">!</code> <b>NOT</b>（除外）<div class="stj-op-ex">例：<code>!山</code> → 「山」が含まれていない時にのみマッチ</div></li>
-                    <li><code class="stj-op">( )</code> <b>グループ化</b>（入れ子可能）<div class="stj-op-ex">例：<code>(山+川),谷</code> → 「山と川」または「谷」のいずれかにマッチ</div></li>
+                    <li><code class="stj-op">+</code> <b>${_t('stj.syntax.and', 'AND（全て含む）')}</b><div class="stj-op-ex">${_t('stj.syntax.and_ex', '例：<code>山+川</code> → 「山」と「川」の両方が含まれる時にマッチ')}</div></li>
+                    <li><code class="stj-op">,</code> <b>${_t('stj.syntax.or', 'OR（いずれか含む）')}</b><div class="stj-op-ex">${_t('stj.syntax.or_ex', '例：<code>山,川</code> → 「山」または「川」のどちらかが含まれる時にマッチ')}</div></li>
+                    <li><code class="stj-op">!</code> <b>${_t('stj.syntax.not', 'NOT（除外）')}</b><div class="stj-op-ex">${_t('stj.syntax.not_ex', '例：<code>!山</code> → 「山」が含まれていない時にのみマッチ')}</div></li>
+                    <li><code class="stj-op">( )</code> <b>${_t('stj.syntax.group', 'グループ化（入れ子可能）')}</b><div class="stj-op-ex">${_t('stj.syntax.group_ex', '例：<code>(山+川),谷</code> → 「山と川」または「谷」のいずれかにマッチ')}</div></li>
                 </ul>
             </div>
         `;
@@ -3263,10 +3271,10 @@
         dialog.id = 'stj_confirm_dialog';
         dialog.innerHTML = `
             <div class="stj-confirm-box">
-                <div class="stj-confirm-message">本当に削除しますか？</div>
+                <div class="stj-confirm-message">${_t('stj.confirm.delete_msg', '本当に削除しますか？')}</div>
                 <div class="stj-confirm-buttons">
-                    <button type="button" class="stj-confirm-yes">はい</button>
-                    <button type="button" class="stj-confirm-no">いいえ</button>
+                    <button type="button" class="stj-confirm-yes">${_t('stj.confirm.yes', 'はい')}</button>
+                    <button type="button" class="stj-confirm-no">${_t('stj.confirm.no', 'いいえ')}</button>
                 </div>
             </div>
         `;
@@ -3315,46 +3323,46 @@
         modal.innerHTML = `
             <div id="stj_test_section">
                 <div class="stj-test-header">
-                    <label>🔍 リアルタイムキーワード反応テスト</label>
+                    <label>${_t('stj.header.title', '🔍 リアルタイムキーワード反応テスト')}</label>
                     <strong id="stj_char_name_display"></strong>
-                    <button type="button" class="stj-help-btn" id="stj_help_button">ヘルプ</button>
+                    <button type="button" class="stj-help-btn" id="stj_help_button">${_t('stj.header.help', 'ヘルプ')}</button>
                 </div>
                 <div class="stj-syntax-guide" id="stj_syntax_guide">${buildSyntaxGuideHtml()}</div>
-                <textarea id="stj_test_input" placeholder="試しに文章を入力してください（例：笑顔で挨拶する）..."></textarea>
-                <div id="stj_test_result">判定結果: <span style="color: #aaa; font-weight: normal;">文章を入力するとヒットするキーワードが表示されます</span></div>
+                <textarea id="stj_test_input" placeholder="${_t('stj.header.test_placeholder', '試しに文章を入力してください（例：笑顔で挨拶する）...')}"></textarea>
+                <div id="stj_test_result">${_t('stj.test.result_prefix', '判定結果')}: <span style="color: #aaa; font-weight: normal;">${_t('stj.test.empty_hint', '文章を入力するとヒットするキーワードが表示されます')}</span></div>
             </div>
 
             <div class="stj-top-section">
                 <div class="stj-special-container">
                     <div class="stj-special-item" data-image-list='[]'>
-                        <div class="stj-special-label">デフォルト表示</div>
+                        <div class="stj-special-label">${_t('stj.special.default_label', 'デフォルト表示')}</div>
                         <div class="stj-special-preview">
                             <div class="stj-image-preview" id="stj_preview_default" style="position: relative;">
-                                <div class="stj-preview-text">デフォルトメディアプレビュー</div>
+                                <div class="stj-preview-text">${_t('stj.preview.default_placeholder', 'デフォルトメディアプレビュー')}</div>
                             </div>
                         </div>
                     </div>
                     <div class="stj-special-item" data-image-list='[]'>
-                        <div class="stj-special-label">サムネイル表示</div>
+                        <div class="stj-special-label">${_t('stj.special.thumbnail_label', 'サムネイル表示')}</div>
                         <div class="stj-special-preview">
                             <div class="stj-image-preview" id="stj_preview_thumbnail" style="position: relative;">
-                                <div class="stj-preview-text">サムネイルプレビュー</div>
+                                <div class="stj-preview-text">${_t('stj.preview.thumbnail_placeholder', 'サムネイルプレビュー')}</div>
                             </div>
                         </div>
                     </div>
                 </div>
                 <div class="stj-info-panel">
-                    <div class="stj-info-note">※セルをクリックすると編集ウインドウが開きます</div>
+                    <div class="stj-info-note">${_t('stj.info.click_hint', '※セルをクリックすると編集ウインドウが開きます')}</div>
                     <div class="stj-info-guide">
-                        <h4>📖 操作方法</h4>
+                        <h4>${_t('stj.info.title', '📖 操作方法')}</h4>
                         <ul class="stj-guide-ops">
-                            <li><b>セルをクリック</b>：編集ウインドウが開きます</li>
-                            <li><b>ギャラリーからドラッグ&ドロップ</b>：画像を追加できます</li>
-                            <li><b>セルをドラッグ</b>：セルの位置を入れ替えられます</li>
-                            <li><b>編集ウインドウでホバー</b>：各マスに ❌ ボタン → 登録解除</li>
-                            <li><b>❌ボタン</b>：セルを削除します</li>
-                            <li><b>一括削除</b>：複数のセルをまとめて削除</li>
-                            <li><b>セル追加</b>：新しいセルを追加</li>
+                            <li>${_t('stj.info.op_click', '<b>セルをクリック</b>：編集ウインドウが開きます')}</li>
+                            <li>${_t('stj.info.op_drag_gallery', '<b>ギャラリーからドラッグ&amp;ドロップ</b>：画像を追加できます')}</li>
+                            <li>${_t('stj.info.op_drag_cell', '<b>セルをドラッグ</b>：セルの位置を入れ替えられます')}</li>
+                            <li>${_t('stj.info.op_hover_remove', '<b>編集ウインドウでホバー</b>：各マスに ❌ ボタン → 登録解除')}</li>
+                            <li>${_t('stj.info.op_delete_btn', '<b>❌ボタン</b>：セルを削除します')}</li>
+                            <li>${_t('stj.info.op_bulk_delete', '<b>一括削除</b>：複数のセルをまとめて削除')}</li>
+                            <li>${_t('stj.info.op_add_cell', '<b>セル追加</b>：新しいセルを追加')}</li>
                         </ul>
                     </div>
                 </div>
@@ -3362,7 +3370,7 @@
             <div id="stj_keywords_container" class="stj-grid-container">
                 <div class="stj-keyword-item" data-image-list='[]' data-keyword=''>
                     <div class="stj-image-preview" id="stj_preview_0" style="position: relative;">
-                        <div class="stj-preview-text">プレビュー</div>
+                        <div class="stj-preview-text">${_t('stj.preview.placeholder', 'プレビュー')}</div>
                     </div>
                     <div class="stj-keyword-display"></div>
                     <button class="stj-delete-row">×</button>
@@ -3370,11 +3378,11 @@
             </div>
             <div class="stj-button-group">
                 <div class="stj-button-group-main">
-                    <button id="stj_cancel_export">終了</button>
-                    <button id="stj_add_keyword" title="ロアブックのエントリと同期してセルを自動作成します（自動削除はしません）">更新</button>
-                    <button id="stj_bulk_delete">一括削除</button>
-                    <button id="stj_delete_cancel" style="display:none;">戻る</button>
-                    <button id="stj_delete_execute" style="display:none;">削除実行</button>
+                    <button id="stj_cancel_export">${_t('stj.button.close', '終了')}</button>
+                    <button id="stj_add_keyword" title="${_t('stj.button.update_title', 'ロアブックのエントリと同期してセルを自動作成します（自動削除はしません）')}">${_t('stj.button.update', '更新')}</button>
+                    <button id="stj_bulk_delete">${_t('stj.button.bulk_delete', '一括削除')}</button>
+                    <button id="stj_delete_cancel" style="display:none;">${_t('stj.button.back', '戻る')}</button>
+                    <button id="stj_delete_execute" style="display:none;">${_t('stj.button.execute_delete', '削除実行')}</button>
                 </div>
             </div>
         `;
@@ -3431,12 +3439,12 @@
                 const showToast = window.GicApi?.showBottomToast;
                 if (added > 0) {
                     if (typeof showToast === 'function') {
-                        showToast(`ロアブックと同期しました（${added} 件追加）`);
+                        showToast(_t('stj.toast.sync_added', `ロアブックと同期しました（${added} 件追加）`, { count: added }));
                     }
                     console.log(`[STJ Editor] ✅ 更新ボタンによる同期: ${added} 件追加`);
                 } else {
                     if (typeof showToast === 'function') {
-                        showToast('同期する新規セルはありませんでした', { type: 'warning' });
+                        showToast(_t('stj.toast.sync_no_add', '同期する新規セルはありませんでした'), { type: 'warning' });
                     }
                     console.log('[STJ Editor] 更新ボタンによる同期: 追加なし');
                 }
@@ -3454,7 +3462,7 @@
                 console.warn('[STJ Editor] 同期エラー:', err);
                 const showToast = window.GicApi?.showBottomToast;
                 if (typeof showToast === 'function') {
-                    showToast('同期に失敗しました', { type: 'error' });
+                    showToast(_t('stj.toast.sync_failed', '同期に失敗しました'), { type: 'error' });
                 }
             }
         });
