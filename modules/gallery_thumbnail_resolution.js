@@ -1,6 +1,7 @@
 // Resolution-aware thumbnail output and settings shortcut for the GIC gallery.
-// The font-scale dialog's explicit monitor-resolution selection is the source
-// of truth; viewport size and devicePixelRatio are intentionally not inferred.
+// GIC's existing image/video thumbnail generators draw into 260px canvases.
+// Preserve their logical drawing coordinates while increasing only the backing
+// store resolution, based on the resolution explicitly selected in the dialog.
 (function installGalleryThumbnailResolution() {
     'use strict';
 
@@ -16,7 +17,13 @@
     const MIN_SCALE = 1;
     const MAX_SCALE = 2;
 
-    const canvases = new WeakMap();
+    // Capture the real browser descriptors before installing our wrappers.
+    // Calling a patched descriptor from its own setter recurses and corrupts
+    // canvas output (the earlier implementation caused black thumbnails).
+    const nativeWidth = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'width');
+    const nativeHeight = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'height');
+    const nativeGetContext = HTMLCanvasElement.prototype.getContext;
+    const canvasState = new WeakMap();
     const scaledContexts = new WeakMap();
 
     function readResolution() {
@@ -38,58 +45,59 @@
     }
 
     function isGicThumbnailSize(width, height) {
-        // GIC creates square image thumbnails and aspect-preserving video
-        // thumbnails whose longest canvas edge is BASE_SIZE.
+        // Image thumbnails are 260x260. Video thumbnails preserve aspect ratio
+        // and have their longest edge capped at 260px.
         return Math.max(width, height) === BASE_SIZE;
     }
 
-    const widthDescriptor = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'width');
-    const heightDescriptor = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'height');
-    const originalGetContext = HTMLCanvasElement.prototype.getContext;
-
-    function updateCanvasBackingStore(canvas, state) {
+    function updateBackingStore(canvas, state) {
         state.scale = isGicThumbnailSize(state.width, state.height) ? getSelectedScale() : 1;
         state.isGicThumbnail = state.scale > 1;
         scaledContexts.delete(canvas);
-        widthDescriptor.set.call(canvas, Math.max(1, Math.round(state.width * state.scale)));
-        heightDescriptor.set.call(canvas, Math.max(1, Math.round(state.height * state.scale)));
+        nativeWidth.set.call(canvas, Math.max(1, Math.round(state.width * state.scale)));
+        nativeHeight.set.call(canvas, Math.max(1, Math.round(state.height * state.scale)));
     }
 
-    function patchDimension(property, descriptor) {
+    function getOrCreateState(canvas) {
+        let state = canvasState.get(canvas);
+        if (!state) {
+            state = {
+                width: nativeWidth.get.call(canvas),
+                height: nativeHeight.get.call(canvas),
+                scale: 1,
+                isGicThumbnail: false,
+            };
+            canvasState.set(canvas, state);
+        }
+        return state;
+    }
+
+    function patchDimension(property, nativeDescriptor) {
         Object.defineProperty(HTMLCanvasElement.prototype, property, {
-            configurable: descriptor.configurable,
-            enumerable: descriptor.enumerable,
-            get: descriptor.get,
+            configurable: nativeDescriptor.configurable,
+            enumerable: nativeDescriptor.enumerable,
+            get: nativeDescriptor.get,
             set(value) {
-                let state = canvases.get(this);
-                if (!state) {
-                    state = {
-                        width: widthDescriptor.get.call(this),
-                        height: heightDescriptor.get.call(this),
-                        scale: 1,
-                        isGicThumbnail: false,
-                    };
-                    canvases.set(this, state);
-                }
+                const state = getOrCreateState(this);
                 const logicalValue = Number(value);
                 state[property] = Number.isFinite(logicalValue) ? logicalValue : 0;
-                updateCanvasBackingStore(this, state);
+                updateBackingStore(this, state);
             },
         });
     }
 
     try {
-        if (!widthDescriptor?.get || !widthDescriptor?.set || !heightDescriptor?.get || !heightDescriptor?.set) {
+        if (!nativeWidth?.get || !nativeWidth?.set || !nativeHeight?.get || !nativeHeight?.set) {
             console.warn('[GIC] Canvas dimensions are not configurable; resolution-aware thumbnails unavailable.');
             return;
         }
 
-        patchDimension('width', widthDescriptor);
-        patchDimension('height', heightDescriptor);
+        patchDimension('width', nativeWidth);
+        patchDimension('height', nativeHeight);
 
         HTMLCanvasElement.prototype.getContext = function (type, ...args) {
-            const context = originalGetContext.call(this, type, ...args);
-            const state = canvases.get(this);
+            const context = nativeGetContext.call(this, type, ...args);
+            const state = canvasState.get(this);
             if (context && type === '2d' && state?.isGicThumbnail &&
                 scaledContexts.get(this) !== state.scale) {
                 context.scale(state.scale, state.scale);
@@ -111,13 +119,10 @@
             button = document.createElement('button');
             button.id = SETTINGS_BUTTON_ID;
             button.type = 'button';
+            button.className = 'menu_button';
             button.textContent = '解像度確認';
             button.title = 'モニタ解像度を選び直し、サムネイルの生成サイズを更新します';
-            button.className = 'menu_button';
-            button.style.cssText = [
-                'margin-left:8px', 'white-space:nowrap', 'cursor:pointer',
-                'align-self:center', 'padding:4px 10px', 'font-size:13px',
-            ].join(';');
+            button.style.cssText = 'margin-left:8px;white-space:nowrap;cursor:pointer;align-self:center;padding:4px 10px;font-size:13px;';
             button.addEventListener('click', () => {
                 if (typeof window.FontScaleAuto?.showDialog === 'function') {
                     window.FontScaleAuto.showDialog();
@@ -132,12 +137,12 @@
         }
     }
 
-    let settingsObserver = null;
     function installSettingsButton() {
         placeSettingsButton();
-        if (settingsObserver || !document.body) return;
-        settingsObserver = new MutationObserver(placeSettingsButton);
-        settingsObserver.observe(document.body, { childList: true, subtree: true });
+        if (!document.body || window.__gicResolutionSettingsObserverInstalled) return;
+        window.__gicResolutionSettingsObserverInstalled = true;
+        const observer = new MutationObserver(placeSettingsButton);
+        observer.observe(document.body, { childList: true, subtree: true });
     }
 
     if (document.readyState === 'loading') {
@@ -149,14 +154,14 @@
     let refreshInProgress = false;
     let lastResolutionSignature = null;
 
-    function resolutionSignature() {
+    function getResolutionSignature() {
         const { width, height } = readResolution();
         return `${width}x${height}:${Math.round(getSelectedScale() * 100)}`;
     }
 
     async function refreshCachesForResolution() {
         if (refreshInProgress || !window.GicApi) return;
-        const signature = resolutionSignature();
+        const signature = getResolutionSignature();
         if (signature === lastResolutionSignature) return;
         lastResolutionSignature = signature;
         refreshInProgress = true;
@@ -164,10 +169,11 @@
         const scaleKey = String(Math.round(getSelectedScale() * 100) / 100);
         let savedScale = null;
         try { savedScale = localStorage.getItem(THUMBNAIL_SCALE_KEY); } catch (e) { /* ignore */ }
+
         try {
-            // Old blobs have insufficient pixel data. Clear them so both image
-            // and video thumbnail generation reruns at the newly selected size.
             if (savedScale !== scaleKey) {
+                // The old fixed-size blobs cannot be enlarged without losing
+                // detail. Clear them so GIC regenerates from original media.
                 await window.GicApi.clearThumbCache?.();
                 await window.GicApi.clearImageCache?.();
                 try { localStorage.setItem(THUMBNAIL_SCALE_KEY, scaleKey); } catch (e) { /* ignore */ }
@@ -184,18 +190,20 @@
         }
     }
 
-    // The font dialog stores its selection in localStorage. Detect both the
-    // initial choice and subsequent choices made from the settings shortcut.
     let apiWaitAttempts = 0;
     const apiWait = setInterval(() => {
         apiWaitAttempts++;
-        if (!window.GicApi) {
-            if (apiWaitAttempts >= 80) clearInterval(apiWait);
-            return;
+        if (window.GicApi) {
+            refreshCachesForResolution();
+        } else if (apiWaitAttempts >= 80) {
+            clearInterval(apiWait);
+            console.warn('[GIC] GicApi unavailable; thumbnail cache migration skipped.');
         }
-        refreshCachesForResolution();
     }, 500);
 
+    // The font dialog writes localStorage in this tab (which does not emit a
+    // storage event), so poll for its saved resolution as well.
+    setInterval(refreshCachesForResolution, 500);
     window.addEventListener('storage', (event) => {
         if (event.key === RESOLUTION_KEY) refreshCachesForResolution();
     });
