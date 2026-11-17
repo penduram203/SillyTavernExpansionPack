@@ -77,6 +77,83 @@
             // === GIC: バナー（ギャラリー上部の赤枠） ===
             'gic.banner.bulk_mode': 'Bulk selection mode — click images to select',
             'gic.banner.bulk_selected': 'select {count} image(s) (🗑 to delete / drag to register together)',
+
+            // === STJ Editor ===
+            'stj.char_name_missing': 'Character name is not set.',
+            'stj.save_success': 'Data saved.',
+
+            'stj.keyword_dup_toast_title': 'Duplicate keyword',
+            'stj.keyword_dup_msg': 'This keyword is already set: "{keyword}"',
+            'stj.keyword_dup_title_attr': 'This keyword is already set',
+
+            'stj.preview.placeholder': 'Preview',
+            'stj.preview.default_placeholder': 'Default media preview',
+            'stj.preview.thumbnail_placeholder': 'Thumbnail preview',
+            'stj.preview.missing_file': 'File not found',
+            'stj.preview.loading': 'Loading...',
+
+            'stj.choices.label': 'Choices',
+            'stj.choices.button': 'Choices',
+            'stj.choices.button_title': 'Show choices ({count})',
+
+            'stj.cell_modal.apply': 'Apply',
+            'stj.cell_modal.cancel': 'Cancel',
+            'stj.cell_modal.keyword_placeholder': 'Keyword',
+            'stj.cell_modal.slot_remove_title': 'Unregister',
+
+            'stj.drag.swap': '⇄ Swap',
+            'stj.drag.insert': '⬇ Insert',
+
+            'stj.confirm.delete_msg': 'Are you sure you want to delete?',
+            'stj.confirm.bulk_delete_msg': 'Are you sure you want to delete in bulk?',
+            'stj.confirm.unregister_images_msg': 'Unregister {count} image(s) from the keyword?',
+            'stj.confirm.yes': 'Yes',
+            'stj.confirm.no': 'No',
+
+            'stj.bulk_delete.in_progress': 'Deleting selected cells in bulk...',
+
+            'stj.test.empty_hint': 'Enter text to see which keywords match.',
+            'stj.test.matched': 'Matched 「{keyword}」! (File: {file})',
+            'stj.test.no_match': 'No keyword matched (default "{default}" will be applied).',
+            'stj.test.file_unspecified': 'unspecified',
+
+            'stj.header.title': '🔍 Real-time keyword reaction test',
+            'stj.header.help': 'Help',
+            'stj.header.test_placeholder': 'Enter a test sentence (e.g., greets with a smile)...',
+
+            'stj.special.default_label': 'Default display',
+            'stj.special.thumbnail_label': 'Thumbnail display',
+
+            'stj.info.click_hint': '※ Click a cell to open the edit window.',
+            'stj.info.title': '📖 Operations',
+            'stj.info.op_click': '<b>Click a cell</b>: opens the edit window',
+            'stj.info.op_drag_gallery': '<b>Drag &amp; drop from the gallery</b>: adds an image',
+            'stj.info.op_drag_cell': '<b>Drag a cell</b>: swaps cell positions',
+            'stj.info.op_hover_remove': '<b>Hover in the edit window</b>: ❌ button on each slot → unregister',
+            'stj.info.op_delete_btn': '<b>❌ button</b>: deletes the cell',
+            'stj.info.op_bulk_delete': '<b>Bulk Delete</b>: deletes multiple cells at once',
+            'stj.info.op_add_cell': '<b>Add Cell</b>: adds a new cell',
+
+            'stj.button.close': 'Close',
+            'stj.button.update': 'Update',
+            'stj.button.update_title': 'Sync with lorebook entries and auto-create cells (no auto-delete)',
+            'stj.button.bulk_delete': 'Bulk Delete',
+            'stj.button.back': 'Back',
+            'stj.button.execute_delete': 'Execute Delete',
+
+            'stj.syntax.title': '🔧 Basic Operators',
+            'stj.syntax.and': 'AND (all must match)',
+            'stj.syntax.and_ex': 'Example: <code>mountain+river</code> → matches when both "mountain" and "river" are present',
+            'stj.syntax.or': 'OR (any match)',
+            'stj.syntax.or_ex': 'Example: <code>mountain,river</code> → matches when either "mountain" or "river" is present',
+            'stj.syntax.not': 'NOT (exclude)',
+            'stj.syntax.not_ex': 'Example: <code>!mountain</code> → matches only when "mountain" is not present',
+            'stj.syntax.group': 'Grouping (nestable)',
+            'stj.syntax.group_ex': 'Example: <code>(mountain+river),valley</code> → matches either "mountain and river" or "valley"',
+
+            'stj.toast.sync_added': 'Synced with lorebook ({count} added)',
+            'stj.toast.sync_no_add': 'No new cells to sync',
+            'stj.toast.sync_failed': 'Sync failed',
             
             // === GIC: 確認 ===
             'gic.confirm.bulk_delete': 'Delete the {count} selected image(s)?\nThis operation cannot be undone.',
@@ -160,6 +237,83 @@
             // === GIC: バナー（ギャラリー上部の赤枠） ===
             'gic.banner.bulk_mode': '一括選択モード — 画像クリックで選択',
             'gic.banner.bulk_selected': '一括選択中 — {count} 枚（🗑 で削除 / ドラッグでまとめて登録）',
+
+            // === STJ Editor ===
+            'stj.char_name_missing': 'キャラクター名が設定されていません',
+            'stj.save_success': 'データを保存しました',
+
+            'stj.keyword_dup_toast_title': 'キーワード重複',
+            'stj.keyword_dup_msg': '既に同じキーワードが設定されています: 「{keyword}」',
+            'stj.keyword_dup_title_attr': '既に同じキーワードが設定されています',
+
+            'stj.preview.placeholder': 'プレビュー',
+            'stj.preview.default_placeholder': 'デフォルトメディアプレビュー',
+            'stj.preview.thumbnail_placeholder': 'サムネイルプレビュー',
+            'stj.preview.missing_file': 'ファイルが見つかりません',
+            'stj.preview.loading': '読み込み中...',
+
+            'stj.choices.label': '選択肢',
+            'stj.choices.button': '選択肢',
+            'stj.choices.button_title': '選択肢を表示 ({count}件)',
+
+            'stj.cell_modal.apply': '決定',
+            'stj.cell_modal.cancel': 'キャンセル',
+            'stj.cell_modal.keyword_placeholder': 'キーワード',
+            'stj.cell_modal.slot_remove_title': '登録解除',
+
+            'stj.drag.swap': '⇄ 場所交代',
+            'stj.drag.insert': '⬇ 隙間挿入',
+
+            'stj.confirm.delete_msg': '本当に削除しますか？',
+            'stj.confirm.bulk_delete_msg': '本当に一括削除しますか？',
+            'stj.confirm.unregister_images_msg': '{count}枚の画像をキーワードから登録解除しますか？',
+            'stj.confirm.yes': 'はい',
+            'stj.confirm.no': 'いいえ',
+
+            'stj.bulk_delete.in_progress': '選択されたセルを一括削除します',
+
+            'stj.test.empty_hint': '文章を入力するとヒットするキーワードが表示されます',
+            'stj.test.matched': '「{keyword}」 にマッチしました！ (ファイル: {file})',
+            'stj.test.no_match': '一致するキーワードがありません（デフォルト「{default}」が適用されます）',
+            'stj.test.file_unspecified': '未指定',
+
+            'stj.header.title': '🔍 リアルタイムキーワード反応テスト',
+            'stj.header.help': 'ヘルプ',
+            'stj.header.test_placeholder': '試しに文章を入力してください（例：笑顔で挨拶する）...',
+
+            'stj.special.default_label': 'デフォルト表示',
+            'stj.special.thumbnail_label': 'サムネイル表示',
+
+            'stj.info.click_hint': '※セルをクリックすると編集ウインドウが開きます',
+            'stj.info.title': '📖 操作方法',
+            'stj.info.op_click': '<b>セルをクリック</b>：編集ウインドウが開きます',
+            'stj.info.op_drag_gallery': '<b>ギャラリーからドラッグ&amp;ドロップ</b>：画像を追加できます',
+            'stj.info.op_drag_cell': '<b>セルをドラッグ</b>：セルの位置を入れ替えられます',
+            'stj.info.op_hover_remove': '<b>編集ウインドウでホバー</b>：各マスに ❌ ボタン → 登録解除',
+            'stj.info.op_delete_btn': '<b>❌ボタン</b>：セルを削除します',
+            'stj.info.op_bulk_delete': '<b>一括削除</b>：複数のセルをまとめて削除',
+            'stj.info.op_add_cell': '<b>セル追加</b>：新しいセルを追加',
+
+            'stj.button.close': '終了',
+            'stj.button.update': '更新',
+            'stj.button.update_title': 'ロアブックのエントリと同期してセルを自動作成します（自動削除はしません）',
+            'stj.button.bulk_delete': '一括削除',
+            'stj.button.back': '戻る',
+            'stj.button.execute_delete': '削除実行',
+
+            'stj.syntax.title': '🔧 基本演算子',
+            'stj.syntax.and': 'AND（全て含む）',
+            'stj.syntax.and_ex': '例：<code>山+川</code> → 「山」と「川」の両方が含まれる時にマッチ',
+            'stj.syntax.or': 'OR（いずれか含む）',
+            'stj.syntax.or_ex': '例：<code>山,川</code> → 「山」または「川」のどちらかが含まれる時にマッチ',
+            'stj.syntax.not': 'NOT（除外）',
+            'stj.syntax.not_ex': '例：<code>!山</code> → 「山」が含まれていない時にのみマッチ',
+            'stj.syntax.group': 'グループ化（入れ子可能）',
+            'stj.syntax.group_ex': '例：<code>(山+川),谷</code> → 「山と川」または「谷」のいずれかにマッチ',
+
+            'stj.toast.sync_added': 'ロアブックと同期しました（{count} 件追加）',
+            'stj.toast.sync_no_add': '同期する新規セルはありませんでした',
+            'stj.toast.sync_failed': '同期に失敗しました',
             
             // === GIC: 確認 ===
             'gic.confirm.bulk_delete': '選択した {count} 枚の画像を削除しますか？\nこの操作は取り消せません。',
