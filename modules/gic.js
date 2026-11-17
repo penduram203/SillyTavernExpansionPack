@@ -487,7 +487,7 @@ const GALLERY_PREPARE_RETRY_INTERVAL_MS = 800;
 const GALLERY_PREPARE_MAX_RETRIES = 15;
 
 // === Video Thumbnail Cache ===
-const THUMB_SIZE = 260;
+const THUMB_BASE_SIZE = 260;
 const THUMB_SUFFIX = '_thum.png';
 const THUMB_CONCURRENCY = 2;
 const THUMB_GEN_TIMEOUT_MS = 30000;
@@ -505,19 +505,44 @@ const IMG_DB_VERSION = 1;
 const IMG_PRELOAD_CHUNK = 3;
 const IMG_PRELOAD_DELAY_MS = 50;
 
-// === Image Thumbnail Cache (画像用 200x200 サムネイル) ===
+// === Image Thumbnail Cache ===
 const IMG_THUMB_SUFFIX = '_img_thum.png';
-const IMG_THUMB_SIZE = 260;
+const IMG_THUMB_BASE_SIZE = 260;
 const IMG_THUMB_MANIFEST_KEY = 'gic_image_thumb_manifest';
 
 // ============================================================
 // ★ サムネキャッシュバージョン
-//   THUMB_SIZE / IMG_THUMB_SIZE を変更したらこの値を更新する。
-//   起動時に不一致を検出すると IndexedDB を自動クリアする。
+//   解像度ごとに異なるサイズのサムネイルを使うため、サイズを
+//   キャッシュバージョンに含める。解像度変更時には古いキャッシュを破棄する。
 // ============================================================
-const THUMB_CACHE_VERSION = 260;
+const THUMB_CACHE_BASE_VERSION = 260;
 const THUMB_CACHE_VERSION_KEY = 'gic_thumb_cache_version_v1';
 let _cacheVersionReadyPromise = null;
+
+const THUMB_BASE_WIDTH = 1920;
+const THUMB_BASE_HEIGHT = 1080;
+const THUMB_MIN_SCALE = 1;
+const THUMB_MAX_SCALE = 2;
+
+function getThumbnailScale() {
+    // screen はモニタ解像度を参照し、devicePixelRatio で OS の表示倍率も補正する。
+    const dpr = Number(window.devicePixelRatio) || 1;
+    const width = Number(window.screen?.width) || window.innerWidth;
+    const height = Number(window.screen?.height) || window.innerHeight;
+    const scale = Math.min(
+        (width * dpr) / THUMB_BASE_WIDTH,
+        (height * dpr) / THUMB_BASE_HEIGHT,
+    );
+    return Math.max(THUMB_MIN_SCALE, Math.min(THUMB_MAX_SCALE, scale));
+}
+
+function getThumbnailSize(baseSize) {
+    return Math.max(1, Math.round(baseSize * getThumbnailScale()));
+}
+
+function getThumbnailCacheVersion() {
+    return `${THUMB_CACHE_BASE_VERSION}-${getThumbnailSize(THUMB_BASE_SIZE)}`;
+}
 
 // 既知の画像サムネイル（メモリマニフェスト）
 const _imgThumbKnown = new Set();
@@ -2454,7 +2479,7 @@ async function checkFileExists(url, useCache = true) {
     return exists;
 }
 
-async function generateVideoThumbnailBlob(videoUrl, size = THUMB_SIZE) {
+async function generateVideoThumbnailBlob(videoUrl, size = getThumbnailSize(THUMB_BASE_SIZE)) {
     return new Promise((resolve) => {
         const video = document.createElement('video');
         video.preload = 'auto';
@@ -2583,6 +2608,7 @@ function openThumbDB() {
 //   src インターセプタから呼ばれる。キャッシュミス時は null。
 // ============================================================
 async function _ensureImageThumbCached(origName, charName) {
+    await ensureThumbCacheVersion();
     const cacheKey = `${charName}:${origName}:imgthumb`;
     if (_imgBlobUrlCache.has(cacheKey)) return _imgBlobUrlCache.get(cacheKey);
     try {
@@ -2597,6 +2623,7 @@ async function _ensureImageThumbCached(origName, charName) {
 }
 
 async function _ensureVideoThumbCached(videoFileName, charName) {
+    await ensureThumbCacheVersion();
     const cacheKey = `${charName}:${videoFileName}`;
     const cached = _thumbUrlCache.get(cacheKey);
     if (cached) return cached;
@@ -2710,7 +2737,7 @@ function ensureThumbCacheVersion() {
     if (_cacheVersionReadyPromise) return _cacheVersionReadyPromise;
 
     _cacheVersionReadyPromise = (async () => {
-        const current = String(THUMB_CACHE_VERSION);
+        const current = getThumbnailCacheVersion();
         let stored = null;
         try {
             stored = localStorage.getItem(THUMB_CACHE_VERSION_KEY);
@@ -2980,6 +3007,7 @@ async function uploadThumbnailBlob(charName, blob, thumbName) {
 
 async function ensureThumbnailForVideo(videoFileName, charName = getCurrentCharacterName()) {
     if (!videoFileName || !charName) return null;
+    await ensureThumbCacheVersion();
     const cacheKey = `${charName}:${videoFileName}`;
 
     if (_thumbUrlCache.has(cacheKey)) {
@@ -2998,7 +3026,7 @@ async function ensureThumbnailForVideo(videoFileName, charName = getCurrentChara
 
     const videoUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(videoFileName);
     console.log(`[GIC] 🎬 generating thumbnail: ${cacheKey}`);
-    const blob = await generateVideoThumbnailBlob(videoUrl, THUMB_SIZE);
+    const blob = await generateVideoThumbnailBlob(videoUrl, getThumbnailSize(THUMB_BASE_SIZE));
     if (!blob) {
         console.warn(`[GIC] ❌ thumbnail generation failed: ${cacheKey}`);
         return null;
@@ -3016,7 +3044,7 @@ async function ensureThumbnailForVideo(videoFileName, charName = getCurrentChara
 // ★ 画像サムネイル（200x200）の生成・キャッシュ
 //    ★ ディスク保存も行う（/api/images/list 置換に必須）
 // ============================================================
-async function generateImageThumbnailBlob(imageUrl, size = IMG_THUMB_SIZE) {
+async function generateImageThumbnailBlob(imageUrl, size = getThumbnailSize(IMG_THUMB_BASE_SIZE)) {
     return new Promise((resolve) => {
         const img = new Image();
         img.onload = () => {
@@ -3056,6 +3084,7 @@ async function generateImageThumbnailBlob(imageUrl, size = IMG_THUMB_SIZE) {
 
 async function ensureImageThumbnail(imageFileName, charName) {
     if (!imageFileName || !charName) return null;
+    await ensureThumbCacheVersion();
 
     if (imageFileName.endsWith('_thum.png') || imageFileName.endsWith('_img_thum.png')) {
         return null;
@@ -3083,7 +3112,7 @@ async function ensureImageThumbnail(imageFileName, charName) {
 
     /* 新規生成 → IndexedDB のみ保存 */
     const imageUrl = '/user/images/' + encodeURIComponent(charName) + '/' + encodeURIComponent(imageFileName);
-    const blob = await generateImageThumbnailBlob(imageUrl, IMG_THUMB_SIZE);
+    const blob = await generateImageThumbnailBlob(imageUrl, getThumbnailSize(IMG_THUMB_BASE_SIZE));
     if (!blob) return null;
 
     await putImgInDB(cacheKey, blob);
