@@ -116,6 +116,7 @@
             'stj.test.matched': 'Matched 「{keyword}」! (File: {file})',
             'stj.test.no_match': 'No keyword matched (default "{default}" will be applied).',
             'stj.test.file_unspecified': 'unspecified',
+            'stj.test.result_prefix': 'Result',
 
             'stj.header.title': '🔍 Real-time keyword reaction test',
             'stj.header.help': 'Help',
@@ -276,6 +277,7 @@
             'stj.test.matched': '「{keyword}」 にマッチしました！ (ファイル: {file})',
             'stj.test.no_match': '一致するキーワードがありません（デフォルト「{default}」が適用されます）',
             'stj.test.file_unspecified': '未指定',
+            'stj.test.result_prefix': '判定結果',
 
             'stj.header.title': '🔍 リアルタイムキーワード反応テスト',
             'stj.header.help': 'ヘルプ',
