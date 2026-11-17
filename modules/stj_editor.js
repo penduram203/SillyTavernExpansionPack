@@ -1486,7 +1486,7 @@
         if (!stjModalEl) return;
         const { fromGallery = false, force = false } = opts;
         if (stjModalEl.style.display !== 'block') return;
-        if (!force && (isBulkDeleteMode || isDialogActive)) return;
+        if (!force && isDialogActive) return;
         closeExportModalInternal();
         if (!fromGallery) {
             if (window.GicApi?.closeGallery) {
@@ -1595,7 +1595,7 @@
 
     function openCellModal(cell) {
         if (!cell) return;
-        if (isBulkDeleteMode || isDialogActive) return;
+        if (isDialogActive) return;
 
         if (currentModalCell === cell &&
             currentCellModal &&
@@ -2203,7 +2203,7 @@
 
         item.addEventListener('click', (e) => {
             if (e.target.closest('button')) return;
-            if (isBulkDeleteMode || isDialogActive) return;
+            if (isDialogActive) return;
             if (Date.now() < _suppressCellClickUntil) {
                 e.stopPropagation();
                 e.preventDefault();
@@ -3134,7 +3134,7 @@
         const addBtn = document.getElementById('stj_add_keyword');
         if (addBtn) addBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
-            if (isBulkDeleteMode || isDialogActive) return;
+            if (isDialogActive) return;
 
             try {
                 autoSave({ immediate: true });
@@ -3172,7 +3172,7 @@
         if (cancelBtn) {
             cancelBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                if (isBulkDeleteMode || isDialogActive) return;
+                if (isDialogActive) return;
                 closeExportModal();
             });
         }
@@ -3180,7 +3180,7 @@
         modal.querySelectorAll('.stj-special-item').forEach(item => {
             item.addEventListener('click', (e) => {
                 if (e.target.closest('button')) return;
-                if (isBulkDeleteMode || isDialogActive) return;
+                if (isDialogActive) return;
                 if (Date.now() < _suppressCellClickUntil) {
                     e.stopPropagation();
                     e.preventDefault();
