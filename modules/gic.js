@@ -7,7 +7,7 @@ import { getContext } from '../../../../extensions.js';
 
 console.log('[GIC] モジュールロード開始');
 
-// ============================================================
+// ===========================================================
 // ★ 画像リソース インターセプタ（サムネ 404 防止 / 完全版）
 //   - HTMLImageElement.src セッター
 //   - Element.setAttribute('src')
@@ -16,7 +16,7 @@ console.log('[GIC] モジュールロード開始');
 //   - CSSStyleDeclaration.backgroundImage セッター
 //   - CSSStyleDeclaration.setProperty('background-image')
 //   すべてで _thum.png URL を data URI / blob URL に差し替える
-// ============================================================
+// ===========================================================
 (function installGicImageSrcInterceptor() {
     if (window.__gicImageSrcInterceptorInstalled) return;
     window.__gicImageSrcInterceptorInstalled = true;
