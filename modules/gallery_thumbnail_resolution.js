@@ -159,9 +159,23 @@
     }
 
     // ============================================================
-    // 2. パフォーマンス＆メモリ最適化（Lazy Loading & ギャラリー非表示時のメモリ解放）
+    // 2. パフォーマンス＆メモリ最適化（過剰な一括プリロード抑制・Lazy Loading・メモリ解放）
     // ============================================================
     const TRANSPARENT_PIXEL = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
+    // GIC本体の一括プリロード関数をインターセプトしてメモリ爆発を防止
+    function suppressAggressivePreloading() {
+        if (window.GicApi && typeof window.GicApi.preloadAllImages === 'function') {
+            if (!window.GicApi.__suppressed) {
+                const originalPreload = window.GicApi.preloadAllImages;
+                window.GicApi.preloadAllImages = async function(...args) {
+                    console.info('[GalleryMemoryOpt] 🛡️ 一括バックグラウンド先読みはメモリ節約のためスキップされました。');
+                    return Promise.resolve();
+                };
+                window.GicApi.__suppressed = true;
+            }
+        }
+    }
 
     function enforceLazyLoading() {
         const gallery = document.getElementById('gallery');
@@ -210,6 +224,7 @@
 
     function initGalleryOptimizer() {
         const observer = new MutationObserver(() => {
+            suppressAggressivePreloading();
             enforceLazyLoading();
             monitorGalleryMemory();
         });
@@ -236,6 +251,7 @@
     }
 
     async function refreshCachesForResolution() {
+        suppressAggressivePreloading();
         if (refreshInProgress || !window.GicApi) return;
         const signature = getResolutionSignature();
         if (signature === lastResolutionSignature) return;
