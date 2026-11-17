@@ -18,6 +18,15 @@
 
 import { getContext } from '../../../../extensions.js';
 
+import './i18n.js';
+
+function _t(k, fb, p) {
+    try { if (window.ExpI18n?.t) return window.ExpI18n.t(k, fb, p); } catch (e) {}
+    let s = fb !== undefined ? String(fb) : k;
+    if (p) for (const kk of Object.keys(p)) s = s.split(`{${kk}}`).join(String(p[kk]));
+    return s;
+}
+
 const LOG = '[RandomPromptWildcard]';
 const NAMESPACE = 'random_prompt_wildcard';
 const BUTTON_ID = 'rpw-open-button';
@@ -299,15 +308,15 @@ function saveLorasForChar(charName, loras) {
 //   キャラ選択時は「{キャラ名} 推奨LoRA」/「{キャラ名} 推奨 LoRA 設定」
 // ============================================================
 function getLoraButtonLabel() {
-    const charName = getCurrentCharName();
-    if (!charName || !charName.trim()) return 'キャラ推奨LoRA';
-    return `${charName.trim()} 推奨LoRA`;
+    const n = (getCurrentCharName() || '').trim();
+    return n ? _t('crl.btn_label', '{name} 推奨LoRA', { name: n })
+             : _t('crl.btn_label_default', 'キャラ推奨LoRA');
 }
 
 function getLoraModalTitle() {
-    const charName = getCurrentCharName();
-    if (!charName || !charName.trim()) return 'キャラ推奨 LoRA 設定';
-    return `${charName.trim()} 推奨 LoRA 設定`;
+    const n = (getCurrentCharName() || '').trim();
+    return n ? _t('crl.modal_title', '{name} 推奨 LoRA 設定', { name: n })
+             : _t('crl.modal_title_default', 'キャラ推奨 LoRA 設定');
 }
 
 // ============================================================
@@ -809,37 +818,33 @@ function injectStyle() {
 function getHelpContentHTML() {
     return `
         <section class="rpw-help-section">
-            <h3>概要</h3>
-            <p>
-                ここに定義したワイルドカードは、このキャラクター専用のプロンプト変数として記録されます。
-                ロアブックの <code>Img_prompt</code> や <code>Negative_prompt</code> に含まれる
-                <strong>変数名</strong>が、画像生成時に自動的に<strong>ランダムな値</strong>へ置き換えられます。
-            </p>
+            <h3>${_t('rpw.help.overview.h')}</h3>
+            <p>${_t('rpw.help.overview.p')}</p>
         </section>
 
         <section class="rpw-help-section">
-            <h3>基本構文</h3>
-            <pre class="rpw-code-block">変数名 = 値1,値2,値3, ...</pre>
+            <h3>${_t('rpw.help.syntax.h')}</h3>
+            <pre class="rpw-code-block">${_t('rpw.help.syntax.code')}</pre>
             <ul>
-                <li>「変数名」と <code>=</code> の間にスペースを入れてください。</li>
-                <li>値はカンマ <code>,</code> で区切ってください。</li>
-                <li>1行につき1つの変数を定義します。</li>
-                <li>変数名には好きな文字を使えます（例: <code>color1?</code>, <code>eyes</code>）</li>
+                <li>${_t('rpw.help.syntax.li1')}</li>
+                <li>${_t('rpw.help.syntax.li2')}</li>
+                <li>${_t('rpw.help.syntax.li3')}</li>
+                <li>${_t('rpw.help.syntax.li4')}</li>
             </ul>
         </section>
 
         <section class="rpw-help-section">
-            <h3>例 1: 髪の色をランダム化</h3>
+            <h3>${_t('rpw.help.ex1.h')}</h3>
             <div class="rpw-example-def">
-                <div class="rpw-example-label">定義</div>
+                <div class="rpw-example-label">${_t('rpw.help.label.def')}</div>
                 <pre class="rpw-code-block">color1? = black,brown,orange,yellow,pink</pre>
             </div>
             <div class="rpw-example-usage">
-                <div class="rpw-example-label">ロアブックのプロンプト</div>
+                <div class="rpw-example-label">${_t('rpw.help.label.lore_prompt')}</div>
                 <pre class="rpw-code-block">1girl,color1? hair, miniskirt,</pre>
             </div>
             <div class="rpw-example-result">
-                <div class="rpw-example-label">生成結果の例</div>
+                <div class="rpw-example-label">${_t('rpw.help.label.result')}</div>
                 <pre class="rpw-code-block">1girl,black hair, miniskirt,
 1girl,brown hair, miniskirt,
 1girl,pink hair, miniskirt,</pre>
@@ -847,40 +852,38 @@ function getHelpContentHTML() {
         </section>
 
         <section class="rpw-help-section rpw-help-section-highlight">
-            <h3>例 2: 同じ変数を複数箇所で使う（重要）</h3>
-            <p>1回の画像生成で<strong>同じ変数は同じ値</strong>になります。</p>
+            <h3>${_t('rpw.help.ex2.h')}</h3>
+            <p>${_t('rpw.help.ex2.p')}</p>
             <div class="rpw-example-usage">
-                <div class="rpw-example-label">プロンプト</div>
+                <div class="rpw-example-label">${_t('rpw.help.label.prompt')}</div>
                 <pre class="rpw-code-block">color1? hair, color1? eyes, 1girl</pre>
             </div>
             <div class="rpw-example-result">
-                <div class="rpw-example-label">生成例（髪と瞳が同じ色になる）</div>
+                <div class="rpw-example-label">${_t('rpw.help.ex2.result_label')}</div>
                 <pre class="rpw-code-block">pink hair, pink eyes, 1girl
 brown hair, brown eyes, 1girl</pre>
             </div>
-            <p class="rpw-note">
-                ※ 別々の色にしたい場合は <code>color1?</code> <code>color2?</code> と別名の変数を定義してください。
-            </p>
+            <p class="rpw-note">${_t('rpw.help.ex2.note')}</p>
         </section>
 
         <section class="rpw-help-section">
-            <h3>例 3: カンマを含む値を使いたい場合</h3>
-            <p>ダブルクォートまたはシングルクォートで囲ってください。</p>
+            <h3>${_t('rpw.help.ex3.h')}</h3>
+            <p>${_t('rpw.help.ex3.p')}</p>
             <div class="rpw-example-def">
-                <div class="rpw-example-label">定義</div>
+                <div class="rpw-example-label">${_t('rpw.help.label.def')}</div>
                 <pre class="rpw-code-block">style? = "soft, pastel", "sharp, realistic"</pre>
             </div>
         </section>
 
         <section class="rpw-help-section">
-            <h3>注意事項</h3>
+            <h3>${_t('rpw.help.notes.h')}</h3>
             <ul>
-                <li><code>#</code> で始まる行はコメントとして無視されます。</li>
-                <li>空行も無視されます。</li>
-                <li>値が空の変数（例: <code>foo =</code>）は無視されます。</li>
-                <li>変数名が同じ場合は、後から書いた定義が優先されます。</li>
-                <li>ロアブックに変数名が含まれていない場合は何も変化しません。</li>
-                <li>入力内容は自動的に保存されます（キャラクター毎に独立管理）。</li>
+                <li>${_t('rpw.help.notes.li1')}</li>
+                <li>${_t('rpw.help.notes.li2')}</li>
+                <li>${_t('rpw.help.notes.li3')}</li>
+                <li>${_t('rpw.help.notes.li4')}</li>
+                <li>${_t('rpw.help.notes.li5')}</li>
+                <li>${_t('rpw.help.notes.li6')}</li>
             </ul>
         </section>
     `;
@@ -892,85 +895,66 @@ brown hair, brown eyes, 1girl</pre>
 function getLoraHelpHTML() {
     return `
         <div class="crl-help-block">
-            <h4>📖 LoRAとは</h4>
-            <p>
-                LoRA（Low-Rank Adaptation）は、ベースモデルの画風やキャラクターを
-                <strong>追加学習</strong>するための軽量な追加ファイルです。
-                ベースモデルを変えずに、特定のスタイル・キャラクター・構図を再現できます。
-            </p>
+            <h4>${_t('crl.help.what.h')}</h4>
+            <p>${_t('crl.help.what.p')}</p>
         </div>
 
         <div class="crl-help-block">
-            <h4>📦 LoRAファイルの配置</h4>
-            <p>ダウンロードした <code>.safetensors</code> ファイルを以下に配置してください。</p>
+            <h4>${_t('crl.help.place.h')}</h4>
+            <p>${_t('crl.help.place.p')}</p>
             <ul>
-                <li><strong>ComfyUI ローカル:</strong> <code>ComfyUI/models/loras/</code></li>
-                <li><strong>Colab + Google Drive:</strong> <code>MyDrive/ComfyUI/models/loras/</code></li>
-                <li><strong>SillyTavern SD拡張:</strong> <code>data/default-user/extensions/sd/models/lora/</code></li>
+                <li>${_t('crl.help.place.li1')}</li>
+                <li>${_t('crl.help.place.li2')}</li>
+                <li>${_t('crl.help.place.li3')}</li>
             </ul>
-            <p class="crl-warn">
-                ⚠️ ファイル名は<strong>完全一致</strong>が必要です（大文字小文字・拡張子まで）。
-            </p>
+            <p class="crl-warn">${_t('crl.help.place.warn')}</p>
         </div>
 
         <div class="crl-help-block">
-            <h4>✍️ プロンプトへの記述</h4>
-            <p>Img_prompt に以下のタグを書くと、LoRAが適用されます。</p>
-            <pre class="crl-code-block">&lt;lora:ファイル名:強度&gt;</pre>
-            <p>例:</p>
+            <h4>${_t('crl.help.write.h')}</h4>
+            <p>${_t('crl.help.write.p1')}</p>
+            <pre class="crl-code-block">&lt;lora:${_t('crl.help.write.syntax_name')}:${_t('crl.help.write.syntax_strength')}&gt;</pre>
+            <p>${_t('crl.help.write.example')}</p>
             <pre class="crl-code-block">&lt;lora:myCharacterLora.safetensors:0.8&gt; 1girl, school uniform</pre>
-            <p>
-                <strong>強度</strong>は <code>0.0</code> 〜 <code>1.0</code> の範囲で指定します。
-                <code>0.6</code> 〜 <code>0.8</code> が一般的です。
-            </p>
+            <p>${_t('crl.help.write.p2')}</p>
         </div>
 
         <div class="crl-help-block">
-            <h4>🔑 トリガーワード</h4>
-            <p>
-                LoRAによっては、効果を発動させるために<strong>特定のキーワード</strong>
-                （トリガーワード）をプロンプトに含める必要があります。
-                Civitai のLoRAページの説明欄に記載されています。
-            </p>
+            <h4>${_t('crl.help.trigger.h')}</h4>
+            <p>${_t('crl.help.trigger.p')}</p>
             <pre class="crl-code-block">&lt;lora:myLora:0.8&gt;, myStyle, 1girl</pre>
         </div>
 
         <div class="crl-help-block">
-            <h4>💡 強度の目安</h4>
+            <h4>${_t('crl.help.strength.h')}</h4>
             <ul>
-                <li><strong>0.3〜0.5:</strong> 控えめ。ベースモデルの画風を残す</li>
-                <li><strong>0.6〜0.8:</strong> 標準。バランスが良い</li>
-                <li><strong>0.9〜1.0:</strong> 強め。LoRAの特徴を強く出す</li>
-                <li><strong>1.0超:</strong> 過飽和・アーティファクトの原因になる</li>
+                <li>${_t('crl.help.strength.li1')}</li>
+                <li>${_t('crl.help.strength.li2')}</li>
+                <li>${_t('crl.help.strength.li3')}</li>
+                <li>${_t('crl.help.strength.li4')}</li>
             </ul>
         </div>
 
         <div class="crl-help-block">
-            <h4>⚠️ SDXL / SD1.5 の互換性</h4>
-            <p>
-                LoRAは<strong>ベースモデルと同じ系統</strong>でなければ動作しません。
-                NovaAnimeXL は <strong>SDXL</strong> ベースなので、
-                <strong>SDXL用LoRA</strong>（Civitaiで「SDXL 1.0」「Pony」「Illustrious」等）を使ってください。
-            </p>
-            <p class="crl-warn">
-                ⚠️ SD1.5用LoRAはSDXLモデルでは効果がほとんど出ません。
-            </p>
+            <h4>${_t('crl.help.compat.h')}</h4>
+            <p>${_t('crl.help.compat.p')}</p>
+            <p class="crl-warn">${_t('crl.help.compat.warn')}</p>
         </div>
 
         <div class="crl-help-block">
-            <h4>🔄 複数LoRAの併用</h4>
-            <p>1つのプロンプトに複数のLoRAタグを書けます。</p>
+            <h4>${_t('crl.help.multi.h')}</h4>
+            <p>${_t('crl.help.multi.p1')}</p>
             <pre class="crl-code-block">&lt;lora:styleA:0.7&gt; &lt;lora:styleB:0.5&gt; 1girl, ...</pre>
-            <p>合計強度が <code>1.5</code> を超えると画質劣化の原因になるため注意してください。</p>
+            <p>${_t('crl.help.multi.p2')}</p>
         </div>
 
         <div class="crl-help-block">
-            <h4>🧪 動作確認のポイント</h4>
+            <h4>${_t('crl.help.verify.h')}</h4>
             <ul>
-                <li>ComfyUIのサーバーログに <code>detected lora tag: (...)</code> が出れば認識成功</li>
-                <li><code>patches attached: N</code> の N が 0 より大きければ適用成功</li>
-                <li>LoRAを外して同じプロンプトで生成し、見た目を比較する</li>
-                <li>強度を <code>1.5</code> まで上げて変化が強調されるか確認する</li>
+                <li>${_t('crl.help.verify.li1')}</li>
+                <li>${_t('crl.help.verify.li2')}</li>
+                <li>${_t('crl.help.verify.li3')}</li>
+                <li>${_t('crl.help.verify.li4')}</li>
             </ul>
         </div>
     `;
@@ -994,14 +978,14 @@ function ensureModal() {
 
     const title = document.createElement('div');
     title.className = 'rpw-title';
-    title.textContent = 'Random Prompt Wildcard 設定';
+    title.textContent = _t('rpw.title');
     headerLeft.appendChild(title);
 
     const helpBtn = document.createElement('button');
     helpBtn.id = HELP_BTN_ID;
     helpBtn.type = 'button';
-    helpBtn.textContent = 'ヘルプ';
-    helpBtn.title = '使い方（ヘルプ）を表示';
+    helpBtn.textContent = _t('rpw.help_btn');
+    helpBtn.title = _t('rpw.help_btn_title');
     helpBtn.addEventListener('click', () => openHelpModal());
     headerLeft.appendChild(helpBtn);
 
@@ -1011,7 +995,7 @@ function ensureModal() {
     closeBtn.id = CLOSE_BTN_ID;
     closeBtn.type = 'button';
     closeBtn.textContent = '✕';
-    closeBtn.title = '閉じる (Escape)';
+    closeBtn.title = _t('rpw.close_title');
     closeBtn.addEventListener('click', () => closeModal());
     header.appendChild(closeBtn);
 
@@ -1020,11 +1004,7 @@ function ensureModal() {
     const textarea = document.createElement('textarea');
     textarea.id = TEXTAREA_ID;
     textarea.spellcheck = false;
-    textarea.placeholder = [
-        '# 1行1定義: name? = value1,value2,value3',
-        '# 例: color1? = black,brown,orange,yellow,pink',
-        '# 詳しくは右上の「ヘルプ」ボタンを押してください',
-    ].join('\n');
+    textarea.placeholder = _t('rpw.placeholder');
     textarea.addEventListener('input', () => {
         const charName = _currentCharName;
         if (!charName) return;
@@ -1060,7 +1040,7 @@ function ensureHelpModal() {
 
     const title = document.createElement('div');
     title.className = 'rpw-title';
-    title.textContent = 'Random Prompt Wildcard の使い方';
+    title.textContent = _t('rpw.help_title');
     headerLeft.appendChild(title);
 
     header.appendChild(headerLeft);
@@ -1069,7 +1049,7 @@ function ensureHelpModal() {
     closeBtn.id = HELP_CLOSE_BTN_ID;
     closeBtn.type = 'button';
     closeBtn.textContent = '✕';
-    closeBtn.title = '閉じる (Escape)';
+    closeBtn.title = _t('rpw.close_title');
     closeBtn.addEventListener('click', () => closeHelpModal());
     header.appendChild(closeBtn);
 
@@ -1106,7 +1086,7 @@ function ensureLoraModal() {
 
     const title = document.createElement('div');
     title.className = 'rpw-title';
-    title.textContent = 'キャラ推奨 LoRA 設定';
+    title.textContent = getLoraModalTitle();
     headerLeft.appendChild(title);
 
     header.appendChild(headerLeft);
@@ -1115,7 +1095,7 @@ function ensureLoraModal() {
     closeBtn.id = LORA_CLOSE_BTN_ID;
     closeBtn.type = 'button';
     closeBtn.textContent = '✕';
-    closeBtn.title = '閉じる (Escape)';
+    closeBtn.title = _t('rpw.close_title');
     closeBtn.addEventListener('click', () => closeLoraModal());
     header.appendChild(closeBtn);
 
@@ -1130,7 +1110,7 @@ function ensureLoraModal() {
 
     const topHeader = document.createElement('div');
     topHeader.className = 'crl-top-header';
-    topHeader.textContent = '推奨 LoRA 入力エリア';
+    topHeader.textContent = _t('crl.top_header');
     topSection.appendChild(topHeader);
 
     const list = document.createElement('div');
@@ -1144,7 +1124,7 @@ function ensureLoraModal() {
     const addBtn = document.createElement('button');
     addBtn.id = LORA_ADD_BTN_ID;
     addBtn.type = 'button';
-    addBtn.textContent = '＋ LoRAを追加';
+    addBtn.textContent = _t('crl.add');
     addBtn.addEventListener('click', () => addLoraEntry());
     addRow.appendChild(addBtn);
 
@@ -1181,13 +1161,13 @@ function createLoraEntryRow(entry, index) {
     // ① Lora名
     const nameLabel = document.createElement('label');
     nameLabel.className = 'crl-label crl-label-required';
-    nameLabel.textContent = '① LoRA名（ファイル名）';
+    nameLabel.textContent = _t('crl.label.name');
     fields.appendChild(nameLabel);
 
     const nameInput = document.createElement('input');
     nameInput.type = 'text';
     nameInput.className = 'crl-name';
-    nameInput.placeholder = '例: myCharacterLora.safetensors';
+    nameInput.placeholder = _t('crl.ph.name');
     nameInput.value = entry.name || '';
     nameInput.addEventListener('input', () => {
         entry.name = nameInput.value;
@@ -1198,13 +1178,13 @@ function createLoraEntryRow(entry, index) {
     // ② ダウンロードURL
     const urlLabel = document.createElement('label');
     urlLabel.className = 'crl-label';
-    urlLabel.textContent = '② ダウンロードURL';
+    urlLabel.textContent = _t('crl.label.url');
     fields.appendChild(urlLabel);
 
     const urlInput = document.createElement('input');
     urlInput.type = 'text';
     urlInput.className = 'crl-url';
-    urlInput.placeholder = '例: https://civitai.com/models/xxxxx';
+    urlInput.placeholder = _t('crl.ph.url');
     urlInput.value = entry.downloadUrl || '';
     urlInput.addEventListener('input', () => {
         entry.downloadUrl = urlInput.value;
@@ -1215,13 +1195,13 @@ function createLoraEntryRow(entry, index) {
     // ③ トリガーワード
     const triggerLabel = document.createElement('label');
     triggerLabel.className = 'crl-label';
-    triggerLabel.textContent = '③ トリガーワード';
+    triggerLabel.textContent = _t('crl.label.trigger');
     fields.appendChild(triggerLabel);
 
     const triggerInput = document.createElement('input');
     triggerInput.type = 'text';
     triggerInput.className = 'crl-trigger';
-    triggerInput.placeholder = '例: myStyle, characterName';
+    triggerInput.placeholder = _t('crl.ph.trigger');
     triggerInput.value = entry.triggerWords || '';
     triggerInput.addEventListener('input', () => {
         entry.triggerWords = triggerInput.value;
@@ -1232,12 +1212,12 @@ function createLoraEntryRow(entry, index) {
     // ④ 説明
     const descLabel = document.createElement('label');
     descLabel.className = 'crl-label';
-    descLabel.textContent = '④ 説明';
+    descLabel.textContent = _t('crl.label.desc');
     fields.appendChild(descLabel);
 
     const descInput = document.createElement('textarea');
     descInput.className = 'crl-description';
-    descInput.placeholder = 'このLoRAの説明、推奨強度、注意点など';
+    descInput.placeholder = _t('crl.ph.desc');
     descInput.value = entry.description || '';
     descInput.addEventListener('input', () => {
         entry.description = descInput.value;
@@ -1252,9 +1232,9 @@ function createLoraEntryRow(entry, index) {
     delBtn.type = 'button';
     delBtn.className = 'crl-delete';
     delBtn.textContent = '✕';
-    delBtn.title = 'このLoRAを削除';
+    delBtn.title = _t('crl.delete_title');
     delBtn.addEventListener('click', () => {
-        if (!confirm('この LoRA を削除しますか？\nこの操作は取り消せません。')) return;
+        if (!confirm(_t('crl.delete_confirm'))) return;
         const charName = _currentLoraCharName;
         if (!charName) return;
 
@@ -1281,7 +1261,7 @@ function renderLoraEntries() {
     if (!charName) {
         const empty = document.createElement('div');
         empty.style.cssText = 'color: #a0aec0; text-align: center; padding: 20px;';
-        empty.textContent = 'キャラクターが選択されていません';
+        empty.textContent = _t('crl.no_char');
         list.appendChild(empty);
         return;
     }
@@ -1290,7 +1270,7 @@ function renderLoraEntries() {
     if (loras.length === 0) {
         const empty = document.createElement('div');
         empty.style.cssText = 'color: #a0aec0; text-align: center; padding: 20px; font-size: 13px;';
-        empty.textContent = 'まだ LoRA が登録されていません。「＋ LoRAを追加」を押してください。';
+        empty.textContent = _t('crl.empty');
         list.appendChild(empty);
         return;
     }
@@ -1382,9 +1362,9 @@ function openModal() {
     if (!charName) {
         console.warn(LOG, 'キャラクターが選択されていません');
         if (typeof window.toastr !== 'undefined' && typeof window.toastr.warning === 'function') {
-            window.toastr.warning('キャラクターを選択してください');
+            window.toastr.warning(_t('rpw.select_char'));
         } else {
-            alert('キャラクターを選択してください');
+            alert(_t('rpw.select_char'));
         }
         return;
     }
@@ -1439,9 +1419,9 @@ function openLoraModal() {
     if (!charName) {
         console.warn(LOG, 'キャラクターが選択されていません');
         if (typeof window.toastr !== 'undefined' && typeof window.toastr.warning === 'function') {
-            window.toastr.warning('キャラクターを選択してください');
+            window.toastr.warning(_t('rpw.select_char'));
         } else {
-            alert('キャラクターを選択してください');
+            alert(_t('rpw.select_char'));
         }
         return;
     }
@@ -1484,7 +1464,7 @@ function createWildcardButton() {
     btn.id = BUTTON_ID;
     btn.type = 'button';
     btn.textContent = 'Random_Prompt_Wildcard';
-    btn.title = 'キャラクター毎のランダムプロンプトワイルドカードを設定';
+    btn.title = _t('rpw.btn_title');
     btn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -1501,7 +1481,7 @@ function createLoraButton() {
     btn.id = LORA_BUTTON_ID;
     btn.type = 'button';
     btn.textContent = getLoraButtonLabel();   // ★ キャラ名に応じたラベル
-    btn.title = 'キャラクター推奨のLoRA情報を登録する';
+    btn.title = _t('crl.btn_title');
     btn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -1597,6 +1577,45 @@ function init() {
         }
     } catch (e) { /* ignore */ }
 
+    // ★ 言語変更に追従
+    const retranslate = () => {
+        try {
+            const m = document.getElementById(MODAL_ID);
+            if (m) {
+                m.querySelector('.rpw-title').textContent = _t('rpw.title');
+                const hb = m.querySelector('#' + HELP_BTN_ID);
+                if (hb) { hb.textContent = _t('rpw.help_btn'); hb.title = _t('rpw.help_btn_title'); }
+                const ta = m.querySelector('#' + TEXTAREA_ID);
+                if (ta) ta.placeholder = _t('rpw.placeholder');
+            }
+            const h = document.getElementById(HELP_MODAL_ID);
+            if (h) {
+                h.querySelector('.rpw-title').textContent = _t('rpw.help_title');
+                h.querySelector('.rpw-help-body').innerHTML = getHelpContentHTML();
+            }
+            const l = document.getElementById(LORA_MODAL_ID);
+            if (l) {
+                l.querySelector('.rpw-title').textContent = getLoraModalTitle();
+                l.querySelector('.crl-top-header').textContent = _t('crl.top_header');
+                l.querySelector('#' + LORA_ADD_BTN_ID).textContent = _t('crl.add');
+                l.querySelector('.crl-help-section').innerHTML = getLoraHelpHTML();
+                if (l.classList.contains('visible')) renderLoraEntries();
+            }
+            document.querySelectorAll('#' + MODAL_ID + ' ~ *, #' + HELP_MODAL_ID + ' button, #' + LORA_MODAL_ID + ' button[id$="close-button"]')
+                .forEach(() => {});
+            [CLOSE_BTN_ID, HELP_CLOSE_BTN_ID, LORA_CLOSE_BTN_ID].forEach(id => {
+                const b = document.getElementById(id);
+                if (b) b.title = _t('rpw.close_title');
+            });
+            const wb = document.getElementById(BUTTON_ID);
+            if (wb) wb.title = _t('rpw.btn_title');
+            const lb = document.getElementById(LORA_BUTTON_ID);
+            if (lb) { lb.textContent = getLoraButtonLabel(); lb.title = _t('crl.btn_title'); }
+        } catch (e) { console.warn(LOG, 'retranslate error:', e); }
+    };
+    window.ExpI18n?.onLanguageChange?.(retranslate);
+    retranslate();   // 初期化時にも1回適用
+        
     console.log(LOG, '初期化完了');
 }
 
