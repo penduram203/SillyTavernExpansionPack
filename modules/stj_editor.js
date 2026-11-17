@@ -1478,7 +1478,7 @@
             }
         } catch (e) { /* ignore */ }
         closeCellModal(false);
-        stjModalEl.style.display = 'none';
+        stjModalEl.style.display = 'none'; // ← ここで非表示にしているか確認
         document.body.classList.remove('stj-editor-open');
     }
 
@@ -3169,11 +3169,13 @@
         });
 
         const cancelBtn = document.getElementById('stj_cancel_export');
-        if (cancelBtn) cancelBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (isBulkDeleteMode || isDialogActive) return;
-            closeExportModal();
-        });
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (isBulkDeleteMode || isDialogActive) return;
+                closeExportModal();
+            });
+        }
 
         modal.querySelectorAll('.stj-special-item').forEach(item => {
             item.addEventListener('click', (e) => {
