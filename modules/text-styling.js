@@ -3,6 +3,18 @@
 function initTextStyling() {
     console.log('テキストスタイル拡張機能 (修正版): 初期化開始');
 
+    // ★ 多言語対応ヘルパー（window.ExpI18n が読まれていなくても安全）
+    function _t(k, fb, p) {
+        try {
+            if (window.ExpI18n?.t) return window.ExpI18n.t(k, fb, p);
+        } catch (e) { /* ignore */ }
+        let s = (fb !== undefined) ? String(fb) : k;
+        if (p && typeof p === 'object') {
+            for (const kk of Object.keys(p)) s = s.split(`{${kk}}`).join(String(p[kk]));
+        }
+        return s;
+    }
+
     const MODULE_NAME = 'text_styling';
     const OLD_STORAGE_KEY = 'textStylingSettings_v6_modified';
 
@@ -151,14 +163,14 @@ function initTextStyling() {
 
     const header = document.createElement('div');
     header.id = 'text-styling-header';
-    header.textContent = 'テキストスタイル設定';
+    header.textContent = _t('ts.panel_title', 'テキストスタイル設定');
     panel.appendChild(header);
 
     // 左下の T アイコン
     const restoreButton = document.createElement('button');
     restoreButton.id = 'restore-panel-button';
     restoreButton.textContent = 'T';
-    restoreButton.title = '設定パネルの表示/非表示';
+    restoreButton.title = _t('ts.restore_title', '設定パネルの表示/非表示');
     restoreButton.onclick = () => {
         panel.classList.toggle('hidden');
         saveSettings();
@@ -181,46 +193,46 @@ function initTextStyling() {
         return `
             <div class="enable-styling-toggle">
                 <input type="checkbox" id="${tagName}-enabled">
-                <label for="${tagName}-enabled">このスタイルを有効にする</label>
+                <label for="${tagName}-enabled"><span data-ts-i18n="ts.label.enable">${_t('ts.label.enable', 'このスタイルを有効にする')}</span></label>
             </div>
             <div class="columns-container">
                 <div class="column">
                     <div class="text-styling-control-group">
-                        <label for="${tagName}-font-size">文字サイズ: <span id="${tagName}-font-size-value"></span>%</label>
+                        <label for="${tagName}-font-size"><span data-ts-i18n="ts.label.font_size">${_t('ts.label.font_size', '文字サイズ')}</span>: <span id="${tagName}-font-size-value"></span>%</label>
                         <input type="range" id="${tagName}-font-size" min="50" max="250" step="10">
                     </div>
                     <div class="text-styling-control-group">
-                        <label for="${tagName}-font-weight">文字の太さ: <span id="${tagName}-font-weight-value"></span></label>
+                        <label for="${tagName}-font-weight"><span data-ts-i18n="ts.label.font_weight">${_t('ts.label.font_weight', '文字の太さ')}</span>: <span id="${tagName}-font-weight-value"></span></label>
                         <input type="range" id="${tagName}-font-weight" min="100" max="900" step="100">
                     </div>
                     <div class="text-styling-control-group">
-                        <label for="${tagName}-line-height">行間: <span id="${tagName}-line-height-value"></span></label>
+                        <label for="${tagName}-line-height"><span data-ts-i18n="ts.label.line_height">${_t('ts.label.line_height', '行間')}</span>: <span id="${tagName}-line-height-value"></span></label>
                         <input type="range" id="${tagName}-line-height" min="1.0" max="3.0" step="0.1">
                     </div>
                     <div class="text-styling-control-group">
-                        <label for="${tagName}-letter-spacing">字間: <span id="${tagName}-letter-spacing-value"></span>px</label>
+                        <label for="${tagName}-letter-spacing"><span data-ts-i18n="ts.label.letter_spacing">${_t('ts.label.letter_spacing', '字間')}</span>: <span id="${tagName}-letter-spacing-value"></span>px</label>
                         <input type="range" id="${tagName}-letter-spacing" min="-5" max="20" step="0.5">
                     </div>
                     <div class="text-styling-control-group">
-                        <label for="${tagName}-text-opacity">透過度: <span id="${tagName}-text-opacity-value"></span>%</label>
+                        <label for="${tagName}-text-opacity"><span data-ts-i18n="ts.label.text_opacity">${_t('ts.label.text_opacity', '透過度')}</span>: <span id="${tagName}-text-opacity-value"></span>%</label>
                         <input type="range" id="${tagName}-text-opacity" min="0" max="100" step="1">
                     </div>
                 </div>
                 <div class="column">
                     <div class="text-styling-control-group">
-                        <label for="${tagName}-text-color">文字色</label>
+                        <label for="${tagName}-text-color"><span data-ts-i18n="ts.label.text_color">${_t('ts.label.text_color', '文字色')}</span></label>
                         <input type="color" id="${tagName}-text-color">
                     </div>
                     <div class="text-styling-control-group">
-                        <label for="${tagName}-outline-color">縁取り色</label>
+                        <label for="${tagName}-outline-color"><span data-ts-i18n="ts.label.outline_color">${_t('ts.label.outline_color', '縁取り色')}</span></label>
                         <input type="color" id="${tagName}-outline-color">
                     </div>
                     <div class="text-styling-control-group">
-                        <label for="${tagName}-outline-width">縁取り幅: <span id="${tagName}-outline-width-value"></span>px</label>
+                        <label for="${tagName}-outline-width"><span data-ts-i18n="ts.label.outline_width">${_t('ts.label.outline_width', '縁取り幅')}</span>: <span id="${tagName}-outline-width-value"></span>px</label>
                         <input type="range" id="${tagName}-outline-width" min="0" max="10" step="0.5">
                     </div>
                     <div class="text-styling-control-group">
-                        <label for="${tagName}-bottom-margin">下余白: <span id="${tagName}-bottom-margin-value"></span>px</label>
+                        <label for="${tagName}-bottom-margin"><span data-ts-i18n="ts.label.bottom_margin">${_t('ts.label.bottom_margin', '下余白')}</span>: <span id="${tagName}-bottom-margin-value"></span>px</label>
                         <input type="range" id="${tagName}-bottom-margin" min="0" max="200" step="1">
                     </div>
                 </div>
@@ -231,7 +243,7 @@ function initTextStyling() {
         const button = document.createElement('button');
         button.className = 'tab-button';
         button.dataset.tab = tagName;
-        button.textContent = TAG_CONFIG[tagName].label;
+        button.textContent = _t(`ts.tag.${tagName}`, TAG_CONFIG[tagName].label);
         tabButtons.appendChild(button);
 
         const content = document.createElement('div');
@@ -273,9 +285,9 @@ function initTextStyling() {
     chatSection.className = 'text-styling-section';
     chatSection.style.marginTop = '15px';
     chatSection.innerHTML = `
-        <h3>チャットウィンドウ設定</h3>
+        <h3><span data-ts-i18n="ts.chat_section">${_t('ts.chat_section', 'チャットウィンドウ設定')}</span></h3>
         <div class="text-styling-control-group">
-            <label for="chat-opacity">透過度: <span id="chat-opacity-value"></span>%</label>
+            <label for="chat-opacity"><span data-ts-i18n="ts.chat_opacity">${_t('ts.chat_opacity', '透過度')}</span>: <span id="chat-opacity-value"></span>%</label>
             <input type="range" id="chat-opacity" min="0" max="100" step="1">
         </div>`;
     panel.appendChild(chatSection);
@@ -647,16 +659,16 @@ function initTextStyling() {
         if (toggleBtn) {
             switch (currentLayoutMode) {
                 case 'center':
-                    toggleBtn.textContent = '中央';
-                    toggleBtn.title = 'クリックで「左右」に切替';
+                    toggleBtn.textContent = _t('ts.layout.center', '中央');
+                    toggleBtn.title = _t('ts.layout.toggle.center_title', 'クリックで「左右」に切替');
                     break;
                 case 'split':
-                    toggleBtn.textContent = '左右';
-                    toggleBtn.title = 'クリックで「手動」に切替';
+                    toggleBtn.textContent = _t('ts.layout.split', '左右');
+                    toggleBtn.title = _t('ts.layout.toggle.split_title', 'クリックで「手動」に切替');
                     break;
                 case 'manual':
-                    toggleBtn.textContent = '手動';
-                    toggleBtn.title = 'クリックで「中央」に切替';
+                    toggleBtn.textContent = _t('ts.layout.manual', '手動');
+                    toggleBtn.title = _t('ts.layout.toggle.manual_title', 'クリックで「中央」に切替');
                     break;
             }
             console.log(`[Text Styling] ボタンテキスト更新: "${toggleBtn.textContent}" (mode=${currentLayoutMode})`);
@@ -701,6 +713,58 @@ function initTextStyling() {
         setLayoutMode(nextMode);
     }
 
+    // ============================================================
+    // ★ 言語変更時に UI を再翻訳
+    // ============================================================
+    function retranslateTextStylingUI() {
+        // パネルヘッダー
+        const hdr = document.getElementById('text-styling-header');
+        if (hdr) hdr.textContent = _t('ts.panel_title', 'テキストスタイル設定');
+
+        // T アイコン
+        const rb = document.getElementById('restore-panel-button');
+        if (rb) rb.title = _t('ts.restore_title', '設定パネルの表示/非表示');
+
+        // タブボタン
+        tabButtons.querySelectorAll('.tab-button').forEach(btn => {
+            const tag = btn.dataset.tab;
+            if (tag) btn.textContent = _t(`ts.tag.${tag}`, TAG_CONFIG[tag]?.label || tag);
+        });
+
+        // data-ts-i18n 属性を持つ要素を再翻訳
+        panel.querySelectorAll('[data-ts-i18n]').forEach(el => {
+            const key = el.getAttribute('data-ts-i18n');
+            const fb = el.textContent;
+            el.textContent = _t(key, fb);
+        });
+
+        // レイアウト切替ボタン
+        const toggleBtn = document.getElementById('center-button');
+        if (toggleBtn) {
+            switch (currentLayoutMode) {
+                case 'center':
+                    toggleBtn.textContent = _t('ts.layout.center', '中央');
+                    toggleBtn.title = _t('ts.layout.toggle.center_title', 'クリックで「左右」に切替');
+                    break;
+                case 'split':
+                    toggleBtn.textContent = _t('ts.layout.split', '左右');
+                    toggleBtn.title = _t('ts.layout.toggle.split_title', 'クリックで「手動」に切替');
+                    break;
+                case 'manual':
+                    toggleBtn.textContent = _t('ts.layout.manual', '手動');
+                    toggleBtn.title = _t('ts.layout.toggle.manual_title', 'クリックで「中央」に切替');
+                    break;
+            }
+        }
+
+        // サイズ設定ボタン
+        const manualBtn = document.getElementById('manual-settings-button');
+        if (manualBtn) {
+            manualBtn.textContent = _t('ts.manual_settings', 'サイズ設定');
+            manualBtn.title = _t('ts.manual_settings_title', '背景画像ウィンドウの位置とサイズを設定');
+        }
+    }
+    
     // --- 初期化処理 ---
     setTimeout(() => {
         console.log('拡張機能の初期化処理を開始');
@@ -713,8 +777,8 @@ function initTextStyling() {
         const layoutToggleButton = document.createElement('button');
         layoutToggleButton.id = 'center-button';
         layoutToggleButton.className = 'window-control-button';
-        layoutToggleButton.textContent = '中央';
-        layoutToggleButton.title = 'クリックで「左右」に切替';
+        layoutToggleButton.textContent = _t('ts.layout.center', '中央');
+        layoutToggleButton.title = _t('ts.layout.toggle.center_title', 'クリックで「左右」に切替');
         windowControlContainer.appendChild(layoutToggleButton);
 
         // ★ 「位置・サイズの設定」ボタン（手動モード専用）
@@ -722,8 +786,8 @@ function initTextStyling() {
         const manualSettingsButton = document.createElement('button');
         manualSettingsButton.id = 'manual-settings-button';
         manualSettingsButton.className = 'window-control-button';
-        manualSettingsButton.textContent = 'サイズ設定';
-        manualSettingsButton.title = '背景画像ウィンドウの位置とサイズを設定';
+        manualSettingsButton.textContent = _t('ts.manual_settings', 'サイズ設定');
+        manualSettingsButton.title = _t('ts.manual_settings_title', '背景画像ウィンドウの位置とサイズを設定');
         manualSettingsButton.style.display = 'none';
         manualSettingsButton.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -766,6 +830,14 @@ function initTextStyling() {
 
         // ★ 保存されたレイアウトモードを適用（保存はしない）
         setLayoutMode(currentLayoutMode, { skipSave: true });
+        // ★ 言語変更に追従して UI を再翻訳
+        try {
+            if (window.ExpI18n?.onLanguageChange) {
+                window.ExpI18n.onLanguageChange(() => {
+                    try { retranslateTextStylingUI(); } catch (e) { /* ignore */ }
+                });
+            }
+        } catch (e) { /* ignore */ }
 
         // ★ ウィンドウリサイズ時にレイアウトを再適用
         //   （4K ⇄ 1920 切替時も 50vw が再計算される）
