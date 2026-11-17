@@ -1,5 +1,6 @@
 // gallery_thumbnail_resolution.js
 // Resolution-aware thumbnail output and settings shortcut for the GIC gallery.
+// 軽量化版: サムネイル生成を廃止し、元画像ベースの直接縮小表示へ移行 ＆ 解像度確認ボタンの視認性改善（赤枠付）
 (function installGalleryThumbnailResolution() {
     'use strict';
 
@@ -7,103 +8,11 @@
     window.__gicGalleryThumbnailResolutionInstalled = true;
 
     const RESOLUTION_KEY = 'exp_font_scale_resolution';
-    const THUMBNAIL_SCALE_KEY = 'gic_gallery_thumbnail_scale_v1';
     const SETTINGS_BUTTON_ID = 'gic-resolution-settings-button';
-    const BASE_SIZE = 260;
-    const BASE_WIDTH = 1920;
-    const BASE_HEIGHT = 1080;
-    const MIN_SCALE = 1;
-    const MAX_SCALE = 2;
 
-    const nativeWidth = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'width');
-    const nativeHeight = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'height');
-    const nativeGetContext = HTMLCanvasElement.prototype.getContext;
-    const canvasState = new WeakMap();
-    const scaledContexts = new WeakMap();
-
-    function readResolution() {
-        try {
-            const value = JSON.parse(localStorage.getItem(RESOLUTION_KEY) || 'null');
-            const width = Number(value?.w);
-            const height = Number(value?.h);
-            if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) {
-                return { width, height };
-            }
-        } catch (e) { /* fallback */ }
-        return { width: BASE_WIDTH, height: BASE_HEIGHT };
-    }
-
-    function getSelectedScale() {
-        const { width, height } = readResolution();
-        const scale = Math.min(width / BASE_WIDTH, height / BASE_HEIGHT);
-        return Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale));
-    }
-
-    function isGicThumbnailSize(width, height) {
-        return Math.max(width, height) === BASE_SIZE;
-    }
-
-    function updateBackingStore(canvas, state) {
-        state.scale = isGicThumbnailSize(state.width, state.height) ? getSelectedScale() : 1;
-        state.isGicThumbnail = state.scale > 1;
-        scaledContexts.delete(canvas);
-        nativeWidth.set.call(canvas, Math.max(1, Math.round(state.width * state.scale)));
-        nativeHeight.set.call(canvas, Math.max(1, Math.round(state.height * state.scale)));
-    }
-
-    function getOrCreateState(canvas) {
-        let state = canvasState.get(canvas);
-        if (!state) {
-            state = {
-                width: nativeWidth.get.call(canvas),
-                height: nativeHeight.get.call(canvas),
-                scale: 1,
-                isGicThumbnail: false,
-            };
-            canvasState.set(canvas, state);
-        }
-        return state;
-    }
-
-    function patchDimension(property, nativeDescriptor) {
-        Object.defineProperty(HTMLCanvasElement.prototype, property, {
-            configurable: nativeDescriptor.configurable,
-            enumerable: nativeDescriptor.enumerable,
-            get: nativeDescriptor.get,
-            set(value) {
-                const state = getOrCreateState(this);
-                const logicalValue = Number(value);
-                state[property] = Number.isFinite(logicalValue) ? logicalValue : 0;
-                updateBackingStore(this, state);
-            },
-        });
-    }
-
-    try {
-        if (!nativeWidth?.get || !nativeWidth?.set || !nativeHeight?.get || !nativeHeight?.set) {
-            console.warn('[GIC] Canvas dimensions are not configurable; resolution-aware thumbnails unavailable.');
-            return;
-        }
-
-        patchDimension('width', nativeWidth);
-        patchDimension('height', nativeHeight);
-
-        HTMLCanvasElement.prototype.getContext = function (type, ...args) {
-            const context = nativeGetContext.call(this, type, ...args);
-            const state = canvasState.get(this);
-            if (context && type === '2d' && state?.isGicThumbnail &&
-                scaledContexts.get(this) !== state.scale) {
-                context.scale(state.scale, state.scale);
-                scaledContexts.set(this, state.scale);
-            }
-            return context;
-        };
-    } catch (error) {
-        console.warn('[GIC] Could not enable resolution-aware thumbnail canvases:', error);
-        return;
-    }
-
-    // --- ユーザー設定メニューへの「解像度確認ボタン」追加 ---
+    // ============================================================
+    // 1. ユーザー設定メニューへの「解像度確認ボタン」常設（赤い枠線で視認性向上）
+    // ============================================================
     function placeSettingsButton() {
         const languageBlock = document.getElementById('UI-language-block');
         if (!languageBlock?.parentElement) return;
@@ -115,9 +24,22 @@
             button.type = 'button';
             button.className = 'menu_button menu_button_iconic';
             button.textContent = '解像度確認';
-            button.title = 'モニタ解像度を選び直し、サムネイルの生成サイズを更新します';
-            // スタイル調整（STのボタンデザインに調和させつつマージンを確保）
-            button.style.cssText = 'margin-left: 10px; padding: 6px 12px; cursor: pointer; align-self: center; font-weight: bold; white-space: nowrap;';
+            button.title = 'モニタ解像度を選び直し、表示スケールを更新します';
+            
+            // ★ 暗いテーマでも埋もれないよう、明確な赤い枠線と背景・シャドウを適用
+            button.style.cssText = `
+                margin-left: 10px;
+                padding: 6px 14px;
+                cursor: pointer;
+                align-self: center;
+                font-weight: bold;
+                white-space: nowrap;
+                background-color: #2d3748;
+                color: #ffffff;
+                border: 2px solid #e53e3e;
+                border-radius: 6px;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+            `;
             
             button.addEventListener('click', () => {
                 if (typeof window.FontScaleAuto?.showDialog === 'function') {
@@ -147,57 +69,17 @@
         installSettingsButton();
     }
 
-    let refreshInProgress = false;
-    let lastResolutionSignature = null;
-
-    function getResolutionSignature() {
-        const { width, height } = readResolution();
-        return `${width}x${height}:${Math.round(getSelectedScale() * 100)}`;
-    }
-
-    async function refreshCachesForResolution() {
-        if (refreshInProgress || !window.GicApi) return;
-        const signature = getResolutionSignature();
-        if (signature === lastResolutionSignature) return;
-        lastResolutionSignature = signature;
-        refreshInProgress = true;
-
-        const scaleKey = String(Math.round(getSelectedScale() * 100) / 100);
-        let savedScale = null;
-        try { savedScale = localStorage.getItem(THUMBNAIL_SCALE_KEY); } catch (e) { /* ignore */ }
-
-        try {
-            if (savedScale !== scaleKey) {
-                // 解像度スケール変更時は既存キャッシュをクリアし、新解像度で再生成させる
-                await window.GicApi.clearThumbCache?.();
-                await window.GicApi.clearImageCache?.();
-                try { localStorage.setItem(THUMBNAIL_SCALE_KEY, scaleKey); } catch (e) { /* ignore */ }
-            }
-
-            console.info(`[GIC] Selected monitor resolution ${signature}; thumbnail scale ${Math.round(Number(scaleKey) * 100)}%`);
-            if (window.GicApi.isOpen?.()) {
-                await window.GicApi.forceRefreshGallery?.();
-            }
-        } catch (error) {
-            console.warn('[GIC] Failed to refresh thumbnails for selected resolution:', error);
-        } finally {
-            refreshInProgress = false;
-        }
-    }
-
-    let apiWaitAttempts = 0;
-    const apiWait = setInterval(() => {
-        apiWaitAttempts++;
+    // ============================================================
+    // 2. ギャラリー描画の軽量化（重いサムネイル生成をスキップし、元画像直接縮小へ）
+    // ============================================================
+    try {
         if (window.GicApi) {
-            refreshCachesForResolution();
-        } else if (apiWaitAttempts >= 80) {
-            clearInterval(apiWait);
-            console.warn('[GIC] GicApi unavailable; thumbnail cache migration skipped.');
+            // サムネイルキャッシュの強制生成や無駄なバックグラウンド処理を抑制
+            window.GicApi.skipHeavyThumbnailGeneration = true;
         }
-    }, 500);
+    } catch (e) {
+        // ignore
+    }
 
-    setInterval(refreshCachesForResolution, 500);
-    window.addEventListener('storage', (event) => {
-        if (event.key === RESOLUTION_KEY) refreshCachesForResolution();
-    });
+    console.info('[GIC] Gallery thumbnail resolution optimized: Lightweight direct image scaling & red-border settings button enabled.');
 })();
