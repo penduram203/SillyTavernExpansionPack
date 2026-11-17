@@ -3112,7 +3112,7 @@
         const nameEl = document.getElementById('stj_char_name_display');
         const charName = nameEl ? nameEl.textContent : '';
         if (!charName) {
-            if (!silent) alert('キャラクター名が設定されていません');
+            if (!silent) alert(_t('stj.char_name_missing', 'キャラクター名が設定されていません'));
             return;
         }
 
@@ -3176,7 +3176,7 @@
                 );
             }
         } else {
-            showCustomAlert('データを保存しました');
+            showCustomAlert(_t('stj.save_success', 'データを保存しました'));
         }
     }
 
@@ -3532,12 +3532,12 @@
         if (delCancelBtn) delCancelBtn.disabled = true;
         if (delExecBtn) delExecBtn.disabled = true;
 
-        showMessageDialog('選択されたセルを一括削除します');
+        showMessageDialog(_t('stj.bulk_delete.in_progress', '選択されたセルを一括削除します'));
 
         setTimeout(() => {
             hideMessageDialog();
             showDeleteConfirmDialog(
-                '本当に一括削除しますか？',
+                _t('stj.confirm.bulk_delete_msg', '本当に一括削除しますか？'),
                 () => {
                     isDialogActive = false;
                     if (delCancelBtn) delCancelBtn.disabled = false;
@@ -4218,6 +4218,104 @@ function setupLorebookEntryWatcher() {
 
     console.log('[STJ Editor] ロアブックエントリ監視を開始しました');
 }
+
+    function retranslateStjUI() {
+        if (!stjModalEl) return;
+
+        const testHeaderLabel = stjModalEl.querySelector('.stj-test-header > label');
+        if (testHeaderLabel) testHeaderLabel.textContent = _t('stj.header.title', '🔍 リアルタイムキーワード反応テスト');
+
+        const helpBtn = stjModalEl.querySelector('#stj_help_button');
+        if (helpBtn) helpBtn.textContent = _t('stj.header.help', 'ヘルプ');
+
+        const testInput = stjModalEl.querySelector('#stj_test_input');
+        if (testInput) testInput.placeholder = _t('stj.header.test_placeholder', '試しに文章を入力してください（例：笑顔で挨拶する）...');
+
+        const syntaxGuide = stjModalEl.querySelector('#stj_syntax_guide');
+        if (syntaxGuide) syntaxGuide.innerHTML = buildSyntaxGuideHtml();
+
+        const specials = stjModalEl.querySelectorAll('.stj-special-item');
+        if (specials[0]) {
+            const l = specials[0].querySelector('.stj-special-label');
+            if (l) l.textContent = _t('stj.special.default_label', 'デフォルト表示');
+            const ph = specials[0].querySelector('.stj-preview-text');
+            if (ph) { ph.textContent = _t('stj.preview.default_placeholder', 'デフォルトメディアプレビュー'); ph.dataset.originalText = ph.textContent; }
+        }
+        if (specials[1]) {
+            const l = specials[1].querySelector('.stj-special-label');
+            if (l) l.textContent = _t('stj.special.thumbnail_label', 'サムネイル表示');
+            const ph = specials[1].querySelector('.stj-preview-text');
+            if (ph) { ph.textContent = _t('stj.preview.thumbnail_placeholder', 'サムネイルプレビュー'); ph.dataset.originalText = ph.textContent; }
+        }
+
+        const infoNote = stjModalEl.querySelector('.stj-info-note');
+        if (infoNote) infoNote.textContent = _t('stj.info.click_hint', '※セルをクリックすると編集ウインドウが開きます');
+
+        const infoTitle = stjModalEl.querySelector('.stj-info-guide > h4');
+        if (infoTitle) infoTitle.textContent = _t('stj.info.title', '📖 操作方法');
+
+        const infoItems = stjModalEl.querySelectorAll('.stj-info-guide .stj-guide-ops > li');
+        const infoKeys = ['stj.info.op_click', 'stj.info.op_drag_gallery', 'stj.info.op_drag_cell', 'stj.info.op_hover_remove', 'stj.info.op_delete_btn', 'stj.info.op_bulk_delete', 'stj.info.op_add_cell'];
+        const infoFallbacks = [
+            '<b>セルをクリック</b>：編集ウインドウが開きます',
+            '<b>ギャラリーからドラッグ&amp;ドロップ</b>：画像を追加できます',
+            '<b>セルをドラッグ</b>：セルの位置を入れ替えられます',
+            '<b>編集ウインドウでホバー</b>：各マスに ❌ ボタン → 登録解除',
+            '<b>❌ボタン</b>：セルを削除します',
+            '<b>一括削除</b>：複数のセルをまとめて削除',
+            '<b>セル追加</b>：新しいセルを追加',
+        ];
+        infoItems.forEach((li, i) => {
+            if (i < infoKeys.length) li.innerHTML = _t(infoKeys[i], infoFallbacks[i]);
+        });
+
+        const cancelBtn = stjModalEl.querySelector('#stj_cancel_export');
+        if (cancelBtn) cancelBtn.textContent = _t('stj.button.close', '終了');
+        const addBtn = stjModalEl.querySelector('#stj_add_keyword');
+        if (addBtn) {
+            addBtn.textContent = _t('stj.button.update', '更新');
+            addBtn.title = _t('stj.button.update_title', 'ロアブックのエントリと同期してセルを自動作成します（自動削除はしません）');
+        }
+        const bulkBtn = stjModalEl.querySelector('#stj_bulk_delete');
+        if (bulkBtn) bulkBtn.textContent = _t('stj.button.bulk_delete', '一括削除');
+        const delCancelBtn = stjModalEl.querySelector('#stj_delete_cancel');
+        if (delCancelBtn) delCancelBtn.textContent = _t('stj.button.back', '戻る');
+        const delExecBtn = stjModalEl.querySelector('#stj_delete_execute');
+        if (delExecBtn) delExecBtn.textContent = _t('stj.button.execute_delete', '削除実行');
+
+        const firstPreview = stjModalEl.querySelector('.stj-keyword-item .stj-preview-text');
+        if (firstPreview) {
+            firstPreview.textContent = _t('stj.preview.placeholder', 'プレビュー');
+            firstPreview.dataset.originalText = firstPreview.textContent;
+        }
+
+        if (confirmDialogEl) {
+            const yes = confirmDialogEl.querySelector('.stj-confirm-yes');
+            if (yes) yes.textContent = _t('stj.confirm.yes', 'はい');
+            const no = confirmDialogEl.querySelector('.stj-confirm-no');
+            if (no) no.textContent = _t('stj.confirm.no', 'いいえ');
+        }
+
+        if (currentCellModal) {
+            const a = currentCellModal.querySelector('.stj-cell-modal-apply');
+            if (a) a.textContent = _t('stj.cell_modal.apply', '決定');
+            const c = currentCellModal.querySelector('.stj-cell-modal-cancel');
+            if (c) c.textContent = _t('stj.cell_modal.cancel', 'キャンセル');
+            const kw = currentCellModal.querySelector('.stj-cell-modal-keyword');
+            if (kw) kw.placeholder = _t('stj.cell_modal.keyword_placeholder', 'キーワード');
+            const ch = currentCellModal.querySelector('.stj-cell-modal-choices');
+            if (ch) ch.textContent = _t('stj.choices.button', '選択肢');
+        }
+
+        const choicesPopup = document.getElementById('stj_choices_popup');
+        if (choicesPopup) {
+            choicesPopup.querySelectorAll('.stj-choices-popup-label').forEach(el => {
+                el.textContent = _t('stj.choices.label', '選択肢') + '　';
+            });
+        }
+
+        try { runLiveTest(); } catch (e) { /* ignore */ }
+    }
     
     function initStjEditor() {
         const context = getSTContext();
@@ -4233,6 +4331,15 @@ function setupLorebookEntryWatcher() {
         // ★ ロアブックエントリ監視（セル自動作成 / 画像自動登録）
         setupLorebookEntryWatcher();
 
+        // ★ 言語変更に追従して UI を再翻訳
+        try {
+            if (window.ExpI18n?.onLanguageChange) {
+                window.ExpI18n.onLanguageChange(() => {
+                    try { retranslateStjUI(); } catch (e) { /* ignore */ }
+                });
+            }
+        } catch (e) { /* ignore */ }
+        
         window.STJEditor = {
             open: function () {
                 try { openExportModal(); return true; }
