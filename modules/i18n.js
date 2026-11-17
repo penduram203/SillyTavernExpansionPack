@@ -48,6 +48,7 @@
             'gic.title.delete_header_ready': 'Delete the {count} selected image(s)',
             'gic.title.delete_header_select_first': 'Select images first',
             'gic.title.gallery_open': 'Open the SillyTavern official gallery',
+            'gic.title.gallery_loading_click': 'Loading gallery… (click to open immediately)',
             'gic.title.floating_bulk_exit': 'End bulk selection mode',
 
             // === GIC: ダイアログ ===
@@ -209,6 +210,7 @@
             'gic.title.delete_header_ready': '選択中の {count} 枚を削除',
             'gic.title.delete_header_select_first': '先に画像を選択してください',
             'gic.title.gallery_open': 'SillyTavern公式ギャラリーを開く',
+            'gic.title.gallery_loading_click': 'ギャラリーを読み込み中です…（クリックで即時オープン）',
             'gic.title.floating_bulk_exit': '一括選択モードを終了',
 
             // === GIC: ダイアログ ===
