@@ -1,7 +1,7 @@
 // resolution_scale.js
 // 全拡張パックの解像度スケーリング（CSS変数モード）
 //
-// 1920×1080 基準で設計された UI を、他の解像度でも比例スケーリングする。
+// 1920×962 基準で設計された UI を、他の解像度でも比例スケーリングする。
 // 既存の JS はそのまま動く。CSS 側だけ段階的に calc(var(--exp-scale) * Npx)
 // に書き換えていく。
 //
@@ -9,7 +9,6 @@
 //   1. comfy_boot.js の先頭で import
 //   2. CSS で width: calc(var(--exp-scale, 1) * 50px) のように参照
 //   3. JS で window.S(50) のように参照（必要な箇所のみ）
-//   4. サムネイルサイズは window.ExpScale.thumbSize(260) のように取得
 
 (function () {
     'use strict';
@@ -17,12 +16,11 @@
     window.__expResolutionScaleInstalled = true;
 
     const BASE_W = 1920;
-    const BASE_H = 1080;
+    const BASE_H = 962;
     const LOG = '[ExpScale]';
 
     function computeScale() {
-        const scale = Math.min(window.innerWidth / BASE_W, window.innerHeight / BASE_H);
-        return Number.isFinite(scale) && scale > 0 ? scale : 1;
+        return Math.min(window.innerWidth / BASE_W, window.innerHeight / BASE_H);
     }
 
     function apply() {
@@ -30,7 +28,7 @@
         const root = document.documentElement;
 
         root.style.setProperty('--exp-scale', String(scale));
-        root.style.setProperty('--exp-scale-w', String(window.innerWidth / BASE_W));
+        root.style.setProperty('--exp-scale-w', String(window.innerWidth  / BASE_W));
         root.style.setProperty('--exp-scale-h', String(window.innerHeight / BASE_H));
         window.__expScale = scale;
     }
@@ -41,19 +39,6 @@
     window.ExpScale = {
         get scale() { return window.__expScale || 1; },
         S: (px) => Math.round(px * (window.__expScale || 1)),
-
-        // サムネイル用の解像度スケール
-        getThumbScale: () => window.__expScale || computeScale(),
-
-        // 基準サイズを現在の解像度に応じて拡大・縮小する
-        thumbSize: (baseSizePx) => {
-            const size = Number(baseSizePx);
-            if (!Number.isFinite(size) || size <= 0) return 1;
-
-            const scale = window.__expScale || computeScale();
-            return Math.max(1, Math.round(size * scale));
-        },
-
         refresh: () => apply(),
         info: () => ({
             physW: window.innerWidth,
@@ -192,7 +177,7 @@
         document.head.appendChild(style);
         console.log(`${LOG} chat content scaling CSS injected`);
     })();
-
+    
     console.log(`${LOG} installed`, {
         physW: window.innerWidth,
         physH: window.innerHeight,
