@@ -51,7 +51,6 @@
     let autoScrollTarget = null;
     let autoScrollDelta = 0;
 
-    let isBulkDeleteMode = false;
     let isDialogActive = false;
 
     // ===== Cell Popup Modal 状態 =====
@@ -1322,7 +1321,6 @@
             }
 
             if (!s.isDragging && (dx * dx + dy * dy) > (DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX)) {
-                if (s.isBulkDelete) return;
                 s.isDragging = true;
                 s.sourceItem.classList.add('stj-dragging');
                 s.ghostState = createDragGhost(s.sourceItem, e.clientX, e.clientY);
@@ -1365,11 +1363,6 @@
             } else {
                 const src = s.sourceItem;
                 if (!src) return;
-                if (s.isBulkDelete || isBulkDeleteMode) {
-                    if (src.classList.contains('stj-marked-for-delete')) src.classList.remove('stj-marked-for-delete');
-                    else src.classList.add('stj-marked-for-delete');
-                    return;
-                }
                 if (s.hasMoved) {
                     return;
                 }
@@ -1389,47 +1382,6 @@
             if (s.insertReference) s.insertReference.classList.remove('stj-insert-before', 'stj-insert-after');
             removeDragGhost(s.ghostState);
         });
-    }
-
-    function enterBulkDeleteMode() {
-        if (isBulkDeleteMode) return;
-        isBulkDeleteMode = true;
-        closeCellModal(false);
-        if (stjModalEl) stjModalEl.classList.add('stj-bulk-delete-mode');
-
-        const addBtn = document.getElementById('stj_add_keyword');
-        const bulkBtn = document.getElementById('stj_bulk_delete');
-        const delCancelBtn = document.getElementById('stj_delete_cancel');
-        const delExecBtn = document.getElementById('stj_delete_execute');
-        const cancelBtn = document.getElementById('stj_cancel_export');
-
-        if (addBtn) addBtn.style.display = 'none';
-        if (bulkBtn) bulkBtn.style.display = 'none';
-        if (delCancelBtn) delCancelBtn.style.display = '';
-        if (delExecBtn) delExecBtn.style.display = '';
-        if (cancelBtn) cancelBtn.disabled = true;
-    }
-
-    function exitBulkDeleteMode() {
-        if (!isBulkDeleteMode) return;
-        isBulkDeleteMode = false;
-        isDialogActive = false;
-        document.querySelectorAll('.stj-keyword-item.stj-marked-for-delete').forEach(el => el.classList.remove('stj-marked-for-delete'));
-        hideMessageDialog();
-        hideDeleteConfirmDialog();
-        if (stjModalEl) stjModalEl.classList.remove('stj-bulk-delete-mode');
-
-        const addBtn = document.getElementById('stj_add_keyword');
-        const bulkBtn = document.getElementById('stj_bulk_delete');
-        const delCancelBtn = document.getElementById('stj_delete_cancel');
-        const delExecBtn = document.getElementById('stj_delete_execute');
-        const cancelBtn = document.getElementById('stj_cancel_export');
-
-        if (addBtn) addBtn.style.display = '';
-        if (bulkBtn) bulkBtn.style.display = '';
-        if (delCancelBtn) delCancelBtn.style.display = 'none';
-        if (delExecBtn) delExecBtn.style.display = 'none';
-        if (cancelBtn) cancelBtn.disabled = false;
     }
 
     function resetFormToEmpty() {
@@ -2235,22 +2187,6 @@
             previewEl.addEventListener('mousedown', function(e) {
                 if (e.button !== 0) return;
                 if (e.target.closest && e.target.closest('button')) return;
-
-                if (isBulkDeleteMode) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    pointerDragState = {
-                        sourceItem: item,
-                        startX: e.clientX, startY: e.clientY,
-                        lastX: e.clientX, lastY: e.clientY,
-                        isDragging: false, isBulkDelete: true,
-                        hasMoved: false,
-                        currentTarget: null, ghostState: null, scrollContainer: null,
-                        insertReference: null, insertZone: null
-                    };
-                    return;
-                }
-
                 e.preventDefault();
                 e.stopPropagation();
                 pointerDragState = {
@@ -3160,9 +3096,6 @@
                 <div class="stj-button-group-main">
                     <button id="stj_cancel_export">${_t('stj.button.close', '終了')}</button>
                     <button id="stj_add_keyword" title="${_t('stj.button.update_title', 'ロアブックのエントリと同期してセルを自動作成します（自動削除はしません）')}">${_t('stj.button.update', '更新')}</button>
-                    <button id="stj_bulk_delete">${_t('stj.button.bulk_delete', '一括削除')}</button>
-                    <button id="stj_delete_cancel" style="display:none;">${_t('stj.button.back', '戻る')}</button>
-                    <button id="stj_delete_execute" style="display:none;">${_t('stj.button.execute_delete', '削除実行')}</button>
                 </div>
             </div>
         `;
@@ -3235,27 +3168,6 @@
             }
         });
 
-        const bulkDeleteBtn = document.getElementById('stj_bulk_delete');
-        if (bulkDeleteBtn) bulkDeleteBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (isBulkDeleteMode || isDialogActive) return;
-            enterBulkDeleteMode();
-        });
-
-        const delCancelBtn = document.getElementById('stj_delete_cancel');
-        if (delCancelBtn) delCancelBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (!isBulkDeleteMode || isDialogActive) return;
-            exitBulkDeleteMode();
-        });
-
-        const delExecBtn = document.getElementById('stj_delete_execute');
-        if (delExecBtn) delExecBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (!isBulkDeleteMode || isDialogActive) return;
-            executeBulkDelete();
-        });
-
         const cancelBtn = document.getElementById('stj_cancel_export');
         if (cancelBtn) cancelBtn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -3288,39 +3200,6 @@
         const thumbnailCell = modal.querySelector('.stj-special-item:nth-child(2)');
         if (defaultCell) updateCellPreview(defaultCell);
         if (thumbnailCell) updateCellPreview(thumbnailCell);
-    }
-
-    function executeBulkDelete() {
-        const marked = document.querySelectorAll('.stj-keyword-item.stj-marked-for-delete');
-        if (marked.length === 0) return;
-        isDialogActive = true;
-
-        const delCancelBtn = document.getElementById('stj_delete_cancel');
-        const delExecBtn = document.getElementById('stj_delete_execute');
-        if (delCancelBtn) delCancelBtn.disabled = true;
-        if (delExecBtn) delExecBtn.disabled = true;
-
-        showMessageDialog(_t('stj.bulk_delete.in_progress', '選択されたセルを一括削除します'));
-
-        setTimeout(() => {
-            hideMessageDialog();
-            showDeleteConfirmDialog(
-                _t('stj.confirm.bulk_delete_msg', '本当に一括削除しますか？'),
-                () => {
-                    isDialogActive = false;
-                    if (delCancelBtn) delCancelBtn.disabled = false;
-                    if (delExecBtn) delExecBtn.disabled = false;
-                    document.querySelectorAll('.stj-keyword-item.stj-marked-for-delete').forEach(el => el.remove());
-                    runLiveTest();
-                    autoSave({ immediate: true });
-                },
-                () => {
-                    isDialogActive = false;
-                    if (delCancelBtn) delCancelBtn.disabled = false;
-                    if (delExecBtn) delExecBtn.disabled = false;
-                }
-            );
-        }, 1000);
     }
 
     function setupImageDeletedListener() {
@@ -3912,12 +3791,6 @@ function setupLorebookEntryWatcher() {
             addBtn.textContent = _t('stj.button.update', '更新');
             addBtn.title = _t('stj.button.update_title', 'ロアブックのエントリと同期してセルを自動作成します（自動削除はしません）');
         }
-        const bulkBtn = stjModalEl.querySelector('#stj_bulk_delete');
-        if (bulkBtn) bulkBtn.textContent = _t('stj.button.bulk_delete', '一括削除');
-        const delCancelBtn = stjModalEl.querySelector('#stj_delete_cancel');
-        if (delCancelBtn) delCancelBtn.textContent = _t('stj.button.back', '戻る');
-        const delExecBtn = stjModalEl.querySelector('#stj_delete_execute');
-        if (delExecBtn) delExecBtn.textContent = _t('stj.button.execute_delete', '削除実行');
 
         const firstPreview = stjModalEl.querySelector('.stj-keyword-item .stj-preview-text');
         if (firstPreview) {
