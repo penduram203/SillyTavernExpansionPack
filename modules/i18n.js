@@ -156,6 +156,36 @@
             'stj.toast.sync_added': 'Synced with lorebook ({count} added)',
             'stj.toast.sync_no_add': 'No new cells to sync',
             'stj.toast.sync_failed': 'Sync failed',
+
+            // === Text Styling ===
+            'ts.panel_title': 'Text Style Settings',
+            'ts.restore_title': 'Show/hide the settings panel',
+            'ts.tag.p': 'Normal text',
+            'ts.tag.q': 'Dialogue',
+
+            'ts.label.enable': 'Enable this style',
+            'ts.label.font_size': 'Font size',
+            'ts.label.font_weight': 'Font weight',
+            'ts.label.line_height': 'Line height',
+            'ts.label.letter_spacing': 'Letter spacing',
+            'ts.label.text_opacity': 'Opacity',
+            'ts.label.text_color': 'Text color',
+            'ts.label.outline_color': 'Outline color',
+            'ts.label.outline_width': 'Outline width',
+            'ts.label.bottom_margin': 'Bottom margin',
+
+            'ts.chat_section': 'Chat window settings',
+            'ts.chat_opacity': 'Opacity',
+
+            'ts.layout.center': 'Center',
+            'ts.layout.split': 'Split',
+            'ts.layout.manual': 'Manual',
+            'ts.layout.toggle.center_title': 'Click to switch to "Split"',
+            'ts.layout.toggle.split_title': 'Click to switch to "Manual"',
+            'ts.layout.toggle.manual_title': 'Click to switch to "Center"',
+
+            'ts.manual_settings': 'Size Settings',
+            'ts.manual_settings_title': 'Set the position and size of the background image window',
             
             // === GIC: 確認 ===
             'gic.confirm.bulk_delete': 'Delete the {count} selected image(s)?\nThis operation cannot be undone.',
@@ -318,6 +348,36 @@
             'stj.toast.sync_added': 'ロアブックと同期しました（{count} 件追加）',
             'stj.toast.sync_no_add': '同期する新規セルはありませんでした',
             'stj.toast.sync_failed': '同期に失敗しました',
+
+                   // === Text Styling ===
+            'ts.panel_title': 'テキストスタイル設定',
+            'ts.restore_title': '設定パネルの表示/非表示',
+            'ts.tag.p': '通常テキスト',
+            'ts.tag.q': 'セリフ',
+
+            'ts.label.enable': 'このスタイルを有効にする',
+            'ts.label.font_size': '文字サイズ',
+            'ts.label.font_weight': '文字の太さ',
+            'ts.label.line_height': '行間',
+            'ts.label.letter_spacing': '字間',
+            'ts.label.text_opacity': '透過度',
+            'ts.label.text_color': '文字色',
+            'ts.label.outline_color': '縁取り色',
+            'ts.label.outline_width': '縁取り幅',
+            'ts.label.bottom_margin': '下余白',
+
+            'ts.chat_section': 'チャットウィンドウ設定',
+            'ts.chat_opacity': '透過度',
+
+            'ts.layout.center': '中央',
+            'ts.layout.split': '左右',
+            'ts.layout.manual': '手動',
+            'ts.layout.toggle.center_title': 'クリックで「左右」に切替',
+            'ts.layout.toggle.split_title': 'クリックで「手動」に切替',
+            'ts.layout.toggle.manual_title': 'クリックで「中央」に切替',
+
+            'ts.manual_settings': 'サイズ設定',
+            'ts.manual_settings_title': '背景画像ウィンドウの位置とサイズを設定',     
             
             // === GIC: 確認 ===
             'gic.confirm.bulk_delete': '選択した {count} 枚の画像を削除しますか？\nこの操作は取り消せません。',
