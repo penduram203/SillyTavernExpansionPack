@@ -8064,27 +8064,26 @@ let _galleryPrepareRetries = 0;
 function setGalleryButtonLoading(loading) {
     const btn = document.getElementById(GALLERY_BUTTON_ID);
     if (!btn) return;
+    const _t = (k, fb) => window.ExpI18n?.t(k, fb) ?? fb;
     if (loading) {
         btn.classList.add('gic-gallery-loading');
-        // ★ btn.disabled = true は使わない
-        //   disabled なボタンは pointerdown / click イベントを発火しないため、
-        //   ローディング中にユーザーがクリックしても反応しなくなる。
-        //   代わりに dataset.loading で状態管理し、クリック自体は受け付ける。
         btn.dataset.loading = '1';
-        btn.title = 'ギャラリーを読み込み中です…（クリックで即時オープン）';
+        btn.title = _t('gic.title.gallery_loading_click', 'ギャラリーを読み込み中です…（クリックで即時オープン）');
     } else {
         btn.classList.remove('gic-gallery-loading');
         delete btn.dataset.loading;
         btn.disabled = false;
-        btn.title = 'SillyTavern公式ギャラリーを開く';
+        btn.title = _t('gic.title.gallery_open', 'SillyTavern公式ギャラリーを開く');
     }
 }
 
 async function prepareGalleryForCharacter() {
+    const _t = (k, fb) => window.ExpI18n?.t(k, fb) ?? fb;
+
     if (_galleryPreloadState === 'loading') return;
     if (_galleryPreloadState !== 'ready') {
         setGalleryButtonLoading(true);
-        showStatusMessage('ギャラリーを読み込み中です…', 0);
+        showStatusMessage(_t('gic.status.gallery_loading', 'ギャラリーを読み込み中です…'), 0);
     }
 
     let charName = getCurrentCharacterName();
@@ -8116,11 +8115,11 @@ async function prepareGalleryForCharacter() {
         clearGalleryOpenInFlight();
         _galleryPreparedFor = charName;
         _galleryPreloadState = 'ready';
-        showStatusMessage('読み込み完了', 1500);
+        showStatusMessage(_t('gic.status.gallery_ready', '読み込み完了'), 1500);
         setGalleryButtonLoading(false);
     } catch (e) {
         _galleryPreloadState = 'idle';
-        showStatusMessage('読み込みに失敗しました', 2000);
+        showStatusMessage(_t('gic.status.gallery_load_failed', '読み込みに失敗しました'), 2000);
         setGalleryButtonLoading(false);
     }
 }
@@ -8132,7 +8131,8 @@ function createGalleryButton() {
     const btn = document.createElement('button');
     btn.id = GALLERY_BUTTON_ID;
     btn.type = 'button';
-    btn.title = 'SillyTavern公式ギャラリーを開く';
+    btn.title = (window.ExpI18n?.t('gic.title.gallery_open', 'SillyTavern公式ギャラリーを開く'))
+        ?? 'SillyTavern公式ギャラリーを開く';
     btn.textContent = '🎨';
 
     Object.assign(btn.style, {
