@@ -73,7 +73,7 @@
     let _editorLoading = false;
     // ★ 明示的に削除されたキーを追跡
     //   「フォームに無い既存キー」を null 送信で誤削除しないための管理。
-    //   セル削除ボタン / 一括削除でのみ追加され、autoSave 成功後にクリアされる。
+    //   一括削除でのみ追加され、autoSave 成功後にクリアされる。
     const _explicitlyDeletedKeys = new Set();
     // ============================================================
     // ★ 別キャラ画像エントリの「一度きり」マイグレーション管理
@@ -335,21 +335,18 @@
     }
 
     function detectCharacterNameFromDOM() {
-        // ★ 1. SillyTavern の context から取得（最も信頼できる）
         try {
             const ctx = getSTContext();
             const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
             if (char?.name) return char.name;
         } catch (e) { /* ignore */ }
 
-        // 2. #character_name_holder から
         const nameHolder = document.querySelector('#character_name_holder');
         if (nameHolder) {
             const t = (nameHolder.textContent || '').trim();
             if (t) return t;
         }
 
-        // 3. .mes[mesid="0"] の ch_name 属性から
         const greetingMessage = document.querySelector('.mes[mesid="0"][is_user="false"]');
         if (greetingMessage) {
             const t = (greetingMessage.getAttribute('ch_name') || '').trim();
@@ -428,9 +425,6 @@
     async function loadWorldInfoEntries(worldName) {
         if (!worldName) return null;
 
-        // ★ ① fetch を最優先（cache: no-store で常に最新を取得）
-        //   LBE の 2 秒キャッシュを経由すると、削除直後のエントリ一覧が
-        //   古いまま返されることがあるため、fetch を直接呼ぶ。
         for (let attempt = 1; attempt <= 2; attempt++) {
             try {
                 const ctx = getSTContext();
@@ -455,7 +449,6 @@
             if (attempt < 2) await new Promise(r => setTimeout(r, 300));
         }
 
-        // ② fetch 失敗時のみ LBE にフォールバック
         if (window.LorebookExpansion?.loadWorldInfoEntriesByName) {
             try {
                 const entries = await window.LorebookExpansion.loadWorldInfoEntriesByName(worldName);
@@ -626,13 +619,13 @@
             if (row.label) {
                 const labelEl = document.createElement('span');
                 labelEl.className = 'stj-choices-popup-label';
-                labelEl.textContent = row.label + '　';
+                labelEl.textContent = row.label + ' ';
                 line.appendChild(labelEl);
             }
 
             const numEl = document.createElement('span');
             numEl.className = 'stj-choices-popup-num';
-            numEl.textContent = row.num + '　';
+            numEl.textContent = row.num + ' ';
             line.appendChild(numEl);
 
             const textEl = document.createElement('span');
@@ -694,13 +687,6 @@
         });
     }
 
-    // ============================================================
-    // ★ サーバー上の実ファイル存在チェック (ブラウザキャッシュ無効)
-    //    checkMediaExists は内部で new Image()/video の onload/onerror を
-    //    使うため、ブラウザキャッシュに残っている画像は「存在する」と
-    //    誤判定される。ローカルディスク削除を確実に検知するため、
-    //    fetch HEAD + cache:no-store で実ディスクを確認する。
-    // ============================================================
     async function checkFileExistsOnServer(charName, fileName) {
         if (!charName || !fileName) return false;
         const path = `/user/images/${encodeURIComponent(charName)}/${encodeURIComponent(fileName)}`;
@@ -758,14 +744,6 @@
         return null;
     }
 
-    // ============================================================
-    // ★ 別キャラの画像エントリ検出・除去（残留データ対策）
-    //   image-display.js と同じロジック。
-    //   フラグはログ抑制専用。データが壊れている場合は
-    //   フラグ済みでも毎回クリーンアップする
-    //   (STコアが古いデータを再取得して上書きするケースがあるため)。
-    //   ★ 空配列になったキーも保持する(セルとキーワードを残すため)。
-    // ============================================================
     function getKnownCharacterNames() {
         try {
             const ctx = getSTContext();
@@ -789,16 +767,10 @@
     function cleanForeignImageEntries(imageMap, charName) {
         if (!imageMap || typeof imageMap !== 'object' || !charName) return imageMap;
 
-        // ★ 既にクリーンアップ済みのキャラは、ユーザーが明示的に追加した
-        //    別キャラの画像（ドラッグ&ドロップ等）を尊重するため、
-        //    クリーンアップをスキップする。
-        //    STコアの再取得による汚染は CharStore のバックアップ注入で防がれている。
         if (isMigrationDoneForChar(charName)) {
             return imageMap;
         }
 
-        // ★ フラグは「per-item ログ抑制」のためだけに使う。
-        //   データが壊れている場合はフラグ済みでも毎回クリーンアップする
         const alreadyMigrated = false;
 
         let removed = 0;
@@ -819,7 +791,6 @@
                     }
                     return true;
                 });
-                // ★ 空配列でもキーを保持する（画像全削除されたキーワードを残すため）
                 if (filtered.length === 0) return [];
                 return filtered.length === 1 ? filtered[0] : filtered;
             } else if (typeof val === 'string') {
@@ -829,7 +800,6 @@
                         console.log(`[STJ Editor] 🧹 別キャラの画像エントリを除外: ${fn}`);
                     }
                     removed++;
-                    // ★ 空配列に変換してキーを保持（セルとキーワードを残す）
                     return [];
                 }
                 return val;
@@ -850,13 +820,11 @@
             );
             try {
                 if (window.CharStore?.saveCharacterExtension) {
-                    // ★ STコアの再取得で上書きされるのを防ぐため即時保存
                     window.CharStore.saveCharacterExtension('image_display_extension', cleaned, { immediate: true });
                 }
             } catch (e) { /* ignore */ }
         }
 
-        // ★ フラグ未設定なら初回としてマーク
         if (!alreadyMigrated) {
             markMigrationDoneForChar(charName);
         }
@@ -864,19 +832,9 @@
         return cleaned;
     }
 
-    // ============================================================
-    // ★ ディスク上に存在しない画像エントリを検出・除去
-    //    ローカルディスクから画像を直接削除した場合、
-    //    character.data.extensions.image_display_extension に
-    //    キーワードとファイル名のマッピングだけが残ってしまう。
-    //    ここで実ファイルの存在を fetch HEAD で確認し、
-    //    無い場合はマッピングを除去する。
-    //    ★ 空配列になったキーも保持する(セルとキーワードを残すため)。
-    // ============================================================
     async function cleanMissingImageFiles(imageMap, charName) {
         if (!imageMap || typeof imageMap !== 'object' || !charName) return imageMap;
 
-        // 1. 全ファイル名を収集（元ファイル名に正規化）
         const fileNames = new Set();
         const addFile = (p) => {
             if (typeof p !== 'string') return;
@@ -891,17 +849,12 @@
         }
         if (fileNames.size === 0) return imageMap;
 
-        // 2. 並列で実ファイル存在チェック (ブラウザキャッシュ無効)
-        //    ★ checkMediaExists ではなく checkFileExistsOnServer を使う:
-        //      checkMediaExists は new Image() の onload で判定するため、
-        //      ブラウザキャッシュに残っている画像を「存在する」と誤判定する。
         const existMap = new Map();
         await Promise.all([...fileNames].map(async (fn) => {
             const exists = await checkFileExistsOnServer(charName, fn);
             existMap.set(fn, exists);
         }));
 
-        // 3. 欠損しているファイルを除去（ただしキーは保持）
         let removed = 0;
         const cleaned = {};
         const isMissing = (p) => {
@@ -922,13 +875,11 @@
                     }
                     return true;
                 });
-                // ★ 空配列でもキーを保持する（画像全削除されたキーワードを残すため）
                 cleaned[key] = filtered.length === 0 ? [] : (filtered.length === 1 ? filtered[0] : filtered);
             } else if (typeof val === 'string') {
                 if (isMissing(val)) {
                     console.log(`[STJ Editor] 🗑️ 存在しないファイルを除去: key="${key}" → ${val}`);
                     removed++;
-                    // ★ 空配列でキーを保持（セルとキーワードを残す）
                     cleaned[key] = [];
                     continue;
                 }
@@ -947,7 +898,6 @@
                 window.CharStore?.saveCharacterExtension?.(
                     'image_display_extension', cleaned, { immediate: true }
                 );
-                // image-display.js に即時反映
                 window.dispatchEvent(new CustomEvent('lbe-image-map-updated', {
                     detail: { charName, imageMap: cleaned }
                 }));
@@ -957,7 +907,6 @@
         return cleaned;
     }
 
-    // ===== 条件評価 =====
     function normalizeConditionExpression(expr) {
         if (!expr || typeof expr !== 'string') return '';
         return expr.replace(/\band\b/gi, '+').replace(/\bor\b/gi, ',').replace(/\bnot\b/gi, '!');
@@ -1078,9 +1027,6 @@
         messageDialogEl.style.display = 'none';
     }
 
-    // ============================================================
-    // ★ セル挿入（参照セルの前後に移動し、他セルをずらす）
-    // ============================================================
     function insertCellAt(source, reference, position) {
         if (!source || !reference || source === reference) return;
         const parent = source.parentNode;
@@ -1155,12 +1101,6 @@
         } else stopAutoScroll();
     }
 
-    // ============================================================
-    // ★ ドロップゾーン判定
-    //   セル中央部  → 入れ替え（swap）
-    //   セル左/右端 → そのセルの前/後に挿入（insert）
-    //   セル間の隙間 → 最近傍セルを基準に挿入
-    // ============================================================
     function findDropZone(s, x, y) {
         const container = document.getElementById('stj_keywords_container');
         if (!container) return null;
@@ -1168,9 +1108,8 @@
         const el = document.elementFromPoint(x, y);
         const hoveredCell = el && el.closest ? el.closest('.stj-keyword-item') : null;
 
-        // ① キーワードセルの上
         if (hoveredCell && container.contains(hoveredCell)) {
-            if (hoveredCell === s.sourceItem) return null; // 自分自身の上は無反応
+            if (hoveredCell === s.sourceItem) return null;
             const rect = hoveredCell.getBoundingClientRect();
             if (rect.width <= 0 || rect.height <= 0) return null;
             const relX = (x - rect.left) / rect.width;
@@ -1183,7 +1122,6 @@
             return { type: 'swap', cell: hoveredCell };
         }
 
-        // ② セルの上ではない → コンテナ内なら「挿入」扱い
         const containerRect = container.getBoundingClientRect();
         const margin = 60;
         if (x < containerRect.left - margin || x > containerRect.right + margin ||
@@ -1230,10 +1168,6 @@
         return { type: 'insert', reference: nearest, position: insertBefore ? 'before' : 'after' };
     }
 
-    // ============================================================
-    // ★ ドラッグモードバッジ（カーソル追従表示）
-    //    「⇄ 場所交代」 / 「⬇ 隙間挿入」
-    // ============================================================
     function ensureDragModeBadge() {
         let badge = document.getElementById('stj-drag-mode-badge');
         if (!badge) {
@@ -1295,7 +1229,6 @@
         const newTarget = (zone && zone.type === 'swap') ? zone.cell : null;
         const newInsertRef = (zone && zone.type === 'insert') ? zone.reference : null;
 
-        // 既存の視覚インジケーターをクリア（対象が変わったものだけ）
         if (s.currentTarget && s.currentTarget !== newTarget) {
             s.currentTarget.classList.remove('stj-drag-over');
             s.currentTarget = null;
@@ -1421,12 +1354,10 @@
 
             if (s.isDragging) {
                 if (s.insertZone && s.insertZone.reference && s.insertZone.reference !== s.sourceItem) {
-                    // ★ 挿入モード（隙間ドロップ）
                     insertCellAt(s.sourceItem, s.insertZone.reference, s.insertZone.position);
                     runLiveTest();
                     autoSave({ immediate: true });
                 } else if (s.currentTarget && s.currentTarget !== s.sourceItem) {
-                    // ★ 入れ替えモード（重ねドロップ）
                     swapCells(s.sourceItem, s.currentTarget);
                     runLiveTest();
                     autoSave({ immediate: true });
@@ -1477,7 +1408,6 @@
         if (delCancelBtn) delCancelBtn.style.display = '';
         if (delExecBtn) delExecBtn.style.display = '';
         if (cancelBtn) cancelBtn.disabled = true;
-        document.querySelectorAll('.stj-keyword-item .stj-delete-row').forEach(btn => btn.disabled = true);
     }
 
     function exitBulkDeleteMode() {
@@ -1500,16 +1430,9 @@
         if (delCancelBtn) delCancelBtn.style.display = 'none';
         if (delExecBtn) delExecBtn.style.display = 'none';
         if (cancelBtn) cancelBtn.disabled = false;
-        document.querySelectorAll('.stj-keyword-item .stj-delete-row').forEach(btn => btn.disabled = false);
     }
 
-    // ============================================================
-    // ★ フォームを完全リセット（別キャラのセル内容が残らないように）
-    //    openExportModal で毎回呼び出し、その後に loadExistingJSONData / loadSavedData
-    //    で新しいキャラの内容を読み込む。
-    // ============================================================
     function resetFormToEmpty() {
-        // 特殊セル（デフォルト・サムネイル）を空に
         const defaultCell = document.querySelector('.stj-special-item:nth-child(1)');
         if (defaultCell) {
             setCellImages(defaultCell, []);
@@ -1522,14 +1445,12 @@
             updateCellPreview(thumbnailCell);
         }
 
-        // キーワードコンテナを空にして、空セル1個だけ配置
         const container = document.getElementById('stj_keywords_container');
         if (container) {
             container.innerHTML = '';
             addKeywordRowWithData(container, 0, { keyword: '', images: [] });
         }
 
-        // テスト入力欄もクリア
         const testInput = document.getElementById('stj_test_input');
         if (testInput) testInput.value = '';
 
@@ -1557,16 +1478,12 @@
         const nameEl = document.getElementById('stj_char_name_display');
         if (nameEl) nameEl.textContent = charName;
 
-        // ★ エディタ初期化中フラグを立てる
         _editorLoading = true;
 
-        // ★ 前回編集した別キャラのセル内容が残らないよう、必ず先にフォームをリセット
         resetFormToEmpty();
 
         (async () => {
             try {
-                // ★ charName が空なら、最大 2 秒間リトライして取得する
-                //    （新規チャット直後は greeting が未レンダリングの場合がある）
                 let effectiveCharName = charName;
                 if (!effectiveCharName) {
                     for (let i = 0; i < 10; i++) {
@@ -1603,9 +1520,6 @@
     function closeExportModalInternal() {
         if (!stjModalEl) return;
         flushAutoSave();
-        // ★ モーダルを閉じる前に pending 保存を確実にフラッシュ
-        //    （_doAutoSave は immediate: true で保存するが、
-        //      saveCharacterExtension を他のコードパスから呼んでいる場合の保険）
         try {
             if (window.CharStore?.flushCharacterExtension) {
                 window.CharStore.flushCharacterExtension('image_display_extension');
@@ -1629,9 +1543,6 @@
         }
     }
 
-    // ============================================================
-    // セルポップアップモーダル
-    // ============================================================
     function createCellModal() {
         const modal = document.createElement('div');
         modal.id = 'stj_cell_modal';
@@ -1905,9 +1816,6 @@
         }
     }
 
-    // ============================================================
-    // セルモーダル用: 動画サムネイルの IntersectionObserver
-    // ============================================================
     let _cellVideoIO = null;
     let _cellVideoIORoot = null;
 
@@ -2163,9 +2071,6 @@
         updateImagePreview(previewEl.id, charName, images.join(','));
     }
 
-    // ============================================================
-    // セルへのドロップ処理
-    // ============================================================
     function handleCellDropFromPath(cell, path) {
         if (!cell || !path) return;
         cell.classList.remove('stj-drop-target');
@@ -2322,7 +2227,7 @@
     }
 
     // ============================================================
-    // セル個別のリスナー
+    // セル個別のリスナー（❌ボタン関連コードを削除）
     // ============================================================
     function attachKeywordRowListeners(item, index) {
         const previewEl = item.querySelector('.stj-image-preview');
@@ -2360,30 +2265,6 @@
             });
         }
 
-        const deleteButton = item.querySelector('.stj-delete-row');
-        if (deleteButton) {
-            deleteButton.addEventListener('click', function(e) {
-                e.stopPropagation();
-                if (isBulkDeleteMode || isDialogActive) return;
-                showDeleteConfirmDialog(
-                    _t('stj.confirm.bulk_delete_msg', '本当に一括削除しますか？'),
-                    () => {
-                        isDialogActive = false;
-                        if (delCancelBtn) delCancelBtn.disabled = false;
-                        if (delExecBtn) delExecBtn.disabled = false;
-                        document.querySelectorAll('.stj-keyword-item.stj-marked-for-delete').forEach(el => {
-                            const kw = getCellKeyword(el).trim();
-                            if (kw) _explicitlyDeletedKeys.add(kw);   // ★ 追加
-                            el.remove();
-                        });
-                        runLiveTest();
-                        autoSave({ immediate: true });
-                    },
-                    () => { /* cancel */ }
-                );
-            });
-        }
-
         item.addEventListener('click', (e) => {
             if (e.target.closest('button')) return;
             if (isBulkDeleteMode || isDialogActive) return;
@@ -2396,9 +2277,6 @@
         });
     }
 
-    // ============================================================
-    // ライブテスト
-    // ============================================================
     function runLiveTest() {
         const testInput = document.getElementById('stj_test_input');
         const testResult = document.getElementById('stj_test_result');
@@ -2467,7 +2345,6 @@
                 <div class="stj-preview-text">${_t('stj.preview.placeholder', 'プレビュー')}</div>
             </div>
             <div class="stj-keyword-display"></div>
-            <button class="stj-delete-row">×</button>
         `;
         container.appendChild(newItem);
         attachKeywordRowListeners(newItem, itemCount);
@@ -2477,11 +2354,6 @@
         autoSave({ immediate: true });
     }
 
-    // ============================================================
-    // ★ extensionSettings のレガシーデータ → image_display_extension 形式に変換
-    //    character.data が空で extensionSettings にのみデータがある場合、
-    //    この関数で変換して character.data へ移行する。
-    // ============================================================
     function buildImageMapFromLegacySavedData(data, charName) {
         const imageMap = {};
         const toPaths = (names) => (names || []).map(name => {
@@ -2510,18 +2382,12 @@
         return imageMap;
     }
 
-    // ============================================================
-    // ★ loadExistingJSONData の戻り値 hasCharData:
-    //    character.data.extensions.image_display_extension キーが
-    //    存在する場合(空 {} でも) true。この場合 loadSavedData をスキップする。
-    // ============================================================
     async function loadExistingJSONData(charName) {
         if (!charName) { console.warn('[STJ Editor] charName 空'); return false; }
 
         let imageMap = null;
         let hasCharData = false;
 
-        // ── ① ctx.characters[characterId] → ctx.character の順（一次情報源）──
         try {
             const context = getSTContext();
 
@@ -2532,11 +2398,8 @@
                 ext = context?.character?.data?.extensions?.image_display_extension;
             }
 
-            // ★ character.data.extensions.image_display_extension が undefined でなければ
-            //    （空 {} でも）character.data を権威ソースとして扱う
             if (ext !== undefined && typeof ext === 'object') {
                 hasCharData = true;
-                // ★ null 値（削除マーカー）を除外
                 const filteredExt = {};
                 let nullRemoved = 0;
                 for (const [k, v] of Object.entries(ext)) {
@@ -2547,9 +2410,6 @@
                     }
                 }
 
-                // ★ null があった場合は char.data をクリーンアップして保存
-                //    merge-attributes では null で「削除」できないため、
-                //    読み込み時にクリーンアップしてメモリとサーバの両方を更新する
                 if (nullRemoved > 0) {
                     try {
                         const context = getSTContext();
@@ -2563,10 +2423,6 @@
                         window.CharStore?.saveCharacterExtension?.(
                             'image_display_extension', filteredExt, { immediate: true }
                         );
-                        console.log(
-                            `[STJ Editor] 🧹 null 値 ${nullRemoved} 件を除去して保存 ` +
-                            `(${Object.keys(filteredExt).length} entries)`
-                        );
                     } catch (e) {
                         console.warn('[STJ Editor] null 値クリーンアップ失敗:', e);
                     }
@@ -2574,15 +2430,11 @@
 
                 if (Object.keys(filteredExt).length > 0) {
                     imageMap = filteredExt;
-                    console.log(`[STJ Editor] ✅ image_display_extension を読込 (${Object.keys(filteredExt).length} entries)`);
-                } else {
-                    console.log(`[STJ Editor] image_display_extension は空 ({}) → 空フォーム維持`);
                 }
             }
 
         } catch (e) { /* ignore */ }
 
-        // ── ② 移行フォールバック: _ext.json（character.data にキーが無い時のみ）──
         if (!imageMap && !hasCharData) {
             try {
                 const jsonPath = `user/images/${charName}/${charName}_ext.json`;
@@ -2592,21 +2444,17 @@
                     const legacy = findImageMapInData(data);
                     if (legacy && Object.keys(legacy).length > 0) {
                         imageMap = legacy;
-                        console.log(`[STJ Editor] 🔄 _ext.json から読込。character.json へ移行`);
                         try {
                             window.CharStore?.saveCharacterExtension?.(
                                 'image_display_extension', legacy, { immediate: true }
                             );
                         } catch (e) { /* ignore */ }
                     } else {
-                        // 空の _ext.json → 「確認済み・データなし」として空データ保存
                         window.CharStore?.saveCharacterExtension?.(
                             'image_display_extension', {}, { immediate: true }
                         );
                     }
                 } else if (resp.status === 404) {
-                    // ★ character.data にも _ext.json にもデータが無い
-                    //    → extensionSettings にレガシーデータがあれば character.data へ移行
                     try {
                         const stjSettings = getExtensionSettings();
                         const legacyData = stjSettings[charName];
@@ -2621,9 +2469,7 @@
                                 'image_display_extension', migrated, { immediate: true }
                             );
                             imageMap = migrated;
-                            console.log('[STJ Editor] 🔄 extensionSettings から character.data へ移行しました');
                         } else {
-                            // 本当にデータなし → 空 {} を保存して「確認済み」とする
                             window.CharStore?.saveCharacterExtension?.(
                                 'image_display_extension', {}, { immediate: true }
                             );
@@ -2637,24 +2483,13 @@
             } catch (e) { /* ignore */ }
         }
 
-        // ── ③ クリーニング + フォーム反映 ──
         if (imageMap) {
-            // ★ 別キャラの画像エントリを先に除外
             const cleanedMap = cleanForeignImageEntries(imageMap, charName);
-
-            // ★ 自動の missing-file クリーンアップは無効化
-            //   ファイルが一時的に 404 になるケース（サーバー負荷、キャッシュ、
-            //   ユーザーの手動移動など）で誤ってセルから参照が消えるのを防ぐ。
-            //   明示的にクリーンアップしたい場合は window.STJEditor.cleanMissingFiles()
-            //   を手動で呼ぶ。
             const existingMap = cleanedMap;
 
             populateFormFromImageMap(existingMap);
-            // extensionSettings も同期
             try { saveData({ silent: true }); } catch (e) { /* ignore */ }
-        }else {
-            // ★ 空の image_display_extension が既に保存されている場合は
-            //    「新規作成」ではなく「空データ（確認済み）」とログを分ける
+        } else {
             let hasEmptyExt = false;
             try {
                 const ctx = getSTContext();
@@ -2664,11 +2499,6 @@
                     hasEmptyExt = ext !== undefined && typeof ext === 'object';
                 }
             } catch (e) { /* ignore */ }
-            if (hasEmptyExt) {
-                console.log(`[STJ Editor] image_display_extension は空です（確認済み・_ ext.json フォールバック不要）`);
-            } else {
-                console.log(`[STJ Editor] image_display_extension が見つかりません（新規作成）`);
-            }
         }
 
         return hasCharData;
@@ -2954,7 +2784,6 @@
             imageMap.thumbnail = paths.length === 1 ? paths[0] : paths;
         }
 
-        // フォームに存在するキーワードセルのみ更新
         document.querySelectorAll('.stj-keyword-item').forEach(item => {
             const kw = getCellKeyword(item).trim();
             if (!kw) return;
@@ -2965,12 +2794,10 @@
                 : (paths.length === 1 ? paths[0] : paths);
         });
 
-        // ★ 既存マップをマージ（フォームに無い既存キーを保持）
         if (existingMap && typeof existingMap === 'object') {
             for (const [key, val] of Object.entries(existingMap)) {
                 if (key in imageMap) continue;
                 if (_explicitlyDeletedKeys.has(key)) continue;
-                // null は削除マーカーなので保持しない
                 if (val === null) continue;
                 imageMap[key] = val;
             }
@@ -2999,42 +2826,27 @@
         }, 3000);
     }
 
-    // ============================================================
-    // ★ オートセーブ
-    //   ユーザー操作（セル追加/削除/入れ替え/キーワード確定/画像登録解除）で
-    //   自動保存する。短時間に複数回呼ばれた場合は 400ms デバウンス。
-    // ============================================================
     function _doAutoSave() {
         try {
             const nameEl = document.getElementById('stj_char_name_display');
             const charName = nameEl ? nameEl.textContent : '';
             if (!charName) return;
 
-            if (_editorLoading) {
-                console.debug('[STJ Editor] autoSave: エディタ初期化中のためスキップ');
-                return;
-            }
+            if (_editorLoading) return;
 
             try {
                 const ctx = getSTContext();
                 const currentChar = ctx?.characters?.[ctx?.characterId] || ctx?.character;
                 const currentCharName = currentChar?.name || '';
-                if (currentCharName && currentCharName !== charName) {
-                    console.debug(
-                        `[STJ Editor] autoSave: キャラ不一致 (editor="${charName}", current="${currentCharName}") → スキップ`
-                    );
-                    return;
-                }
+                if (currentCharName && currentCharName !== charName) return;
             } catch (e) { /* ignore */ }
 
             saveData({ silent: true });
 
             try {
-                // ★ 既存マップを取得してマージ方式で構築
                 const existingMap = getCurrentImageMapFromCharData(charName) || {};
                 const imageMap = buildImageMapFromForm(charName, existingMap);
 
-                // ★ 明示的に削除されたキーのみ null 送信（フォームに無い既存キーは保持）
                 const explicitDeletes = Array.from(_explicitlyDeletedKeys)
                     .filter(k => !(k in imageMap));
 
@@ -3043,7 +2855,6 @@
                     payload = { ...imageMap };
                     for (const k of explicitDeletes) {
                         payload[k] = null;
-                        console.log(`[STJ Editor] 🗑️ 明示削除キーを null で送信: ${k}`);
                     }
                 }
 
@@ -3054,7 +2865,6 @@
                         { immediate: true }
                     );
 
-                    // メモリ修正
                     try {
                         const ctx = getSTContext();
                         const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
@@ -3067,13 +2877,7 @@
                         detail: { charName, imageMap }
                     }));
     
-                    // ★ 削除セットをクリア
                     _explicitlyDeletedKeys.clear();
-
-                    console.log(
-                        `[STJ Editor] image_display_extension を保存 ` +
-                        `(${Object.keys(imageMap).length} entries, 明示削除 ${explicitDeletes.length})`
-                    );
                 }
             } catch (e) {
                 console.warn('[STJ Editor] character.json 保存エラー:', e);
@@ -3149,16 +2953,11 @@
             if (kw || images.length > 0) data.keywords.push({ keyword: kw, images });
         });
 
-        // ★ 空フォーム保護: エディタ初期化中のみスキップ
-        //    セル全削除後の空フォームは「ユーザーの意図した削除」なので保存する。
-        //    （以前は無条件スキップで、全削除が extensionSettings に反映されず
-        //      再起動後に loadSavedData が古いセルを復元するバグがあった）
         if (silent &&
             data.keywords.length === 0 &&
             data.defaultImages.length === 0 &&
             data.thumbnailImages.length === 0 &&
             _editorLoading) {
-            console.debug('[STJ Editor] autoSave: エディタ初期化中の空フォームのため保存をスキップ');
             return;
         }
 
@@ -3166,16 +2965,7 @@
         stjSettings[charName] = data;
         persistSettings();
 
-        if (silent) {
-            // ★ キーワードのみのセルも保存されていることがわかるログ
-            const kwOnlyCount = data.keywords.filter(k => (k.images || []).length === 0).length;
-            if (kwOnlyCount > 0) {
-                console.debug(
-                    `[STJ Editor] autoSave: extensionSettings を保存 ` +
-                    `(keywords=${data.keywords.length}, うち画像0枚=${kwOnlyCount})`
-                );
-            }
-        } else {
+        if (!silent) {
             showCustomAlert(_t('stj.save_success', 'データを保存しました'));
         }
     }
@@ -3205,14 +2995,7 @@
             const container = document.getElementById('stj_keywords_container');
             if (!container) return;
 
-            // ★ data.keywords が空の場合は既存のフォーム（_ext.json 由来）を保持
-            //   空データで有効な _ext.json を上書きしないための保護
             if (!Array.isArray(data.keywords) || data.keywords.length === 0) {
-                const existingCells = container.querySelectorAll('.stj-keyword-item').length;
-                console.log(
-                    `[STJ Editor] loadSavedData: keywords が空のため既存フォームを保持 ` +
-                    `(既存セル ${existingCells} 件)`
-                );
                 return;
             }
 
@@ -3235,7 +3018,6 @@
                 <div class="stj-preview-text">${_t('stj.preview.placeholder', 'プレビュー')}</div>
             </div>
             <div class="stj-keyword-display"></div>
-            <button class="stj-delete-row">×</button>
         `;
         container.appendChild(newItem);
 
@@ -3357,10 +3139,9 @@
                         <h4>${_t('stj.info.title', '📖 操作方法')}</h4>
                         <ul class="stj-guide-ops">
                             <li>${_t('stj.info.op_click', '<b>セルをクリック</b>：編集ウインドウが開きます')}</li>
-                            <li>${_t('stj.info.op_drag_gallery', '<b>ギャラリーからドラッグ&amp;ドロップ</b>：画像を追加できます')}</li>
+                            <li>${_t('stj.info.op_drag_gallery', '<b>ギャラリーからドラッグ&ドロップ</b>：画像を追加できます')}</li>
                             <li>${_t('stj.info.op_drag_cell', '<b>セルをドラッグ</b>：セルの位置を入れ替えられます')}</li>
                             <li>${_t('stj.info.op_hover_remove', '<b>編集ウインドウでホバー</b>：各マスに ❌ ボタン → 登録解除')}</li>
-                            <li>${_t('stj.info.op_delete_btn', '<b>❌ボタン</b>：セルを削除します')}</li>
                             <li>${_t('stj.info.op_bulk_delete', '<b>一括削除</b>：複数のセルをまとめて削除')}</li>
                             <li>${_t('stj.info.op_add_cell', '<b>セル追加</b>：新しいセルを追加')}</li>
                         </ul>
@@ -3373,7 +3154,6 @@
                         <div class="stj-preview-text">${_t('stj.preview.placeholder', 'プレビュー')}</div>
                     </div>
                     <div class="stj-keyword-display"></div>
-                    <button class="stj-delete-row">×</button>
                 </div>
             </div>
             <div class="stj-button-group">
@@ -3423,17 +3203,8 @@
             e.stopPropagation();
             if (isBulkDeleteMode || isDialogActive) return;
 
-            // ★ 「更新」ボタン: ロアブックのエントリと同期してセルを自動作成
-            //   - comment と keys[0] が一致するエントリのみ対象
-            //   - 「00_共通ルール」は除外
-            //   - 自動削除は行わない（既存セルは保持）
             try {
-                // 編集中の内容を先に保存
                 autoSave({ immediate: true });
-
-                // 既存セルに影響を与えないよう、ロアブックのエントリのみから
-                // 新規キーを抽出して追加する（syncLorebookEntriesToImageMap は
-                // 既に「無いキーのみ追加」する実装になっている）
                 const added = await syncLorebookEntriesToImageMap();
 
                 const showToast = window.GicApi?.showBottomToast;
@@ -3441,15 +3212,12 @@
                     if (typeof showToast === 'function') {
                         showToast(_t('stj.toast.sync_added', `ロアブックと同期しました（${added} 件追加）`, { count: added }));
                     }
-                    console.log(`[STJ Editor] ✅ 更新ボタンによる同期: ${added} 件追加`);
                 } else {
                     if (typeof showToast === 'function') {
                         showToast(_t('stj.toast.sync_no_add', '同期する新規セルはありませんでした'), { type: 'warning' });
                     }
-                    console.log('[STJ Editor] 更新ボタンによる同期: 追加なし');
                 }
 
-                // UI を最新状態に再描画
                 if (stjModalEl && stjModalEl.style.display === 'block') {
                     const charName = detectCharacterNameFromDOM();
                     if (charName) {
@@ -3555,12 +3323,6 @@
         }, 1000);
     }
 
-    // ============================================================
-    // ★ ギャラリーからの画像削除通知(gic-image-deleted)を購読し、
-    //    ・character.data.extensions.image_display_extension から該当ファイルを除去
-    //    ・JSON 編集画面が開いていれば、全セルからも除去して autoSave
-    //    ★ 空配列になったキーも保持する(セルとキーワードを残すため)。
-    // ============================================================
     function setupImageDeletedListener() {
         if (window.__stjImageDeletedListenerInstalled) return;
         window.__stjImageDeletedListenerInstalled = true;
@@ -3570,13 +3332,7 @@
             if (!charName || !Array.isArray(fileNames) || fileNames.length === 0) return;
 
             const deleteSet = new Set(fileNames.map(n => String(n)));
-            console.log(
-                `[STJ Editor] 📢 gic-image-deleted 受信: ${fileNames.length} 件 (char="${charName}")`
-            );
 
-            // ── ① character.data.extensions.image_display_extension を直接クリーン ──
-            //    エディタが閉じていてもデータを整合させる。
-            //    これを怠ると、後からエディタを開いた時に削除済み画像が復活する。
             try {
                 const ctx = getSTContext();
                 let char = null;
@@ -3609,7 +3365,6 @@
                                     }
                                     return true;
                                 });
-                                // ★ 空配列でもキーを保持（セルとキーワードを残す）
                                 if (filtered.length === 0) return [];
                                 return filtered.length === 1 ? filtered[0] : filtered;
                             } else if (typeof v === 'string') {
@@ -3618,7 +3373,6 @@
                                     const resolved = resolveThumbToOriginal(fn);
                                     if (deleteSet.has(fn) || deleteSet.has(resolved)) {
                                         dataChanged = true;
-                                        // ★ 単一文字列 → 空配列に変換してキーを保持
                                         return [];
                                     }
                                 }
@@ -3634,30 +3388,20 @@
                         window.CharStore?.saveCharacterExtension?.(
                             'image_display_extension', newExt, { immediate: true }
                         );
-                        // image-display.js に即時反映
                         try {
                             window.dispatchEvent(new CustomEvent('lbe-image-map-updated', {
                                 detail: { charName, imageMap: newExt }
                             }));
                         } catch (e) { /* ignore */ }
-                        console.log(
-                            `[STJ Editor] 🧹 character.data から削除画像を除去して保存 ` +
-                            `(${Object.keys(ext).length} → ${Object.keys(newExt).length} entries)`
-                        );
                     }
                 }
             } catch (e) {
                 console.warn('[STJ Editor] character.data クリーンアップ失敗:', e);
             }
 
-            // ── ② エディタが開いていて、対象キャラと一致するなら UI も更新 ──
             const nameEl = document.getElementById('stj_char_name_display');
             const editorCharName = nameEl ? nameEl.textContent : '';
             if (!editorCharName || editorCharName !== charName) {
-                console.log(
-                    `[STJ Editor] エディタのキャラと不一致のため UI 更新スキップ ` +
-                    `(editor="${editorCharName}", deleted="${charName}")`
-                );
                 return;
             }
 
@@ -3684,7 +3428,6 @@
                     updateCellPreview(cell);
                     affectedCells++;
 
-                    // セルポップアップモーダルが開いていて対象セルならグリッド再描画
                     if (currentModalCell === cell && currentCellModal && currentCellModal.classList.contains('visible')) {
                         renderCellModalGrid(cell).catch(e => console.warn('[STJ Editor] render error:', e));
                     }
@@ -3692,25 +3435,12 @@
             });
 
             if (removedCount > 0) {
-                console.log(
-                    `[STJ Editor] 🧹 ギャラリー削除に追従: ${removedCount} 件の画像を ${affectedCells} セルから除去`
-                );
-                // 変更を即時保存（キーワードからの画像登録解除を確定させる）
                 autoSave({ immediate: true });
                 try { runLiveTest(); } catch (e) { /* ignore */ }
             }
         });
-
-        console.log('[STJ Editor] 📢 gic-image-deleted リスナーを設置しました');
     }
 
-// ============================================================
-// ★ ロアブックエントリ ↔ JSON編集画面 セル 自動同期
-//   - エントリの comment と keys[0] が同じ名前ならセルを自動作成
-//   - 「00_共通ルール」は除外
-//   - エントリ削除時は自動削除しない（手動）
-//   - 画像生成完了時に該当キーワードのセルへ画像を自動登録
-// ============================================================
 const AUTO_SYNC_COMMON_RULE_NAME = '00_共通ルール';
 
 function normalizeCellImages(val) {
@@ -3739,7 +3469,6 @@ function saveImageMapToCharData(charName, imageMap) {
         const ctx = getSTContext();
         const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
         if (!char || char.name !== charName) {
-            console.warn('[STJ Editor] saveImageMapToCharData: char mismatch');
             return false;
         }
         if (!char.data) char.data = {};
@@ -3770,7 +3499,6 @@ function isCommonRuleName(name) {
     return false;
 }
 
-// ★ 値が空かどうか判定
 function _isEmptyImageValue(v) {
     if (v === null || v === undefined) return true;
     if (Array.isArray(v)) return v.length === 0;
@@ -3778,7 +3506,6 @@ function _isEmptyImageValue(v) {
     return false;
 }
 
-// ★ bag_state から image_display_extension を復元
 function _restoreImageMapFromBagState(charName) {
     try {
         const ctx = getSTContext();
@@ -3798,10 +3525,6 @@ function _restoreImageMapFromBagState(charName) {
             }
         }
         if (Object.keys(restored).length === 0) return null;
-        console.log(
-            `[STJ Editor] 🔄 bag_state から ${Object.keys(restored).length} キーを復元: ` +
-            `[${Object.keys(restored).join(', ')}]`
-        );
         return restored;
     } catch (e) {
         console.warn('[STJ Editor] bag_state 復元エラー:', e);
@@ -3809,24 +3532,12 @@ function _restoreImageMapFromBagState(charName) {
     }
 }
 
-// ★ 値が空かどうか判定
-function _isEmptyImageValue(v) {
-    if (v === null || v === undefined) return true;
-    if (Array.isArray(v)) return v.length === 0;
-    if (typeof v === 'string') return v.trim() === '';
-    return false;
-}
-
-// ★ 配列/文字列のファイル数を数える
 function _countImageFiles(v) {
     if (Array.isArray(v)) return v.length;
     if (typeof v === 'string' && v) return 1;
     return 0;
 }
 
-// ★ 画像ファイル名から key を抽出
-//   命名規則: {charName}_{key}_{timestamp}.ext  (key 無しは default)
-//   timestamp: YYYY-MM-DD@HHhMMmSSsMMMms
 function _parseImageFileKey(charName, fileName) {
     if (!fileName || typeof fileName !== 'string') return null;
     const base = fileName.replace(/\.(png|jpe?g|webp|gif|avif|bmp)$/i, '');
@@ -3842,9 +3553,7 @@ function _parseImageFileKey(charName, fileName) {
     return null;
 }
 
-// ★ ディスク上の画像一覧を key ごとにグループ化
-//   結果: { "000": ["user/images/...png", ...], "default": [...], ... }
-const _diskScanCache = new Map(); // charName -> { data, ts }
+const _diskScanCache = new Map();
 const DISK_SCAN_TTL_MS = 5000;
 
 async function _scanImagesFromDisk(charName) {
@@ -3878,20 +3587,13 @@ async function _scanImagesFromDisk(charName) {
         const grouped = {};
         for (const f of files) {
             if (typeof f !== 'string') continue;
-            if (/_thum\.png$/i.test(f)) continue;      // 動画サムネ
-            if (/_img_thum\.png$/i.test(f)) continue;  // 画像サムネ
+            if (/_thum\.png$/i.test(f)) continue;
+            if (/_img_thum\.png$/i.test(f)) continue;
             const key = _parseImageFileKey(charName, f);
             if (!key) continue;
             if (!grouped[key]) grouped[key] = [];
             grouped[key].push(`user/images/${charName}/${f}`);
         }
-
-        const summary = Object.entries(grouped)
-            .map(([k, v]) => `${k}:${v.length}`).join(', ');
-        console.log(
-            `[STJ Editor] 📂 ディスクスキャン "${charName}": ` +
-            `${Object.keys(grouped).length} キー (${summary})`
-        );
 
         _diskScanCache.set(charName, { data: grouped, ts: Date.now() });
         return grouped;
@@ -3901,18 +3603,14 @@ async function _scanImagesFromDisk(charName) {
     }
 }
 
-// ★ ディスクスキャン結果のキャッシュを破棄（画像追加/削除後に呼ぶ）
 function _invalidateDiskScanCache(charName) {
     if (charName) _diskScanCache.delete(charName);
     else _diskScanCache.clear();
 }
 
-// ★ 統合復元: bag_state（優先）+ ディスクスキャン（補完）
 async function _restoreImageMapUnified(charName) {
     const restored = {};
 
-    // ① bag_state を authority として採用
-    //    （ファイル名の key 部分が欠落していても復元できる）
     const bagMap = _restoreImageMapFromBagState(charName);
     if (bagMap) {
         for (const [k, v] of Object.entries(bagMap)) {
@@ -3920,7 +3618,6 @@ async function _restoreImageMapUnified(charName) {
         }
     }
 
-    // ② ディスクスキャンで補完（bag_state に無いキーのみ）
     const diskMap = await _scanImagesFromDisk(charName);
     for (const [k, v] of Object.entries(diskMap)) {
         if (k === '__default__') {
@@ -3934,15 +3631,9 @@ async function _restoreImageMapUnified(charName) {
         }
     }
 
-    const keys = Object.keys(restored);
-    console.log(
-        `[STJ Editor] 🔄 統合復元 "${charName}": ${keys.length} キー ` +
-        `[${keys.join(', ')}]`
-    );
     return restored;
 }
     
-// ★ 特定キーの bag_state ファイル一覧を取得
 function _getBagStateFilesForKeyword(charName, keyword) {
     try {
         const ctx = getSTContext();
@@ -3959,13 +3650,11 @@ function _getBagStateFilesForKeyword(charName, keyword) {
 async function syncLorebookEntriesToImageMap() {
     const charName = detectCharacterNameFromDOM();
     if (!charName) {
-        console.debug('[STJ Editor] syncLorebook: キャラ未選択のためスキップ');
         return 0;
     }
 
     const worldName = getCharacterWorldInfoName();
     if (!worldName) {
-        console.debug('[STJ Editor] syncLorebook: ロアブック未関連付けのためスキップ');
         return 0;
     }
 
@@ -3980,7 +3669,6 @@ async function syncLorebookEntriesToImageMap() {
     let imageMap = getCurrentImageMapFromCharData(charName);
     if (!imageMap) imageMap = {};
 
-    // ロアブックの全エントリから存在キーを収集
     const existingKeys = new Set();
     const autoCreateKeys = new Set();
     for (const entry of list) {
@@ -3995,7 +3683,6 @@ async function syncLorebookEntriesToImageMap() {
         }
     }
 
-    // ★ 空のキーが1つでもあれば統合復元を準備
     const hasEmptyKeys = Object.entries(imageMap).some(
         ([k, v]) => !UNREGISTER_EXCLUDED_KEYS.has(k) && _isEmptyImageValue(v)
     );
@@ -4004,7 +3691,6 @@ async function syncLorebookEntriesToImageMap() {
         restoreData = await _restoreImageMapUnified(charName);
     }
 
-    // 残骸削除（ロアブックに存在しないキーのみ）
     const removedKeys = [];
     for (const key of Object.keys(imageMap)) {
         if (UNREGISTER_EXCLUDED_KEYS.has(key)) continue;
@@ -4014,7 +3700,6 @@ async function syncLorebookEntriesToImageMap() {
         }
     }
 
-    // 新規追加 + 既存空配列の復元
     const addedKeys = [];
     const restoredKeys = [];
     const allKeysToProcess = new Set([...autoCreateKeys, ...existingKeys]);
@@ -4029,21 +3714,9 @@ async function syncLorebookEntriesToImageMap() {
         if (!exists) {
             imageMap[keyword] = hasRestore ? rv : [];
             addedKeys.push(keyword);
-            if (hasRestore) {
-                restoredKeys.push(keyword);
-                console.log(
-                    `[STJ Editor] 🆕 セル自動作成(復元): "${keyword}" ` +
-                    `(${_countImageFiles(rv)}件)`
-                );
-            } else {
-                console.log(`[STJ Editor] 🆕 セル自動作成: "${keyword}" (復元データなし)`);
-            }
         } else if (_isEmptyImageValue(imageMap[keyword]) && hasRestore) {
             imageMap[keyword] = rv;
             restoredKeys.push(keyword);
-            console.log(
-                `[STJ Editor] 🔄 空配列を復元: "${keyword}" (${_countImageFiles(rv)}件)`
-            );
         }
     }
 
@@ -4060,11 +3733,6 @@ async function syncLorebookEntriesToImageMap() {
                 console.warn('[STJ Editor] UI 更新エラー:', e);
             }
         }
-
-        console.log(
-            `[STJ Editor] ✅ 同期完了: 追加=${addedKeys.length}, ` +
-            `削除=${removedKeys.length}, 復元=${restoredKeys.length}`
-        );
     }
 
     return addedKeys.length;
@@ -4074,29 +3742,20 @@ async function handleImageGeneratedForKeyword(e) {
     const { charName, entryKey, fileName } = e.detail || {};
     if (!charName || !entryKey || !fileName) return;
 
-    // 該当キャラチェック
     const currentCharName = detectCharacterNameFromDOM();
     if (currentCharName !== charName) {
-        console.debug(`[STJ Editor] 別キャラのためスキップ (${charName} != ${currentCharName})`);
         return;
     }
 
-    // 共通ルール除外
     if (isCommonRuleName(entryKey)) {
-        console.debug(`[STJ Editor] 共通ルールのためスキップ: ${entryKey}`);
         return;
     }
 
-    // ★ entryKey が現在のロアブックに存在するか確認
-    //   削除済みエントリや古いキャッシュに基づく entryKey の場合は、
-    //   セル作成も画像登録も行わない。
     const worldName = getCharacterWorldInfoName();
     if (!worldName) {
-        console.debug('[STJ Editor] ロアブック未関連付けのためスキップ');
         return;
     }
 
-    // ★ キャッシュをクリアして最新のエントリ一覧を取得
     try {
         window.LorebookExpansion?.clearWorldInfoEntriesCache?.(worldName);
     } catch (err) { /* ignore */ }
@@ -4104,18 +3763,13 @@ async function handleImageGeneratedForKeyword(e) {
     let entries = null;
     try {
         entries = await loadWorldInfoEntries(worldName);
-    } catch (err) {
-        console.warn('[STJ Editor] ロアブック取得エラー:', err);
-    }
+    } catch (err) { /* ignore */ }
     if (!entries) {
-        console.debug('[STJ Editor] ロアブック取得失敗のためスキップ');
         return;
     }
 
     const list = Array.isArray(entries) ? entries : Object.values(entries);
 
-    // ★ entryKey に対応するエントリが存在するかチェック
-    //   comment または keys[0] のいずれかに一致すれば存在扱い。
     let entryExists = false;
     for (const entry of list) {
         if (!entry) continue;
@@ -4129,34 +3783,25 @@ async function handleImageGeneratedForKeyword(e) {
     }
 
     if (!entryExists) {
-        console.log(
-            `[STJ Editor] ⚠️ entryKey="${entryKey}" は現在のロアブック "${worldName}" に存在しないため、` +
-            `セル作成・画像登録をスキップします`
-        );
         return;
     }
 
     const imageMap = getCurrentImageMapFromCharData(charName);
     if (!imageMap) return;
 
-    // セルが無ければ自動作成（entryKey がロアブックに存在する場合のみ）
     if (!Object.prototype.hasOwnProperty.call(imageMap, entryKey)) {
         imageMap[entryKey] = [];
-        console.log(`[STJ Editor] 🆕 セル自動作成（画像生成時）: "${entryKey}"`);
     }
 
-    // ★ フルパス形式で保存する（image_display_extension の他エントリと統一）
     const fullPath = `user/images/${charName}/${fileName}`;
     const currentList = normalizeCellImages(imageMap[entryKey]);
 
-    // ★ 重複チェック: フルパス・ファイル名どちらの形式でも一致判定
     const isDuplicate = currentList.some(p => {
         if (typeof p !== 'string') return false;
         const base = p.split('/').pop().split('?')[0].split('#')[0];
         try { return decodeURIComponent(base) === fileName; } catch (err) { return base === fileName; }
     });
     if (isDuplicate) {
-        console.debug(`[STJ Editor] 画像 "${fileName}" は既に登録済み`);
         return;
     }
 
@@ -4173,8 +3818,6 @@ async function handleImageGeneratedForKeyword(e) {
             console.warn('[STJ Editor] UI 更新エラー:', err);
         }
     }
-
-    console.log(`[STJ Editor] 🖼️ 画像自動登録: "${entryKey}" ← ${fileName}`);
 }
 
 function setupLorebookEntryWatcher() {
@@ -4196,27 +3839,21 @@ function setupLorebookEntryWatcher() {
         }, delay);
     };
 
-    // ロアブック更新時
     ['WORLDINFO_UPDATED', 'WORLDINFO_SETTINGS_UPDATED'].forEach(name => {
         if (et[name] && typeof es.on === 'function') {
             es.on(et[name], () => syncLater(600));
         }
     });
 
-    // キャラ切替時
     ['CHAT_CHANGED', 'CHARACTER_SELECTED', 'CHARACTER_PAGE_LOADED'].forEach(name => {
         if (et[name] && typeof es.on === 'function') {
             es.on(et[name], () => syncLater(800));
         }
     });
 
-    // 画像生成完了イベント
     window.addEventListener('gic-image-generated-for-keyword', handleImageGeneratedForKeyword);
 
-    // 起動直後にも1回
     syncLater(1500);
-
-    console.log('[STJ Editor] ロアブックエントリ監視を開始しました');
 }
 
     function retranslateStjUI() {
@@ -4255,13 +3892,12 @@ function setupLorebookEntryWatcher() {
         if (infoTitle) infoTitle.textContent = _t('stj.info.title', '📖 操作方法');
 
         const infoItems = stjModalEl.querySelectorAll('.stj-info-guide .stj-guide-ops > li');
-        const infoKeys = ['stj.info.op_click', 'stj.info.op_drag_gallery', 'stj.info.op_drag_cell', 'stj.info.op_hover_remove', 'stj.info.op_delete_btn', 'stj.info.op_bulk_delete', 'stj.info.op_add_cell'];
+        const infoKeys = ['stj.info.op_click', 'stj.info.op_drag_gallery', 'stj.info.op_drag_cell', 'stj.info.op_hover_remove', 'stj.info.op_bulk_delete', 'stj.info.op_add_cell'];
         const infoFallbacks = [
             '<b>セルをクリック</b>：編集ウインドウが開きます',
-            '<b>ギャラリーからドラッグ&amp;ドロップ</b>：画像を追加できます',
+            '<b>ギャラリーからドラッグ&ドロップ</b>：画像を追加できます',
             '<b>セルをドラッグ</b>：セルの位置を入れ替えられます',
             '<b>編集ウインドウでホバー</b>：各マスに ❌ ボタン → 登録解除',
-            '<b>❌ボタン</b>：セルを削除します',
             '<b>一括削除</b>：複数のセルをまとめて削除',
             '<b>セル追加</b>：新しいセルを追加',
         ];
@@ -4310,7 +3946,7 @@ function setupLorebookEntryWatcher() {
         const choicesPopup = document.getElementById('stj_choices_popup');
         if (choicesPopup) {
             choicesPopup.querySelectorAll('.stj-choices-popup-label').forEach(el => {
-                el.textContent = _t('stj.choices.label', '選択肢') + '　';
+                el.textContent = _t('stj.choices.label', '選択肢') + ' ';
             });
         }
 
@@ -4325,13 +3961,9 @@ function setupLorebookEntryWatcher() {
             createExportModal();
         }
 
-        // ★ ギャラリーからの画像削除を購読
         setupImageDeletedListener();
-
-        // ★ ロアブックエントリ監視（セル自動作成 / 画像自動登録）
         setupLorebookEntryWatcher();
 
-        // ★ 言語変更に追従して UI を再翻訳
         try {
             if (window.ExpI18n?.onLanguageChange) {
                 window.ExpI18n.onLanguageChange(() => {
@@ -4352,7 +3984,6 @@ function setupLorebookEntryWatcher() {
             isOpen: function () {
                 return !!(stjModalEl && stjModalEl.style.display === 'block');
             },
-            // ★ 手動で存在しないファイルを除去（デバッグ・復旧用）
             cleanMissingFiles: async function (targetCharName) {
                 const charName = targetCharName
                     || document.getElementById('stj_char_name_display')?.textContent
@@ -4386,9 +4017,7 @@ function setupLorebookEntryWatcher() {
                     return { ok: false, error: String(e) };
                 }
             },
-            // ★ 手動でロアブック↔セルを同期（デバッグ・復旧用）
             syncLorebookEntries: () => syncLorebookEntriesToImageMap(),
-            // ★ image_display_extension を bag_state + ディスクスキャンから一括復元
             restoreAllKeys: async function () {
                 const charName = detectCharacterNameFromDOM();
                 if (!charName) return { ok: false, message: 'no charName' };
@@ -4398,11 +4027,10 @@ function setupLorebookEntryWatcher() {
                     const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
                     if (!char || char.name !== charName) {
                         return { ok: false, message: 'char mismatch' };
-            }
+                    }
 
                     const imageMap = getCurrentImageMapFromCharData(charName) || {};
 
-                    // キャッシュ破棄して最新のディスク状態を取得
                     _invalidateDiskScanCache(charName);
                     const restoreData = await _restoreImageMapUnified(charName);
 
@@ -4436,10 +4064,6 @@ function setupLorebookEntryWatcher() {
                         autoSave({ immediate: true });
                     }
 
-                    console.log(
-                        `[STJ Editor] ✅ restoreAllKeys: ${restoredKeys.length} キー復元`,
-                        detail
-                    );
                     return {
                         ok: true,
                         restored: restoredKeys.length,
@@ -4452,8 +4076,6 @@ function setupLorebookEntryWatcher() {
                 }
             },
         };
-
-        console.log('[STJ Editor] JSONエディタAPIを公開しました（キャラ編集画面のボタンは廃止）');
     }
 
     $(document).ready(() => { initStjEditor(); });
