@@ -2411,95 +2411,93 @@
         return hasCharData;
     }
 
-    // ★ 既存のセル要素の「位置と順番」を可能な限り保持してデータを同期・再描画する関数
-    function populateFormFromImageMap(imageMap, preserveOrder = false) {
-        const toFileNames = (val) => {
-            if (val === null || val === undefined) return [];
-            const arr = Array.isArray(val) ? val : [val];
-            return arr
-                .filter(p => p !== null && p !== undefined)
-                .map(p => extractFileNameFromPath(p))
-                .filter(Boolean);
-        };
+// 既存セルの位置と並び順を完全維持しながらキーワード名と画像を更新する関数
+function populateFormFromImageMap(imageMap, preserveOrder = false) {
+    const toFileNames = (val) => {
+        if (val === null || val === undefined) return [];
+        const arr = Array.isArray(val) ? val : [val];
+        return arr
+            .filter(p => p !== null && p !== undefined)
+            .map(p => extractFileNameFromPath(p))
+            .filter(Boolean);
+    };
 
-        const defaultCell = document.querySelector('.stj-special-item:nth-child(1)');
-        if (defaultCell) {
-            const files = imageMap.default !== undefined ? toFileNames(imageMap.default) : [];
-            setCellImages(defaultCell, files);
-            updateCellPreview(defaultCell);
-        }
+    const defaultCell = document.querySelector('.stj-special-item:nth-child(1)');
+    if (defaultCell) {
+        const files = imageMap.default !== undefined ? toFileNames(imageMap.default) : [];
+        setCellImages(defaultCell, files);
+        updateCellPreview(defaultCell);
+    }
 
-        const thumbnailCell = document.querySelector('.stj-special-item:nth-child(2)');
-        if (thumbnailCell) {
-            const files = imageMap.thumbnail !== undefined ? toFileNames(imageMap.thumbnail) : [];
-            setCellImages(thumbnailCell, files);
-            updateCellPreview(thumbnailCell);
-        }
+    const thumbnailCell = document.querySelector('.stj-special-item:nth-child(2)');
+    if (thumbnailCell) {
+        const files = imageMap.thumbnail !== undefined ? toFileNames(imageMap.thumbnail) : [];
+        setCellImages(thumbnailCell, files);
+        updateCellPreview(thumbnailCell);
+    }
 
-        const container = document.getElementById('stj_keywords_container');
-        if (!container) return;
+    const container = document.getElementById('stj_keywords_container');
+    if (!container) return;
 
-        if (preserveOrder) {
-            // --- 既存の並び順（DOM要素）をベースに、キーワード名や画像の変更だけをインプレースで反映する ---
-            const existingItems = Array.from(container.querySelectorAll('.stj-keyword-item'));
-            const processedKeys = new Set();
-            const charName = document.getElementById('stj_char_name_display')?.textContent || '';
+    if (preserveOrder) {
+        const existingItems = Array.from(container.querySelectorAll('.stj-keyword-item'));
+        const processedKeys = new Set();
 
-            // 1. 既存セルを走査し、まだ画像マップに存在するものはキーワード名を更新、存在しなければ削除
-            existingItems.forEach(item => {
-                const currentKw = getCellKeyword(item);
-                // imageMap 内で、このセルに一致するキーを探す（改名されていれば新キーにマッチさせる）
-                // ここではシンプルに、現在 imageMap にあるキーのうち、まだどのDOMにも割り当てられていないものを順に割り当てる
-                const availableKeys = Object.keys(imageMap).filter(k => k !== 'default' && k !== 'thumbnail' && !processedKeys.has(k));
-            
-                let matchedKey = '';
-                if (currentKw && imageMap[currentKw] !== undefined) {
-                    matchedKey = currentKw;
-                } else if (availableKeys.length > 0) {
-                    // キーワードが変わっていて、かつ余っているキーがあればそれを割り当てる（改名追従）
-                    matchedKey = availableKeys[0];
-                }
+        // 1. 既存の各セル要素を上から順に走査し、新旧のキーワードを対応付けてその場で書き換える（＝位置が絶対に移動しない）
+        existingItems.forEach((item, index) => {
+            const currentKw = getCellKeyword(item);
+            const activeKeys = Object.keys(imageMap).filter(k => k !== 'default' && k !== 'thumbnail');
 
-                if (matchedKey) {
-                    processedKeys.add(matchedKey);
-                    setCellKeyword(item, matchedKey);
-                    const files = toFileNames(imageMap[matchedKey]);
-                    setCellImages(item, files);
-                    updateCellPreview(item);
-                } else {
-                    // ロアブックから削除されたセルはDOMから除外
-                    item.remove();
-                }
-            });
-
-            // 2. imageMap に新しく追加されたキーがあれば、コンテナの末尾に追加する
-            let index = container.querySelectorAll('.stj-keyword-item').length;
-            for (const [key, val] of Object.entries(imageMap)) {
-                if (key === 'default' || key === 'thumbnail') continue;
-                if (!processedKeys.has(key)) {
-                    addKeywordRowWithData(container, index, { keyword: key, images: toFileNames(val) });
-                    index++;
+            let targetKey = '';
+            if (currentKw && imageMap[currentKw] !== undefined) {
+                // キーがそのまま存在する場合
+                targetKey = currentKw;
+            } else {
+                // キーが変わっている（改名された）場合、まだ処理されていない残りのキーを順番に割り当てる
+                const unassignedKeys = activeKeys.filter(k => !processedKeys.has(k));
+                if (unassignedKeys.length > 0) {
+                    targetKey = unassignedKeys[0];
                 }
             }
 
-            // セルが1つも無くなった場合のフォールバック
-            if (container.querySelectorAll('.stj-keyword-item').length === 0) {
-                addKeywordRowWithData(container, 0, { keyword: '', images: [] });
+            if (targetKey) {
+                processedKeys.add(targetKey);
+                setCellKeyword(item, targetKey);
+                const files = toFileNames(imageMap[targetKey]);
+                setCellImages(item, files);
+                updateCellPreview(item);
+            } else {
+                // ロアブック側から完全に削除されたセルは削除
+                item.remove();
             }
-        } else {
-            // --- 従来の完全再生成（初期ロード時など） ---
-            container.innerHTML = '';
-            let index = 0;
-            Object.entries(imageMap).forEach(([key, val]) => {
-                if (key === 'default' || key === 'thumbnail') return;
+        });
+
+        // 2. まだどのセルにも割り当てられていない新規追加キーがあれば、リストの末尾に追加
+        let index = container.querySelectorAll('.stj-keyword-item').length;
+        for (const [key, val] of Object.entries(imageMap)) {
+            if (key === 'default' || key === 'thumbnail') continue;
+            if (!processedKeys.has(key)) {
                 addKeywordRowWithData(container, index, { keyword: key, images: toFileNames(val) });
                 index++;
-            });
-            if (index === 0) {
-                addKeywordRowWithData(container, 0, { keyword: '', images: [] });
             }
         }
+
+        if (container.querySelectorAll('.stj-keyword-item').length === 0) {
+            addKeywordRowAndData(container, 0, { keyword: '', images: [] });
+        }
+    } else {
+        container.innerHTML = '';
+        let index = 0;
+        Object.entries(imageMap).forEach(([key, val]) => {
+            if (key === 'default' || key === 'thumbnail') return;
+            addKeywordRowWithData(container, index, { keyword: key, images: toFileNames(val) });
+            index++;
+        });
+        if (index === 0) {
+            addKeywordRowWithData(container, 0, { keyword: '', images: [] });
+        }
     }
+}
 
     function setupPreviewListeners() { updatePreview(); }
 
@@ -3589,22 +3587,12 @@ async function syncLorebookEntriesToImageMap() {
     let imageMap = getCurrentImageMapFromCharData(charName);
     if (!imageMap) imageMap = {};
 
-    const stjCharSet = getStjCharSettings(charName);
-    const oldUidMap = stjCharSet.uidMap || {};
-
-    const currentUidMap = {}; // uid -> newKeyword
     const activeKeywords = new Set();
-
     for (const entry of list) {
         if (!entry) continue;
-        const uid = entry.uid !== undefined && entry.uid !== null ? String(entry.uid) : null;
         const kw = getEntryKeyword(entry);
         if (!kw || isCommonRuleName(kw)) continue;
-
         activeKeywords.add(kw);
-        if (uid !== null) {
-            currentUidMap[uid] = kw;
-        }
     }
 
     let hasEmptyKeys = Object.entries(imageMap).some(
@@ -3615,39 +3603,34 @@ async function syncLorebookEntriesToImageMap() {
         restoreData = await _restoreImageMapUnified(charName);
     }
 
-    // --- 1. 改名（リネーム）の追跡と imageMap キーの確実な移行 ---
-    // ① UID履歴に基づく改名追跡 (例: 001 → 001a)
-    for (const [uid, newKw] of Object.entries(currentUidMap)) {
-        const oldKw = oldUidMap[uid];
-        if (oldKw && oldKw !== newKw) {
-            // 古いキーワードの画像データが imageMap にある場合、新キーワードに確実に引き継ぐ
+    // --- 1. ★ 確実な改名（リネーム）検出とキー移行 ---
+    // imageMap 内にあって、現在のロアブックのキーワード一覧に存在しないキー（＝改名されたか削除された古いキー）を抽出
+    const existingImageKeys = Object.keys(imageMap).filter(k => !UNREGISTER_EXCLUDED_KEYS.has(k));
+    const missingKeys = existingImageKeys.filter(k => !activeKeywords.has(k));
+    // ロアブック側にあって、まだ imageMap に存在しない新しいキーワードを抽出
+    const newKeywords = [...activeKeywords].filter(k => imageMap[k] === undefined);
+
+    // もし「消えたキー」と「新しいキー」が両方存在する場合、順番（インデックス）や1対1の関係から改名とみなしてデータを安全に引き継ぐ
+    if (missingKeys.length > 0 && newKeywords.length > 0) {
+        // 数量が一致する場合、あるいはシンプルに順番通りに対応づけてキーをリネームする
+        const count = Math.min(missingKeys.length, newKeywords.length);
+        for (let i = 0; i < count; i++) {
+            const oldKw = missingKeys[i];
+            const newKw = newKeywords[i];
             if (imageMap[oldKw] !== undefined) {
                 if (imageMap[newKw] === undefined || _isEmptyImageValue(imageMap[newKw])) {
                     imageMap[newKw] = imageMap[oldKw];
-                    console.log(`[STJ Editor] 🔄 改名を検知・データ移行: "${oldKw}" → "${newKw}"`);
+                    console.log(`[STJ Editor] 🔄 エントリの改名を検知・データ移行: "${oldKw}" → "${newKw}"`);
                 }
                 delete imageMap[oldKw];
             }
         }
     }
 
-    // ② UID履歴が途切れた場合の自動推論（1対1の増減）
-    const remainingOrphans = Object.keys(imageMap).filter(k => !UNREGISTER_EXCLUDED_KEYS.has(k) && !activeKeywords.has(k));
-    const newlyAddedKeywords = [...activeKeywords].filter(k => imageMap[k] === undefined || _isEmptyImageValue(imageMap[k]));
-    if (remainingOrphans.length === 1 && newlyAddedKeywords.length === 1) {
-        const oldKw = remainingOrphans[0];
-        const newKw = newlyAddedKeywords[0];
-        if (imageMap[oldKw] !== undefined) {
-            imageMap[newKw] = imageMap[oldKw];
-            delete imageMap[oldKw];
-            console.log(`[STJ Editor] 🔄 増減推論から改名移行: "${oldKw}" → "${newKw}"`);
-        }
-    }
-
     // --- 2. 完全に削除されたエントリのクリーンアップ ---
     const removedKeys = [];
     for (const key of Object.keys(imageMap)) {
-        if (UNREGISTER_EXCLUDED_KEYS.has(key)) continue;
+        if (UNREGISTER_EXCLUDED_KEYS.has(key)) continue; // default, thumbnail は保護
         if (!activeKeywords.has(key)) {
             delete imageMap[key];
             removedKeys.push(key);
@@ -3675,21 +3658,18 @@ async function syncLorebookEntriesToImageMap() {
         }
     }
 
-    stjCharSet.uidMap = currentUidMap;
-    persistSettings();
-
-    const changed = removedKeys.length > 0 || addedKeys.length > 0 || restoredKeys.length > 0 || remainingOrphans.length > 0;
+    const changed = removedKeys.length > 0 || addedKeys.length > 0 || restoredKeys.length > 0 || missingKeys.length > 0;
 
     if (changed) {
         saveImageMapToCharData(charName, imageMap);
 
         if (stjModalEl && stjModalEl.style.display === 'block' && !_editorLoading) {
             try {
-                // ★ 画面を再構築する際、既存セルの順番や位置関係を維持して更新する
+                // 順序を完全に維持したインプレース更新を実行
                 populateFormFromImageMap(imageMap, true);
                 runLiveTest();
                 autoSave({ immediate: true });
-                console.log('[STJ Editor] 🔄 改名・同期を順序を維持してJSON編集画面に反映しました');
+                console.log('[STJ Editor] 🔄 改名・同期を順序維持でUIに即時反映しました');
             } catch (e) {
                 console.warn('[STJ Editor] UI 再描画エラー:', e);
             }
