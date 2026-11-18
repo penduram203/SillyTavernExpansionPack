@@ -3538,7 +3538,10 @@ async function syncLorebookEntriesToImageMap() {
     if (!imageMap) imageMap = {};
 
     const stjCharSet = getStjCharSettings(charName);
-    const oldUidMap = stjCharSet.uidMap || {}; // uid -> oldKeyword
+    
+    // ★ 過去の残骸データ（古い紐付けのゴミ）を完全にリセット・クリアして安全な状態にする
+    stjCharSet.uidMap = {}; 
+    const oldUidMap = {};
 
     const currentUidMap = {}; // uid -> newKeyword
     const activeKeywords = new Set();
@@ -3563,7 +3566,7 @@ async function syncLorebookEntriesToImageMap() {
         }
     }
 
-    hasEmptyKeys = Object.entries(imageMap).some(
+    let hasEmptyKeys = Object.entries(imageMap).some(
         ([k, v]) => !UNREGISTER_EXCLUDED_KEYS.has(k) && _isEmptyImageValue(v)
     );
     let restoreData = {};
@@ -3571,34 +3574,17 @@ async function syncLorebookEntriesToImageMap() {
         restoreData = await _restoreImageMapUnified(charName);
     }
 
-    // --- 1. uid の変化（改名 / リネーム）の検知とデータ移行 ---
-    for (const [uid, newKw] of Object.entries(currentUidMap)) {
-        const oldKw = oldUidMap[uid];
-        if (oldKw && oldKw !== newKw) {
-            // oldKw から newKw へのリネームが発生
-            if (Object.prototype.hasOwnProperty.call(imageMap, oldKw)) {
-                if (!Object.prototype.hasOwnProperty.call(imageMap, newKw) || _isEmptyImageValue(imageMap[newKw])) {
-                    imageMap[newKw] = imageMap[oldKw];
-                    console.log(`[STJ Editor] 🔄 キーワード改名を検知・移行: "${oldKw}" → "${newKw}"`);
-                }
-                delete imageMap[oldKw];
-            }
-        }
-    }
-
-    // --- 2. 削除されたエントリのクリーンアップ ---
-    // 有効なキーワードのどれにも一致せず、どの uid の旧キーワードにも一致しないものを削除
-    const validOldKeywords = new Set(Object.values(oldUidMap));
+    // --- 1. 削除されたエントリ（現在のロアブックに存在しないもの）の完全なクリーンアップ ---
     const removedKeys = [];
     for (const key of Object.keys(imageMap)) {
-        if (UNREGISTER_EXCLUDED_KEYS.has(key)) continue;
-        if (!activeKeywords.has(key) && !validOldKeywords.has(key)) {
+        if (UNREGISTER_EXCLUDED_KEYS.has(key)) continue; // default, thumbnail は保護
+        if (!activeKeywords.has(key)) {
             delete imageMap[key];
             removedKeys.push(key);
         }
     }
 
-    // --- 3. 新規追加・復元処理 ---
+    // --- 2. 新規追加・既存維持・復元処理 ---
     const addedKeys = [];
     const restoredKeys = [];
     for (const keyword of activeKeywords) {
@@ -3617,7 +3603,7 @@ async function syncLorebookEntriesToImageMap() {
         }
     }
 
-    // uidMap を更新して保存
+    // 現在の正しい uidMap のみを保存
     stjCharSet.uidMap = currentUidMap;
     persistSettings();
 
