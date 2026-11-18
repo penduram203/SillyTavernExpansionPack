@@ -3538,10 +3538,7 @@ async function syncLorebookEntriesToImageMap() {
     if (!imageMap) imageMap = {};
 
     const stjCharSet = getStjCharSettings(charName);
-    
-    // ★ 過去の残骸データ（古い紐付けのゴミ）を完全にリセット・クリアして安全な状態にする
-    stjCharSet.uidMap = {}; 
-    const oldUidMap = {};
+    const oldUidMap = stjCharSet.uidMap || {}; // ★ 前回保存された uid -> keyword の履歴を保持
 
     const currentUidMap = {}; // uid -> newKeyword
     const activeKeywords = new Set();
@@ -3574,17 +3571,33 @@ async function syncLorebookEntriesToImageMap() {
         restoreData = await _restoreImageMapUnified(charName);
     }
 
-    // --- 1. 削除されたエントリ（現在のロアブックに存在しないもの）の完全なクリーンアップ ---
+    // --- 1. ★ UIDの変更（改名）を追跡して imageMap のキーを安全にリネーム・移行 ---
+    for (const [uid, newKw] of Object.entries(currentUidMap)) {
+        const oldKw = oldUidMap[uid];
+        if (oldKw && oldKw !== newKw) {
+            // oldKw から newKw への改名が発生した場合、画像データを新しいキーへ引き継ぐ
+            if (Object.prototype.hasOwnProperty.call(imageMap, oldKw)) {
+                if (!Object.prototype.hasOwnProperty.call(imageMap, newKw) || _isEmptyImageValue(imageMap[newKw])) {
+                    imageMap[newKw] = imageMap[oldKw];
+                    console.log(`[STJ Editor] 🔄 キーワード改名を検知・データ移行: "${oldKw}" → "${newKw}"`);
+                }
+                delete imageMap[oldKw];
+            }
+        }
+    }
+
+    // --- 2. 完全に削除されたエントリ（現在のロアブックに存在せず、どの改名元でもないもの）のクリーンアップ ---
+    const validOldKeywords = new Set(Object.values(oldUidMap));
     const removedKeys = [];
     for (const key of Object.keys(imageMap)) {
         if (UNREGISTER_EXCLUDED_KEYS.has(key)) continue; // default, thumbnail は保護
-        if (!activeKeywords.has(key)) {
+        if (!activeKeywords.has(key) && !validOldKeywords.has(key)) {
             delete imageMap[key];
             removedKeys.push(key);
         }
     }
 
-    // --- 2. 新規追加・既存維持・復元処理 ---
+    // --- 3. 新規追加・既存維持・復元処理 ---
     const addedKeys = [];
     const restoredKeys = [];
     for (const keyword of activeKeywords) {
@@ -3603,7 +3616,7 @@ async function syncLorebookEntriesToImageMap() {
         }
     }
 
-    // 現在の正しい uidMap のみを保存
+    // 最新の uidMap 履歴を保存
     stjCharSet.uidMap = currentUidMap;
     persistSettings();
 
