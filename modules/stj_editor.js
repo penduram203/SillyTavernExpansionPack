@@ -2536,11 +2536,25 @@ function extractChoiceTriggerText(choiceStr) {
     const STJ_TREE_V_GAP = 30;
     const STJ_TREE_PADDING = 40;
 
+    function _stjToHalfWidth(str) {
+        return String(str).replace(/[Ａ-Ｚａ-ｚ０-９]/g, c =>
+            String.fromCharCode(c.charCodeAt(0) - 0xFEE0)
+        );
+    }
+
+    function _stjToFullWidth(str) {
+        return String(str).replace(/[A-Za-z0-9]/g, c =>
+            String.fromCharCode(c.charCodeAt(0) + 0xFEE0)
+        );
+    }
+    
     function _stjExtractChoiceNumber(text) {
-        if (window.LorebookExpansion?.extractChoiceNumber) {
-            return window.LorebookExpansion.extractChoiceNumber(text);
-        }
         if (!text || typeof text !== 'string') return null;
+        // ★ 全角数字を半角化してから抽出（LorebookExpansion 側は全角非対応）
+        const normalized = _stjToHalfWidth(text);
+        if (window.LorebookExpansion?.extractChoiceNumber) {
+            return window.LorebookExpansion.extractChoiceNumber(normalized);
+        }
         const pats = [
             /選択肢[「『"']?(\d{1,4})[」』"']?/,
             /choice[^\d]{0,3}(\d{1,4})/i,
@@ -2548,7 +2562,7 @@ function extractChoiceTriggerText(choiceStr) {
             /(\d{3})/,
         ];
         for (const pat of pats) {
-            const m = text.match(pat);
+            const m = normalized.match(pat);
             if (m) return String(m[1]).padStart(3, '0');
         }
         return null;
@@ -2574,6 +2588,68 @@ function extractChoiceTriggerText(choiceStr) {
         return partial;
     }
 
+    function _stjFindEntryByKeywordLoose(list, choiceStr) {
+        if (!Array.isArray(list) || !choiceStr) return null;
+        const raw = String(choiceStr).trim();
+        if (!raw) return null;
+
+        // 全角/半角の相互バリアント
+        const variants = new Set([raw]);
+        variants.add(_stjToHalfWidth(raw));
+        variants.add(_stjToFullWidth(raw));
+
+        // 接頭辞除去バリアント（選択肢 / choice / 先頭番号）
+        const base = [...variants];
+        for (const v of base) {
+            const s1 = v.replace(/^選択肢[「『"']?/, '').replace(/[」』"']$/, '').trim();
+            if (s1 && s1 !== v) variants.add(s1);
+            const s2 = v.replace(/^choice[:\s]*/i, '').trim();
+            if (s2 && s2 !== v) variants.add(s2);
+            const s3 = v.replace(/^[０-９\d]{1,4}[:：\s]*/, '').trim();
+            if (s3 && s3 !== v) variants.add(s3);
+        }
+
+        const lowerVariants = new Set([...variants].map(v => v.toLowerCase()));
+
+        // キーワード長の降順（長い＝具体的なキーワード優先）で評価
+        const entriesWithKw = [];
+        for (const e of list) {
+            const kw = getEntryKeyword(e);
+            if (kw) entriesWithKw.push({ entry: e, kw });
+        }
+        entriesWithKw.sort((a, b) => b.kw.length - a.kw.length);
+
+        // 1. 完全一致（大文字小文字区別）
+        for (const { entry, kw } of entriesWithKw) {
+            if (variants.has(kw)) return entry;
+        }
+        // 1b. 完全一致（大文字小文字無視）
+        for (const { entry, kw } of entriesWithKw) {
+            if (lowerVariants.has(kw.toLowerCase())) return entry;
+        }
+        // 2. 選択肢がキーワードで始まる
+        for (const { entry, kw } of entriesWithKw) {
+            for (const v of variants) {
+                if (v.startsWith(kw)) return entry;
+            }
+        }
+        for (const { entry, kw } of entriesWithKw) {
+            const kwL = kw.toLowerCase();
+            for (const v of variants) {
+                if (v.toLowerCase().startsWith(kwL)) return entry;
+            }
+        }
+        // 3. 選択肢にキーワードが含まれる（2文字以上のキーワードのみ・誤爆防止）
+        for (const { entry, kw } of entriesWithKw) {
+            if (kw.length < 2) continue;
+            for (const v of variants) {
+                if (v.includes(kw)) return entry;
+            }
+        }
+
+        return null;
+    }
+    
     async function _stjBuildChoiceGraph(imageMap) {
         const empty = { children: new Map(), parents: new Map(), allNodes: new Set() };
         const worldName = getCharacterWorldInfoName();
@@ -2613,10 +2689,19 @@ function extractChoiceTriggerText(choiceStr) {
             const childKws = [];
 
             for (const choiceStr of choices) {
+                // ① 数字抽出で試す（既存動作を保持）
+                let target = null;
                 const num = _stjExtractChoiceNumber(choiceStr);
-                if (!num) continue;
-                const target = _stjFindEntryByChoice(list, num);
+                if (num) {
+                    target = _stjFindEntryByChoice(list, num);
+                }
+                // ② 数字で見つからない、または数字が抽出できない場合、
+                //    選択肢文字列を直接キーワードとしてマッチ（非数値キー対応）
+                if (!target) {
+                    target = _stjFindEntryByKeywordLoose(list, choiceStr);
+                }
                 if (!target) continue;
+
                 const targetKw = getEntryKeyword(target);
                 if (!targetKw || !allNodes.has(targetKw)) continue;
                 if (childKws.includes(targetKw)) continue;
