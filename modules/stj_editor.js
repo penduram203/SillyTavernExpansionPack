@@ -2411,7 +2411,7 @@
         return hasCharData;
     }
 
-// 既存セルの並び順を完全に維持し、要素を削除・再作成せずにキーワード名と画像をその場で書き換える関数
+// ロアブックの正しい並び順を完全に維持してJSON編集画面のセルを構築・同期する関数
 function populateFormFromImageMap(imageMap, preserveOrder = false) {
     const toFileNames = (val) => {
         if (val === null || val === undefined) return [];
@@ -2439,57 +2439,61 @@ function populateFormFromImageMap(imageMap, preserveOrder = false) {
     const container = document.getElementById('stj_keywords_container');
     if (!container) return;
 
+    // 現在 imageMap に存在する有効なキーワードのリスト（＝ロアブックの現在の正しい並び順）
+    const activeKeys = Object.keys(imageMap).filter(k => k !== 'default' && k !== 'thumbnail');
+
     if (preserveOrder) {
         const existingItems = Array.from(container.querySelectorAll('.stj-keyword-item'));
-        const activeKeys = Object.keys(imageMap).filter(k => k !== 'default' && k !== 'thumbnail');
-        const assignedKeys = new Set();
+        const itemMapByKeyword = new Map();
 
-        // 1. 既存の各セル要素の位置（インデックス）をそのまま維持し、上から順に新しいキーをマッピングしてテキストを書き換える
-        existingItems.forEach((item, index) => {
-            const currentKw = getCellKeyword(item);
-            let targetKey = '';
-
-            // まず現在のキーがそのまま imageMap に残っているか確認
-            if (currentKw && imageMap[currentKw] !== undefined && !assignedKeys.has(currentKw)) {
-                targetKey = currentKw;
-            } else {
-                // 残っているキー（改名された新しいキー等）の中から、まだどのセルにも割り当てられていないものを順番に充てる
-                const unassigned = activeKeys.filter(k => !assignedKeys.has(k));
-                if (unassigned.length > 0) {
-                    targetKey = unassigned[0];
-                }
-            }
-
-            if (targetKey) {
-                assignedKeys.add(targetKey);
-                setCellKeyword(item, targetKey); // 既存DOMのキーワード名を直接書き換え（位置は移動しない）
-                const files = toFileNames(imageMap[targetKey]);
-                setCellImages(item, files);
-                updateCellPreview(item);
-            } else {
-                // ロアブック側で削除されたセルのみDOMから除外
-                item.remove();
+        // 既存のDOM要素を現在のキーワード名でマップ化
+        existingItems.forEach(item => {
+            const kw = getCellKeyword(item);
+            if (kw) {
+                itemMapByKeyword.set(kw, item);
             }
         });
 
-        // 2. まだどのセルにも割り当てられていない新規追加キーがあれば、リストの末尾に追加
-        let index = container.querySelectorAll('.stj-keyword-item').length;
-        for (const key of activeKeys) {
-            if (!assignedKeys.has(key)) {
-                addKeywordRowWithData(container, index, { keyword: key, images: toFileNames(imageMap[key]) });
-                index++;
-            }
-        }
+        // 変更されたキー（改名等）の追従：マップにないDOM要素があれば、まだ使われていない古いDOMをそれに割り当てる
+        const unmatchedItems = existingItems.filter(item => !activeKeys.includes(getCellKeyword(item)));
+        
+        // ロアブックの正しい並び順（activeKeys）に従ってDOM要素を並べ替えながら更新する
+        activeKeys.forEach((key, index) => {
+            let item = itemMapByKeyword.get(key);
 
+            // もし完全一致するDOMがなく、使い回せる未マッチのDOMがあればそれをリネームして再利用（位置を維持）
+            if (!item && unmatchedItems.length > 0) {
+                item = unmatchedItems.shift();
+                setCellKeyword(item, key);
+            }
+
+            if (item) {
+                // データを更新
+                const files = toFileNames(imageMap[key]);
+                setCellImages(item, files);
+                updateCellPreview(item);
+                
+                // 正しい順番（ロアブックのインデックス順）にDOMをコンテナ内で移動させる
+                container.appendChild(item);
+            } else {
+                // 完全に新規のキーの場合は新しく行を追加
+                addKeywordRowWithData(container, index, { keyword: key, images: toFileNames(imageMap[key]) });
+            }
+        });
+
+        // ロアブックから削除された古いDOM要素をすべて削除
+        unmatchedItems.forEach(item => item.remove());
+
+        // セルが1つも無くなった場合のフォールバック
         if (container.querySelectorAll('.stj-keyword-item').length === 0) {
             addKeywordRowWithData(container, 0, { keyword: '', images: [] });
         }
     } else {
+        // 初期ロード時など
         container.innerHTML = '';
         let index = 0;
-        Object.entries(imageMap).forEach(([key, val]) => {
-            if (key === 'default' || key === 'thumbnail') return;
-            addKeywordRowWithData(container, index, { keyword: key, images: toFileNames(val) });
+        activeKeys.forEach(key => {
+            addKeywordRowWithData(container, index, { keyword: key, images: toFileNames(imageMap[key]) });
             index++;
         });
         if (index === 0) {
