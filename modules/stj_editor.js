@@ -3075,14 +3075,16 @@ function populateFormFromImageMap(imageMap, preserveOrder = false) {
         modal.style.zIndex = '10001';
         modal.innerHTML = `
             <div id="stj_test_section">
-                <div class="stj-test-header">
-                    <label>${_t('stj.header.title', '🔍 リアルタイムキーワード反応テスト')}</label>
-                    <strong id="stj_char_name_display"></strong>
-                    <button type="button" class="stj-help-btn" id="stj_help_button">${_t('stj.header.help', 'ヘルプ')}</button>
+                <button type="button" id="stj_test_toggle" class="stj-test-toggle">${_t('stj.header.title', '🔍 リアルタイムキーワード反応テスト')} ▼</button>
+                <div id="stj_test_body" style="display: none;">
+                    <div class="stj-test-header">
+                        <strong id="stj_char_name_display"></strong>
+                        <button type="button" class="stj-help-btn" id="stj_help_button">${_t('stj.header.help', 'ヘルプ')}</button>
+                    </div>
+                    <div class="stj-syntax-guide" id="stj_syntax_guide">${buildSyntaxGuideHtml()}</div>
+                    <textarea id="stj_test_input" placeholder="${_t('stj.header.test_placeholder', '試しに文章を入力してください（例：笑顔で挨拶する）...')}"></textarea>
+                    <div id="stj_test_result">${_t('stj.test.result_prefix', '判定結果')}: <span style="color: #aaa; font-weight: normal;">${_t('stj.test.empty_hint', '文章を入力するとヒットするキーワードが表示されます')}</span></div>
                 </div>
-                <div class="stj-syntax-guide" id="stj_syntax_guide">${buildSyntaxGuideHtml()}</div>
-                <textarea id="stj_test_input" placeholder="${_t('stj.header.test_placeholder', '試しに文章を入力してください（例：笑顔で挨拶する）...')}"></textarea>
-                <div id="stj_test_result">${_t('stj.test.result_prefix', '判定結果')}: <span style="color: #aaa; font-weight: normal;">${_t('stj.test.empty_hint', '文章を入力するとヒットするキーワードが表示されます')}</span></div>
             </div>
 
             <div class="stj-top-section">
@@ -3134,6 +3136,40 @@ function populateFormFromImageMap(imageMap, preserveOrder = false) {
                 </div>
             </div>
         `;
+
+        // ★ スクロール追従停止 + トグルボタン用CSS
+        if (!document.getElementById('stj-test-section-style')) {
+            const s = document.createElement('style');
+            s.id = 'stj-test-section-style';
+            s.textContent = `
+                #stj_export_modal #stj_test_section,
+                #stj_export_modal #stj_test_section .stj-test-header,
+                #stj_export_modal #stj_test_section .stj-syntax-guide {
+                    position: static !important;
+                    top: auto !important;
+                }
+                #stj_export_modal #stj_test_toggle {
+                    display: block;
+                    width: 100%;
+                    padding: 8px 12px;
+                    margin: 0 0 6px 0;
+                    background: #2c5282;
+                    color: #fff;
+                    border: 1px solid #4299e1;
+                    border-radius: 4px;
+                    font-size: 14px;
+                    font-weight: bold;
+                    cursor: pointer;
+                    text-align: left;
+                    box-sizing: border-box;
+                }
+                #stj_export_modal #stj_test_toggle:hover {
+                    background: #4299e1;
+                }
+            `;
+            document.head.appendChild(s);
+        }
+        
         document.body.appendChild(modal);
         stjModalEl = modal;
 
@@ -3142,6 +3178,17 @@ function populateFormFromImageMap(imageMap, preserveOrder = false) {
 
         modal.addEventListener('click', (e) => e.stopPropagation());
 
+        const testToggleBtn = document.getElementById('stj_test_toggle');
+        const testBody = document.getElementById('stj_test_body');
+        if (testToggleBtn && testBody) {
+            testToggleBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const expanded = testBody.style.display !== 'none';
+                testBody.style.display = expanded ? 'none' : '';
+                testToggleBtn.textContent = _t('stj.header.title', '🔍 リアルタイムキーワード反応テスト') + (expanded ? ' ▼' : ' ▲');
+            });
+        }
+        
         const testInput = document.getElementById('stj_test_input');
         if (testInput) testInput.addEventListener('input', runLiveTest);
 
@@ -3818,8 +3865,12 @@ function setupLorebookEntryWatcher() {
     function retranslateStjUI() {
         if (!stjModalEl) return;
 
-        const testHeaderLabel = stjModalEl.querySelector('.stj-test-header > label');
-        if (testHeaderLabel) testHeaderLabel.textContent = _t('stj.header.title', '🔍 リアルタイムキーワード反応テスト');
+        const testToggleBtn = stjModalEl.querySelector('#stj_test_toggle');
+        if (testToggleBtn) {
+            const testBody = stjModalEl.querySelector('#stj_test_body');
+            const expanded = testBody && testBody.style.display !== 'none';
+            testToggleBtn.textContent = _t('stj.header.title', '🔍 リアルタイムキーワード反応テスト') + (expanded ? ' ▲' : ' ▼');
+        }
 
         const helpBtn = stjModalEl.querySelector('#stj_help_button');
         if (helpBtn) helpBtn.textContent = _t('stj.header.help', 'ヘルプ');
