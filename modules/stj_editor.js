@@ -3632,12 +3632,15 @@ async function syncLorebookEntriesToImageMap() {
     if (changed) {
         saveImageMapToCharData(charName, imageMap);
 
-        if (stjModalEl && stjModalEl.style.display === 'block' && !_editorLoading) {
+        // ★ JSON編集画面が開いている場合は、強制的にフォームを再構築して画面上のセルの名前と画像を最新にする
+        if (stjModalEl && stjModalEl.style.display === 'block') {
             try {
                 populateFormFromImageMap(imageMap);
+                runLiveTest();
                 autoSave({ immediate: true });
+                console.log('[STJ Editor] 🔄 ロアブックの変更（改名・追加・削除）をJSON編集画面に即時反映しました');
             } catch (e) {
-                console.warn('[STJ Editor] UI 更新エラー:', e);
+                console.warn('[STJ Editor] UI 再描画エラー:', e);
             }
         }
     }
