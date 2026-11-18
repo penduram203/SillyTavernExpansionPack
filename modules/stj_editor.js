@@ -3499,6 +3499,22 @@ function _getBagStateFilesForKeyword(charName, keyword) {
     } catch (e) { return []; }
 }
     
+function getEntryKeyword(entry) {
+    if (!entry) return '';
+    const comment = (typeof entry.comment === 'string' ? entry.comment.trim() : '');
+    if (comment && !isCommonRuleName(comment)) return comment;
+    const keys = getEntryKeys(entry);
+    if (keys.length > 0 && String(keys[0]).trim()) return String(keys[0]).trim();
+    return '';
+}
+
+function getStjCharSettings(charName) {
+    const settings = getExtensionSettings();
+    if (!settings[charName]) settings[charName] = {};
+    if (!settings[charName].uidMap) settings[charName].uidMap = {};
+    return settings[charName];
+}
+
 async function syncLorebookEntriesToImageMap() {
     const charName = detectCharacterNameFromDOM();
     if (!charName) {
@@ -3521,44 +3537,91 @@ async function syncLorebookEntriesToImageMap() {
     let imageMap = getCurrentImageMapFromCharData(charName);
     if (!imageMap) imageMap = {};
 
-    // ロアブックに存在する有効なキー（コメント または 最初のキー）のセットを収集
-    const existingKeys = new Set();
+    const stjCharSet = getStjCharSettings(charName);
+    const oldUidMap = stjCharSet.uidMap || {}; // uid -> oldKeyword
+
+    const currentUidMap = {}; // uid -> newKeyword
+    const activeKeywords = new Set();
     const autoCreateKeys = new Set();
+
     for (const entry of list) {
         if (!entry) continue;
+        const uid = entry.uid !== undefined && entry.uid !== null ? String(entry.uid) : null;
+        const kw = getEntryKeyword(entry);
+        if (!kw || isCommonRuleName(kw)) continue;
+
+        activeKeywords.add(kw);
+        if (uid !== null) {
+            currentUidMap[uid] = kw;
+        }
+
         const comment = (typeof entry.comment === 'string' ? entry.comment.trim() : '');
         const keys = getEntryKeys(entry);
         const firstKey = keys.length > 0 ? String(keys[0]).trim() : '';
-        if (comment && !isCommonRuleName(comment)) existingKeys.add(comment);
-        if (firstKey) existingKeys.add(firstKey);
-        if (comment && firstKey && comment === firstKey && !isCommonRuleName(comment)) {
-            autoCreateKeys.add(comment);
+        if (comment && firstKey && comment === firstKey) {
+            autoCreateKeys.add(kw);
         }
     }
 
+    hasEmptyKeys = Object.entries(imageMap).some(
+        ([k, v]) => !UNREGISTER_EXCLUDED_KEYS.has(k) && _isEmptyImageValue(v)
+    );
+    let restoreData = {};
+    if (hasEmptyKeys) {
+        restoreData = await _restoreImageMapUnified(charName);
+    }
+
+    // --- 1. uid の変化（改名 / リネーム）の検知とデータ移行 ---
+    for (const [uid, newKw] of Object.entries(currentUidMap)) {
+        const oldKw = oldUidMap[uid];
+        if (oldKw && oldKw !== newKw) {
+            // oldKw から newKw へのリネームが発生
+            if (Object.prototype.hasOwnProperty.call(imageMap, oldKw)) {
+                if (!Object.prototype.hasOwnProperty.call(imageMap, newKw) || _isEmptyImageValue(imageMap[newKw])) {
+                    imageMap[newKw] = imageMap[oldKw];
+                    console.log(`[STJ Editor] 🔄 キーワード改名を検知・移行: "${oldKw}" → "${newKw}"`);
+                }
+                delete imageMap[oldKw];
+            }
+        }
+    }
+
+    // --- 2. 削除されたエントリのクリーンアップ ---
+    // 有効なキーワードのどれにも一致せず、どの uid の旧キーワードにも一致しないものを削除
+    const validOldKeywords = new Set(Object.values(oldUidMap));
     const removedKeys = [];
-    // ロアブックから削除されたキーを imageMap からも確実に削除
     for (const key of Object.keys(imageMap)) {
-        if (UNREGISTER_EXCLUDED_KEYS.has(key)) continue; // default, thumbnail は保護
-        if (!existingKeys.has(key)) {
+        if (UNREGISTER_EXCLUDED_KEYS.has(key)) continue;
+        if (!activeKeywords.has(key) && !validOldKeywords.has(key)) {
             delete imageMap[key];
             removedKeys.push(key);
         }
     }
 
+    // --- 3. 新規追加・復元処理 ---
     const addedKeys = [];
-    const allKeysToProcess = new Set([...autoCreateKeys, ...existingKeys]);
-    for (const keyword of allKeysToProcess) {
-        if (!keyword || UNREGISTER_EXCLUDED_KEYS.has(keyword)) continue;
-        if (isCommonRuleName(keyword)) continue;
+    const restoredKeys = [];
+    for (const keyword of activeKeywords) {
+        if (UNREGISTER_EXCLUDED_KEYS.has(keyword)) continue;
 
-        if (!Object.prototype.hasOwnProperty.call(imageMap, keyword)) {
-            imageMap[keyword] = [];
+        const exists = Object.prototype.hasOwnProperty.call(imageMap, keyword);
+        const rv = restoreData[keyword];
+        const hasRestore = rv && !_isEmptyImageValue(rv);
+
+        if (!exists) {
+            imageMap[keyword] = hasRestore ? rv : [];
             addedKeys.push(keyword);
+        } else if (_isEmptyImageValue(imageMap[keyword]) && hasRestore) {
+            imageMap[keyword] = rv;
+            restoredKeys.push(keyword);
         }
     }
 
-    const changed = removedKeys.length > 0 || addedKeys.length > 0;
+    // uidMap を更新して保存
+    stjCharSet.uidMap = currentUidMap;
+    persistSettings();
+
+    const changed = removedKeys.length > 0 || addedKeys.length > 0 || restoredKeys.length > 0;
 
     if (changed) {
         saveImageMapToCharData(charName, imageMap);
