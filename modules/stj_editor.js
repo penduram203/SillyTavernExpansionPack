@@ -3538,11 +3538,10 @@ async function syncLorebookEntriesToImageMap() {
     if (!imageMap) imageMap = {};
 
     const stjCharSet = getStjCharSettings(charName);
-    const oldUidMap = stjCharSet.uidMap || {};
+    const oldUidMap = stjCharSet.uidMap || {}; // ★ 過去の uid -> keyword の履歴を保持して改名を追跡する
 
     const currentUidMap = {}; // uid -> newKeyword
     const activeKeywords = new Set();
-    const entryKeywordsByUid = new Map(); // uid -> keyword
 
     for (const entry of list) {
         if (!entry) continue;
@@ -3553,7 +3552,6 @@ async function syncLorebookEntriesToImageMap() {
         activeKeywords.add(kw);
         if (uid !== null) {
             currentUidMap[uid] = kw;
-            entryKeywordsByUid.set(uid, kw);
         }
     }
 
@@ -3565,36 +3563,32 @@ async function syncLorebookEntriesToImageMap() {
         restoreData = await _restoreImageMapUnified(charName);
     }
 
-    // --- 1. キーワードの改名（リネーム）のスマート追跡・移行 ---
-    // 画像データを持つ既存の imageMap キーのうち、現在のロアブックに存在しないものを洗い出す
+    // --- 1. ★ 改名（リネーム）の追跡と imageMap キーのスマート移行 ---
     const existingImageKeys = Object.keys(imageMap).filter(k => !UNREGISTER_EXCLUDED_KEYS.has(k));
     const orphanedImageKeys = existingImageKeys.filter(k => !activeKeywords.has(k));
 
-    // もし「ロアブックから消えた古いキー」と「ロアブックに新しく増えたキー」が同時にある場合、
-    // UIDの履歴（oldUidMap）や、孤立したキーの数・順序を手がかりに同一エントリの改名とみなして引き継ぐ
-    if (orphanedImageKeys.length > 0) {
-        for (const [uid, newKw] of Object.entries(currentUidMap)) {
-            const oldKw = oldUidMap[uid];
-            // 履歴に古い名前があり、それが現在 imageMap に存在し、新名側にまだデータが無い場合
-            if (oldKw && oldKw !== newKw && imageMap[oldKw] !== undefined) {
-                if (!imageMap[newKw] || _isEmptyImageValue(imageMap[newKw])) {
-                    imageMap[newKw] = imageMap[oldKw];
-                    console.log(`[STJ Editor] 🔄 UID履歴から改名を検知・データ移行: "${oldKw}" → "${newKw}"`);
-                }
-                delete imageMap[oldKw];
-            }
-        }
-
-        // UID履歴に無くても、孤立キーが1つだけで、かつ新規追加キーも1つだけなら「単一エントリの改名」とみなして安全に移行
-        const newlyAddedKeywords = [...activeKeywords].filter(k => imageMap[k] === undefined || _isEmptyImageValue(imageMap[k]));
-        if (orphanedImageKeys.length === 1 && newlyAddedKeywords.length === 1) {
-            const oldKw = orphanedImageKeys[0];
-            const newKw = newlyAddedKeywords[0];
-            if (imageMap[oldKw] !== undefined) {
+    // ① UID履歴に基づく改名追跡 (例: UIDが同じで名前が 001 → 001a に変わった場合)
+    for (const [uid, newKw] of Object.entries(currentUidMap)) {
+        const oldKw = oldUidMap[uid];
+        if (oldKw && oldKw !== newKw && imageMap[oldKw] !== undefined) {
+            if (!imageMap[newKw] || _isEmptyImageValue(imageMap[newKw])) {
                 imageMap[newKw] = imageMap[oldKw];
-                delete imageMap[oldKw];
-                console.log(`[STJ Editor] 🔄 単一の増減から改名を自動推論・移行: "${oldKw}" → "${newKw}"`);
+                console.log(`[STJ Editor] 🔄 UID履歴から改名を検知・キー移行: "${oldKw}" → "${newKw}"`);
             }
+            delete imageMap[oldKw];
+        }
+    }
+
+    // ② UID履歴が途切れても、消えたキーと新キーが1対1なら改名とみなして自動移行
+    const remainingOrphans = Object.keys(imageMap).filter(k => !UNREGISTER_EXCLUDED_KEYS.has(k) && !activeKeywords.has(k));
+    const newlyAddedKeywords = [...activeKeywords].filter(k => imageMap[k] === undefined || _isEmptyImageValue(imageMap[k]));
+    if (remainingOrphans.length === 1 && newlyAddedKeywords.length === 1) {
+        const oldKw = remainingOrphans[0];
+        const newKw = newlyAddedKeywords[0];
+        if (imageMap[oldKw] !== undefined) {
+            imageMap[newKw] = imageMap[oldKw];
+            delete imageMap[oldKw];
+            console.log(`[STJ Editor] 🔄 増減の推論から改名を自動移行: "${oldKw}" → "${newKw}"`);
         }
     }
 
@@ -3629,11 +3623,11 @@ async function syncLorebookEntriesToImageMap() {
         }
     }
 
-    // 最新の uidMap 履歴を保存
+    // 最新の uidMap 履歴を保存（次回の改名追跡用）
     stjCharSet.uidMap = currentUidMap;
     persistSettings();
 
-    const changed = removedKeys.length > 0 || addedKeys.length > 0 || restoredKeys.length > 0;
+    const changed = removedKeys.length > 0 || addedKeys.length > 0 || restoredKeys.length > 0 || remainingOrphans.length > 0;
 
     if (changed) {
         saveImageMapToCharData(charName, imageMap);
