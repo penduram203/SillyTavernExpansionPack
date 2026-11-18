@@ -1517,9 +1517,38 @@ function extractChoiceTriggerText(choiceStr) {
                     <button type="button" class="stj-cell-modal-cancel">${_t('stj.cell_modal.cancel', 'キャンセル')}</button>
                     <button type="button" class="stj-cell-modal-choices stj-choices-disabled" disabled title="">${_t('stj.choices.button', '選択肢')}</button>
                 </div>
+                <div class="stj-cell-modal-keyword-display" id="stj_cell_modal_keyword_display"></div>
                 <div class="stj-cell-modal-grid"></div>
             </div>
         `;
+
+        if (!document.getElementById('stj-cell-keyword-style')) {
+            const s = document.createElement('style');
+            s.id = 'stj-cell-keyword-style';
+            s.textContent = `
+                .stj-cell-modal-keyword-display {
+                    padding: 10px 16px;
+                    margin: 4px 0 8px;
+                    font-size: 28px;
+                    font-weight: bold;
+                    color: #ffffff;
+                    text-align: center;
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+                    -webkit-text-stroke: 4px #000000;
+                    paint-order: stroke fill;
+                    text-shadow:
+                        -3px -3px 0 #000, 3px -3px 0 #000, -3px 3px 0 #000, 3px 3px 0 #000,
+                        -3px 0 0 #000, 3px 0 0 #000, 0 -3px 0 #000, 0 3px 0 #000;
+                    word-break: break-word;
+                    line-height: 1.3;
+                }
+                .stj-cell-modal-keyword-display:empty {
+                    display: none;
+                }
+            `;
+            document.head.appendChild(s);
+        }
+        
         document.body.appendChild(modal);
 
         modal.querySelector('.stj-cell-modal-apply').addEventListener('click', (e) => {
@@ -1641,6 +1670,15 @@ function extractChoiceTriggerText(choiceStr) {
             _cellVideoIORoot = null;
         }
 
+        const kwDisplayEl = currentCellModal.querySelector('#stj_cell_modal_keyword_display');
+        if (kwDisplayEl) {
+            if (isSpecial) {
+                kwDisplayEl.textContent = '';
+            } else {
+                kwDisplayEl.textContent = getCellKeyword(cell) || '';
+            }
+        }
+        
         currentCellModal.classList.add('visible');
         document.body.classList.add('stj-cell-modal-active');
 
