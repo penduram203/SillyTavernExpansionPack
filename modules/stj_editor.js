@@ -2411,7 +2411,7 @@
         return hasCharData;
     }
 
-// 既存セルの位置と並び順を完全維持しながらキーワード名と画像を更新する関数
+// 既存セルの並び順を完全に維持し、要素を削除・再作成せずにキーワード名と画像をその場で書き換える関数
 function populateFormFromImageMap(imageMap, preserveOrder = false) {
     const toFileNames = (val) => {
         if (val === null || val === undefined) return [];
@@ -2441,49 +2441,48 @@ function populateFormFromImageMap(imageMap, preserveOrder = false) {
 
     if (preserveOrder) {
         const existingItems = Array.from(container.querySelectorAll('.stj-keyword-item'));
-        const processedKeys = new Set();
+        const activeKeys = Object.keys(imageMap).filter(k => k !== 'default' && k !== 'thumbnail');
+        const assignedKeys = new Set();
 
-        // 1. 既存の各セル要素を上から順に走査し、新旧のキーワードを対応付けてその場で書き換える（＝位置が絶対に移動しない）
+        // 1. 既存の各セル要素の位置（インデックス）をそのまま維持し、上から順に新しいキーをマッピングしてテキストを書き換える
         existingItems.forEach((item, index) => {
             const currentKw = getCellKeyword(item);
-            const activeKeys = Object.keys(imageMap).filter(k => k !== 'default' && k !== 'thumbnail');
-
             let targetKey = '';
-            if (currentKw && imageMap[currentKw] !== undefined) {
-                // キーがそのまま存在する場合
+
+            // まず現在のキーがそのまま imageMap に残っているか確認
+            if (currentKw && imageMap[currentKw] !== undefined && !assignedKeys.has(currentKw)) {
                 targetKey = currentKw;
             } else {
-                // キーが変わっている（改名された）場合、まだ処理されていない残りのキーを順番に割り当てる
-                const unassignedKeys = activeKeys.filter(k => !processedKeys.has(k));
-                if (unassignedKeys.length > 0) {
-                    targetKey = unassignedKeys[0];
+                // 残っているキー（改名された新しいキー等）の中から、まだどのセルにも割り当てられていないものを順番に充てる
+                const unassigned = activeKeys.filter(k => !assignedKeys.has(k));
+                if (unassigned.length > 0) {
+                    targetKey = unassigned[0];
                 }
             }
 
             if (targetKey) {
-                processedKeys.add(targetKey);
-                setCellKeyword(item, targetKey);
+                assignedKeys.add(targetKey);
+                setCellKeyword(item, targetKey); // 既存DOMのキーワード名を直接書き換え（位置は移動しない）
                 const files = toFileNames(imageMap[targetKey]);
                 setCellImages(item, files);
                 updateCellPreview(item);
             } else {
-                // ロアブック側から完全に削除されたセルは削除
+                // ロアブック側で削除されたセルのみDOMから除外
                 item.remove();
             }
         });
 
         // 2. まだどのセルにも割り当てられていない新規追加キーがあれば、リストの末尾に追加
         let index = container.querySelectorAll('.stj-keyword-item').length;
-        for (const [key, val] of Object.entries(imageMap)) {
-            if (key === 'default' || key === 'thumbnail') continue;
-            if (!processedKeys.has(key)) {
-                addKeywordRowWithData(container, index, { keyword: key, images: toFileNames(val) });
+        for (const key of activeKeys) {
+            if (!assignedKeys.has(key)) {
+                addKeywordRowWithData(container, index, { keyword: key, images: toFileNames(imageMap[key]) });
                 index++;
             }
         }
 
         if (container.querySelectorAll('.stj-keyword-item').length === 0) {
-            addKeywordRowAndData(container, 0, { keyword: '', images: [] });
+            addKeywordRowWithData(container, 0, { keyword: '', images: [] });
         }
     } else {
         container.innerHTML = '';
@@ -3603,24 +3602,22 @@ async function syncLorebookEntriesToImageMap() {
         restoreData = await _restoreImageMapUnified(charName);
     }
 
-    // --- 1. ★ 確実な改名（リネーム）検出とキー移行 ---
-    // imageMap 内にあって、現在のロアブックのキーワード一覧に存在しないキー（＝改名されたか削除された古いキー）を抽出
+    // --- 1. 確実な改名（リネーム）検出と画像データの安全な移行 ---
     const existingImageKeys = Object.keys(imageMap).filter(k => !UNREGISTER_EXCLUDED_KEYS.has(k));
     const missingKeys = existingImageKeys.filter(k => !activeKeywords.has(k));
-    // ロアブック側にあって、まだ imageMap に存在しない新しいキーワードを抽出
     const newKeywords = [...activeKeywords].filter(k => imageMap[k] === undefined);
 
-    // もし「消えたキー」と「新しいキー」が両方存在する場合、順番（インデックス）や1対1の関係から改名とみなしてデータを安全に引き継ぐ
     if (missingKeys.length > 0 && newKeywords.length > 0) {
-        // 数量が一致する場合、あるいはシンプルに順番通りに対応づけてキーをリネームする
         const count = Math.min(missingKeys.length, newKeywords.length);
         for (let i = 0; i < count; i++) {
             const oldKw = missingKeys[i];
             const newKw = newKeywords[i];
             if (imageMap[oldKw] !== undefined) {
-                if (imageMap[newKw] === undefined || _isEmptyImageValue(imageMap[newKw])) {
-                    imageMap[newKw] = imageMap[oldKw];
-                    console.log(`[STJ Editor] 🔄 エントリの改名を検知・データ移行: "${oldKw}" → "${newKw}"`);
+                // ★ 空データや新規作成された空配列があっても、旧キー側に画像データがあれば強制的に上書きして引き継ぐ
+                const oldData = imageMap[oldKw];
+                if (!_isEmptyImageValue(oldData)) {
+                    imageMap[newKw] = oldData;
+                    console.log(`[STJ Editor] 🔄 改名・データ完全引継ぎ成功: "${oldKw}" → "${newKw}"`);
                 }
                 delete imageMap[oldKw];
             }
@@ -3630,7 +3627,7 @@ async function syncLorebookEntriesToImageMap() {
     // --- 2. 完全に削除されたエントリのクリーンアップ ---
     const removedKeys = [];
     for (const key of Object.keys(imageMap)) {
-        if (UNREGISTER_EXCLUDED_KEYS.has(key)) continue; // default, thumbnail は保護
+        if (UNREGISTER_EXCLUDED_KEYS.has(key)) continue;
         if (!activeKeywords.has(key)) {
             delete imageMap[key];
             removedKeys.push(key);
@@ -3651,7 +3648,7 @@ async function syncLorebookEntriesToImageMap() {
             if (hasRestore) {
                 imageMap[keyword] = rv;
                 restoredKeys.push(keyword);
-            } else if (imageMap[keyword] === undefined) {
+            } else if (imageMap[keyword] === undefined || _isEmptyImageValue(imageMap[keyword])) {
                 imageMap[keyword] = [];
                 addedKeys.push(keyword);
             }
@@ -3665,11 +3662,10 @@ async function syncLorebookEntriesToImageMap() {
 
         if (stjModalEl && stjModalEl.style.display === 'block' && !_editorLoading) {
             try {
-                // 順序を完全に維持したインプレース更新を実行
                 populateFormFromImageMap(imageMap, true);
                 runLiveTest();
                 autoSave({ immediate: true });
-                console.log('[STJ Editor] 🔄 改名・同期を順序維持でUIに即時反映しました');
+                console.log('[STJ Editor] 🔄 順序を完全に維持してJSON編集画面を更新しました');
             } catch (e) {
                 console.warn('[STJ Editor] UI 再描画エラー:', e);
             }
