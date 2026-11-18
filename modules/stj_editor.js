@@ -3538,11 +3538,11 @@ async function syncLorebookEntriesToImageMap() {
     if (!imageMap) imageMap = {};
 
     const stjCharSet = getStjCharSettings(charName);
-    const oldUidMap = stjCharSet.uidMap || {}; // ★ 前回保存された uid -> keyword の履歴を保持
+    const oldUidMap = stjCharSet.uidMap || {};
 
     const currentUidMap = {}; // uid -> newKeyword
     const activeKeywords = new Set();
-    const autoCreateKeys = new Set();
+    const entryKeywordsByUid = new Map(); // uid -> keyword
 
     for (const entry of list) {
         if (!entry) continue;
@@ -3553,13 +3553,7 @@ async function syncLorebookEntriesToImageMap() {
         activeKeywords.add(kw);
         if (uid !== null) {
             currentUidMap[uid] = kw;
-        }
-
-        const comment = (typeof entry.comment === 'string' ? entry.comment.trim() : '');
-        const keys = getEntryKeys(entry);
-        const firstKey = keys.length > 0 ? String(keys[0]).trim() : '';
-        if (comment && firstKey && comment === firstKey) {
-            autoCreateKeys.add(kw);
+            entryKeywordsByUid.set(uid, kw);
         }
     }
 
@@ -3571,27 +3565,44 @@ async function syncLorebookEntriesToImageMap() {
         restoreData = await _restoreImageMapUnified(charName);
     }
 
-    // --- 1. ★ UIDの変更（改名）を追跡して imageMap のキーを安全にリネーム・移行 ---
-    for (const [uid, newKw] of Object.entries(currentUidMap)) {
-        const oldKw = oldUidMap[uid];
-        if (oldKw && oldKw !== newKw) {
-            // oldKw から newKw への改名が発生した場合、画像データを新しいキーへ引き継ぐ
-            if (Object.prototype.hasOwnProperty.call(imageMap, oldKw)) {
-                if (!Object.prototype.hasOwnProperty.call(imageMap, newKw) || _isEmptyImageValue(imageMap[newKw])) {
+    // --- 1. キーワードの改名（リネーム）のスマート追跡・移行 ---
+    // 画像データを持つ既存の imageMap キーのうち、現在のロアブックに存在しないものを洗い出す
+    const existingImageKeys = Object.keys(imageMap).filter(k => !UNREGISTER_EXCLUDED_KEYS.has(k));
+    const orphanedImageKeys = existingImageKeys.filter(k => !activeKeywords.has(k));
+
+    // もし「ロアブックから消えた古いキー」と「ロアブックに新しく増えたキー」が同時にある場合、
+    // UIDの履歴（oldUidMap）や、孤立したキーの数・順序を手がかりに同一エントリの改名とみなして引き継ぐ
+    if (orphanedImageKeys.length > 0) {
+        for (const [uid, newKw] of Object.entries(currentUidMap)) {
+            const oldKw = oldUidMap[uid];
+            // 履歴に古い名前があり、それが現在 imageMap に存在し、新名側にまだデータが無い場合
+            if (oldKw && oldKw !== newKw && imageMap[oldKw] !== undefined) {
+                if (!imageMap[newKw] || _isEmptyImageValue(imageMap[newKw])) {
                     imageMap[newKw] = imageMap[oldKw];
-                    console.log(`[STJ Editor] 🔄 キーワード改名を検知・データ移行: "${oldKw}" → "${newKw}"`);
+                    console.log(`[STJ Editor] 🔄 UID履歴から改名を検知・データ移行: "${oldKw}" → "${newKw}"`);
                 }
                 delete imageMap[oldKw];
             }
         }
+
+        // UID履歴に無くても、孤立キーが1つだけで、かつ新規追加キーも1つだけなら「単一エントリの改名」とみなして安全に移行
+        const newlyAddedKeywords = [...activeKeywords].filter(k => imageMap[k] === undefined || _isEmptyImageValue(imageMap[k]));
+        if (orphanedImageKeys.length === 1 && newlyAddedKeywords.length === 1) {
+            const oldKw = orphanedImageKeys[0];
+            const newKw = newlyAddedKeywords[0];
+            if (imageMap[oldKw] !== undefined) {
+                imageMap[newKw] = imageMap[oldKw];
+                delete imageMap[oldKw];
+                console.log(`[STJ Editor] 🔄 単一の増減から改名を自動推論・移行: "${oldKw}" → "${newKw}"`);
+            }
+        }
     }
 
-    // --- 2. 完全に削除されたエントリ（現在のロアブックに存在せず、どの改名元でもないもの）のクリーンアップ ---
-    const validOldKeywords = new Set(Object.values(oldUidMap));
+    // --- 2. 完全に削除されたエントリのクリーンアップ ---
     const removedKeys = [];
     for (const key of Object.keys(imageMap)) {
         if (UNREGISTER_EXCLUDED_KEYS.has(key)) continue; // default, thumbnail は保護
-        if (!activeKeywords.has(key) && !validOldKeywords.has(key)) {
+        if (!activeKeywords.has(key)) {
             delete imageMap[key];
             removedKeys.push(key);
         }
@@ -3603,16 +3614,18 @@ async function syncLorebookEntriesToImageMap() {
     for (const keyword of activeKeywords) {
         if (UNREGISTER_EXCLUDED_KEYS.has(keyword)) continue;
 
-        const exists = Object.prototype.hasOwnProperty.call(imageMap, keyword);
+        const exists = Object.prototype.hasOwnProperty.call(imageMap, keyword) && !_isEmptyImageValue(imageMap[keyword]);
         const rv = restoreData[keyword];
         const hasRestore = rv && !_isEmptyImageValue(rv);
 
         if (!exists) {
-            imageMap[keyword] = hasRestore ? rv : [];
-            addedKeys.push(keyword);
-        } else if (_isEmptyImageValue(imageMap[keyword]) && hasRestore) {
-            imageMap[keyword] = rv;
-            restoredKeys.push(keyword);
+            if (hasRestore) {
+                imageMap[keyword] = rv;
+                restoredKeys.push(keyword);
+            } else if (imageMap[keyword] === undefined) {
+                imageMap[keyword] = [];
+                addedKeys.push(keyword);
+            }
         }
     }
 
