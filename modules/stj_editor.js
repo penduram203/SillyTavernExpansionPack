@@ -3606,7 +3606,7 @@ async function syncLorebookEntriesToImageMap() {
         restoreData = await _restoreImageMapUnified(charName);
     }
 
-    // --- 1. 確実な改名（リネーム）検出と画像データの安全な移行 ---
+// --- 1. 確実な改名（リネーム）検出と、元の位置を維持したキーのインプレース置換 ---
     const existingImageKeys = Object.keys(imageMap).filter(k => !UNREGISTER_EXCLUDED_KEYS.has(k));
     const missingKeys = existingImageKeys.filter(k => !activeKeywords.has(k));
     const newKeywords = [...activeKeywords].filter(k => imageMap[k] === undefined);
@@ -3617,13 +3617,20 @@ async function syncLorebookEntriesToImageMap() {
             const oldKw = missingKeys[i];
             const newKw = newKeywords[i];
             if (imageMap[oldKw] !== undefined) {
-                // ★ 空データや新規作成された空配列があっても、旧キー側に画像データがあれば強制的に上書きして引き継ぐ
                 const oldData = imageMap[oldKw];
-                if (!_isEmptyImageValue(oldData)) {
-                    imageMap[newKw] = oldData;
-                    console.log(`[STJ Editor] 🔄 改名・データ完全引継ぎ成功: "${oldKw}" → "${newKw}"`);
+                
+                // ★ 古いキーの「オブジェクト内の位置（順序）」を完全に維持したまま新しいキー名に変更する
+                const newImageMap = {};
+                for (const [k, v] of Object.entries(imageMap)) {
+                    if (k === oldKw) {
+                        // 古いキーの位置にそのまま新しいキー名でデータを配置
+                        newImageMap[newKw] = !_isEmptyImageValue(oldData) ? oldData : [];
+                    } else if (!Object.prototype.hasOwnProperty.call(newImageMap, k)) {
+                        newImageMap[k] = v;
+                    }
                 }
-                delete imageMap[oldKw];
+                imageMap = newImageMap;
+                console.log(`[STJ Editor] 🔄 位置を維持して改名キーを置換: "${oldKw}" → "${newKw}"`);
             }
         }
     }
