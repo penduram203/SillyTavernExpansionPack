@@ -349,10 +349,10 @@
   left: 0;
   right: 0;
   bottom: auto;
-  padding: calc(var(--exp-scale, 1) * 6px) calc(var(--exp-scale, 1) * 8px) calc(var(--exp-scale, 1) * 6px) calc(var(--exp-scale, 1) * 44px);
+  padding: calc(var(--exp-scale, 1) * 6px) calc(var(--exp-scale, 1) * 8px) calc(var(--exp-scale, 1) * 6px) calc(var(--exp-scale, 1) * 4px);
   background: rgba(0, 0, 0, 0.7);
   color: white;
-  font-size: calc(var(--exp-scale, 1) * 20px);
+  font-size: calc(var(--exp-scale, 1) * 17px);
   font-weight: bold;
   text-align: center;
   white-space: nowrap;
