@@ -5,7 +5,7 @@
 //   - Img_prompt      : 画像生成プロンプト (gic_lorebook.js が読み取る)
 //   - Negative_prompt : ネガティブプロンプト (gic_lorebook.js が読み取る)
 //   - variables       : 変数管理 (variable_manager.js が読み取る)
-//   - choices         : 応答末尾に自動表示される選択肢群 (番号 + 文言)
+//   - choices         : 応答末尾に自動表示される選択肢群 (統合テキスト)
 //
 // ★ データ保存先 (Phase 5 改修):
 //   一次: extension_settings.lorebook_expansion.data[worldName][charKey]
@@ -159,6 +159,28 @@ function getLexStore() {
     return s.data;
 }
 
+// --- 選択肢の正規化・トリガー抽出ヘルパー ---
+function normalizeChoiceItem(item) {
+    if (typeof item === 'string') {
+        return item.trim();
+    }
+    if (item && typeof item === 'object') {
+        const num = (item.id ?? item.number ?? item.code ?? item.num ?? '').toString().trim();
+        const txt = (item.text ?? item.content ?? item.label ?? '').toString().trim();
+        if (num && txt) {
+            return txt.startsWith(num) ? txt : `${num}${txt}`;
+        }
+        return num || txt;
+    }
+    return '';
+}
+
+function extractChoiceTriggerText(choiceStr) {
+    const str = String(choiceStr || '').trim();
+    if (!str) return '';
+    return str;
+}
+
 function normalizeLexData(raw) {
     if (!raw || typeof raw !== 'object') {
         return {
@@ -231,11 +253,8 @@ function normalizeLexData(raw) {
         selectedTemplate,
         choices: Array.isArray(raw.choices)
             ? raw.choices
-                  .filter(c => c && typeof c === 'object')
-                  .map(c => ({
-                      num: typeof c.num === 'string' ? c.num : String(c.num ?? ''),
-                      text: typeof c.text === 'string' ? c.text : '',
-                  }))
+                  .map(c => normalizeChoiceItem(c))
+                  .filter(Boolean)
             : [],
         variables: Array.isArray(raw.variables)
             ? raw.variables
@@ -946,7 +965,7 @@ async function fetchWorldInfoWithRetry(worldName, maxRetries = WORLDIINFO_FETCH_
 const CHOICE_PATTERNS = [
     /選択肢[「『"']?(\d{1,4})[」』"']?/,
     /choice[^\d]{0,3}(\d{1,4})/i,
-    /(?:^|\s)(\d{3,4})(?:\s|$|[\u3000。、,.])/,
+    /(?:^|\s)(\d{3,4})(?:\s|$|[\u3000。.,])/,
     /(\d{3})/,
 ];
 
@@ -998,7 +1017,6 @@ function renderChoicesBlock(msgIdx, choices) {
     if (!mesTextEl) return;
 
     // ★ 同じ内容のブロックが既にあれば再描画をスキップ
-    //    (appendChoicesToAllAiMessages が毎回全メッセージを走査するための最適化)
     const newSig = JSON.stringify(choices);
     const existing = mesTextEl.querySelector(':scope > .' + CHOICE_BLOCK_CLASS);
     if (existing && existing.dataset.choiceSig === newSig) return;
@@ -1014,7 +1032,7 @@ function renderChoicesBlock(msgIdx, choices) {
     for (const c of choices) {
         const item = document.createElement('div');
         item.className = 'lbe-choice-item';
-        item.textContent = `${c.num} ${c.text}`;
+        item.textContent = normalizeChoiceItem(c);
         list.appendChild(item);
     }
     block.appendChild(list);
@@ -1025,28 +1043,6 @@ function renderChoicesBlock(msgIdx, choices) {
 
 function removeAllChoicesBlocks() {
     document.querySelectorAll('.' + CHOICE_BLOCK_CLASS).forEach(el => el.remove());
-}
-
-// --- 選択肢の正規化・トリガー抽出ヘルパー ---
-function normalizeChoiceItem(item) {
-    if (typeof item === 'string') {
-        return item.trim();
-    }
-    if (item && typeof item === 'object') {
-        const num = (item.id ?? item.number ?? item.code ?? '').toString().trim();
-        const txt = (item.text ?? item.content ?? item.label ?? '').toString().trim();
-        if (num && txt) {
-            return txt.startsWith(num) ? txt : `${num}${txt}`;
-        }
-        return num || txt;
-    }
-    return '';
-}
-
-function extractChoiceTriggerText(choiceStr) {
-    const str = String(choiceStr || '').trim();
-    if (!str) return '';
-    return str;
 }
 
 async function appendChoicesToLastAiMessage() {
@@ -1119,12 +1115,6 @@ async function appendChoicesToLastAiMessage() {
 
 // ============================================================
 // ★ 全 AI メッセージに対して選択肢ブロックを描画
-//   各 AI メッセージの直前のユーザーメッセージが選択肢番号を
-//   含む場合、対応するエントリの choices をそのメッセージに描画する。
-//   チャット再読み込み (CHAT_CHANGED) で過去の選択肢が失われる
-//   問題を修正するため、最新だけでなく全メッセージを対象とする。
-//   O(n) 走査: pendingUserText を使い、直前のユーザーメッセージを
-//   1 回消費する形で処理する。
 // ============================================================
 async function appendChoicesToAllAiMessages() {
     if (!settings.enabled || !settings.autoAppendChoices) return;
@@ -1250,8 +1240,6 @@ function triggerWorldInfoSave() {
 
 // ============================================================
 // ★ SD 拡張が対応している解像度のリストを取得
-//    #sd_resolution の option から "sd_res_" を剥がして抽出
-//    SD 拡張がまだ読み込まれていない場合はフォールバックを返す
 // ============================================================
 function getAvailableResolutionsFromSD() {
     const result = [];
@@ -1264,7 +1252,6 @@ function getAvailableResolutionsFromSD() {
                 if (!v) continue;
                 const res = v.replace(/^sd_res_/, '');
                 if (/^\d+x\d+$/.test(res)) {
-                    // 重複排除（同名 value が複数ある場合）
                     if (!result.some(r => r.value === res)) {
                         result.push({ value: res, label: t || res });
                     }
@@ -1275,22 +1262,14 @@ function getAvailableResolutionsFromSD() {
     return result;
 }
 
-// ============================================================
-// ★ Lorebook Expansion の解像度選択肢を決定
-//    SD 拡張が対応している解像度のみを候補にする。
-//    取得できない場合はフォールバック（旧来の6項目）を返す。
-// ============================================================
 function getResolutionOptionsForLex() {
     const fromSD = getAvailableResolutionsFromSD();
     if (fromSD.length > 0) {
-        // ★ 1280x720 が SD 拡張の対応リストに無い場合でも必ず含める
-        //   （新規エントリ / 新規テンプレートのデフォルト値として使うため）
         if (!fromSD.some(o => o.value === '1280x720')) {
             fromSD.unshift({ value: '1280x720', label: '1280×720 (横長)' });
         }
         return fromSD;
     }
-    // フォールバック（SD 拡張が読み込まれていない場合）
     return [
         { value: '1280x720',  label: '1280×720 (横長)' },
         { value: '1152x896',  label: '1152×896' },
@@ -1315,7 +1294,6 @@ function buildExpansionSection(uid, worldName, data, onChange) {
                 : '1280x720',
         }];
     }
-    // 各テンプレートに resolution が無ければ補完
     for (const t of data.templates) {
         if (!t || typeof t !== 'object') continue;
         if (typeof t.resolution !== 'string' || !t.resolution.trim()) {
@@ -1346,7 +1324,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         return idx;
     }
 
-    // ── template ラベル行（template + 追加 + 削除） ──
+    // ── template ラベル行 ──
     const templateLabelRow = document.createElement('div');
     templateLabelRow.className = 'lbe-label-row lbe-template-row';
 
@@ -1376,21 +1354,15 @@ function buildExpansionSection(uid, worldName, data, onChange) {
 
     section.appendChild(templateLabelRow);
 
-    // ── 解像度オプション（SD 拡張の対応解像度から動的生成 + ランダム） ──
     const RESOLUTION_OPTIONS = getResolutionOptionsForLex().concat([
         { value: 'random', label: _t('lbe.random', 'ランダム') },
     ]);
 
     const isResolutionValid = (v) => RESOLUTION_OPTIONS.some(o => o.value === v);
-
-    // ★ SD 拡張の対応解像度リストの先頭（random 以外）をフォールバックに使う
-    //   保存済みの解像度が SD 拡張の対応外（例: 720x1280 が resolutions マップに無い）の場合、
-    //   この値に置き換える。SD 拡張が読み込まれていない場合は '1280x720'。
-    // ★ 新規テンプレート / 既存データのフォールバック値は必ず 1280x720
     const LEX_DEFAULT_RESOLUTION = '1280x720';
     const fallbackResolution = LEX_DEFAULT_RESOLUTION;
 
-    // ── Img_prompt ラベル行（ラベル + 解像度ドロップダウン） ──
+    // ── Img_prompt ラベル行 ──
     const imgLabelRow = document.createElement('div');
     imgLabelRow.className = 'lbe-label-row';
 
@@ -1432,7 +1404,6 @@ function buildExpansionSection(uid, worldName, data, onChange) {
     negTextarea.placeholder = '例: bad hands, extra fingers, lowres, ugly, blurry, watermark';
     section.appendChild(negTextarea);
 
-    // ── template と textarea / 解像度の連携 ──
     let _currentIndex = resolveEditIndex();
 
     const rebuildTemplateOptions = (selectedValue) => {
@@ -1477,36 +1448,24 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         data.img_prompt = t.img_prompt || '';
         data.negative_prompt = t.negative_prompt || '';
 
-        // ★ 解像度もテンプレートから同期
-        //   保存済み解像度が SD 拡張の対応リストに無い場合は fallbackResolution に置き換える
         let validRes;
         if (isResolutionValid(t.resolution)) {
             validRes = t.resolution;
         } else {
-            if (t.resolution) {
-                console.warn(
-                    `[LBE] 解像度 "${t.resolution}" は SD 拡張の対応リストに無いため ` +
-                    `"${LEX_DEFAULT_RESOLUTION}" にフォールバックします (uid=${uid}, template=${_currentIndex})`
-                );
-            }
             validRes = LEX_DEFAULT_RESOLUTION;
         }
         resolutionSelect.value = validRes;
         data.resolution = validRes;
-        // ★ テンプレート自体の解像度も更新しておく（次回保存時に反映）
         t.resolution = validRes;
 
         updateReadOnlyState();
     };
 
-    // ── 初期化 ──
     rebuildTemplateOptions(data.selectedTemplate);
     loadPromptIntoTextareas();
 
-    // ── イベント: 解像度変更 ──
     resolutionSelect.addEventListener('change', () => {
         if (data.selectedTemplate === 'random') {
-            // ランダム時は編集不可: 表示を現在の値に戻す
             const t = data.templates[_currentIndex];
             const validRes = (t && isResolutionValid(t.resolution)) ? t.resolution : fallbackResolution;
             resolutionSelect.value = validRes;
@@ -1517,10 +1476,8 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         t.resolution = resolutionSelect.value;
         data.resolution = resolutionSelect.value;
         onChange(data);
-        debugLog(`uid=${uid}: template ${_currentIndex} の解像度を ${t.resolution} に変更`);
     });
 
-    // ── イベント: textarea 編集 ──
     imgTextarea.addEventListener('input', () => {
         if (data.selectedTemplate === 'random') return;
         const t = data.templates[_currentIndex];
@@ -1539,7 +1496,6 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         onChange(data);
     });
 
-    // ── イベント: template 切替 ──
     templateSelect.addEventListener('change', () => {
         data.selectedTemplate = templateSelect.value;
         if (data.selectedTemplate === 'random') {
@@ -1548,19 +1504,10 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         _currentIndex = resolveEditIndex();
         loadPromptIntoTextareas();
         onChange(data);
-        debugLog(`uid=${uid}: template=${data.selectedTemplate} に切替`);
     });
 
-    // ── イベント: template 追加 ──
     templateAddBtn.addEventListener('click', () => {
-        if (data.templates.length >= 99) {
-            console.warn(`${LOG} テンプレートは最大99個までです`);
-            return;
-        }
-
-        // ★ 追加ボタン押下時点の「現在編集対象のテンプレート」を複製する。
-        //   ランダム選択中でも _currentIndex は _activeRandomIndex に解決済み
-        //   （resolveEditIndex / loadPromptIntoTextareas で更新される）。
+        if (data.templates.length >= 99) return;
         const srcTpl = data.templates[_currentIndex] || {
             img_prompt: '',
             negative_prompt: '',
@@ -1585,22 +1532,11 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         rebuildTemplateOptions(String(newIdx));
         loadPromptIntoTextareas();
         onChange(data);
-        debugLog(
-            `uid=${uid}: テンプレート ${newIdx} を追加 ` +
-            `(コピー元=${newIdx - 1}, 解像度=${copiedResolution})`
-        );
     });
 
-    // ── イベント: template 削除 ──
     templateDelBtn.addEventListener('click', () => {
-        if (data.templates.length <= 1) {
-            console.warn(`${LOG} テンプレートは最低1つ必要です`);
-            return;
-        }
-        if (data.selectedTemplate === 'random') {
-            console.warn(`${LOG} ランダム選択中は削除できません`);
-            return;
-        }
+        if (data.templates.length <= 1) return;
+        if (data.selectedTemplate === 'random') return;
         const idx = parseInt(data.selectedTemplate, 10);
         if (!Number.isFinite(idx) || idx < 0 || idx >= data.templates.length) return;
         if (!confirm(_t(
@@ -1615,7 +1551,6 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         rebuildTemplateOptions('0');
         loadPromptIntoTextareas();
         onChange(data);
-        debugLog(`uid=${uid}: テンプレート ${idx} を削除、テンプレート 0 にフォールバック`);
     });
 
     // ── variables セクション ──
@@ -1641,7 +1576,6 @@ function buildExpansionSection(uid, worldName, data, onChange) {
 
     const renderVariables = () => {
         varsContainer.innerHTML = '';
-
         const variables = Array.isArray(data.variables) ? data.variables : [];
 
         variables.forEach((v, idx) => {
@@ -1721,7 +1655,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
 
     renderVariables();
 
-    // ── choices セクション ──
+    // ── choices セクション (1つのテキスト入力欄に統一) ──
     const choicesLabel = document.createElement('label');
     choicesLabel.className = 'lbe-label';
     choicesLabel.textContent = 'choices';
@@ -1737,37 +1671,16 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         data.choices.forEach((choice, idx) => {
             const row = document.createElement('div');
             row.className = 'lbe-choice-row';
-
-            const numInput = document.createElement('input');
-            numInput.type = 'text';
-            numInput.className = 'lbe-choice-num text_pole';
-            numInput.maxLength = 4;
-            numInput.placeholder = '001';
-            numInput.value = choice.num || '';
-            numInput.addEventListener('input', () => {
-                const v = numInput.value.replace(/[^\d]/g, '');
-                numInput.value = v;
-                choice.num = v;
-                onChange(data);
-            });
-            numInput.addEventListener('blur', () => {
-                let v = numInput.value.replace(/[^\d]/g, '');
-                if (v) {
-                    v = v.padStart(3, '0');
-                    numInput.value = v;
-                    choice.num = v;
-                    onChange(data);
-                }
-            });
-            row.appendChild(numInput);
+            row.style.cssText = 'display: flex; align-items: center; gap: 6px; margin-bottom: 6px;';
 
             const textInput = document.createElement('input');
             textInput.type = 'text';
-            textInput.className = 'lbe-choice-text text_pole';
-            textInput.placeholder = _t('lbe.choice.text_ph', '選択肢の内容 (例: 一人の小柄な女子が近づいてきた)');
-            textInput.value = choice.text || '';
+            textInput.className = 'lbe-choice-input text_pole';
+            textInput.placeholder = _t('lbe.choice.text_ph', '例: 001ドアを開ける / ドアを開ける');
+            textInput.value = normalizeChoiceItem(choice);
+            textInput.style.cssText = 'flex: 1; min-width: 0;';
             textInput.addEventListener('input', () => {
-                choice.text = textInput.value;
+                data.choices[idx] = textInput.value;
                 onChange(data);
             });
             row.appendChild(textInput);
@@ -1777,6 +1690,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
             delBtn.className = 'lbe-choice-del menu_button';
             delBtn.textContent = '✕';
             delBtn.title = _t('lbe.choice.del_title', 'この選択肢を削除');
+            delBtn.style.cssText = 'width: auto; padding: 4px 8px; flex-shrink: 0;';
             delBtn.addEventListener('click', () => {
                 data.choices.splice(idx, 1);
                 renderChoices();
@@ -1792,15 +1706,8 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         addBtn.className = 'lbe-choice-add menu_button';
         addBtn.textContent = _t('lbe.choice.add', '＋ 選択肢を追加');
         addBtn.addEventListener('click', () => {
-            let next = '001';
-            if (data.choices.length > 0) {
-                const nums = data.choices
-                    .map(c => parseInt(c.num, 10))
-                    .filter(n => !isNaN(n));
-                const max = nums.length > 0 ? Math.max(...nums) : 0;
-                next = String(max + 1).padStart(3, '0');
-            }
-            data.choices.push({ num: next, text: '' });
+            if (!Array.isArray(data.choices)) data.choices = [];
+            data.choices.push('');
             renderChoices();
             onChange(data);
         });
@@ -1923,16 +1830,9 @@ function reorganizeEntryLayout(entryEl) {
     debugLog(`uid=${entryEl.getAttribute('uid')}: レイアウト再編 + 折りたたみトグル挿入`);
 }
 
-// ============================================================
-// ★ 新規エントリ用フォールバック:
-//    entries に未登録の uid について、DOM 上の .world_entry から
-//    comment / keys / content を読み取って仮 entry を構築する。
-//    これにより、サーバー未保存の新規エントリにも LEX UI を注入できる。
-// ============================================================
 function buildFallbackEntryFromDOM(entryEl, uid, worldName) {
     if (!entryEl) return null;
     try {
-        // comment を複数パターンで探索
         let comment = '';
         const commentInput = entryEl.querySelector(
             'input[name="comment"], textarea[name="comment"], ' +
@@ -1942,7 +1842,6 @@ function buildFallbackEntryFromDOM(entryEl, uid, worldName) {
             comment = (commentInput.value || '').trim();
         }
 
-        // keys を探索
         let keys = [];
         const keysInput = entryEl.querySelector(
             'textarea[name="key"], textarea[name="keys"], ' +
@@ -1955,7 +1854,6 @@ function buildFallbackEntryFromDOM(entryEl, uid, worldName) {
                 .filter(Boolean);
         }
 
-        // content を探索
         let content = '';
         const contentTextarea = entryEl.querySelector('textarea[name="content"]');
         if (contentTextarea) {
@@ -2006,7 +1904,6 @@ async function injectExpansionSections() {
             needsWork = true;
             break;
         }
-        // ★ negative_prompt 欄の存在チェック
         if (!entryEl.querySelector('.lbe-negative-prompt')) {
             needsWork = true;
             break;
@@ -2019,15 +1916,10 @@ async function injectExpansionSections() {
 
     let entries = await loadWorldInfoEntriesByName(worldName);
     if (!entries) {
-        // ★ entries が取得できなくても DOM フォールバックで続行
         entries = {};
         debugLog(`inject: world "${worldName}" のエントリ取得失敗 → DOM フォールバックで続行`);
     }
 
-    // ★ 新規エントリ（サーバー未保存）のチェック
-    //   DOM 上に存在するが entries に無い uid がある場合、
-    //   ST 内部の world_info から再取得を試みる。
-    //   ST は新規エントリ作成時に world_info[worldName].entries へ登録する場合がある。
     const domUids = Array.from(entryEls)
         .map(el => String(el.getAttribute('uid')))
         .filter(uid => uid && uid !== 'null' && uid !== 'undefined');
@@ -2035,7 +1927,6 @@ async function injectExpansionSections() {
     if (missingUids.length > 0) {
         debugLog(`DOM 上に存在するが entries に無い uid: [${missingUids.join(', ')}] → 再取得を試行`);
 
-        // ① ST 内部の world_info から再取得
         try {
             const mod = await getWorldInfoModule();
             const liveEntries = mod?.world_info?.[worldName]?.entries;
@@ -2051,7 +1942,6 @@ async function injectExpansionSections() {
             debugLog('ST 内部 world_info 参照エラー:', e);
         }
 
-        // ② それでも見つからない場合、キャッシュをクリアして fetch 再取得
         const stillMissing = domUids.filter(uid => !entries[uid]);
         if (stillMissing.length > 0) {
             try {
@@ -2096,12 +1986,10 @@ async function injectExpansionSections() {
     let skippedCollapsed = 0;
     let skippedAlready = 0;
 
-    // ★ forEach → for...of（await を使うため）
     for (const entryEl of entryEls) {
         const uid = String(entryEl.getAttribute('uid'));
         if (uid === null || uid === 'null' || uid === 'undefined') continue;
 
-        // ★ entries[uid] が無い場合、DOM から仮 entry を構築
         let entry = entries[uid];
         if (!entry) {
             entry = buildFallbackEntryFromDOM(entryEl, uid, worldName);
@@ -2184,7 +2072,6 @@ let _injectTimer = null;
 let _pollTimer = null;
 let _lastWorldPopupScrollAt = 0;
 
-// ★ 永続スクロールトラッカー（ST再構築対策）
 let _lbeLastScrollTop = 0;
 let _lbeLastScrollLeft = 0;
 let _lbeLastUserInputAt = 0;
@@ -2352,7 +2239,6 @@ function onCharacterMessageRendered() {
 }
 
 function onChatChanged() {
-    // ★ 即座に古い選択肢ブロックを削除（キャラ切替時に旧キャラの選択肢が残らないように）
     removeAllChoicesBlocks();
     setTimeout(() => {
         refreshAllChoicesBlocks();
@@ -2387,9 +2273,7 @@ function registerEventListeners() {
     }
     if (event_types.CHARACTER_PAGE_LOADED) {
         eventSource.on(event_types.CHARACTER_PAGE_LOADED, () => {
-            // 初回起動時の一括移行（フラグで制御・後方互換）
             migrateCharacterLexDataToWorldStore();
-            // ★ 現在キャラの character.data → per-world store 追加マージ
             migrateCurrentCharacterToWorldStore();
         });
     }
@@ -2400,8 +2284,6 @@ function registerEventListeners() {
             }, 200);
         });
     }
-    // ★ ST 側のロアブック更新時にキャッシュをクリア
-    //   （新規エントリ追加・編集・削除が LBE キャッシュに反映されるようにする）
     const worldInfoCacheClearEvents = [
         'WORLDINFO_UPDATED',
         'WORLDINFO_SETTINGS_UPDATED',
@@ -2745,7 +2627,6 @@ window.LorebookExpansion = {
         }
     },
 
-    // ★ スクロールトラッカー制御用（デバッグ・復旧用）
     _lbeDebugScrollState: () => ({
         lastScrollTop: _lbeLastScrollTop,
         lastScrollLeft: _lbeLastScrollLeft,
