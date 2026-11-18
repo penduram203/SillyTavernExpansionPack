@@ -1027,6 +1027,28 @@ function removeAllChoicesBlocks() {
     document.querySelectorAll('.' + CHOICE_BLOCK_CLASS).forEach(el => el.remove());
 }
 
+// --- 選択肢の正規化・トリガー抽出ヘルパー ---
+function normalizeChoiceItem(item) {
+    if (typeof item === 'string') {
+        return item.trim();
+    }
+    if (item && typeof item === 'object') {
+        const num = (item.id ?? item.number ?? item.code ?? '').toString().trim();
+        const txt = (item.text ?? item.content ?? item.label ?? '').toString().trim();
+        if (num && txt) {
+            return txt.startsWith(num) ? txt : `${num}${txt}`;
+        }
+        return num || txt;
+    }
+    return '';
+}
+
+function extractChoiceTriggerText(choiceStr) {
+    const str = String(choiceStr || '').trim();
+    if (!str) return '';
+    return str;
+}
+
 async function appendChoicesToLastAiMessage() {
     if (!settings.enabled || !settings.autoAppendChoices) return;
 
