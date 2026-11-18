@@ -5103,45 +5103,15 @@ function updatePromptOverlay(panel) {
     const img = panel.querySelector('img');
     if (!img) { removePromptOverlay(panel); return; }
 
-    let charName = img.dataset?.gicOrigChar;
-    let fileName = img.dataset?.gicOrigFile;
-
-    // ★ データ属性未設定時のフォールバック（pendingSrc / src から推定）
-    if (!charName || !fileName) {
-        const pendingSrc = img.dataset?.gicPendingSrc || '';
-        const currentSrc = img.getAttribute('src') || '';
-        const sourceUrl = pendingSrc
-            || ((currentSrc.startsWith('blob:') || currentSrc.startsWith('data:')) ? '' : currentSrc);
-        if (sourceUrl) {
-            try {
-                const urlObj = new URL(sourceUrl, window.location.origin);
-                const m = urlObj.pathname.match(/^\/user\/images\/([^/]+)\/([^/]+)$/);
-                if (m) {
-                    const cn = decodeURIComponent(m[1]);
-                    const rawName = decodeURIComponent(m[2]);
-                    const orig = resolveOriginalFileName(rawName);
-                    if (orig) {
-                        charName = cn;
-                        fileName = orig;
-                        img.dataset.gicOrigChar = charName;
-                        img.dataset.gicOrigFile = fileName;
-                    }
-                }
-            } catch (e) { /* ignore */ }
-        }
-    }
-
+    const charName = img.dataset?.gicOrigChar;
+    const fileName = img.dataset?.gicOrigFile;
     if (!charName || !fileName) { removePromptOverlay(panel); return; }
 
     const prompt = getImagePrompt(charName, fileName) || '';
     const negativePrompt = getImageNegativePrompt(charName, fileName) || '';
 
     // どちらも無ければ何も表示しない
-    if (!prompt && !negativePrompt) {
-        console.debug(`[GIC] updatePromptOverlay: no prompt for "${charName}:${fileName}"`);
-        removePromptOverlay(panel);
-        return;
-    }
+    if (!prompt && !negativePrompt) { removePromptOverlay(panel); return; }
 
     let overlay = panel.querySelector('.' + PROMPT_OVERLAY_CLASS);
     if (!overlay) {
