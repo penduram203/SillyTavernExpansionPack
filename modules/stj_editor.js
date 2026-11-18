@@ -3814,31 +3814,44 @@ async function handleImageGeneratedForKeyword(e) {
 
     const list = Array.isArray(entries) ? entries : Object.values(entries);
 
-    let entryExists = false;
+    const _sanitizeKey = (s) => {
+        if (typeof s !== 'string' || !s) return '';
+        return s.trim()
+            .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
+            .replace(/\s+/g, '_')
+            .trim();
+    };
+
+    let foundEntry = null;
     for (const entry of list) {
         if (!entry) continue;
         const comment = (typeof entry.comment === 'string' ? entry.comment.trim() : '');
         const keys = getEntryKeys(entry);
         const firstKey = keys.length > 0 ? String(keys[0]).trim() : '';
-        if (comment === entryKey || firstKey === entryKey) {
-            entryExists = true;
+        if (comment === entryKey || firstKey === entryKey ||
+            _sanitizeKey(comment) === entryKey ||
+            _sanitizeKey(firstKey) === entryKey) {
+            foundEntry = entry;
             break;
         }
     }
 
-    if (!entryExists) {
+    if (!foundEntry) {
         return;
     }
 
     const imageMap = getCurrentImageMapFromCharData(charName);
     if (!imageMap) return;
 
-    if (!Object.prototype.hasOwnProperty.call(imageMap, entryKey)) {
-        imageMap[entryKey] = [];
+    // ★ syncLorebookEntriesToImageMap() と同じキー（生の comment/key）で登録する
+    const keyword = getEntryKeyword(foundEntry) || entryKey;
+
+    if (!Object.prototype.hasOwnProperty.call(imageMap, keyword)) {
+        imageMap[keyword] = [];
     }
 
     const fullPath = `user/images/${charName}/${fileName}`;
-    const currentList = normalizeCellImages(imageMap[entryKey]);
+    const currentList = normalizeCellImages(imageMap[keyword]);
 
     const isDuplicate = currentList.some(p => {
         if (typeof p !== 'string') return false;
@@ -3850,7 +3863,7 @@ async function handleImageGeneratedForKeyword(e) {
     }
 
     currentList.push(fullPath);
-    imageMap[entryKey] = currentList;
+    imageMap[keyword] = currentList;
 
     saveImageMapToCharData(charName, imageMap);
 
