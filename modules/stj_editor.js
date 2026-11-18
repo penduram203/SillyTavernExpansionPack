@@ -150,6 +150,66 @@
         document.head.appendChild(style);
     })();
 
+    // ===== ★ ツリーレイアウト用 CSS 注入 =====
+    (function injectStjTreeLayoutStyle() {
+        if (document.getElementById('stj-tree-layout-style')) return;
+        const style = document.createElement('style');
+        style.id = 'stj-tree-layout-style';
+        style.textContent = `
+            #stj_keywords_container.stj-tree-mode {
+                position: relative !important;
+                display: block !important;
+                padding: 0 !important;
+                margin: 0 !important;
+                min-height: 600px;
+                max-width: 100%;
+                overflow: auto;
+            }
+            #stj_keywords_container.stj-tree-mode > .stj-keyword-item {
+                position: absolute !important;
+                flex: none !important;
+                display: flex !important;
+                flex-direction: column;
+                margin: 0 !important;
+                box-sizing: border-box;
+                z-index: 1;
+                transition: left 0.15s ease, top 0.15s ease;
+            }
+            #stj_keywords_container.stj-tree-mode > .stj-keyword-item > .stj-image-preview {
+                flex: 1 1 auto;
+                min-height: 0;
+                overflow: hidden;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            #stj_keywords_container.stj-tree-mode > .stj-keyword-item > .stj-image-preview > img,
+            #stj_keywords_container.stj-tree-mode > .stj-keyword-item > .stj-image-preview > video {
+                max-width: 100%;
+                max-height: 100%;
+                object-fit: contain;
+            }
+            #stj_keywords_container.stj-tree-mode > .stj-keyword-item > .stj-keyword-display {
+                flex: 0 0 auto;
+                text-align: center;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                padding: 4px 2px;
+                font-size: 12px;
+            }
+            #stj_keywords_container.stj-tree-mode > .stj-tree-svg {
+                position: absolute;
+                top: 0;
+                left: 0;
+                pointer-events: none;
+                overflow: visible;
+                z-index: 0;
+            }
+        `;
+        document.head.appendChild(style);
+    })();
+    
     // ===== セルデータヘルパー =====
     function getCellImages(cell) {
         try {
@@ -1366,10 +1426,12 @@ function extractChoiceTriggerText(choiceStr) {
                     insertCellAt(s.sourceItem, s.insertZone.reference, s.insertZone.position);
                     runLiveTest();
                     autoSave({ immediate: true });
+                    _stjScheduleTreeLayout();  // ★ 追加
                 } else if (s.currentTarget && s.currentTarget !== s.sourceItem) {
                     swapCells(s.sourceItem, s.currentTarget);
                     runLiveTest();
                     autoSave({ immediate: true });
+                    _stjScheduleTreeLayout();  // ★ 追加
                 }
             } else {
                 const src = s.sourceItem;
@@ -2460,6 +2522,360 @@ function extractChoiceTriggerText(choiceStr) {
         return hasCharData;
     }
 
+    // ============================================================
+    // ★ 選択肢分岐ツリーレイアウト
+    //   - imageMap の各キー(=エントリ)について LEX の choices を読み、
+    //     選択肢番号→対応エントリキー の有向グラフを構築
+    //   - 左→右のツリーとして絶対座標を算出（親は子の中央）
+    //   - 単独セル（親なし・子なし）は左端に縦積み
+    //   - 接続線は SVG の elbow パスで描画
+    // ============================================================
+    const STJ_TREE_CELL_W = 140;
+    const STJ_TREE_CELL_H = 160;
+    const STJ_TREE_H_GAP = 100;
+    const STJ_TREE_V_GAP = 30;
+    const STJ_TREE_PADDING = 40;
+
+    function _stjExtractChoiceNumber(text) {
+        if (window.LorebookExpansion?.extractChoiceNumber) {
+            return window.LorebookExpansion.extractChoiceNumber(text);
+        }
+        if (!text || typeof text !== 'string') return null;
+        const pats = [
+            /選択肢[「『"']?(\d{1,4})[」』"']?/,
+            /choice[^\d]{0,3}(\d{1,4})/i,
+            /(?:^|\s)(\d{3,4})(?:\s|$|[\u3000。.,])/,
+            /(\d{3})/,
+        ];
+        for (const pat of pats) {
+            const m = text.match(pat);
+            if (m) return String(m[1]).padStart(3, '0');
+        }
+        return null;
+    }
+
+    function _stjFindEntryByChoice(entries, choiceNum) {
+        if (window.LorebookExpansion?.findEntryByChoice) {
+            return window.LorebookExpansion.findEntryByChoice(entries, choiceNum);
+        }
+        if (!entries || !choiceNum) return null;
+        const list = Array.isArray(entries) ? entries : Object.values(entries);
+        let partial = null;
+        for (const entry of list) {
+            if (!entry) continue;
+            for (const key of getEntryKeys(entry)) {
+                const k = String(key).trim();
+                if (k === choiceNum) return entry;
+                if (!partial && (k.startsWith(choiceNum) || k.includes(choiceNum))) {
+                    partial = entry;
+                }
+            }
+        }
+        return partial;
+    }
+
+    async function _stjBuildChoiceGraph(imageMap) {
+        const empty = { children: new Map(), parents: new Map(), allNodes: new Set() };
+        const worldName = getCharacterWorldInfoName();
+        if (!worldName) return empty;
+
+        let entries;
+        try {
+            entries = await loadWorldInfoEntries(worldName);
+        } catch (e) {
+            return empty;
+        }
+        if (!entries) return empty;
+
+        const list = Array.isArray(entries) ? entries : Object.values(entries);
+        const entryMap = new Map();
+        for (const entry of list) {
+            const kw = getEntryKeyword(entry);
+            if (kw) entryMap.set(kw, entry);
+        }
+
+        const allNodes = new Set();
+        for (const kw of Object.keys(imageMap)) {
+            if (kw === 'default' || kw === 'thumbnail') continue;
+            if (!kw || !kw.trim()) continue;
+            allNodes.add(kw);
+        }
+
+        const children = new Map();
+        const parents = new Map();
+
+        for (const kw of allNodes) {
+            const entry = entryMap.get(kw);
+            if (!entry) { children.set(kw, []); continue; }
+
+            const lex = getLexDataFor(worldName, entry.uid, entry);
+            const choices = Array.isArray(lex.choices) ? lex.choices : [];
+            const childKws = [];
+
+            for (const choiceStr of choices) {
+                const num = _stjExtractChoiceNumber(choiceStr);
+                if (!num) continue;
+                const target = _stjFindEntryByChoice(list, num);
+                if (!target) continue;
+                const targetKw = getEntryKeyword(target);
+                if (!targetKw || !allNodes.has(targetKw)) continue;
+                if (childKws.includes(targetKw)) continue;
+                childKws.push(targetKw);
+                if (!parents.has(targetKw)) parents.set(targetKw, []);
+                parents.get(targetKw).push(kw);
+            }
+            children.set(kw, childKws);
+        }
+
+        return { children, parents, allNodes };
+    }
+
+    function _stjComputeTreeLayout(graph) {
+        const { children, parents, allNodes } = graph;
+        const positions = new Map();
+        const visited = new Set();
+        let cursorY = 0;
+
+        function layoutSubtree(node, depth) {
+            if (visited.has(node)) return null;
+            visited.add(node);
+
+            const kids = (children.get(node) || []).filter(k => !visited.has(k));
+            if (kids.length === 0) {
+                const y = cursorY;
+                positions.set(node, {
+                    x: depth * (STJ_TREE_CELL_W + STJ_TREE_H_GAP),
+                    y,
+                });
+                cursorY += STJ_TREE_CELL_H + STJ_TREE_V_GAP;
+                return { top: y, bottom: y + STJ_TREE_CELL_H };
+            }
+
+            const kidBounds = [];
+            for (const kid of kids) {
+                const b = layoutSubtree(kid, depth + 1);
+                if (b) kidBounds.push(b);
+            }
+
+            if (kidBounds.length === 0) {
+                const y = cursorY;
+                positions.set(node, {
+                    x: depth * (STJ_TREE_CELL_W + STJ_TREE_H_GAP),
+                    y,
+                });
+                cursorY += STJ_TREE_CELL_H + STJ_TREE_V_GAP;
+                return { top: y, bottom: y + STJ_TREE_CELL_H };
+            }
+
+            const top = kidBounds[0].top;
+            const bottom = kidBounds[kidBounds.length - 1].bottom;
+            const centerY = (top + bottom - STJ_TREE_CELL_H) / 2;
+            positions.set(node, {
+                x: depth * (STJ_TREE_CELL_W + STJ_TREE_H_GAP),
+                y: centerY,
+            });
+            return {
+                top: Math.min(top, centerY),
+                bottom: Math.max(bottom, centerY + STJ_TREE_CELL_H),
+            };
+        }
+
+        const roots = [];
+        const isolated = [];
+        for (const kw of allNodes) {
+            const hasParent = parents.has(kw) && parents.get(kw).length > 0;
+            const hasChild = (children.get(kw) || []).length > 0;
+            if (!hasParent) {
+                if (hasChild) roots.push(kw);
+                else isolated.push(kw);
+            }
+        }
+        roots.sort();
+        isolated.sort();
+
+        for (const root of roots) {
+            layoutSubtree(root, 0);
+            cursorY += STJ_TREE_V_GAP * 2;
+        }
+
+        for (const node of isolated) {
+            positions.set(node, { x: 0, y: cursorY });
+            cursorY += STJ_TREE_CELL_H + STJ_TREE_V_GAP;
+        }
+
+        const unvisited = [...allNodes].filter(k => !visited.has(k));
+        for (const node of unvisited) {
+            positions.set(node, { x: 0, y: cursorY });
+            cursorY += STJ_TREE_CELL_H + STJ_TREE_V_GAP;
+        }
+
+        return { positions, children };
+    }
+
+    function _stjDrawConnections(container, positions, children) {
+        const old = container.querySelector(':scope > .stj-tree-svg');
+        if (old) old.remove();
+
+        let maxX = 0, maxY = 0;
+        for (const pos of positions.values()) {
+            maxX = Math.max(maxX, pos.x + STJ_TREE_CELL_W);
+            maxY = Math.max(maxY, pos.y + STJ_TREE_CELL_H);
+        }
+        const svgW = maxX + STJ_TREE_PADDING * 2;
+        const svgH = maxY + STJ_TREE_PADDING * 2;
+
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.classList.add('stj-tree-svg');
+        svg.setAttribute('width', String(svgW));
+        svg.setAttribute('height', String(svgH));
+        svg.style.width = svgW + 'px';
+        svg.style.height = svgH + 'px';
+
+        for (const [parentKw, childKws] of children) {
+            const parentPos = positions.get(parentKw);
+            if (!parentPos) continue;
+            for (const childKw of childKws) {
+                const childPos = positions.get(childKw);
+                if (!childPos) continue;
+
+                const x1 = parentPos.x + STJ_TREE_CELL_W;
+                const y1 = parentPos.y + STJ_TREE_CELL_H / 2;
+                const x2 = childPos.x;
+                const y2 = childPos.y + STJ_TREE_CELL_H / 2;
+                const midX = x1 + (x2 - x1) / 2;
+
+                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                path.setAttribute('d',
+                    `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`);
+                path.setAttribute('stroke', '#4a90e2');
+                path.setAttribute('stroke-width', '2');
+                path.setAttribute('fill', 'none');
+                path.setAttribute('stroke-linejoin', 'round');
+                svg.appendChild(path);
+
+                const sz = 7;
+                const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                arrow.setAttribute('points',
+                    `${x2},${y2} ${x2 - sz},${y2 - sz / 1.5} ${x2 - sz},${y2 + sz / 1.5}`);
+                arrow.setAttribute('fill', '#4a90e2');
+                svg.appendChild(arrow);
+            }
+        }
+
+        container.insertBefore(svg, container.firstChild);
+    }
+
+    let _stjTreeLayoutInFlight = false;
+    let _stjTreeLayoutPending = false;
+
+    async function _stjApplyTreeLayout() {
+        if (_stjTreeLayoutInFlight) {
+            _stjTreeLayoutPending = true;
+            return;
+        }
+        _stjTreeLayoutInFlight = true;
+
+        try {
+            const container = document.getElementById('stj_keywords_container');
+            if (!container) return;
+            if (container.offsetParent === null) return;
+
+            const startCharName = document.getElementById('stj_char_name_display')?.textContent;
+            if (!startCharName) return;
+
+            const imageMap = {};
+            container.querySelectorAll(':scope > .stj-keyword-item').forEach(cell => {
+                const kw = getCellKeyword(cell).trim();
+                if (kw) imageMap[kw] = getCellImages(cell);
+            });
+            if (Object.keys(imageMap).length === 0) {
+                container.classList.add('stj-tree-mode');
+                container.querySelectorAll(':scope > .stj-keyword-item').forEach(cell => {
+                    cell.style.position = 'absolute';
+                    cell.style.left = '0px';
+                    cell.style.top = '0px';
+                    cell.style.width = STJ_TREE_CELL_W + 'px';
+                    cell.style.height = STJ_TREE_CELL_H + 'px';
+                });
+                return;
+            }
+
+            const graph = await _stjBuildChoiceGraph(imageMap);
+
+            const endCharName = document.getElementById('stj_char_name_display')?.textContent;
+            if (endCharName !== startCharName) return;
+            if (!document.body.contains(container)) return;
+
+            const { positions, children } = _stjComputeTreeLayout(graph);
+
+            let maxX = 0, maxY = 0, minX = 0, minY = 0;
+            for (const pos of positions.values()) {
+                maxX = Math.max(maxX, pos.x + STJ_TREE_CELL_W);
+                maxY = Math.max(maxY, pos.y + STJ_TREE_CELL_H);
+                minX = Math.min(minX, pos.x);
+                minY = Math.min(minY, pos.y);
+            }
+            const offsetX = STJ_TREE_PADDING - minX;
+            const offsetY = STJ_TREE_PADDING - minY;
+
+            const unpositioned = [];
+            container.querySelectorAll(':scope > .stj-keyword-item').forEach(cell => {
+                const kw = getCellKeyword(cell).trim();
+                const pos = kw ? positions.get(kw) : null;
+                if (pos) {
+                    cell.style.position = 'absolute';
+                    cell.style.left = (pos.x + offsetX) + 'px';
+                    cell.style.top = (pos.y + offsetY) + 'px';
+                    cell.style.width = STJ_TREE_CELL_W + 'px';
+                    cell.style.height = STJ_TREE_CELL_H + 'px';
+                } else {
+                    unpositioned.push(cell);
+                }
+            });
+
+            let totalHeight = maxY - minY + STJ_TREE_PADDING * 2;
+            if (unpositioned.length > 0) {
+                let unposY = totalHeight;
+                for (const cell of unpositioned) {
+                    cell.style.position = 'absolute';
+                    cell.style.left = STJ_TREE_PADDING + 'px';
+                    cell.style.top = unposY + 'px';
+                    cell.style.width = STJ_TREE_CELL_W + 'px';
+                    cell.style.height = STJ_TREE_CELL_H + 'px';
+                    unposY += STJ_TREE_CELL_H + STJ_TREE_V_GAP;
+                }
+                totalHeight = unposY;
+            }
+
+            container.classList.add('stj-tree-mode');
+            container.style.minWidth = (maxX - minX + STJ_TREE_PADDING * 2) + 'px';
+            container.style.minHeight = totalHeight + 'px';
+
+            const offsetPositions = new Map();
+            for (const [kw, pos] of positions) {
+                offsetPositions.set(kw, { x: pos.x + offsetX, y: pos.y + offsetY });
+            }
+            _stjDrawConnections(container, offsetPositions, children);
+        } catch (e) {
+            console.warn('[STJ Editor] ツリーレイアウト適用エラー:', e);
+        } finally {
+            _stjTreeLayoutInFlight = false;
+            if (_stjTreeLayoutPending) {
+                _stjTreeLayoutPending = false;
+                _stjScheduleTreeLayout();
+            }
+        }
+    }
+
+    let _stjTreeLayoutTimer = null;
+    function _stjScheduleTreeLayout() {
+        if (_stjTreeLayoutTimer) clearTimeout(_stjTreeLayoutTimer);
+        _stjTreeLayoutTimer = setTimeout(() => {
+            _stjTreeLayoutTimer = null;
+            _stjApplyTreeLayout().catch(e => console.warn('[STJ Editor] ツリーレイアウトエラー:', e));
+        }, 100);
+    }
+    
 // ロアブックの正しい並び順を完全に維持してJSON編集画面のセルを構築・同期する関数
 function populateFormFromImageMap(imageMap, preserveOrder = false) {
     const toFileNames = (val) => {
@@ -2549,6 +2965,8 @@ function populateFormFromImageMap(imageMap, preserveOrder = false) {
             addKeywordRowWithData(container, 0, { keyword: '', images: [] });
         }
     }
+    // ★ 追加: 選択肢分岐のツリーレイアウトを適用
+    _stjScheduleTreeLayout();
 }
 
     function setupPreviewListeners() { updatePreview(); }
