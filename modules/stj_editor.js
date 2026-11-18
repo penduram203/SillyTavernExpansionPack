@@ -1504,7 +1504,6 @@
                 <div class="stj-cell-modal-header">
                     <button type="button" class="stj-cell-modal-apply">${_t('stj.cell_modal.apply', '決定')}</button>
                     <button type="button" class="stj-cell-modal-cancel">${_t('stj.cell_modal.cancel', 'キャンセル')}</button>
-                    <input type="text" class="stj-cell-modal-keyword" placeholder="${_t('stj.cell_modal.keyword_placeholder', 'キーワード')}">
                     <button type="button" class="stj-cell-modal-choices stj-choices-disabled" disabled title="">${_t('stj.choices.button', '選択肢')}</button>
                 </div>
                 <div class="stj-cell-modal-grid"></div>
@@ -1607,36 +1606,17 @@
 
         currentModalCell = cell;
         modalOriginalImages = [...getCellImages(cell)];
-        modalOriginalKeyword = getCellKeyword(cell);
+        modalOriginalKeyword = getCellKeyword(cell); // キーワード保持のみ（表示・編集はしない）
 
         const isSpecial = cell.classList.contains('stj-special-item');
-        const kwInput = currentCellModal.querySelector('.stj-cell-modal-keyword');
         const choicesBtn = currentCellModal.querySelector('.stj-cell-modal-choices');
 
-        if (isSpecial) {
-            kwInput.style.display = 'none';
-            if (choicesBtn) choicesBtn.style.display = 'none';
-        } else {
-            kwInput.style.display = '';
-            kwInput.value = modalOriginalKeyword;
-            if (choicesBtn) {
+        if (choicesBtn) {
+            if (isSpecial) {
+                choicesBtn.style.display = 'none';
+            } else {
                 choicesBtn.style.display = '';
                 updateChoicesButtonState(cell).catch(e => console.warn('[STJ Editor] choices state error:', e));
-            }
-        }
-
-        kwInput.style.borderColor = '';
-        kwInput.style.boxShadow = '';
-        kwInput.title = '';
-        {
-            const curKw = kwInput.value.trim();
-            if (curKw) {
-                const dup = findDuplicateKeyword(cell, curKw);
-                if (dup) {
-                    kwInput.style.borderColor = '#e53e3e';
-                    kwInput.style.boxShadow = '0 0 0 2px rgba(229, 62, 62, 0.4)';
-                    kwInput.title = _t('stj.keyword_dup_title_attr', '既に同じキーワードが設定されています');
-                }
             }
         }
 
@@ -1663,12 +1643,6 @@
                 }
             });
         });
-
-        if (!isSpecial && kwInput) {
-            setTimeout(() => {
-                try { kwInput.focus(); } catch (e) { /* ignore */ }
-            }, 50);
-        }
     }
 
     function closeCellModal(revert) {
@@ -1743,10 +1717,7 @@
     function doApplyCellModal() {
         if (!currentCellModal || !currentModalCell) return;
         const cell = currentModalCell;
-        if (!cell.classList.contains('stj-special-item')) {
-            const kwInput = currentCellModal.querySelector('.stj-cell-modal-keyword');
-            if (kwInput) setCellKeyword(cell, kwInput.value.trim());
-        }
+        // ※ モーダル内でのキーワード変更は廃止するため、キーワード更新処理は削除
         updateCellPreview(cell);
         runLiveTest();
         autoSave({ immediate: true });
@@ -3550,6 +3521,7 @@ async function syncLorebookEntriesToImageMap() {
     let imageMap = getCurrentImageMapFromCharData(charName);
     if (!imageMap) imageMap = {};
 
+    // ロアブックに存在する有効なキー（コメント または 最初のキー）のセットを収集
     const existingKeys = new Set();
     const autoCreateKeys = new Set();
     for (const entry of list) {
@@ -3564,17 +3536,10 @@ async function syncLorebookEntriesToImageMap() {
         }
     }
 
-    const hasEmptyKeys = Object.entries(imageMap).some(
-        ([k, v]) => !UNREGISTER_EXCLUDED_KEYS.has(k) && _isEmptyImageValue(v)
-    );
-    let restoreData = {};
-    if (hasEmptyKeys) {
-        restoreData = await _restoreImageMapUnified(charName);
-    }
-
     const removedKeys = [];
+    // ロアブックから削除されたキーを imageMap からも確実に削除
     for (const key of Object.keys(imageMap)) {
-        if (UNREGISTER_EXCLUDED_KEYS.has(key)) continue;
+        if (UNREGISTER_EXCLUDED_KEYS.has(key)) continue; // default, thumbnail は保護
         if (!existingKeys.has(key)) {
             delete imageMap[key];
             removedKeys.push(key);
@@ -3582,26 +3547,18 @@ async function syncLorebookEntriesToImageMap() {
     }
 
     const addedKeys = [];
-    const restoredKeys = [];
     const allKeysToProcess = new Set([...autoCreateKeys, ...existingKeys]);
     for (const keyword of allKeysToProcess) {
         if (!keyword || UNREGISTER_EXCLUDED_KEYS.has(keyword)) continue;
         if (isCommonRuleName(keyword)) continue;
 
-        const exists = Object.prototype.hasOwnProperty.call(imageMap, keyword);
-        const rv = restoreData[keyword];
-        const hasRestore = rv && !_isEmptyImageValue(rv);
-
-        if (!exists) {
-            imageMap[keyword] = hasRestore ? rv : [];
+        if (!Object.prototype.hasOwnProperty.call(imageMap, keyword)) {
+            imageMap[keyword] = [];
             addedKeys.push(keyword);
-        } else if (_isEmptyImageValue(imageMap[keyword]) && hasRestore) {
-            imageMap[keyword] = rv;
-            restoredKeys.push(keyword);
         }
     }
 
-    const changed = removedKeys.length > 0 || addedKeys.length > 0 || restoredKeys.length > 0;
+    const changed = removedKeys.length > 0 || addedKeys.length > 0;
 
     if (changed) {
         saveImageMapToCharData(charName, imageMap);
