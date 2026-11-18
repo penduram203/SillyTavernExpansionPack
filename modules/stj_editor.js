@@ -474,7 +474,7 @@
                 if (data && Array.isArray(data.choices)) {
                     return {
                         img_prompt: typeof data.img_prompt === 'string' ? data.img_prompt : '',
-                        choices: data.choices,
+                        choices: data.choices.map(c => normalizeChoiceItem(c)).filter(Boolean),
                     };
                 }
             } catch (e) { /* ignore */ }
@@ -484,12 +484,7 @@
             return {
                 img_prompt: typeof ext.img_prompt === 'string' ? ext.img_prompt : '',
                 choices: Array.isArray(ext.choices)
-                    ? ext.choices
-                        .filter(c => c && typeof c === 'object')
-                        .map(c => ({
-                            num: typeof c.num === 'string' ? c.num : String(c.num ?? ''),
-                            text: typeof c.text === 'string' ? c.text : '',
-                        }))
+                    ? ext.choices.map(c => normalizeChoiceItem(c)).filter(Boolean)
                     : [],
             };
         }
@@ -540,9 +535,7 @@
         if (!targetEntry) return;
 
         const lex = getLexDataFor(worldName, targetEntry.uid, targetEntry);
-        const choices = Array.isArray(lex.choices)
-            ? lex.choices.filter(c => c && String(c.num || '').trim())
-            : [];
+        const choices = Array.isArray(lex.choices) ? lex.choices.filter(Boolean) : [];
         if (choices.length === 0) return;
 
         if (currentCellModal !== modal || currentModalCell !== cell) return;
@@ -570,9 +563,7 @@
         if (!targetEntry) return;
 
         const lex = getLexDataFor(worldName, targetEntry.uid, targetEntry);
-        const choices = Array.isArray(lex.choices)
-            ? lex.choices.filter(c => c && String(c.num || '').trim())
-            : [];
+        const choices = Array.isArray(lex.choices) ? lex.choices.filter(Boolean) : [];
         if (choices.length === 0) return;
 
         const rows = [];
@@ -580,20 +571,23 @@
 
         rows.push({
             label: '',
-            num: kw,
-            text: String(targetEntry.content || '').trim(),
+            displayStr: `${kw} ${String(targetEntry.content || '').trim()}`.trim(),
         });
 
         for (const c of choices) {
-            const num = String(c.num).trim();
-            if (!num || seen.has(num)) continue;
-            seen.add(num);
-            const choiceEntry = findEntryByKeyword(entries, num);
+            const choiceStr = normalizeChoiceItem(c);
+            if (!choiceStr || seen.has(choiceStr)) continue;
+            seen.add(choiceStr);
+
+            // 先頭の数字部分（もしあれば）を抽出してエントリ検索を試みる
+            const matchNum = choiceStr.match(/^(\d+)/);
+            const lookupKey = matchNum ? matchNum[1] : choiceStr;
+            const choiceEntry = findEntryByKeyword(entries, lookupKey);
             const content = choiceEntry ? String(choiceEntry.content || '').trim() : '';
+
             rows.push({
                 label: _t('stj.choices.label', '選択肢'),
-                num,
-                text: content || (typeof c.text === 'string' ? c.text : ''),
+                displayStr: content ? `${choiceStr}: ${content}` : choiceStr,
             });
         }
 
@@ -622,14 +616,9 @@
                 line.appendChild(labelEl);
             }
 
-            const numEl = document.createElement('span');
-            numEl.className = 'stj-choices-popup-num';
-            numEl.textContent = row.num + ' ';
-            line.appendChild(numEl);
-
             const textEl = document.createElement('span');
             textEl.className = 'stj-choices-popup-text';
-            textEl.textContent = row.text;
+            textEl.textContent = row.displayStr;
             line.appendChild(textEl);
 
             box.appendChild(line);
