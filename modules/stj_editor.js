@@ -612,40 +612,110 @@
 
     function captureEntrySnapshot(el) {
         if (!el) return null;
-        const snap = {
-            fields: new Map(),
-            heights: new Map(),
-        };
+        const fields = new Map();
+        const heights = new Map();
         el.querySelectorAll('input, textarea, select').forEach((field, idx) => {
             const key = field.getAttribute('name') || `idx_${idx}`;
             if (field.type === 'checkbox' || field.type === 'radio') {
-                snap.fields.set(key, { type: 'check', checked: field.checked });
+                fields.set(key, { type: 'check', checked: field.checked });
+            } else if (field.tagName === 'SELECT') {
+                fields.set(key, {
+                    type: 'select',
+                    value: field.value,
+                    selectedIndex: field.selectedIndex,
+                });
             } else {
-                snap.fields.set(key, { type: 'val', value: field.value });
+                fields.set(key, { type: 'val', value: field.value });
             }
             if (field.tagName === 'TEXTAREA') {
                 const h = field.style.height;
-                if (h) snap.heights.set(key, h);
+                if (h) heights.set(key, h);
             }
         });
-        return snap;
+        return { fields, heights, userModified: new Set() };
     }
 
+    function updateSnapshotForField(snap, field, idx) {
+        if (!snap || !field) return;
+        const key = field.getAttribute('name') || `idx_${idx}`;
+        snap.userModified.add(key);
+        if (field.type === 'checkbox' || field.type === 'radio') {
+            snap.fields.set(key, { type: 'check', checked: field.checked });
+        } else if (field.tagName === 'SELECT') {
+            snap.fields.set(key, {
+                type: 'select',
+                value: field.value,
+                selectedIndex: field.selectedIndex,
+            });
+        } else {
+            snap.fields.set(key, { type: 'val', value: field.value });
+        }
+        if (field.tagName === 'TEXTAREA' && field.style.height) {
+            snap.heights.set(key, field.style.height);
+        }
+    }
+
+    function expandClonedEntryPanels(clonedEl) {
+        if (!clonedEl) return;
+
+        clonedEl.querySelectorAll(
+            '.world_entry_toggle, .drag-handle, .world_entry_collapse, [data-action="toggle"], .fa-chevron-down, .fa-chevron-up, .fa-caret-down, .fa-caret-up'
+        ).forEach((el) => {
+            if (
+                el.closest('button, .inline-drawer-toggle, .world_entry_header_button') ||
+                el.classList.contains('world_entry_toggle') ||
+                el.classList.contains('drag-handle')
+            ) {
+                el.remove();
+            }
+        });
+
+        clonedEl.classList.remove('lbe-extras-collapsed', 'collapsed');
+        clonedEl.querySelectorAll('.lbe-extras-collapsed, .collapsed').forEach((el) => {
+            el.classList.remove('lbe-extras-collapsed', 'collapsed');
+        });
+
+        clonedEl.querySelectorAll(
+            '.world_entry_edit, .world_entry_form, .inline-drawer-content, .lbe-extras-panel, [name="PositionBlock"]'
+        ).forEach((el) => {
+            if (el.style.display === 'none') {
+                el.style.display = '';
+            }
+            if (el.classList.contains('world_entry_edit') || el.classList.contains('lbe-extras-panel')) {
+                el.style.setProperty('display', 'block', 'important');
+            }
+            el.style.removeProperty('max-height');
+            el.style.removeProperty('height');
+        });
+    }
+    
     function applyEntrySnapshotToEl(el, snap) {
         if (!el || !snap) return;
+
+        expandClonedEntryPanels(el);
+
         el.querySelectorAll('input, textarea, select').forEach((field, idx) => {
             const key = field.getAttribute('name') || `idx_${idx}`;
             const info = snap.fields.get(key);
             if (!info) return;
+
             if (info.type === 'check') {
                 if (field.checked !== info.checked) {
                     field.checked = info.checked;
+                }
+            } else if (info.type === 'select') {
+                const matchedOpt = Array.from(field.options || []).find(opt => opt.value === info.value);
+                if (matchedOpt && field.value !== info.value) {
+                    field.value = info.value;
+                } else if (info.selectedIndex >= 0 && field.selectedIndex !== info.selectedIndex) {
+                    field.selectedIndex = info.selectedIndex;
                 }
             } else {
                 if (field.value !== info.value) {
                     field.value = info.value;
                 }
             }
+
             if (field.tagName === 'TEXTAREA' && snap.heights.has(key)) {
                 const h = snap.heights.get(key);
                 if (field.style.height !== h) {
@@ -655,39 +725,53 @@
         });
     }
     
-    function syncClonedEntryToSource(clonedEl, sourceEl) {
+    function syncClonedEntryToSource(clonedEl, sourceEl, isSyncingRef) {
         if (!clonedEl || !sourceEl) return;
+        if (isSyncingRef && isSyncingRef.active) return;
 
-        const fields = clonedEl.querySelectorAll('input, textarea, select');
-        fields.forEach((field) => {
-            const name = field.getAttribute('name');
-            const cls = field.className || '';
-            let target = null;
+        if (isSyncingRef) isSyncingRef.active = true;
+        try {
+            const fields = clonedEl.querySelectorAll('input, textarea, select');
+            fields.forEach((field) => {
+                const name = field.getAttribute('name');
+                const cls = field.className || '';
+                let target = null;
 
-            if (name) {
-                target = sourceEl.querySelector(`[name="${escapeCssAttrValue(name)}"]`);
-            } else if (cls) {
-                const firstCls = cls.trim().split(/\s+/).find(c => c.startsWith('lbe-') || c.startsWith('world_entry'));
-                if (firstCls) target = sourceEl.querySelector('.' + escapeCssAttrValue(firstCls));
-            }
-
-            if (!target) return;
-            if (field.type === 'checkbox' || field.type === 'radio') {
-                if (target.checked !== field.checked) {
-                    target.checked = field.checked;
-                    target.dispatchEvent(new Event('change', { bubbles: true }));
+                if (name) {
+                    target = sourceEl.querySelector(`[name="${escapeCssAttrValue(name)}"]`);
+                } else if (cls) {
+                    const firstCls = cls.trim().split(/\s+/).find(c => c.startsWith('lbe-') || c.startsWith('world_entry'));
+                    if (firstCls) target = sourceEl.querySelector('.' + escapeCssAttrValue(firstCls));
                 }
-            } else {
-                if (target.value !== field.value) {
-                    target.value = field.value;
-                    target.dispatchEvent(new Event('input', { bubbles: true }));
-                    target.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-            }
-        });
 
-        if (window.$) {
-            window.$(sourceEl).triggerHandler('change');
+                if (!target) return;
+                if (field.type === 'checkbox' || field.type === 'radio') {
+                    if (target.checked !== field.checked) {
+                        target.checked = field.checked;
+                        target.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                } else if (field.tagName === 'SELECT') {
+                    if (target.value !== field.value || target.selectedIndex !== field.selectedIndex) {
+                        target.value = field.value;
+                        if (target.value !== field.value && field.selectedIndex >= 0) {
+                            target.selectedIndex = field.selectedIndex;
+                        }
+                        target.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                } else {
+                    if (target.value !== field.value) {
+                        target.value = field.value;
+                        target.dispatchEvent(new Event('input', { bubbles: true }));
+                        target.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                }
+            });
+
+            if (window.$) {
+                window.$(sourceEl).triggerHandler('change');
+            }
+        } finally {
+            if (isSyncingRef) isSyncingRef.active = false;
         }
     }
 
@@ -702,6 +786,7 @@
         delete hostEl._sourceEntryEl;
         delete hostEl._clonedEntryEl;
         delete hostEl._syncEntry;
+        delete hostEl._guardObserver;
 
         if (cell.classList.contains('stj-special-item')) return;
         const kw = getCellKeyword(cell).trim();
@@ -728,66 +813,80 @@
 
         const cloned = sourceEl.cloneNode(true);
         cloned.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
-        cloned.querySelectorAll(
-            '.world_entry_toggle, .drag-handle, .world_entry_collapse, [data-action="toggle"], .fa-chevron-down, .fa-chevron-up, .fa-caret-down, .fa-caret-up'
-        ).forEach(el => {
-            if (el.closest('button, .inline-drawer-toggle, .world_entry_header_button') || el.classList.contains('world_entry_toggle') || el.classList.contains('drag-handle')) {
-                el.remove();
+
+        sourceEl.querySelectorAll('select').forEach((srcSelect) => {
+            const name = srcSelect.getAttribute('name');
+            const dstSelect = name
+                ? cloned.querySelector(`select[name="${escapeCssAttrValue(name)}"]`)
+                : null;
+            if (dstSelect) {
+                dstSelect.value = srcSelect.value;
+                dstSelect.selectedIndex = srcSelect.selectedIndex;
             }
         });
-        cloned.classList.remove('lbe-extras-collapsed');
-        cloned.classList.remove('collapsed');
-        cloned.querySelectorAll('.lbe-extras-collapsed').forEach(el => el.classList.remove('lbe-extras-collapsed'));
-        cloned.querySelectorAll('.collapsed').forEach(el => el.classList.remove('collapsed'));
 
-        const editBlock = cloned.querySelector('.world_entry_edit');
-        if (editBlock) {
-            editBlock.style.setProperty('display', 'block', 'important');
-            editBlock.classList.remove('lbe-extras-collapsed');
-        }
-        cloned.querySelectorAll('.world_entry_edit, .inline-drawer-content, .lbe-extras-panel').forEach(el => {
-            el.style.setProperty('display', 'block', 'important');
-            el.style.removeProperty('max-height');
-            el.style.removeProperty('height');
+        expandClonedEntryPanels(cloned);
+
+        const snap = captureEntrySnapshot(cloned);
+        const syncState = { active: false };
+        const syncNow = () => syncClonedEntryToSource(cloned, sourceEl, syncState);
+
+        const allFields = Array.from(cloned.querySelectorAll('input, textarea, select'));
+        allFields.forEach((field, idx) => {
+            const recordUserEdit = () => {
+                if (field.tagName === 'TEXTAREA') {
+                    field.style.height = 'auto';
+                    field.style.height = field.scrollHeight + 'px';
+                }
+                updateSnapshotForField(snap, field, idx);
+                syncNow();
+            };
+            field.addEventListener('pointerdown', () => updateSnapshotForField(snap, field, idx));
+            field.addEventListener('input', recordUserEdit);
+            field.addEventListener('change', recordUserEdit);
         });
 
-        const initialSnap = captureEntrySnapshot(cloned);
-        const syncNow = () => syncClonedEntryToSource(cloned, sourceEl);
-        cloned.addEventListener('input', (e) => {
-            if (e.target && e.target.tagName === 'TEXTAREA') {
-                e.target.style.height = 'auto';
-                e.target.style.height = e.target.scrollHeight + 'px';
-            }
-            syncNow();
-        });
-        cloned.addEventListener('change', syncNow);
         cloned.addEventListener('click', (e) => {
             if (e.target.closest('button, input, select, textarea, .lbe-extras-toggle')) {
-                setTimeout(syncNow, 0);
+                setTimeout(() => {
+                    allFields.forEach((field, idx) => {
+                        if (field === e.target || field.contains(e.target)) {
+                            updateSnapshotForField(snap, field, idx);
+                        }
+                    });
+                    syncNow();
+                }, 0);
             }
         });
 
         let guardTimer = null;
         const guardObserver = new MutationObserver(() => {
+            if (syncState.active) return;
             if (guardTimer) clearTimeout(guardTimer);
             guardTimer = setTimeout(() => {
-                if (!document.body.contains(cloned)) return;
-                applyEntrySnapshotToEl(cloned, initialSnap);
+                if (!document.body.contains(cloned) || syncState.active) return;
+                applyEntrySnapshotToEl(cloned, snap);
             }, 0);
         });
         guardObserver.observe(cloned, {
             childList: true,
             subtree: true,
             attributes: true,
-            attributeFilter: ['style', 'class', 'value', 'checked'],
+            attributeFilter: ['style', 'class', 'value', 'checked', 'selected'],
         });
-        
+
         hostEl._sourceEntryEl = sourceEl;
         hostEl._clonedEntryEl = cloned;
         hostEl._syncEntry = syncNow;
         hostEl._guardObserver = guardObserver;
         hostEl.appendChild(cloned);
         hostEl.style.display = 'block';
+
+        setTimeout(() => {
+            if (currentCellModal === modal && currentModalCell === cell && document.body.contains(cloned)) {
+                applyEntrySnapshotToEl(cloned, snap);
+            }
+        }, 50);
 
         if (window.LorebookExpansion?.forceInject) {
             setTimeout(() => {
@@ -1675,7 +1774,7 @@ function extractChoiceTriggerText(choiceStr) {
                     <button type="button" class="stj-cell-modal-cancel">${_t('stj.cell_modal.cancel', 'キャンセル')}</button>
                     <div class="stj-cell-modal-keyword-display" id="stj_cell_modal_keyword_display"></div>
                 </div>
-                <div class="stj-cell-modal-entry-host" id="stj_cell_modal_entry_host" style="display: none;"></div>
+                <div class="stj-cell-modal-entry-host" id="stj_cell_modal_entry_host" style="display: block; height: 35%;"></div>
                 <div class="stj-cell-modal-grid"></div>
             </div>
         `;
@@ -1687,6 +1786,11 @@ function extractChoiceTriggerText(choiceStr) {
                 #stj_cell_modal .stj-cell-modal-content {
                     display: flex !important;
                     flex-direction: column !important;
+                    width: calc(var(--stj-cell-modal-base-w, 720px) * 1.35) !important;
+                    max-width: 96vw !important;
+                    height: calc(var(--stj-cell-modal-base-h, 80vh) * 1.15) !important;
+                    max-height: 96vh !important;
+                    overflow: hidden;
                 }
                 #stj_cell_modal .stj-cell-modal-header {
                     display: flex !important;
@@ -1697,27 +1801,19 @@ function extractChoiceTriggerText(choiceStr) {
                     width: 100%;
                     flex-shrink: 0;
                 }
-                #stj_cell_modal .stj-cell-modal-content {
-                    width: calc(var(--stj-cell-modal-base-w, 720px) * 1.35) !important;
-                    max-width: 96vw !important;
-                    height: calc(var(--stj-cell-modal-base-h, 80vh) * 1.15) !important;
-                    max-height: 96vh !important;
-                }
-                #stj_cell_modal .stj-cell-modal-grid {
-                    display: grid !important;
-                    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
-                }
                 #stj_cell_modal .stj-cell-modal-entry-host {
                     display: block !important;
                     width: 100%;
-                    height: 100% !important;
-                    max-height: none !important;
+                    height: 35% !important;
+                    min-height: 0;
                     overflow-y: auto;
                     margin: 6px 0 10px;
                     padding: 8px;
                     border: 1px solid rgba(255, 255, 255, 0.2);
                     border-radius: 6px;
                     background: rgba(0, 0, 0, 0.25);
+                    box-sizing: border-box;
+                    flex: 0 0 35% !important;
                 }
                 #stj_cell_modal .stj-cell-modal-entry-host .world_entry {
                     display: block !important;
@@ -1741,6 +1837,13 @@ function extractChoiceTriggerText(choiceStr) {
                     min-height: 36px;
                     line-height: 1.4;
                     resize: vertical;
+                }
+                #stj_cell_modal .stj-cell-modal-grid {
+                    display: grid !important;
+                    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+                    flex: 1 1 auto;
+                    min-height: 0;
+                    overflow-y: auto;
                 }
                 .stj-cell-modal-keyword-display {
                     display: inline-block;
@@ -1907,15 +2010,16 @@ function extractChoiceTriggerText(choiceStr) {
         });
     }
 
-    function closeCellModal(revert) {
+function closeCellModal(revert) {
         if (!currentCellModal) return;
         const entryHostEl = currentCellModal.querySelector('#stj_cell_modal_entry_host');
         if (entryHostEl) {
             if (entryHostEl._guardObserver) {
                 try { entryHostEl._guardObserver.disconnect(); } catch (e) { /* ignore */ }
-            }            
+            }
             entryHostEl.innerHTML = '';
-            entryHostEl.style.display = 'none';
+            entryHostEl.style.display = 'block';
+            entryHostEl.style.height = '35%';
             delete entryHostEl._sourceEntryEl;
             delete entryHostEl._clonedEntryEl;
             delete entryHostEl._syncEntry;
@@ -1989,7 +2093,6 @@ function extractChoiceTriggerText(choiceStr) {
     function doApplyCellModal() {
         if (!currentCellModal || !currentModalCell) return;
         const cell = currentModalCell;
-        // ※ モーダル内でのキーワード変更は廃止するため、キーワード更新処理は削除
         updateCellPreview(cell);
         runLiveTest();
         autoSave({ immediate: true });
@@ -2000,7 +2103,8 @@ function extractChoiceTriggerText(choiceStr) {
             }
             if (typeof entryHostEl._syncEntry === 'function') entryHostEl._syncEntry();
             entryHostEl.innerHTML = '';
-            entryHostEl.style.display = 'none';
+            entryHostEl.style.display = 'block';
+            entryHostEl.style.height = '35%';
             delete entryHostEl._sourceEntryEl;
             delete entryHostEl._clonedEntryEl;
             delete entryHostEl._syncEntry;
