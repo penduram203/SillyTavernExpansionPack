@@ -58,7 +58,11 @@
     let currentModalCell = null;
     let modalOriginalKeyword = '';
     let modalOriginalImages = [];
-
+    let transplantedWorldEntry = null;
+    let transplantedWorldEntryParent = null;
+    let transplantedWorldEntryNextSibling = null;
+    let transplantedWorldEntryWasCollapsed = false;
+    
     // ===== セルモーダル レンダートークン =====
     let _currentGridRenderToken = 0;
 
@@ -578,14 +582,87 @@
         return _stjFindEntryByKeywordLoose(list, target);
     }
 
-    async function updateCellModalLorebookInfo(cell) {
+    function ensureWorldEntryExpanded(entryEl) {
+        if (!entryEl) return false;
+        const editEl = entryEl.querySelector('.world_entry_edit');
+        if (!editEl) return false;
+        const cs = window.getComputedStyle(editEl);
+        const isHidden = cs.display === 'none' || editEl.classList.contains('displayNone');
+        if (!isHidden) return false;
+
+        if (window.$) {
+            try {
+                window.$(editEl).show();
+                return true;
+            } catch (e) { /* ignore */ }
+        }
+        editEl.classList.remove('displayNone');
+        editEl.style.display = 'block';
+        return true;
+    }
+
+    function restoreWorldEntryCollapse(entryEl, wasCollapsed) {
+        if (!entryEl || !wasCollapsed) return;
+        const editEl = entryEl.querySelector('.world_entry_edit');
+        if (!editEl) return;
+        if (window.$) {
+            try {
+                window.$(editEl).hide();
+                return;
+            } catch (e) { /* ignore */ }
+        }
+        editEl.style.display = 'none';
+    }
+
+    function returnTransplantedWorldEntry() {
+        if (!transplantedWorldEntry) return;
+        const entryEl = transplantedWorldEntry;
+        const parent = transplantedWorldEntryParent;
+        const nextSibling = transplantedWorldEntryNextSibling;
+        const wasCollapsed = transplantedWorldEntryWasCollapsed;
+
+        transplantedWorldEntry = null;
+        transplantedWorldEntryParent = null;
+        transplantedWorldEntryNextSibling = null;
+        transplantedWorldEntryWasCollapsed = false;
+
+        entryEl.classList.remove('stj-transplanted-world-entry');
+        entryEl.style.removeProperty('width');
+        entryEl.style.removeProperty('max-width');
+        entryEl.style.removeProperty('margin');
+
+        if (parent && document.body.contains(parent)) {
+            try {
+                if (nextSibling && nextSibling.parentNode === parent) {
+                    parent.insertBefore(entryEl, nextSibling);
+                } else {
+                    parent.appendChild(entryEl);
+                }
+                restoreWorldEntryCollapse(entryEl, wasCollapsed);
+                return;
+            } catch (e) {
+                console.warn('[STJ Editor] world_entry 返却エラー:', e);
+            }
+        }
+
+        const fallbackParent = document.querySelector('#world_popup .world_entries_list, #world_popup');
+        if (fallbackParent) {
+            try {
+                fallbackParent.appendChild(entryEl);
+                restoreWorldEntryCollapse(entryEl, wasCollapsed);
+            } catch (e) { /* ignore */ }
+        }
+    }
+
+    async function transplantLorebookEntryToModal(cell) {
         const modal = currentCellModal;
         if (!modal || !cell) return;
-        const infoEl = modal.querySelector('#stj_cell_modal_lorebook_info');
-        if (!infoEl) return;
+        const slotEl = modal.querySelector('#stj_cell_modal_lorebook_slot');
+        if (!slotEl) return;
 
-        infoEl.innerHTML = '';
-        infoEl.style.display = 'none';
+        returnTransplantedWorldEntry();
+        slotEl.innerHTML = '';
+        slotEl.style.display = 'none';
 
         if (cell.classList.contains('stj-special-item')) return;
         const kw = getCellKeyword(cell).trim();
@@ -605,81 +682,34 @@
         const targetEntry = findEntryByKeyword(entries, kw);
         if (!targetEntry) return;
 
-        const lex = getLexDataFor(worldName, targetEntry.uid, targetEntry);
-        const choices = Array.isArray(lex.choices) ? lex.choices.filter(Boolean) : [];
-        const rows = [];
-        const content = String(targetEntry.content || '').trim();
-        if (content) {
-            rows.push({ type: 'content', displayStr: content });
+        const uidStr = String(targetEntry.uid);
+        let entryEl = document.querySelector(`#world_popup .world_entry[uid="${uidStr}"]`)
+            || document.querySelector(`.world_entry[uid="${uidStr}"]`);
+
+        if (!entryEl && window.LorebookExpansion?.forceInject) {
+            try {
+                await window.LorebookExpansion.forceInject();
+            } catch (e) { /* ignore */ }
+            entryEl = document.querySelector(`#world_popup .world_entry[uid="${uidStr}"]`)
+                || document.querySelector(`.world_entry[uid="${uidStr}"]`);
         }
 
-        const seen = new Set();
-        const choiceRows = [];
-        for (const c of choices) {
-            const choiceStr = normalizeChoiceItem(c);
-            if (!choiceStr || seen.has(choiceStr)) continue;
-            seen.add(choiceStr);
-            choiceRows.push({ type: 'choice', displayStr: choiceStr });
-        }
-
-        if (content && choiceRows.length > 0) {
-            rows.push({ type: 'divider' });
-        }
-
-        rows.push(...choiceRows);
-
-        if (rows.length === 0) return;
+        if (!entryEl) return;
 
         if (currentCellModal !== modal || currentModalCell !== cell) return;
 
-        const box = document.createElement('div');
-        box.className = 'stj-choices-popup-box';
-        box.style.cssText = 'max-height: 220px; overflow-y: auto;';
-        
-        for (const row of rows) {
-            if (!row) continue;
+        transplantedWorldEntry = entryEl;
+        transplantedWorldEntryParent = entryEl.parentNode;
+        transplantedWorldEntryNextSibling = entryEl.nextSibling;
+        transplantedWorldEntryWasCollapsed = ensureWorldEntryExpanded(entryEl);
 
-            // ── 区切り線 ──
-            if (row.type === 'divider') {
-                const divider = document.createElement('hr');
-                divider.className = 'stj-choices-popup-divider';
-                divider.style.cssText =
-                    'border: none; border-top: 1px solid #888; margin: 8px 0; opacity: 0.7;';
-                box.appendChild(divider);
-                continue;
-            }
+        entryEl.classList.add('stj-transplanted-world-entry');
+        entryEl.style.setProperty('width', '100%', 'important');
+        entryEl.style.setProperty('max-width', '100%', 'important');
+        entryEl.style.setProperty('margin', '0', 'important');
 
-            const line = document.createElement('div');
-            line.className = 'stj-choices-popup-line';
-            line.style.cssText = 'display: flex; align-items: flex-start; gap: 4px; margin: 2px 0;';
-
-            // ── 選択肢行（・付き） ──
-            if (row.type === 'choice') {
-                const bullet = document.createElement('span');
-                bullet.className = 'stj-choices-popup-bullet';
-                bullet.textContent = '・';
-                bullet.style.cssText = 'flex-shrink: 0; margin-right: 2px;';
-                line.appendChild(bullet);
-
-                const textEl = document.createElement('span');
-                textEl.className = 'stj-choices-popup-text';
-                textEl.textContent = row.displayStr;
-                textEl.style.whiteSpace = 'pre-wrap';
-                line.appendChild(textEl);
-                box.appendChild(line);
-                continue;
-            }
-
-            // ── エントリ内容行 ──
-            const textEl = document.createElement('span');
-            textEl.className = 'stj-choices-popup-text';
-            textEl.textContent = row.displayStr;
-            textEl.style.whiteSpace = 'pre-wrap';
-            line.appendChild(textEl);
-            box.appendChild(line);
-        }
-        infoEl.appendChild(box);
-        infoEl.style.display = 'block';
+        slotEl.appendChild(entryEl);
+        slotEl.style.display = 'block';
     }
 
     function checkMediaExists(mediaUrl) {
@@ -1557,7 +1587,7 @@ function extractChoiceTriggerText(choiceStr) {
                 <div class="stj-cell-modal-header">
                     <button type="button" class="stj-cell-modal-apply">${_t('stj.cell_modal.apply', '決定')}</button>
                     <button type="button" class="stj-cell-modal-cancel">${_t('stj.cell_modal.cancel', 'キャンセル')}</button>
-                    <div class="stj-cell-modal-keyword-display" id="stj_cell_modal_keyword_display"></div>
+                    <div class="stj-cell-modal-lorebook-slot" id="stj_cell_modal_lorebook_slot" style="display: none;"></div>
                 </div>
                 <div class="stj-cell-modal-lorebook-info" id="stj_cell_modal_lorebook_info" style="display: none;"></div>
                 <div class="stj-cell-modal-grid"></div>
@@ -1568,6 +1598,23 @@ function extractChoiceTriggerText(choiceStr) {
             const s = document.createElement('style');
             s.id = 'stj-cell-keyword-style';
             s.textContent = `
+                #stj_cell_modal .stj-cell-modal-content {
+                    transform: scale(1.35, 1.2);
+                    transform-origin: center center;
+                }
+                #stj_cell_modal .stj-cell-modal-grid {
+                    display: grid !important;
+                    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+                }
+                #stj_cell_modal .stj-cell-modal-lorebook-slot {
+                    max-height: 260px;
+                    overflow-y: auto;
+                    margin: 6px 0 10px;
+                    padding: 6px;
+                    border: 1px solid rgba(255, 255, 255, 0.2);
+                    border-radius: 6px;
+                    background: rgba(0, 0, 0, 0.25);
+                }
                 .stj-cell-modal-keyword-display {
                     padding: 10px 16px;
                     margin: 0;
@@ -1681,13 +1728,13 @@ function extractChoiceTriggerText(choiceStr) {
         modalOriginalKeyword = getCellKeyword(cell); // キーワード保持のみ（表示・編集はしない）
 
         const isSpecial = cell.classList.contains('stj-special-item');
-        const lorebookInfoEl = currentCellModal.querySelector('#stj_cell_modal_lorebook_info');
+        const lorebookSlotEl = currentCellModal.querySelector('#stj_cell_modal_lorebook_slot');
 
-        if (lorebookInfoEl) {
-            lorebookInfoEl.innerHTML = '';
-            lorebookInfoEl.style.display = 'none';
+        if (lorebookSlotEl) {
+            lorebookSlotEl.innerHTML = '';
+            lorebookSlotEl.style.display = 'none';
             if (!isSpecial) {
-                updateCellModalLorebookInfo(cell).catch(e => console.warn('[STJ Editor] lorebook info error:', e));
+                transplantLorebookEntryToModal(cell).catch(e => console.warn('[STJ Editor] lorebook transplant error:', e));
             }
         }
 
@@ -1727,10 +1774,11 @@ function extractChoiceTriggerText(choiceStr) {
 
     function closeCellModal(revert) {
         if (!currentCellModal) return;
-        const lorebookInfoEl = currentCellModal.querySelector('#stj_cell_modal_lorebook_info');
-        if (lorebookInfoEl) {
-            lorebookInfoEl.innerHTML = '';
-            lorebookInfoEl.style.display = 'none';
+        returnTransplantedWorldEntry();
+        const lorebookSlotEl = currentCellModal.querySelector('#stj_cell_modal_lorebook_slot');
+        if (lorebookSlotEl) {
+            lorebookSlotEl.innerHTML = '';
+            lorebookSlotEl.style.display = 'none';
         }
         const zoom = document.getElementById('stj_media_zoom');
         if (zoom) zoom.remove();
@@ -1804,10 +1852,11 @@ function extractChoiceTriggerText(choiceStr) {
         updateCellPreview(cell);
         runLiveTest();
         autoSave({ immediate: true });
-        const lorebookInfoEl = currentCellModal.querySelector('#stj_cell_modal_lorebook_info');
-        if (lorebookInfoEl) {
-            lorebookInfoEl.innerHTML = '';
-            lorebookInfoEl.style.display = 'none';
+        returnTransplantedWorldEntry();
+        const lorebookSlotEl = currentCellModal.querySelector('#stj_cell_modal_lorebook_slot');
+        if (lorebookSlotEl) {
+            lorebookSlotEl.innerHTML = '';
+            lorebookSlotEl.style.display = 'none';
         }
         const zoom = document.getElementById('stj_media_zoom');
         if (zoom) zoom.remove();
