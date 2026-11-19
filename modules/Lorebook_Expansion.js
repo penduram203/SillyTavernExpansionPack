@@ -19,32 +19,6 @@
 //          ・新形式キー (worldName\x1fcharKey): 該当 world へ
 //          ・旧形式キー (charKey のみ): キャラ本来のロアブックへ
 //
-// ★ v6 修正:
-//   - ST起動時のWIドロワー自動オープン問題への対策を強化
-//     ST本体が jQuery.trigger('click') や classList.add を直接使う場合でも
-//     MutationObserver で強制クローズする
-//
-// ★ Phase 5 修正:
-//   - LEX データの保存先を per-world ストアに変更
-//   - 旧 character.data からの一括移行 (lexStorageMigratedV1 フラグ)
-//   - getDataFor/setDataFor は per-world ストアを一次情報源とする
-//   - init() / CHARACTER_PAGE_LOADED で移行を試行
-//
-// ★ スクロールリセット問題修正 (v2):
-//   - setupObserver の監視対象を body 全体 → #world_popup に限定
-//   - scheduleInjection にスクロール直後スキップを追加
-//   - injectExpansionSections のスクロール位置保存・復元を強化
-//   - ST本体の clearEntryList による独立リセットに対抗するため、
-//     「永続スクロールトラッカー」を追加:
-//       ・ユーザー操作中のスクロール位置を継続記録
-//       ・STがリセットしたら毎フレーム強制復元（_lbeScrollEnforceLoop）
-//       ・DOM一括削除を検知したら段階的復元（_lbeScheduleRestore）
-//
-// ★ v4 修正 (Phase 6):
-//   - Negative_prompt フィールドを追加（img_prompt 直後に2行のテキストエリア）
-//   - contentHeightRatio の既定値を 0.6 → 0.45 に変更（現在の5行 → 4行相当）
-//   - v3 設定の contentHeightRatio=0.6 は v4 移行時に自動で 0.45 に更新
-
 import './i18n.js';
 
 function _t(k, fb, p) {
