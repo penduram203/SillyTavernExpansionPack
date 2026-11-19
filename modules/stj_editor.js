@@ -1598,6 +1598,19 @@ function extractChoiceTriggerText(choiceStr) {
             s.id = 'stj-cell-keyword-style';
             s.textContent = `
                 #stj_cell_modal .stj-cell-modal-content {
+                    display: flex !important;
+                    flex-direction: column !important;
+                }
+                #stj_cell_modal .stj-cell-modal-header {
+                    display: flex !important;
+                    flex-direction: row !important;
+                    flex-wrap: nowrap !important;
+                    align-items: center !important;
+                    gap: 8px;
+                    width: 100%;
+                    flex-shrink: 0;
+                }
+                #stj_cell_modal .stj-cell-modal-content {
                     width: calc(var(--stj-cell-modal-base-w, 720px) * 1.35) !important;
                     max-width: 96vw !important;
                     height: calc(var(--stj-cell-modal-base-h, 80vh) * 1.15) !important;
@@ -1608,6 +1621,8 @@ function extractChoiceTriggerText(choiceStr) {
                     grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
                 }
                 #stj_cell_modal .stj-cell-modal-entry-host {
+                    display: block;
+                    width: 100%;
                     max-height: 36vh;
                     overflow-y: auto;
                     margin: 6px 0 10px;
@@ -1621,6 +1636,9 @@ function extractChoiceTriggerText(choiceStr) {
                     width: 100%;
                 }
                 .stj-cell-modal-keyword-display {
+                    display: inline-block;
+                    flex: 1 1 auto;
+                    min-width: 0;
                     padding: 10px 16px;
                     margin: 0;
                     font-size: 28px;
@@ -1753,13 +1771,18 @@ function extractChoiceTriggerText(choiceStr) {
             _cellVideoIORoot = null;
         }
 
-        const kwDisplayEl = currentCellModal.querySelector('#stj_cell_modal_keyword_display');
+        const headerEl = currentCellModal.querySelector('.stj-cell-modal-header');
+        let kwDisplayEl = currentCellModal.querySelector('#stj_cell_modal_keyword_display');
+        if (!kwDisplayEl && headerEl) {
+            kwDisplayEl = document.createElement('div');
+            kwDisplayEl.className = 'stj-cell-modal-keyword-display';
+            kwDisplayEl.id = 'stj_cell_modal_keyword_display';
+            headerEl.appendChild(kwDisplayEl);
+        } else if (kwDisplayEl && headerEl && kwDisplayEl.parentElement !== headerEl) {
+            headerEl.appendChild(kwDisplayEl);
+        }
         if (kwDisplayEl) {
-            if (isSpecial) {
-                kwDisplayEl.textContent = '';
-            } else {
-                kwDisplayEl.textContent = getCellKeyword(cell) || '';
-            }
+            kwDisplayEl.textContent = isSpecial ? '' : (getCellKeyword(cell) || modalOriginalKeyword || '');
         }
 
         currentCellModal.classList.add('visible');
