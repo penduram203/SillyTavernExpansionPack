@@ -16,7 +16,7 @@
     // ★ gic.js と共有する定数（gic.js 側は独立して定義しているが、
     //   stj_editor.js から sync 関数内で参照するためここでも定義する）
     const UNREGISTER_EXCLUDED_KEYS = new Set(['default', 'thumbnail']);
-    
+
     const mediaCache = new Map();
     const MEDIA_CACHE_FALSE_TTL_MS = 3000;
     const MEDIA_CHECK_TIMEOUT_MS = 5000;
@@ -209,7 +209,7 @@
         `;
         document.head.appendChild(style);
     })();
-    
+
     // ===== セルデータヘルパー =====
     function getCellImages(cell) {
         try {
@@ -463,7 +463,7 @@
     }
 
     // ============================================================
-    // ★ ロアブック連携ヘルパー（選択肢ボタン用）
+    // ★ ロアブック連携ヘルパー（エントリ移植用）
     // ============================================================
     function getCharacterWorldInfoName() {
         const ctx = getSTContext();
@@ -578,14 +578,80 @@
         return _stjFindEntryByKeywordLoose(list, target);
     }
 
-    async function updateCellModalLorebookInfo(cell) {
+    function escapeCssAttrValue(val) {
+        if (window.CSS && typeof window.CSS.escape === 'function') {
+            return window.CSS.escape(String(val));
+        }
+        return String(val).replace(/["\\]/g, '\\$&');
+    }
+
+    function findSourceWorldEntryEl(entries, targetEntry, kw) {
+        const popup = document.getElementById('world_popup');
+        if (!popup) return null;
+
+        if (targetEntry && targetEntry.uid !== undefined && targetEntry.uid !== null) {
+            const byUid = popup.querySelector(`.world_entry[uid="${escapeCssAttrValue(targetEntry.uid)}"]`);
+            if (byUid) return byUid;
+        }
+
+        const targetKw = String(kw || '').trim();
+        if (!targetKw) return null;
+
+        for (const el of popup.querySelectorAll('.world_entry[uid]')) {
+            const uid = el.getAttribute('uid');
+            const entry = entries ? entries[uid] : null;
+            if (entry && getEntryKeyword(entry) === targetKw) return el;
+
+            const commentInput = el.querySelector(
+                'input[name="comment"], textarea[name="comment"], .world_entry_comment input, .world_entry_comment textarea'
+            );
+            if (commentInput && (commentInput.value || '').trim() === targetKw) return el;
+        }
+        return null;
+    }
+
+    function syncClonedEntryToSource(clonedEl, sourceEl) {
+        if (!clonedEl || !sourceEl) return;
+
+        const fields = clonedEl.querySelectorAll('input, textarea, select');
+        fields.forEach((field) => {
+            const name = field.getAttribute('name');
+            const cls = field.className || '';
+            let target = null;
+
+            if (name) {
+                target = sourceEl.querySelector(`[name="${escapeCssAttrValue(name)}"]`);
+            } else if (cls) {
+                const firstCls = cls.trim().split(/\s+/).find(c => c.startsWith('lbe-') || c.startsWith('world_entry'));
+                if (firstCls) target = sourceEl.querySelector('.' + escapeCssAttrValue(firstCls));
+            }
+
+            if (!target) return;
+            if (field.type === 'checkbox' || field.type === 'radio') {
+                target.checked = field.checked;
+            } else {
+                target.value = field.value;
+            }
+            target.dispatchEvent(new Event('input', { bubbles: true }));
+            target.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+
+        if (window.$) {
+            window.$(sourceEl).trigger('change');
+        }
+    }
+
+    async function mountWorldEntryInCellModal(cell) {
         const modal = currentCellModal;
         if (!modal || !cell) return;
-        const infoEl = modal.querySelector('#stj_cell_modal_lorebook_info');
-        if (!infoEl) return;
+        const hostEl = modal.querySelector('#stj_cell_modal_entry_host');
+        if (!hostEl) return;
 
-        infoEl.innerHTML = '';
-        infoEl.style.display = 'none';
+        hostEl.innerHTML = '';
+        hostEl.style.display = 'none';
+        delete hostEl._sourceEntryEl;
+        delete hostEl._clonedEntryEl;
+        delete hostEl._syncEntry;
 
         if (cell.classList.contains('stj-special-item')) return;
         const kw = getCellKeyword(cell).trim();
@@ -605,81 +671,44 @@
         const targetEntry = findEntryByKeyword(entries, kw);
         if (!targetEntry) return;
 
-        const lex = getLexDataFor(worldName, targetEntry.uid, targetEntry);
-        const choices = Array.isArray(lex.choices) ? lex.choices.filter(Boolean) : [];
-        const rows = [];
-        const content = String(targetEntry.content || '').trim();
-        if (content) {
-            rows.push({ type: 'content', displayStr: content });
-        }
-
-        const seen = new Set();
-        const choiceRows = [];
-        for (const c of choices) {
-            const choiceStr = normalizeChoiceItem(c);
-            if (!choiceStr || seen.has(choiceStr)) continue;
-            seen.add(choiceStr);
-            choiceRows.push({ type: 'choice', displayStr: choiceStr });
-        }
-
-        if (content && choiceRows.length > 0) {
-            rows.push({ type: 'divider' });
-        }
-
-        rows.push(...choiceRows);
-
-        if (rows.length === 0) return;
+        const sourceEl = findSourceWorldEntryEl(entries, targetEntry, kw);
+        if (!sourceEl) return;
 
         if (currentCellModal !== modal || currentModalCell !== cell) return;
 
-        const box = document.createElement('div');
-        box.className = 'stj-choices-popup-box';
-        box.style.cssText = 'max-height: 220px; overflow-y: auto;';
-        
-        for (const row of rows) {
-            if (!row) continue;
+        const cloned = sourceEl.cloneNode(true);
+        cloned.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
+        cloned.classList.remove('lbe-extras-collapsed');
+        cloned.querySelectorAll('.lbe-extras-collapsed').forEach(el => el.classList.remove('lbe-extras-collapsed'));
 
-            // ── 区切り線 ──
-            if (row.type === 'divider') {
-                const divider = document.createElement('hr');
-                divider.className = 'stj-choices-popup-divider';
-                divider.style.cssText =
-                    'border: none; border-top: 1px solid #888; margin: 8px 0; opacity: 0.7;';
-                box.appendChild(divider);
-                continue;
-            }
-
-            const line = document.createElement('div');
-            line.className = 'stj-choices-popup-line';
-            line.style.cssText = 'display: flex; align-items: flex-start; gap: 4px; margin: 2px 0;';
-
-            // ── 選択肢行（・付き） ──
-            if (row.type === 'choice') {
-                const bullet = document.createElement('span');
-                bullet.className = 'stj-choices-popup-bullet';
-                bullet.textContent = '・';
-                bullet.style.cssText = 'flex-shrink: 0; margin-right: 2px;';
-                line.appendChild(bullet);
-
-                const textEl = document.createElement('span');
-                textEl.className = 'stj-choices-popup-text';
-                textEl.textContent = row.displayStr;
-                textEl.style.whiteSpace = 'pre-wrap';
-                line.appendChild(textEl);
-                box.appendChild(line);
-                continue;
-            }
-
-            // ── エントリ内容行 ──
-            const textEl = document.createElement('span');
-            textEl.className = 'stj-choices-popup-text';
-            textEl.textContent = row.displayStr;
-            textEl.style.whiteSpace = 'pre-wrap';
-            line.appendChild(textEl);
-            box.appendChild(line);
+        const editBlock = cloned.querySelector('.world_entry_edit');
+        if (editBlock) {
+            editBlock.style.display = 'block';
+            editBlock.classList.remove('lbe-extras-collapsed');
         }
-        infoEl.appendChild(box);
-        infoEl.style.display = 'block';
+
+        const syncNow = () => syncClonedEntryToSource(cloned, sourceEl);
+        cloned.addEventListener('input', syncNow);
+        cloned.addEventListener('change', syncNow);
+        cloned.addEventListener('click', (e) => {
+            if (e.target.closest('button, input, select, textarea, .lbe-extras-toggle')) {
+                setTimeout(syncNow, 0);
+            }
+        });
+
+        hostEl._sourceEntryEl = sourceEl;
+        hostEl._clonedEntryEl = cloned;
+        hostEl._syncEntry = syncNow;
+        hostEl.appendChild(cloned);
+        hostEl.style.display = 'block';
+
+        if (window.LorebookExpansion?.forceInject) {
+            setTimeout(() => {
+                if (currentCellModal === modal && currentModalCell === cell) {
+                    window.LorebookExpansion.forceInject().catch(() => {});
+                }
+            }, 150);
+        }
     }
 
     function checkMediaExists(mediaUrl) {
@@ -762,7 +791,7 @@ function extractChoiceTriggerText(choiceStr) {
     if (!str) return '';
     return str;
 }
-    
+
     function extractFileNameFromPath(path) {
         if (!path || typeof path !== 'string') return '';
         if (path.startsWith('data:')) return '';
@@ -1272,7 +1301,7 @@ function extractChoiceTriggerText(choiceStr) {
         const badge = document.getElementById('stj-drag-mode-badge');
         if (badge) badge.style.display = 'none';
     }
-    
+
     function updateDragTarget(s, x, y) {
         const zone = findDropZone(s, x, y);
 
@@ -1559,7 +1588,7 @@ function extractChoiceTriggerText(choiceStr) {
                     <button type="button" class="stj-cell-modal-cancel">${_t('stj.cell_modal.cancel', 'キャンセル')}</button>
                     <div class="stj-cell-modal-keyword-display" id="stj_cell_modal_keyword_display"></div>
                 </div>
-                <div class="stj-cell-modal-lorebook-info" id="stj_cell_modal_lorebook_info" style="display: none;"></div>
+                <div class="stj-cell-modal-entry-host" id="stj_cell_modal_entry_host" style="display: none;"></div>
                 <div class="stj-cell-modal-grid"></div>
             </div>
         `;
@@ -1568,6 +1597,29 @@ function extractChoiceTriggerText(choiceStr) {
             const s = document.createElement('style');
             s.id = 'stj-cell-keyword-style';
             s.textContent = `
+                #stj_cell_modal .stj-cell-modal-content {
+                    width: calc(var(--stj-cell-modal-base-w, 720px) * 1.35) !important;
+                    max-width: 96vw !important;
+                    height: calc(var(--stj-cell-modal-base-h, 80vh) * 1.15) !important;
+                    max-height: 96vh !important;
+                }
+                #stj_cell_modal .stj-cell-modal-grid {
+                    display: grid !important;
+                    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+                }
+                #stj_cell_modal .stj-cell-modal-entry-host {
+                    max-height: 36vh;
+                    overflow-y: auto;
+                    margin: 6px 0 10px;
+                    padding: 8px;
+                    border: 1px solid rgba(255, 255, 255, 0.2);
+                    border-radius: 6px;
+                    background: rgba(0, 0, 0, 0.25);
+                }
+                #stj_cell_modal .stj-cell-modal-entry-host .world_entry {
+                    display: block !important;
+                    width: 100%;
+                }
                 .stj-cell-modal-keyword-display {
                     padding: 10px 16px;
                     margin: 0;
@@ -1590,7 +1642,7 @@ function extractChoiceTriggerText(choiceStr) {
             `;
             document.head.appendChild(s);
         }
-        
+
         document.body.appendChild(modal);
 
         modal.querySelector('.stj-cell-modal-apply').addEventListener('click', (e) => {
@@ -1681,13 +1733,13 @@ function extractChoiceTriggerText(choiceStr) {
         modalOriginalKeyword = getCellKeyword(cell); // キーワード保持のみ（表示・編集はしない）
 
         const isSpecial = cell.classList.contains('stj-special-item');
-        const lorebookInfoEl = currentCellModal.querySelector('#stj_cell_modal_lorebook_info');
+        const entryHostEl = currentCellModal.querySelector('#stj_cell_modal_entry_host');
 
-        if (lorebookInfoEl) {
-            lorebookInfoEl.innerHTML = '';
-            lorebookInfoEl.style.display = 'none';
+        if (entryHostEl) {
+            entryHostEl.innerHTML = '';
+            entryHostEl.style.display = 'none';
             if (!isSpecial) {
-                updateCellModalLorebookInfo(cell).catch(e => console.warn('[STJ Editor] lorebook info error:', e));
+                mountWorldEntryInCellModal(cell).catch(e => console.warn('[STJ Editor] entry mount error:', e));
             }
         }
 
@@ -1709,7 +1761,7 @@ function extractChoiceTriggerText(choiceStr) {
                 kwDisplayEl.textContent = getCellKeyword(cell) || '';
             }
         }
-        
+
         currentCellModal.classList.add('visible');
         document.body.classList.add('stj-cell-modal-active');
 
@@ -1727,10 +1779,13 @@ function extractChoiceTriggerText(choiceStr) {
 
     function closeCellModal(revert) {
         if (!currentCellModal) return;
-        const lorebookInfoEl = currentCellModal.querySelector('#stj_cell_modal_lorebook_info');
-        if (lorebookInfoEl) {
-            lorebookInfoEl.innerHTML = '';
-            lorebookInfoEl.style.display = 'none';
+        const entryHostEl = currentCellModal.querySelector('#stj_cell_modal_entry_host');
+        if (entryHostEl) {
+            entryHostEl.innerHTML = '';
+            entryHostEl.style.display = 'none';
+            delete entryHostEl._sourceEntryEl;
+            delete entryHostEl._clonedEntryEl;
+            delete entryHostEl._syncEntry;
         }
         const zoom = document.getElementById('stj_media_zoom');
         if (zoom) zoom.remove();
@@ -1804,10 +1859,14 @@ function extractChoiceTriggerText(choiceStr) {
         updateCellPreview(cell);
         runLiveTest();
         autoSave({ immediate: true });
-        const lorebookInfoEl = currentCellModal.querySelector('#stj_cell_modal_lorebook_info');
-        if (lorebookInfoEl) {
-            lorebookInfoEl.innerHTML = '';
-            lorebookInfoEl.style.display = 'none';
+        const entryHostEl = currentCellModal.querySelector('#stj_cell_modal_entry_host');
+        if (entryHostEl) {
+            if (typeof entryHostEl._syncEntry === 'function') entryHostEl._syncEntry();
+            entryHostEl.innerHTML = '';
+            entryHostEl.style.display = 'none';
+            delete entryHostEl._sourceEntryEl;
+            delete entryHostEl._clonedEntryEl;
+            delete entryHostEl._syncEntry;
         }
         const zoom = document.getElementById('stj_media_zoom');
         if (zoom) zoom.remove();
@@ -1861,7 +1920,7 @@ function extractChoiceTriggerText(choiceStr) {
         const grid = currentCellModal.querySelector('.stj-cell-modal-grid');
         if (!grid) return;
 
-        const neededSlots = Math.max(9, Math.ceil(images.length / 3) * 3);
+        const neededSlots = Math.max(8, Math.ceil(images.length / 4) * 4);
         const currentCount = grid.children.length;
         for (let i = currentCount; i < neededSlots; i++) {
             const slot = document.createElement('div');
@@ -2522,7 +2581,7 @@ function extractChoiceTriggerText(choiceStr) {
             String.fromCharCode(c.charCodeAt(0) + 0xFEE0)
         );
     }
-    
+
     function _stjExtractChoiceNumber(text) {
         if (!text || typeof text !== 'string') return null;
         // ★ 全角数字を半角化してから抽出（LorebookExpansion 側は全角非対応）
@@ -2624,7 +2683,7 @@ function extractChoiceTriggerText(choiceStr) {
 
         return null;
     }
-    
+
     async function _stjBuildChoiceGraph(imageMap) {
         const empty = { children: new Map(), parents: new Map(), allNodes: new Set() };
         const worldName = getCharacterWorldInfoName();
@@ -2935,7 +2994,7 @@ function extractChoiceTriggerText(choiceStr) {
             _stjApplyTreeLayout().catch(e => console.warn('[STJ Editor] ツリーレイアウトエラー:', e));
         }, 100);
     }
-    
+
 // ロアブックの正しい並び順を完全に維持してJSON編集画面のセルを構築・同期する関数
 function populateFormFromImageMap(imageMap, preserveOrder = false) {
     const toFileNames = (val) => {
@@ -2981,7 +3040,7 @@ function populateFormFromImageMap(imageMap, preserveOrder = false) {
 
         // 変更されたキー（改名等）の追従：マップにないDOM要素があれば、まだ使われていない古いDOMをそれに割り当てる
         const unmatchedItems = existingItems.filter(item => !activeKeys.includes(getCellKeyword(item)));
-        
+
         // ロアブックの正しい並び順（activeKeys）に従ってDOM要素を並べ替えながら更新する
         activeKeys.forEach((key, index) => {
             let item = itemMapByKeyword.get(key);
@@ -2997,7 +3056,7 @@ function populateFormFromImageMap(imageMap, preserveOrder = false) {
                 const files = toFileNames(imageMap[key]);
                 setCellImages(item, files);
                 updateCellPreview(item);
-                
+
                 // 正しい順番（ロアブックのインデックス順）にDOMをコンテナ内で移動させる
                 container.appendChild(item);
             } else {
@@ -3359,11 +3418,11 @@ function populateFormFromImageMap(imageMap, preserveOrder = false) {
                             char.data.extensions.image_display_extension = imageMap;
                         }
                     } catch (e) { /* ignore */ }
-    
+
                     window.dispatchEvent(new CustomEvent('lbe-image-map-updated', {
                         detail: { charName, imageMap }
                     }));
-    
+
                     _explicitlyDeletedKeys.clear();
                 }
             } catch (e) {
@@ -3685,7 +3744,7 @@ function populateFormFromImageMap(imageMap, preserveOrder = false) {
             `;
             document.head.appendChild(s);
         }
-        
+
         document.body.appendChild(modal);
         stjModalEl = modal;
 
@@ -3704,7 +3763,7 @@ function populateFormFromImageMap(imageMap, preserveOrder = false) {
                 testToggleBtn.textContent = _t('stj.header.title', '🔍 リアルタイムキーワード反応テスト') + (expanded ? ' ▼' : ' ▲');
             });
         }
-        
+
         const testInput = document.getElementById('stj_test_input');
         if (testInput) testInput.addEventListener('input', runLiveTest);
 
@@ -4112,7 +4171,7 @@ async function _restoreImageMapUnified(charName) {
 
     return restored;
 }
-    
+
 function _getBagStateFilesForKeyword(charName, keyword) {
     try {
         const ctx = getSTContext();
@@ -4125,7 +4184,7 @@ function _getBagStateFilesForKeyword(charName, keyword) {
         return Object.keys(state.flags).filter(p => typeof p === 'string' && p);
     } catch (e) { return []; }
 }
-    
+
 function getEntryKeyword(entry) {
     if (!entry) return '';
     const comment = (typeof entry.comment === 'string' ? entry.comment.trim() : '');
@@ -4192,7 +4251,7 @@ async function syncLorebookEntriesToImageMap() {
             const newKw = newKeywords[i];
             if (imageMap[oldKw] !== undefined) {
                 const oldData = imageMap[oldKw];
-                
+
                 // ★ 古いキーの「オブジェクト内の位置（順序）」を完全に維持したまま新しいキー名に変更する
                 const newImageMap = {};
                 for (const [k, v] of Object.entries(imageMap)) {
@@ -4459,20 +4518,11 @@ function setupLorebookEntryWatcher() {
             if (c) c.textContent = _t('stj.cell_modal.cancel', 'キャンセル');
             const kw = currentCellModal.querySelector('.stj-cell-modal-keyword');
             if (kw) kw.placeholder = _t('stj.cell_modal.keyword_placeholder', 'キーワード');
-            const ch = currentCellModal.querySelector('.stj-cell-modal-choices');
-            if (ch) ch.textContent = _t('stj.choices.button', '選択肢');
-        }
-
-        const choicesPopup = document.getElementById('stj_choices_popup');
-        if (choicesPopup) {
-            choicesPopup.querySelectorAll('.stj-choices-popup-label').forEach(el => {
-                el.textContent = _t('stj.choices.label', '選択肢') + ' ';
-            });
         }
 
         try { runLiveTest(); } catch (e) { /* ignore */ }
     }
-    
+
     function initStjEditor() {
         const context = getSTContext();
         if (!context) { setTimeout(initStjEditor, 500); return; }
@@ -4491,7 +4541,7 @@ function setupLorebookEntryWatcher() {
                 });
             }
         } catch (e) { /* ignore */ }
-        
+
         window.STJEditor = {
             open: function () {
                 try { openExportModal(); return true; }
