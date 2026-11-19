@@ -655,20 +655,11 @@
         }
     }
 
-function expandClonedEntryPanels(clonedEl) {
+    function expandClonedEntryPanels(clonedEl) {
         if (!clonedEl) return;
 
-        clonedEl.querySelectorAll(
-            '.world_entry_toggle, .drag-handle, .world_entry_collapse, [data-action="toggle"], .fa-chevron-down, .fa-chevron-up, .fa-caret-down, .fa-caret-up'
-        ).forEach((el) => {
-            if (
-                el.closest('button, .inline-drawer-toggle, .world_entry_header_button') ||
-                el.classList.contains('world_entry_toggle') ||
-                el.classList.contains('drag-handle')
-            ) {
-                el.remove();
-            }
-        });
+        // ドラッグハンドルのみ除去（開閉トグルは残す）
+        clonedEl.querySelectorAll('.drag-handle').forEach((el) => el.remove());
 
         const collapseClasses = [
             'lbe-extras-collapsed',
@@ -680,6 +671,12 @@ function expandClonedEntryPanels(clonedEl) {
         clonedEl.classList.remove(...collapseClasses);
         clonedEl.classList.add('open', 'expanded');
 
+        // トグルアイコンを下向き(down)から上向き(up)に切り替え
+        clonedEl.querySelectorAll('.inline-drawer-toggle').forEach((toggle) => {
+            toggle.classList.remove('down', 'fa-circle-chevron-down', 'fa-chevron-down', 'fa-caret-down');
+            toggle.classList.add('up', 'fa-circle-chevron-up');
+        });
+
         clonedEl.querySelectorAll('*').forEach((el) => {
             collapseClasses.forEach((cls) => {
                 if (el.classList.contains(cls)) {
@@ -687,9 +684,9 @@ function expandClonedEntryPanels(clonedEl) {
                 }
             });
             if (
+                el.classList.contains('inline-drawer-content') ||
                 el.classList.contains('world_entry_edit') ||
                 el.classList.contains('world_entry_form') ||
-                el.classList.contains('inline-drawer-content') ||
                 el.classList.contains('lbe-extras-panel') ||
                 el.classList.contains('world_entry_body') ||
                 el.getAttribute('name') === 'PositionBlock'
@@ -705,6 +702,22 @@ function expandClonedEntryPanels(clonedEl) {
                 el.style.setProperty('display', '', 'important');
             }
         });
+    }
+
+    async function ensureSourceEntryExpanded(sourceEl) {
+        if (!sourceEl) return;
+        const toggle = sourceEl.querySelector('.inline-drawer-toggle');
+        const content = sourceEl.querySelector('.inline-drawer-content');
+        const isClosed =
+            (toggle && toggle.classList.contains('down')) ||
+            !content ||
+            content.style.display === 'none' ||
+            content.children.length === 0;
+
+        if (isClosed && toggle) {
+            toggle.click();
+            await new Promise((r) => setTimeout(r, 80));
+        }
     }
     
     function applyEntrySnapshotToEl(el, snap) {
@@ -827,6 +840,9 @@ function expandClonedEntryPanels(clonedEl) {
         const sourceEl = findSourceWorldEntryEl(entries, targetEntry, kw);
         if (!sourceEl) return;
 
+        // ★ クローン前に元要素のドロワーを展開し、SillyTavern本体に中身を生成させる
+        await ensureSourceEntryExpanded(sourceEl);
+
         if (currentCellModal !== modal || currentModalCell !== cell) return;
 
         const cloned = sourceEl.cloneNode(true);
@@ -844,6 +860,26 @@ function expandClonedEntryPanels(clonedEl) {
         });
 
         expandClonedEntryPanels(cloned);
+
+        // ★ クローン側の開閉ボタンにも手動トグル動作を付与
+        cloned.querySelectorAll('.inline-drawer-toggle').forEach((toggle) => {
+            toggle.addEventListener('click', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                const drawer = toggle.closest('.inline-drawer') || cloned;
+                const content = drawer.querySelector('.inline-drawer-content');
+                const opening = toggle.classList.contains('down');
+                if (opening) {
+                    toggle.classList.remove('down', 'fa-circle-chevron-down');
+                    toggle.classList.add('up', 'fa-circle-chevron-up');
+                    if (content) content.style.setProperty('display', 'block', 'important');
+                } else {
+                    toggle.classList.remove('up', 'fa-circle-chevron-up');
+                    toggle.classList.add('down', 'fa-circle-chevron-down');
+                    if (content) content.style.setProperty('display', 'none', 'important');
+                }
+            });
+        });
 
         const snap = captureEntrySnapshot(cloned);
         const syncState = { active: false };
@@ -1838,22 +1874,21 @@ function extractChoiceTriggerText(choiceStr) {
                     box-sizing: border-box;
                     flex: 0 0 35% !important;
                 }
-                #stj_cell_modal .stj-cell-modal-entry-host .world_entry {
+#stj_cell_modal .stj-cell-modal-entry-host .world_entry {
                     display: block !important;
                     width: 100%;
                     height: auto !important;
                     max-height: none !important;
                 }
-                #stj_cell_modal .stj-cell-modal-entry-host .world_entry > *:not(.world_entry_toggle):not(.drag-handle) {
-                    display: block !important;
+                #stj_cell_modal .stj-cell-modal-entry-host .world_entry > *:not(.drag-handle) {
                     visibility: visible !important;
                     opacity: 1 !important;
                     height: auto !important;
                     max-height: none !important;
                 }
+                #stj_cell_modal .stj-cell-modal-entry-host .inline-drawer-content,
                 #stj_cell_modal .stj-cell-modal-entry-host .world_entry_edit,
                 #stj_cell_modal .stj-cell-modal-entry-host .world_entry_form,
-                #stj_cell_modal .stj-cell-modal-entry-host .inline-drawer-content,
                 #stj_cell_modal .stj-cell-modal-entry-host .lbe-extras-panel {
                     display: block !important;
                     visibility: visible !important;
@@ -1862,7 +1897,6 @@ function extractChoiceTriggerText(choiceStr) {
                     max-height: none !important;
                     overflow: visible !important;
                 }
-                #stj_cell_modal .stj-cell-modal-entry-host .world_entry_toggle,
                 #stj_cell_modal .stj-cell-modal-entry-host .drag-handle {
                     display: none !important;
                 }
