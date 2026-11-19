@@ -655,14 +655,36 @@
         }
     }
 
+    function collapseLbeExtrasPanel(clonedEl) {
+        if (!clonedEl) return;
+
+        clonedEl.classList.add('lbe-extras-collapsed');
+        clonedEl.querySelectorAll('.lbe-extras-toggle').forEach((toggle) => {
+            toggle.classList.remove('open', 'expanded');
+            toggle.classList.add('lbe-extras-collapsed', 'collapsed');
+            const icon = toggle.querySelector('.lbe-extras-icon, i');
+            if (icon) {
+                icon.classList.remove('up', 'fa-circle-chevron-up', 'fa-chevron-up', 'fa-caret-up');
+                icon.classList.add('down', 'fa-circle-chevron-down');
+            }
+        });
+
+        clonedEl.querySelectorAll('.lbe-extras-panel').forEach((panel) => {
+            panel.classList.remove('open', 'expanded');
+            panel.classList.add('lbe-extras-collapsed', 'collapsed');
+            panel.style.setProperty('display', 'none', 'important');
+        });
+    }
+
     function expandClonedEntryPanels(clonedEl) {
         if (!clonedEl) return;
 
-        // ドラッグハンドルのみ除去（開閉トグルは残す）
-        clonedEl.querySelectorAll('.drag-handle').forEach((el) => el.remove());
+        // ドラッグハンドルおよび指定の2要素を削除
+        clonedEl.querySelectorAll('.drag-handle, .inline-drawer-header, [name="keywordsAndLogicBlock"]').forEach((el) => {
+            el.remove();
+        });
 
         const collapseClasses = [
-            'lbe-extras-collapsed',
             'collapsed',
             'closed',
             'is-collapsed',
@@ -671,13 +693,17 @@
         clonedEl.classList.remove(...collapseClasses);
         clonedEl.classList.add('open', 'expanded');
 
-        // トグルアイコンを下向き(down)から上向き(up)に切り替え
+        // トグルアイコンを下向き(down)から上向き(up)に切り替え（lbe-extras-toggle は除外）
         clonedEl.querySelectorAll('.inline-drawer-toggle').forEach((toggle) => {
             toggle.classList.remove('down', 'fa-circle-chevron-down', 'fa-chevron-down', 'fa-caret-down');
             toggle.classList.add('up', 'fa-circle-chevron-up');
         });
 
         clonedEl.querySelectorAll('*').forEach((el) => {
+            // 詳細設定パネル(.lbe-extras-panel)とその内部は常時展開の対象から除外する
+            if (el.closest('.lbe-extras-panel') || el.classList.contains('lbe-extras-panel')) {
+                return;
+            }
             collapseClasses.forEach((cls) => {
                 if (el.classList.contains(cls)) {
                     el.classList.remove(cls);
@@ -687,7 +713,6 @@
                 el.classList.contains('inline-drawer-content') ||
                 el.classList.contains('world_entry_edit') ||
                 el.classList.contains('world_entry_form') ||
-                el.classList.contains('lbe-extras-panel') ||
                 el.classList.contains('world_entry_body') ||
                 el.getAttribute('name') === 'PositionBlock'
             ) {
@@ -702,6 +727,11 @@
                 el.style.setProperty('display', '', 'important');
             }
         });
+
+        // 詳細設定パネルが手動で開かれていなければ閉じた状態を維持
+        if (clonedEl.dataset.lbeExtrasUserOpened !== '1') {
+            collapseLbeExtrasPanel(clonedEl);
+        }
     }
 
     async function ensureSourceEntryExpanded(sourceEl) {
@@ -720,7 +750,7 @@
         }
     }
     
-    function applyEntrySnapshotToEl(el, snap) {
+function applyEntrySnapshotToEl(el, snap) {
         if (!el || !snap) return;
 
         expandClonedEntryPanels(el);
@@ -806,7 +836,7 @@
         }
     }
 
-    async function mountWorldEntryInCellModal(cell) {
+async function mountWorldEntryInCellModal(cell) {
         const modal = currentCellModal;
         if (!modal || !cell) return;
         const hostEl = modal.querySelector('#stj_cell_modal_entry_host');
@@ -840,7 +870,7 @@
         const sourceEl = findSourceWorldEntryEl(entries, targetEntry, kw);
         if (!sourceEl) return;
 
-        // ★ クローン前に元要素のドロワーを展開し、SillyTavern本体に中身を生成させる
+        // クローン前に元要素のドロワーを展開し、SillyTavern本体に中身を生成させる
         await ensureSourceEntryExpanded(sourceEl);
 
         if (currentCellModal !== modal || currentModalCell !== cell) return;
@@ -860,8 +890,34 @@
         });
 
         expandClonedEntryPanels(cloned);
+        collapseLbeExtrasPanel(cloned);
 
-        // ★ クローン側の開閉ボタンにも手動トグル動作を付与
+        // 詳細設定トグル（.lbe-extras-toggle）に手動開閉動作を付与
+        cloned.querySelectorAll('.lbe-extras-toggle').forEach((toggle) => {
+            toggle.addEventListener('click', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                const isClosed = cloned.dataset.lbeExtrasUserOpened !== '1';
+                const icon = toggle.querySelector('.lbe-extras-icon, i');
+                if (isClosed) {
+                    cloned.dataset.lbeExtrasUserOpened = '1';
+                    cloned.classList.remove('lbe-extras-collapsed');
+                    if (icon) {
+                        icon.classList.remove('down', 'fa-circle-chevron-down');
+                        icon.classList.add('up', 'fa-circle-chevron-up');
+                    }
+                    cloned.querySelectorAll('.lbe-extras-panel').forEach((panel) => {
+                        panel.classList.remove('lbe-extras-collapsed', 'collapsed');
+                        panel.style.setProperty('display', 'block', 'important');
+                    });
+                } else {
+                    delete cloned.dataset.lbeExtrasUserOpened;
+                    collapseLbeExtrasPanel(cloned);
+                }
+            });
+        });
+
+        // クローン側の開閉ボタンにも手動トグル動作を付与
         cloned.querySelectorAll('.inline-drawer-toggle').forEach((toggle) => {
             toggle.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -1874,13 +1930,13 @@ function extractChoiceTriggerText(choiceStr) {
                     box-sizing: border-box;
                     flex: 0 0 35% !important;
                 }
-#stj_cell_modal .stj-cell-modal-entry-host .world_entry {
+                #stj_cell_modal .stj-cell-modal-entry-host .world_entry {
                     display: block !important;
                     width: 100%;
                     height: auto !important;
                     max-height: none !important;
                 }
-                #stj_cell_modal .stj-cell-modal-entry-host .world_entry > *:not(.drag-handle) {
+                #stj_cell_modal .stj-cell-modal-entry-host .world_entry > *:not(.drag-handle):not(.inline-drawer-header) {
                     visibility: visible !important;
                     opacity: 1 !important;
                     height: auto !important;
@@ -1888,8 +1944,7 @@ function extractChoiceTriggerText(choiceStr) {
                 }
                 #stj_cell_modal .stj-cell-modal-entry-host .inline-drawer-content,
                 #stj_cell_modal .stj-cell-modal-entry-host .world_entry_edit,
-                #stj_cell_modal .stj-cell-modal-entry-host .world_entry_form,
-                #stj_cell_modal .stj-cell-modal-entry-host .lbe-extras-panel {
+                #stj_cell_modal .stj-cell-modal-entry-host .world_entry_form {
                     display: block !important;
                     visibility: visible !important;
                     opacity: 1 !important;
@@ -1897,7 +1952,17 @@ function extractChoiceTriggerText(choiceStr) {
                     max-height: none !important;
                     overflow: visible !important;
                 }
-                #stj_cell_modal .stj-cell-modal-entry-host .drag-handle {
+                #stj_cell_modal .stj-cell-modal-entry-host .lbe-extras-panel {
+                    height: auto !important;
+                    max-height: none !important;
+                    overflow: visible !important;
+                }
+                #stj_cell_modal .stj-cell-modal-entry-host .world_entry.lbe-extras-collapsed .lbe-extras-panel {
+                    display: none !important;
+                }
+                #stj_cell_modal .stj-cell-modal-entry-host .drag-handle,
+                #stj_cell_modal .stj-cell-modal-entry-host .inline-drawer-header,
+                #stj_cell_modal .stj-cell-modal-entry-host [name="keywordsAndLogicBlock"] {
                     display: none !important;
                 }
                 #stj_cell_modal .stj-cell-modal-entry-host textarea[name="comment"] {
