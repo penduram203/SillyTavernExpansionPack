@@ -655,7 +655,7 @@
         }
     }
 
-    function expandClonedEntryPanels(clonedEl) {
+function expandClonedEntryPanels(clonedEl) {
         if (!clonedEl) return;
 
         clonedEl.querySelectorAll(
@@ -670,22 +670,40 @@
             }
         });
 
-        clonedEl.classList.remove('lbe-extras-collapsed', 'collapsed');
-        clonedEl.querySelectorAll('.lbe-extras-collapsed, .collapsed').forEach((el) => {
-            el.classList.remove('lbe-extras-collapsed', 'collapsed');
-        });
+        const collapseClasses = [
+            'lbe-extras-collapsed',
+            'collapsed',
+            'closed',
+            'is-collapsed',
+            'inline-drawer-collapsed',
+        ];
+        clonedEl.classList.remove(...collapseClasses);
+        clonedEl.classList.add('open', 'expanded');
 
-        clonedEl.querySelectorAll(
-            '.world_entry_edit, .world_entry_form, .inline-drawer-content, .lbe-extras-panel, [name="PositionBlock"]'
-        ).forEach((el) => {
-            if (el.style.display === 'none') {
-                el.style.display = '';
-            }
-            if (el.classList.contains('world_entry_edit') || el.classList.contains('lbe-extras-panel')) {
+        clonedEl.querySelectorAll('*').forEach((el) => {
+            collapseClasses.forEach((cls) => {
+                if (el.classList.contains(cls)) {
+                    el.classList.remove(cls);
+                }
+            });
+            if (
+                el.classList.contains('world_entry_edit') ||
+                el.classList.contains('world_entry_form') ||
+                el.classList.contains('inline-drawer-content') ||
+                el.classList.contains('lbe-extras-panel') ||
+                el.classList.contains('world_entry_body') ||
+                el.getAttribute('name') === 'PositionBlock'
+            ) {
+                el.classList.add('open', 'expanded');
                 el.style.setProperty('display', 'block', 'important');
+                el.style.setProperty('visibility', 'visible', 'important');
+                el.style.setProperty('opacity', '1', 'important');
+                el.style.setProperty('height', 'auto', 'important');
+                el.style.setProperty('max-height', 'none', 'important');
+                el.style.setProperty('overflow', 'visible', 'important');
+            } else if (el.style && el.style.display === 'none') {
+                el.style.setProperty('display', '', 'important');
             }
-            el.style.removeProperty('max-height');
-            el.style.removeProperty('height');
         });
     }
     
@@ -881,17 +899,22 @@
         hostEl._guardObserver = guardObserver;
         hostEl.appendChild(cloned);
         hostEl.style.display = 'block';
+        hostEl.style.height = '35%';
 
-        setTimeout(() => {
+        const enforceOpen = () => {
             if (currentCellModal === modal && currentModalCell === cell && document.body.contains(cloned)) {
+                expandClonedEntryPanels(cloned);
                 applyEntrySnapshotToEl(cloned, snap);
             }
-        }, 50);
+        };
+        setTimeout(enforceOpen, 50);
+        setTimeout(enforceOpen, 200);
 
         if (window.LorebookExpansion?.forceInject) {
             setTimeout(() => {
                 if (currentCellModal === modal && currentModalCell === cell) {
                     window.LorebookExpansion.forceInject().catch(() => {});
+                    enforceOpen();
                 }
             }, 150);
         }
@@ -1821,10 +1844,20 @@ function extractChoiceTriggerText(choiceStr) {
                     height: auto !important;
                     max-height: none !important;
                 }
+                #stj_cell_modal .stj-cell-modal-entry-host .world_entry > *:not(.world_entry_toggle):not(.drag-handle) {
+                    display: block !important;
+                    visibility: visible !important;
+                    opacity: 1 !important;
+                    height: auto !important;
+                    max-height: none !important;
+                }
                 #stj_cell_modal .stj-cell-modal-entry-host .world_entry_edit,
+                #stj_cell_modal .stj-cell-modal-entry-host .world_entry_form,
                 #stj_cell_modal .stj-cell-modal-entry-host .inline-drawer-content,
                 #stj_cell_modal .stj-cell-modal-entry-host .lbe-extras-panel {
                     display: block !important;
+                    visibility: visible !important;
+                    opacity: 1 !important;
                     height: auto !important;
                     max-height: none !important;
                     overflow: visible !important;
