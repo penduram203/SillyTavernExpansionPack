@@ -556,6 +556,15 @@
         const list = Array.isArray(entries) ? entries : Object.values(entries);
         const target = String(kw).trim();
         if (!target) return null;
+
+        // ★ 1st pass: getEntryKeyword（comment 優先）で一致判定
+        //   ツリーレイアウト（_stjBuildChoiceGraph）と同一ロジックに揃える
+        for (const entry of list) {
+            if (!entry) continue;
+            if (getEntryKeyword(entry) === target) return entry;
+        }
+
+        // ★ 2nd pass: keys 配列でも一致判定（後方互換）
         for (const entry of list) {
             if (!entry) continue;
             const keys = getEntryKeys(entry);
@@ -563,7 +572,10 @@
                 if (String(k).trim() === target) return entry;
             }
         }
-        return null;
+
+        // ★ 3rd pass: 緩い一致（全角/半角・接頭辞・部分一致）
+        //   ツリー側と同じ救済経路を通す
+        return _stjFindEntryByKeywordLoose(list, target);
     }
 
     async function updateChoicesButtonState(cell) {
@@ -626,30 +638,27 @@
         const choices = Array.isArray(lex.choices) ? lex.choices.filter(Boolean) : [];
         if (choices.length === 0) return;
 
+        // ★ シンプルな表示形式:
+        //   エントリ内容
+        //   ────────────
+        //   ・選択肢1
+        //   ・選択肢2
         const rows = [];
-        const seen = new Set([kw]);
+        const content = String(targetEntry.content || '').trim();
+        if (content) {
+            rows.push({ type: 'content', displayStr: content });
+            rows.push({ type: 'divider' });
+        }
 
-        rows.push({
-            label: '',
-            displayStr: `${kw} ${String(targetEntry.content || '').trim()}`.trim(),
-        });
-
+        const seen = new Set();
         for (const c of choices) {
             const choiceStr = normalizeChoiceItem(c);
             if (!choiceStr || seen.has(choiceStr)) continue;
             seen.add(choiceStr);
-
-            // 先頭の数字部分（もしあれば）を抽出してエントリ検索を試みる
-            const matchNum = choiceStr.match(/^(\d+)/);
-            const lookupKey = matchNum ? matchNum[1] : choiceStr;
-            const choiceEntry = findEntryByKeyword(entries, lookupKey);
-            const content = choiceEntry ? String(choiceEntry.content || '').trim() : '';
-
-            rows.push({
-                label: _t('stj.choices.label', '選択肢'),
-                displayStr: content ? `${choiceStr}: ${content}` : choiceStr,
-            });
+            rows.push({ type: 'choice', displayStr: choiceStr });
         }
+
+        if (!rows.some(r => r.type === 'choice')) return;
 
         showChoicesOverlay(rows);
     }
@@ -666,21 +675,43 @@
         box.className = 'stj-choices-popup-box';
 
         for (const row of rows) {
+            if (!row) continue;
+
+            // ── 区切り線 ──
+            if (row.type === 'divider') {
+                const divider = document.createElement('hr');
+                divider.className = 'stj-choices-popup-divider';
+                divider.style.cssText =
+                    'border: none; border-top: 1px solid #888; margin: 10px 0; opacity: 0.7;';
+                box.appendChild(divider);
+                continue;
+            }
+
             const line = document.createElement('div');
             line.className = 'stj-choices-popup-line';
 
-            if (row.label) {
-                const labelEl = document.createElement('span');
-                labelEl.className = 'stj-choices-popup-label';
-                labelEl.textContent = row.label + ' ';
-                line.appendChild(labelEl);
+            // ── 選択肢行（・付き） ──
+            if (row.type === 'choice') {
+                const bullet = document.createElement('span');
+                bullet.className = 'stj-choices-popup-bullet';
+                bullet.textContent = '・';
+                bullet.style.cssText = 'flex-shrink: 0; margin-right: 2px;';
+                line.appendChild(bullet);
+
+                const textEl = document.createElement('span');
+                textEl.className = 'stj-choices-popup-text';
+                textEl.textContent = row.displayStr;
+                line.appendChild(textEl);
+                box.appendChild(line);
+                continue;
             }
 
+            // ── エントリ内容行 ──
             const textEl = document.createElement('span');
             textEl.className = 'stj-choices-popup-text';
             textEl.textContent = row.displayStr;
+            textEl.style.whiteSpace = 'pre-wrap';
             line.appendChild(textEl);
-
             box.appendChild(line);
         }
 
