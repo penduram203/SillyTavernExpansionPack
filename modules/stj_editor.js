@@ -610,6 +610,51 @@
         return null;
     }
 
+    function captureEntrySnapshot(el) {
+        if (!el) return null;
+        const snap = {
+            fields: new Map(),
+            heights: new Map(),
+        };
+        el.querySelectorAll('input, textarea, select').forEach((field, idx) => {
+            const key = field.getAttribute('name') || `idx_${idx}`;
+            if (field.type === 'checkbox' || field.type === 'radio') {
+                snap.fields.set(key, { type: 'check', checked: field.checked });
+            } else {
+                snap.fields.set(key, { type: 'val', value: field.value });
+            }
+            if (field.tagName === 'TEXTAREA') {
+                const h = field.style.height;
+                if (h) snap.heights.set(key, h);
+            }
+        });
+        return snap;
+    }
+
+    function applyEntrySnapshotToEl(el, snap) {
+        if (!el || !snap) return;
+        el.querySelectorAll('input, textarea, select').forEach((field, idx) => {
+            const key = field.getAttribute('name') || `idx_${idx}`;
+            const info = snap.fields.get(key);
+            if (!info) return;
+            if (info.type === 'check') {
+                if (field.checked !== info.checked) {
+                    field.checked = info.checked;
+                }
+            } else {
+                if (field.value !== info.value) {
+                    field.value = info.value;
+                }
+            }
+            if (field.tagName === 'TEXTAREA' && snap.heights.has(key)) {
+                const h = snap.heights.get(key);
+                if (field.style.height !== h) {
+                    field.style.height = h;
+                }
+            }
+        });
+    }
+    
     function syncClonedEntryToSource(clonedEl, sourceEl) {
         if (!clonedEl || !sourceEl) return;
 
@@ -628,16 +673,21 @@
 
             if (!target) return;
             if (field.type === 'checkbox' || field.type === 'radio') {
-                target.checked = field.checked;
+                if (target.checked !== field.checked) {
+                    target.checked = field.checked;
+                    target.dispatchEvent(new Event('change', { bubbles: true }));
+                }
             } else {
-                target.value = field.value;
+                if (target.value !== field.value) {
+                    target.value = field.value;
+                    target.dispatchEvent(new Event('input', { bubbles: true }));
+                    target.dispatchEvent(new Event('change', { bubbles: true }));
+                }
             }
-            target.dispatchEvent(new Event('input', { bubbles: true }));
-            target.dispatchEvent(new Event('change', { bubbles: true }));
         });
 
         if (window.$) {
-            window.$(sourceEl).trigger('change');
+            window.$(sourceEl).triggerHandler('change');
         }
     }
 
@@ -678,17 +728,38 @@
 
         const cloned = sourceEl.cloneNode(true);
         cloned.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
+        cloned.querySelectorAll(
+            '.world_entry_toggle, .drag-handle, .world_entry_collapse, [data-action="toggle"], .fa-chevron-down, .fa-chevron-up, .fa-caret-down, .fa-caret-up'
+        ).forEach(el => {
+            if (el.closest('button, .inline-drawer-toggle, .world_entry_header_button') || el.classList.contains('world_entry_toggle') || el.classList.contains('drag-handle')) {
+                el.remove();
+            }
+        });
         cloned.classList.remove('lbe-extras-collapsed');
+        cloned.classList.remove('collapsed');
         cloned.querySelectorAll('.lbe-extras-collapsed').forEach(el => el.classList.remove('lbe-extras-collapsed'));
+        cloned.querySelectorAll('.collapsed').forEach(el => el.classList.remove('collapsed'));
 
         const editBlock = cloned.querySelector('.world_entry_edit');
         if (editBlock) {
-            editBlock.style.display = 'block';
+            editBlock.style.setProperty('display', 'block', 'important');
             editBlock.classList.remove('lbe-extras-collapsed');
         }
+        cloned.querySelectorAll('.world_entry_edit, .inline-drawer-content, .lbe-extras-panel').forEach(el => {
+            el.style.setProperty('display', 'block', 'important');
+            el.style.removeProperty('max-height');
+            el.style.removeProperty('height');
+        });
 
+        const initialSnap = captureEntrySnapshot(cloned);
         const syncNow = () => syncClonedEntryToSource(cloned, sourceEl);
-        cloned.addEventListener('input', syncNow);
+        cloned.addEventListener('input', (e) => {
+            if (e.target && e.target.tagName === 'TEXTAREA') {
+                e.target.style.height = 'auto';
+                e.target.style.height = e.target.scrollHeight + 'px';
+            }
+            syncNow();
+        });
         cloned.addEventListener('change', syncNow);
         cloned.addEventListener('click', (e) => {
             if (e.target.closest('button, input, select, textarea, .lbe-extras-toggle')) {
@@ -696,9 +767,25 @@
             }
         });
 
+        let guardTimer = null;
+        const guardObserver = new MutationObserver(() => {
+            if (guardTimer) clearTimeout(guardTimer);
+            guardTimer = setTimeout(() => {
+                if (!document.body.contains(cloned)) return;
+                applyEntrySnapshotToEl(cloned, initialSnap);
+            }, 0);
+        });
+        guardObserver.observe(cloned, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['style', 'class', 'value', 'checked'],
+        });
+        
         hostEl._sourceEntryEl = sourceEl;
         hostEl._clonedEntryEl = cloned;
         hostEl._syncEntry = syncNow;
+        hostEl._guardObserver = guardObserver;
         hostEl.appendChild(cloned);
         hostEl.style.display = 'block';
 
@@ -1621,9 +1708,10 @@ function extractChoiceTriggerText(choiceStr) {
                     grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
                 }
                 #stj_cell_modal .stj-cell-modal-entry-host {
-                    display: block;
+                    display: block !important;
                     width: 100%;
-                    max-height: 36vh;
+                    height: 100% !important;
+                    max-height: none !important;
                     overflow-y: auto;
                     margin: 6px 0 10px;
                     padding: 8px;
@@ -1634,6 +1722,25 @@ function extractChoiceTriggerText(choiceStr) {
                 #stj_cell_modal .stj-cell-modal-entry-host .world_entry {
                     display: block !important;
                     width: 100%;
+                    height: auto !important;
+                    max-height: none !important;
+                }
+                #stj_cell_modal .stj-cell-modal-entry-host .world_entry_edit,
+                #stj_cell_modal .stj-cell-modal-entry-host .inline-drawer-content,
+                #stj_cell_modal .stj-cell-modal-entry-host .lbe-extras-panel {
+                    display: block !important;
+                    height: auto !important;
+                    max-height: none !important;
+                    overflow: visible !important;
+                }
+                #stj_cell_modal .stj-cell-modal-entry-host .world_entry_toggle,
+                #stj_cell_modal .stj-cell-modal-entry-host .drag-handle {
+                    display: none !important;
+                }
+                #stj_cell_modal .stj-cell-modal-entry-host textarea[name="comment"] {
+                    min-height: 36px;
+                    line-height: 1.4;
+                    resize: vertical;
                 }
                 .stj-cell-modal-keyword-display {
                     display: inline-block;
@@ -1804,11 +1911,15 @@ function extractChoiceTriggerText(choiceStr) {
         if (!currentCellModal) return;
         const entryHostEl = currentCellModal.querySelector('#stj_cell_modal_entry_host');
         if (entryHostEl) {
+            if (entryHostEl._guardObserver) {
+                try { entryHostEl._guardObserver.disconnect(); } catch (e) { /* ignore */ }
+            }            
             entryHostEl.innerHTML = '';
             entryHostEl.style.display = 'none';
             delete entryHostEl._sourceEntryEl;
             delete entryHostEl._clonedEntryEl;
             delete entryHostEl._syncEntry;
+            delete entryHostEl._guardObserver;
         }
         const zoom = document.getElementById('stj_media_zoom');
         if (zoom) zoom.remove();
@@ -1884,12 +1995,16 @@ function extractChoiceTriggerText(choiceStr) {
         autoSave({ immediate: true });
         const entryHostEl = currentCellModal.querySelector('#stj_cell_modal_entry_host');
         if (entryHostEl) {
+            if (entryHostEl._guardObserver) {
+                try { entryHostEl._guardObserver.disconnect(); } catch (e) { /* ignore */ }
+            }
             if (typeof entryHostEl._syncEntry === 'function') entryHostEl._syncEntry();
             entryHostEl.innerHTML = '';
             entryHostEl.style.display = 'none';
             delete entryHostEl._sourceEntryEl;
             delete entryHostEl._clonedEntryEl;
             delete entryHostEl._syncEntry;
+            delete entryHostEl._guardObserver;
         }
         const zoom = document.getElementById('stj_media_zoom');
         if (zoom) zoom.remove();
