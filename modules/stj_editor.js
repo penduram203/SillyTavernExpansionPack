@@ -578,15 +578,14 @@
         return _stjFindEntryByKeywordLoose(list, target);
     }
 
-    async function updateChoicesButtonState(cell) {
+    async function updateCellModalLorebookInfo(cell) {
         const modal = currentCellModal;
         if (!modal || !cell) return;
-        const btn = modal.querySelector('.stj-cell-modal-choices');
-        if (!btn) return;
+        const infoEl = modal.querySelector('#stj_cell_modal_lorebook_info');
+        if (!infoEl) return;
 
-        btn.classList.add('stj-choices-disabled');
-        btn.disabled = true;
-        btn.title = '';
+        infoEl.innerHTML = '';
+        infoEl.style.display = 'none';
 
         if (cell.classList.contains('stj-special-item')) return;
         const kw = getCellKeyword(cell).trim();
@@ -608,72 +607,35 @@
 
         const lex = getLexDataFor(worldName, targetEntry.uid, targetEntry);
         const choices = Array.isArray(lex.choices) ? lex.choices.filter(Boolean) : [];
-        if (choices.length === 0) return;
-
-        if (currentCellModal !== modal || currentModalCell !== cell) return;
-
-        btn.classList.remove('stj-choices-disabled');
-        btn.disabled = false;
-        btn.title = _t('stj.choices.button_title', `選択肢を表示 (${choices.length}件)`, { count: choices.length });
-    }
-
-    async function showChoicesPopup() {
-        const cell = currentModalCell;
-        if (!cell) return;
-        if (cell.classList.contains('stj-special-item')) return;
-
-        const kw = getCellKeyword(cell).trim();
-        if (!kw) return;
-
-        const worldName = getCharacterWorldInfoName();
-        if (!worldName) return;
-
-        const entries = await loadWorldInfoEntries(worldName);
-        if (!entries) return;
-
-        const targetEntry = findEntryByKeyword(entries, kw);
-        if (!targetEntry) return;
-
-        const lex = getLexDataFor(worldName, targetEntry.uid, targetEntry);
-        const choices = Array.isArray(lex.choices) ? lex.choices.filter(Boolean) : [];
-        if (choices.length === 0) return;
-
-        // ★ シンプルな表示形式:
-        //   エントリ内容
-        //   ────────────
-        //   ・選択肢1
-        //   ・選択肢2
         const rows = [];
         const content = String(targetEntry.content || '').trim();
         if (content) {
             rows.push({ type: 'content', displayStr: content });
-            rows.push({ type: 'divider' });
         }
 
         const seen = new Set();
+        const choiceRows = [];
         for (const c of choices) {
             const choiceStr = normalizeChoiceItem(c);
             if (!choiceStr || seen.has(choiceStr)) continue;
             seen.add(choiceStr);
-            rows.push({ type: 'choice', displayStr: choiceStr });
+            choiceRows.push({ type: 'choice', displayStr: choiceStr });
         }
 
-        if (!rows.some(r => r.type === 'choice')) return;
+        if (content && choiceRows.length > 0) {
+            rows.push({ type: 'divider' });
+        }
 
-        showChoicesOverlay(rows);
-    }
+        rows.push(...choiceRows);
 
-    function showChoicesOverlay(rows) {
-        const existing = document.getElementById('stj_choices_popup');
-        if (existing) existing.remove();
+        if (rows.length === 0) return;
 
-        const overlay = document.createElement('div');
-        overlay.id = 'stj_choices_popup';
-        overlay.className = 'stj-choices-popup';
+        if (currentCellModal !== modal || currentModalCell !== cell) return;
 
         const box = document.createElement('div');
         box.className = 'stj-choices-popup-box';
-
+        box.style.cssText = 'max-height: 220px; overflow-y: auto;';
+        
         for (const row of rows) {
             if (!row) continue;
 
@@ -682,13 +644,14 @@
                 const divider = document.createElement('hr');
                 divider.className = 'stj-choices-popup-divider';
                 divider.style.cssText =
-                    'border: none; border-top: 1px solid #888; margin: 10px 0; opacity: 0.7;';
+                    'border: none; border-top: 1px solid #888; margin: 8px 0; opacity: 0.7;';
                 box.appendChild(divider);
                 continue;
             }
 
             const line = document.createElement('div');
             line.className = 'stj-choices-popup-line';
+            line.style.cssText = 'display: flex; align-items: flex-start; gap: 4px; margin: 2px 0;';
 
             // ── 選択肢行（・付き） ──
             if (row.type === 'choice') {
@@ -701,6 +664,7 @@
                 const textEl = document.createElement('span');
                 textEl.className = 'stj-choices-popup-text';
                 textEl.textContent = row.displayStr;
+                textEl.style.whiteSpace = 'pre-wrap';
                 line.appendChild(textEl);
                 box.appendChild(line);
                 continue;
@@ -714,23 +678,8 @@
             line.appendChild(textEl);
             box.appendChild(line);
         }
-
-        overlay.appendChild(box);
-        document.body.appendChild(overlay);
-
-        const onKeyDown = (e) => {
-            if (e.key === 'Escape') {
-                overlay.remove();
-                document.removeEventListener('keydown', onKeyDown);
-            }
-        };
-        overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) {
-                overlay.remove();
-                document.removeEventListener('keydown', onKeyDown);
-            }
-        });
-        document.addEventListener('keydown', onKeyDown);
+        infoEl.appendChild(box);
+        infoEl.style.display = 'block';
     }
 
     function checkMediaExists(mediaUrl) {
@@ -1608,9 +1557,9 @@ function extractChoiceTriggerText(choiceStr) {
                 <div class="stj-cell-modal-header">
                     <button type="button" class="stj-cell-modal-apply">${_t('stj.cell_modal.apply', '決定')}</button>
                     <button type="button" class="stj-cell-modal-cancel">${_t('stj.cell_modal.cancel', 'キャンセル')}</button>
-                    <button type="button" class="stj-cell-modal-choices stj-choices-disabled" disabled title="">${_t('stj.choices.button', '選択肢')}</button>
+                    <div class="stj-cell-modal-keyword-display" id="stj_cell_modal_keyword_display"></div>
                 </div>
-                <div class="stj-cell-modal-keyword-display" id="stj_cell_modal_keyword_display"></div>
+                <div class="stj-cell-modal-lorebook-info" id="stj_cell_modal_lorebook_info" style="display: none;"></div>
                 <div class="stj-cell-modal-grid"></div>
             </div>
         `;
@@ -1621,11 +1570,11 @@ function extractChoiceTriggerText(choiceStr) {
             s.textContent = `
                 .stj-cell-modal-keyword-display {
                     padding: 10px 16px;
-                    margin: 4px 0 8px;
+                    margin: 0;
                     font-size: 28px;
                     font-weight: bold;
                     color: #ffffff;
-                    text-align: center;
+                    text-align: left;
                     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
                     -webkit-text-stroke: 4px #000000;
                     paint-order: stroke fill;
@@ -1652,16 +1601,6 @@ function extractChoiceTriggerText(choiceStr) {
             e.stopPropagation();
             closeCellModal(true);
         });
-
-        const choicesBtn = modal.querySelector('.stj-cell-modal-choices');
-        if (choicesBtn) {
-            choicesBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                if (choicesBtn.disabled) return;
-                showChoicesPopup().catch(err => console.warn('[STJ Editor] showChoicesPopup error:', err));
-            });
-        }
 
         modal.addEventListener('click', (e) => {
             if (e.target === modal) closeCellModal(true);
@@ -1742,14 +1681,13 @@ function extractChoiceTriggerText(choiceStr) {
         modalOriginalKeyword = getCellKeyword(cell); // キーワード保持のみ（表示・編集はしない）
 
         const isSpecial = cell.classList.contains('stj-special-item');
-        const choicesBtn = currentCellModal.querySelector('.stj-cell-modal-choices');
+        const lorebookInfoEl = currentCellModal.querySelector('#stj_cell_modal_lorebook_info');
 
-        if (choicesBtn) {
-            if (isSpecial) {
-                choicesBtn.style.display = 'none';
-            } else {
-                choicesBtn.style.display = '';
-                updateChoicesButtonState(cell).catch(e => console.warn('[STJ Editor] choices state error:', e));
+        if (lorebookInfoEl) {
+            lorebookInfoEl.innerHTML = '';
+            lorebookInfoEl.style.display = 'none';
+            if (!isSpecial) {
+                updateCellModalLorebookInfo(cell).catch(e => console.warn('[STJ Editor] lorebook info error:', e));
             }
         }
 
@@ -1789,8 +1727,11 @@ function extractChoiceTriggerText(choiceStr) {
 
     function closeCellModal(revert) {
         if (!currentCellModal) return;
-        const popup = document.getElementById('stj_choices_popup');
-        if (popup) popup.remove();
+        const lorebookInfoEl = currentCellModal.querySelector('#stj_cell_modal_lorebook_info');
+        if (lorebookInfoEl) {
+            lorebookInfoEl.innerHTML = '';
+            lorebookInfoEl.style.display = 'none';
+        }
         const zoom = document.getElementById('stj_media_zoom');
         if (zoom) zoom.remove();
         document.body.classList.remove('stj-zoom-active');
@@ -1863,8 +1804,11 @@ function extractChoiceTriggerText(choiceStr) {
         updateCellPreview(cell);
         runLiveTest();
         autoSave({ immediate: true });
-        const popup = document.getElementById('stj_choices_popup');
-        if (popup) popup.remove();
+        const lorebookInfoEl = currentCellModal.querySelector('#stj_cell_modal_lorebook_info');
+        if (lorebookInfoEl) {
+            lorebookInfoEl.innerHTML = '';
+            lorebookInfoEl.style.display = 'none';
+        }
         const zoom = document.getElementById('stj_media_zoom');
         if (zoom) zoom.remove();
         document.body.classList.remove('stj-zoom-active');
