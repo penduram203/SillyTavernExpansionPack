@@ -715,6 +715,369 @@
         return _saveQueue;
     }
 
+    function _getLexDataSafe(worldName, entry) {
+        const uid = entry?.uid;
+        let apiData = null;
+        try {
+            if (window.LorebookExpansion?.getDataFor && worldName && uid !== undefined && uid !== null) {
+                apiData = window.LorebookExpansion.getDataFor(worldName, uid, entry);
+            }
+        } catch (err) { /* ignore */ }
+
+        const extData = entry?.extensions?.lorebook_expansion;
+        const base = (apiData && typeof apiData === 'object')
+            ? apiData
+            : ((extData && typeof extData === 'object') ? extData : {});
+
+        try {
+            return JSON.parse(JSON.stringify(base));
+        } catch (err) {
+            return {};
+        }
+    }
+
+    function _setLexDataSafe(worldName, entry, dataObj) {
+        if (!entry || !dataObj || typeof dataObj !== 'object') return;
+        const copy = JSON.parse(JSON.stringify(dataObj));
+        if (!entry.extensions || typeof entry.extensions !== 'object') {
+            entry.extensions = {};
+        }
+        entry.extensions.lorebook_expansion = copy;
+
+        const lex = window.LorebookExpansion;
+        const uid = entry.uid;
+        if (lex && worldName && uid !== undefined && uid !== null) {
+            for (const fnName of ['setDataFor', 'saveDataFor', 'updateEntryData']) {
+                if (typeof lex[fnName] === 'function') {
+                    try { lex[fnName](worldName, uid, copy, entry); } catch (err) { /* ignore */ }
+                }
+            }
+        }
+    }
+
+    function _syncClonedEntryFields(clonedEl, sourceEl, worldName, targetEntry) {
+        if (!clonedEl || !targetEntry) return;
+
+        const lexData = _getLexDataSafe(worldName, targetEntry);
+        let lexUpdated = false;
+
+        const clonedControls = Array.from(clonedEl.querySelectorAll('input, textarea, select'));
+        const sourceControls = sourceEl ? Array.from(sourceEl.querySelectorAll('input, textarea, select')) : [];
+
+        clonedControls.forEach((ctrl, idx) => {
+            const name = (ctrl.getAttribute('name') || '').trim();
+            const dataKey = (
+                ctrl.getAttribute('data-field') ||
+                ctrl.getAttribute('data-name') ||
+                ctrl.getAttribute('data-key') ||
+                ctrl.dataset?.field ||
+                ''
+            ).trim();
+            const cls = (ctrl.className || '').toLowerCase();
+
+            let srcCtrl = null;
+            if (sourceEl && name) {
+                srcCtrl = sourceEl.querySelector(`[name="${escapeCssAttrValue(name)}"]`);
+            }
+            if (!srcCtrl && sourceEl && dataKey) {
+                srcCtrl = sourceEl.querySelector(
+                    `[data-field="${escapeCssAttrValue(dataKey)}"], [data-name="${escapeCssAttrValue(dataKey)}"], [data-key="${escapeCssAttrValue(dataKey)}"]`
+                );
+            }
+            if (!srcCtrl && sourceControls[idx] && sourceControls[idx].tagName === ctrl.tagName) {
+                srcCtrl = sourceControls[idx];
+            }
+
+            if (srcCtrl) {
+                if (ctrl.type === 'checkbox' || ctrl.type === 'radio') {
+                    if (srcCtrl.checked !== ctrl.checked) {
+                        srcCtrl.checked = ctrl.checked;
+                        srcCtrl.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                } else if (srcCtrl.value !== ctrl.value) {
+                    srcCtrl.value = ctrl.value;
+                    srcCtrl.dispatchEvent(new Event('input', { bubbles: true }));
+                    srcCtrl.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            }
+
+            if (name === 'comment') {
+                targetEntry.comment = ctrl.value;
+            } else if (name === 'key' || name === 'keys') {
+                const keysArr = String(ctrl.value || '').split(',').map(s => s.trim()).filter(Boolean);
+                targetEntry.key = keysArr;
+                targetEntry.keys = keysArr;
+            } else if (name === 'content') {
+                targetEntry.content = ctrl.value;
+            } else if (name === 'position') {
+                const parsedNum = Number(ctrl.value);
+                targetEntry.position = Number.isNaN(parsedNum) ? ctrl.value : parsedNum;
+            } else if (name === 'entryStateSelector') {
+                targetEntry.entryStateSelector = ctrl.value;
+            }
+
+            const lexKey = dataKey || (
+                name && !['comment', 'key', 'keys', 'content', 'position', 'entryStateSelector'].includes(name)
+                    ? name
+                    : ''
+            );
+            if (lexKey) {
+                const nextVal = ctrl.type === 'checkbox' ? ctrl.checked : ctrl.value;
+                if (lexData[lexKey] !== nextVal) {
+                    lexData[lexKey] = nextVal;
+                    lexUpdated = true;
+                }
+            } else if ((name.toLowerCase().includes('prompt') || cls.includes('prompt')) && typeof ctrl.value === 'string') {
+                if (lexData.img_prompt !== ctrl.value) {
+                    lexData.img_prompt = ctrl.value;
+                    lexUpdated = true;
+                }
+            }
+        });
+
+        const choiceEls = clonedEl.querySelectorAll('[data-choice-index], .lbe-choice-input, input[name*="choice"], textarea[name*="choice"]');
+        if (choiceEls.length > 0) {
+            const choicesArr = Array.from(choiceEls).map(el => el.value).filter(v => typeof v === 'string');
+            if (JSON.stringify(lexData.choices || []) !== JSON.stringify(choicesArr)) {
+                lexData.choices = choicesArr;
+                lexUpdated = true;
+            }
+        }
+
+        if (lexUpdated || !targetEntry.extensions?.lorebook_expansion) {
+            _setLexDataSafe(worldName, targetEntry, lexData);
+        }
+    }
+
+    let _persistChain = Promise.resolve();
+
+    async function _saveLorebookEntryDirect(worldName, targetEntry, sourceEl, clonedEl) {
+        if (!worldName || !targetEntry || targetEntry.uid === undefined || targetEntry.uid === null) return;
+
+        _persistChain = _persistChain.then(async () => {
+            if (clonedEl) {
+                _syncClonedEntryFields(clonedEl, sourceEl, worldName, targetEntry);
+            }
+
+            const uid = String(targetEntry.uid);
+            const lexSnap = _getLexDataSafe(worldName, targetEntry);
+            _setLexDataSafe(worldName, targetEntry, lexSnap);
+
+            const ctx = getSTContext();
+            const headers = (ctx && typeof ctx.getRequestHeaders === 'function')
+                ? ctx.getRequestHeaders()
+                : { 'Content-Type': 'application/json' };
+
+            const getResp = await fetch('/api/worldinfo/get', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ name: worldName }),
+                cache: 'no-store',
+            });
+            if (!getResp.ok) return;
+
+            const wiJson = await getResp.json();
+            const entriesMap = wiJson?.entries || wiJson?.data?.entries;
+            if (!entriesMap || !entriesMap[uid]) return;
+
+            const srvEntry = entriesMap[uid];
+            if (targetEntry.comment !== undefined) srvEntry.comment = targetEntry.comment;
+            if (targetEntry.key !== undefined) srvEntry.key = targetEntry.key;
+            if (targetEntry.keys !== undefined) srvEntry.keys = targetEntry.keys;
+            if (targetEntry.content !== undefined) srvEntry.content = targetEntry.content;
+            if (targetEntry.position !== undefined) srvEntry.position = targetEntry.position;
+            if (targetEntry.entryStateSelector !== undefined) srvEntry.entryStateSelector = targetEntry.entryStateSelector;
+
+            const mergedLex = {
+                ..._getLexDataSafe(worldName, srvEntry),
+                ...lexSnap,
+            };
+            _setLexDataSafe(worldName, srvEntry, mergedLex);
+
+            await fetch('/api/worldinfo/edit', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({
+                    name: worldName,
+                    data: { entries: entriesMap },
+                }),
+            });
+
+            window.LorebookExpansion?.clearWorldInfoEntriesCache?.(worldName);
+        }).catch((err) => {
+            console.warn('[STJ Editor] ロアブック保存エラー:', err);
+        });
+
+        return _persistChain;
+    }
+
+    async function _applyKeywordToCellAndLorebook(newKwRaw) {
+        const cell = currentModalCell;
+        if (!cell || cell.classList.contains('stj-special-item')) return;
+
+        const newKw = String(newKwRaw || '').trim();
+        const oldKw = getCellKeyword(cell).trim();
+        if (!newKw || newKw === oldKw) return;
+
+        if (findDuplicateKeyword(cell, newKw)) {
+            showKeywordDuplicateWarning(newKw);
+            return;
+        }
+
+        const charName = document.getElementById('stj_char_name_display')?.textContent || detectCharacterNameFromDOM() || '';
+        const worldName = getCharacterWorldInfoName();
+        const entryHostEl = currentCellModal?.querySelector('#stj_cell_modal_entry_host');
+
+        let targetEntry = entryHostEl?._targetEntry || null;
+        if (!targetEntry && worldName) {
+            const entries = await loadWorldInfoEntries(worldName);
+            targetEntry = findEntryByKeyword(entries, oldKw) || findEntryByKeyword(entries, newKw);
+        }
+
+        const lexSnap = (worldName && targetEntry) ? _getLexDataSafe(worldName, targetEntry) : null;
+
+        if (targetEntry) {
+            targetEntry.comment = newKw;
+            const curKeys = getEntryKeys(targetEntry);
+            if (curKeys.length === 0 || (curKeys.length === 1 && String(curKeys[0]).trim() === oldKw)) {
+                targetEntry.key = [newKw];
+                targetEntry.keys = [newKw];
+            }
+            if (worldName && lexSnap) {
+                _setLexDataSafe(worldName, targetEntry, lexSnap);
+            }
+        }
+
+        if (charName) {
+            const curMap = getCurrentImageMapFromCharData(charName) || {};
+            if (Object.prototype.hasOwnProperty.call(curMap, oldKw)) {
+                const nextMap = {};
+                for (const [k, v] of Object.entries(curMap)) {
+                    if (k === oldKw) {
+                        nextMap[newKw] = v;
+                    } else if (!Object.prototype.hasOwnProperty.call(nextMap, k)) {
+                        nextMap[k] = v;
+                    }
+                }
+                saveImageMapToCharData(charName, nextMap);
+            }
+        }
+
+        setCellKeyword(cell, newKw);
+        modalOriginalKeyword = newKw;
+
+        if (entryHostEl?._clonedEntryEl) {
+            const cComment = entryHostEl._clonedEntryEl.querySelector('textarea[name="comment"], input[name="comment"]');
+            if (cComment) cComment.value = newKw;
+        }
+        if (entryHostEl?._sourceEntryEl) {
+            const sComment = entryHostEl._sourceEntryEl.querySelector('textarea[name="comment"], input[name="comment"]');
+            if (sComment) {
+                sComment.value = newKw;
+                sComment.dispatchEvent(new Event('input', { bubbles: true }));
+                sComment.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        }
+
+        if (worldName && targetEntry) {
+            await _saveLorebookEntryDirect(
+                worldName,
+                targetEntry,
+                entryHostEl?._sourceEntryEl || null,
+                entryHostEl?._clonedEntryEl || null
+            );
+        }
+
+        updateCellPreview(cell);
+        autoSave({ immediate: true });
+    }
+    
+    function _installKeywordDisplayDelegate() {
+        if (window._stjKeywordDisplayDelegateInstalled) return;
+        window._stjKeywordDisplayDelegateInstalled = true;
+
+        document.addEventListener('click', (e) => {
+            const kwDisplayEl = e.target.closest('#stj_cell_modal_keyword_display, .stj-cell-modal-keyword-display');
+            if (!kwDisplayEl) return;
+            if (e.target.closest('input.stj-kw-inline-input')) return;
+            if (!currentModalCell || currentModalCell.classList.contains('stj-special-item')) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+
+            const startText = getCellKeyword(currentModalCell) || kwDisplayEl.textContent || '';
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'stj-kw-inline-input';
+            input.value = startText;
+            input.style.cssText = [
+                'width: 100%',
+                'max-width: 480px',
+                'padding: 4px 10px',
+                'font-size: 20px',
+                'font-weight: bold',
+                'color: #ffffff',
+                'background: #0f172a',
+                'border: 2px solid #38bdf8',
+                'border-radius: 6px',
+                'outline: none',
+                'box-sizing: border-box',
+                'position: relative',
+                'z-index: 30',
+            ].join(';');
+
+            let finalized = false;
+            const commitOrCancel = async (shouldSave) => {
+                if (finalized) return;
+                finalized = true;
+                const rawVal = input.value;
+                if (input.parentNode === kwDisplayEl) {
+                    kwDisplayEl.removeChild(input);
+                }
+                const fallbackKw = getCellKeyword(currentModalCell) || '';
+                if (shouldSave) {
+                    const nextKw = rawVal.trim();
+                    if (nextKw && !findDuplicateKeyword(currentModalCell, nextKw)) {
+                        kwDisplayEl.textContent = nextKw;
+                        await _applyKeywordToCellAndLorebook(nextKw);
+                        return;
+                    }
+                }
+                kwDisplayEl.textContent = fallbackKw;
+            };
+
+            input.addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                ev.stopImmediatePropagation();
+            }, true);
+            input.addEventListener('mousedown', (ev) => {
+                ev.stopPropagation();
+                ev.stopImmediatePropagation();
+            }, true);
+            input.addEventListener('keydown', (ev) => {
+                ev.stopPropagation();
+                if (ev.key === 'Enter' && !ev.isComposing) {
+                    ev.preventDefault();
+                    commitOrCancel(true);
+                } else if (ev.key === 'Escape') {
+                    ev.preventDefault();
+                    commitOrCancel(false);
+                }
+            });
+            input.addEventListener('blur', () => {
+                commitOrCancel(true);
+            });
+
+            kwDisplayEl.textContent = '';
+            kwDisplayEl.appendChild(input);
+            requestAnimationFrame(() => {
+                input.focus();
+                input.select();
+            });
+        }, true);
+    }
+    
     async function _commitKeywordEdit(newKwRaw) {
         const cell = currentModalCell;
         if (!cell || cell.classList.contains('stj-special-item')) return;
