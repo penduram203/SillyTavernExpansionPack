@@ -784,312 +784,7 @@ function applyEntrySnapshotToEl(el, snap) {
                 }
             }
         });
-    }
-    
-    function syncClonedEntryToSource(clonedEl, sourceEl, isSyncingRef) {
-        if (!clonedEl || !sourceEl) return;
-        if (isSyncingRef && isSyncingRef.active) return;
-
-        if (isSyncingRef) isSyncingRef.active = true;
-        try {
-            const srcFields = Array.from(sourceEl.querySelectorAll('input, textarea, select'));
-            const usedTargets = new Set();
-
-            const isEntryNameField = (el) => {
-                if (!el) return false;
-                const name = (el.getAttribute('name') || '').toLowerCase();
-                if (name === 'comment' || name === 'title' || name === 'entry_name') return true;
-                if (el.closest('.world_entry_comment, .entry_name, [data-field="comment"], [data-field="title"]')) {
-                    return true;
-                }
-                return false;
-            };
-
-            srcFields.filter(isEntryNameField).forEach(f => usedTargets.add(f));
-
-            // LBE 専用コントロール（template / 解像度 / プロンプト / 変数 / 選択肢）をクラス＋行順で厳密同期
-            const lbeSpecs = [
-                '.lbe-template-select',
-                '.lbe-resolution-select',
-                '.lbe-img-prompt',
-                '.lbe-negative-prompt',
-                '.lbe-variable-type',
-                '.lbe-variable-name',
-                '.lbe-variable-value',
-                '.lbe-choice-input',
-            ];
-            let anyLbeChanged = false;
-            let templateChanged = false;
-            const syncedClonedFields = new Set();
-
-            for (const sel of lbeSpecs) {
-                const cList = Array.from(clonedEl.querySelectorAll(sel));
-                const sList = Array.from(sourceEl.querySelectorAll(sel));
-                cList.forEach((cField, i) => {
-                    const sField = sList[i];
-                    if (!sField) return;
-                    usedTargets.add(sField);
-                    syncedClonedFields.add(cField);
-                    if (cField.tagName === 'SELECT') {
-                        const targetVal = cField.value;
-                        const hasOpt = Array.from(sField.options || []).some(o => o.value === targetVal);
-                        if (sField.value !== targetVal || (hasOpt && sField.selectedIndex !== cField.selectedIndex)) {
-                            if (hasOpt) {
-                                sField.value = targetVal;
-                                const matchedIdx = Array.from(sField.options || []).findIndex(o => o.value === targetVal);
-                                if (matchedIdx >= 0) sField.selectedIndex = matchedIdx;
-                            } else if (cField.selectedIndex >= 0 && sField.options?.[cField.selectedIndex]) {
-                                sField.selectedIndex = cField.selectedIndex;
-                            } else {
-                                sField.value = targetVal;
-                            }
-                            sField.dispatchEvent(new Event('change', { bubbles: true }));
-                            sField.dispatchEvent(new Event('input', { bubbles: true }));
-                            if (window.$) window.$(sField).trigger('change');
-                            anyLbeChanged = true;
-                            if (sel === '.lbe-template-select') {
-                                templateChanged = true;
-                            }
-                        }
-                    } else {
-                        if (sField.value !== cField.value) {
-                            sField.value = cField.value;
-                            sField.dispatchEvent(new Event('input', { bubbles: true }));
-                            sField.dispatchEvent(new Event('change', { bubbles: true }));
-                            if (window.$) window.$(sField).trigger('input').trigger('change');
-                            anyLbeChanged = true;
-                        }
-                    }
-                });
-            }
-
-            // template が切り替わった場合、sourceEl 側でロードされたテンプレート固有の
-            // プロンプト・解像度を clonedEl 側へ取り込み、古い値での上書きを防ぐ
-            if (templateChanged) {
-                const syncPairsFromSource = [
-                    ['.lbe-resolution-select', true],
-                    ['.lbe-img-prompt', false],
-                    ['.lbe-negative-prompt', false],
-                ];
-                for (const [sel, isSelect] of syncPairsFromSource) {
-                    const cField = clonedEl.querySelector(sel);
-                    const sField = sourceEl.querySelector(sel);
-                    if (!cField || !sField) continue;
-                    if (isSelect) {
-                        cField.value = sField.value;
-                        const idx = Array.from(cField.options || []).findIndex(o => o.value === sField.value);
-                        cField.selectedIndex = idx >= 0 ? idx : sField.selectedIndex;
-                    } else {
-                        cField.value = sField.value;
-                    }
-                    syncedClonedFields.add(cField);    
-                }
-            }
-           
-            const isResolutionField = (el) => {
-                const sig = [
-                    el.getAttribute('name') || '',
-                    el.getAttribute('id') || '',
-                    typeof el.className === 'string' ? el.className : '',
-                    el.dataset?.name || '',
-                    el.dataset?.field || '',
-                    el.dataset?.key || '',
-                ].join(' ').toLowerCase();
-                if (/resol|width|height|size|aspect|ratio|解像度/.test(sig)) return true;
-                const wrap = el.closest('div, p, label, .flex-container, .form-group');
-                const wrapTxt = (wrap?.textContent || '').toLowerCase();
-                return /解像度|resolution/.test(wrapTxt);
-            };
-
-            const findResolutionTarget = (field) => {
-                const name = field.getAttribute('name');
-                if (name) {
-                    const exact = Array.from(sourceEl.querySelectorAll(`[name="${escapeCssAttrValue(name)}"]`))
-                        .find(c => !usedTargets.has(c) && c.tagName === field.tagName);
-                    if (exact) return exact;
-                }
-                const candidates = Array.from(sourceEl.querySelectorAll('input, textarea, select'))
-                    .filter(c => !usedTargets.has(c) && c.tagName === field.tagName && isResolutionField(c));
-                return candidates[0] || null;
-            };
-
-            const findTarget = (field, idx) => {
-                if (isResolutionField(field)) {
-                    const resTarget = findResolutionTarget(field);
-                    if (resTarget) return resTarget;
-                }
-
-                const name = field.getAttribute('name');
-                const dataName = field.getAttribute('data-name') || field.dataset?.field || field.dataset?.key;
-                const idAttr = field.getAttribute('id');
-
-                if (name) {
-                    const candidates = Array.from(sourceEl.querySelectorAll(`[name="${escapeCssAttrValue(name)}"]`));
-                    const unused = candidates.find(c => !usedTargets.has(c));
-                    if (unused) return unused;
-                    if (candidates[0]) return candidates[0];
-                }
-                if (dataName) {
-                    const c = sourceEl.querySelector(
-                        `[data-name="${escapeCssAttrValue(dataName)}"], [data-field="${escapeCssAttrValue(dataName)}"], [data-key="${escapeCssAttrValue(dataName)}"]`
-                    );
-                    if (c && !usedTargets.has(c)) return c;
-                }
-
-                if (idAttr) {
-                    const c = sourceEl.querySelector(`#${escapeCssAttrValue(idAttr)}`);
-                    if (c && !usedTargets.has(c)) return c;
-                }
-
-                const clsTokens = (typeof field.className === 'string' ? field.className : '')
-                    .trim()
-                    .split(/\s+/)
-                    .filter(c => c && !c.startsWith('stj-'));
-                for (const token of clsTokens) {
-                    const candidates = Array.from(sourceEl.querySelectorAll('.' + escapeCssAttrValue(token)))
-                        .filter(el => el.matches('input, textarea, select'));
-                    const unused = candidates.find(c => !usedTargets.has(c));
-                    if (unused) return unused;
-                }
-
-                if (srcFields[idx] && srcFields[idx].tagName === field.tagName && !usedTargets.has(srcFields[idx])) {
-                    return srcFields[idx];
-                }
-                return null;
-            };
-
-            let anyChanged = false;
-            const fields = Array.from(clonedEl.querySelectorAll('input, textarea, select'));
-            fields.forEach((field, idx) => {
-                if (isEntryNameField(field)) return;
-                if (syncedClonedFields.has(field)) return;
-                if (templateChanged && field.matches('.lbe-resolution-select, .lbe-img-prompt, .lbe-negative-prompt')) return;
-                const matchedTarget = findTarget(field, idx);
-                if (!matchedTarget || usedTargets.has(matchedTarget) || isEntryNameField(matchedTarget)) return;
-                usedTargets.add(matchedTarget);
-                const target = matchedTarget;
-
-                if (field.type === 'checkbox' || field.type === 'radio') {
-                    if (target.checked !== field.checked) {
-                        target.checked = field.checked;
-                        target.dispatchEvent(new Event('change', { bubbles: true }));
-                        if (window.$) window.$(target).trigger('change');
-                        anyChanged = true;
-                    }
-                } else if (field.tagName === 'SELECT') {
-                    const matchedByVal = Array.from(target.options || []).some(o => o.value === field.value);
-                    const nextVal = matchedByVal ? field.value : (target.options?.[field.selectedIndex]?.value ?? field.value);
-                    if (target.value !== nextVal || (matchedByVal && target.selectedIndex !== field.selectedIndex)) {
-                        if (matchedByVal) {
-                            target.value = nextVal;
-                        } else if (field.selectedIndex >= 0 && target.options?.[field.selectedIndex]) {
-                            target.selectedIndex = field.selectedIndex;
-                        } else {
-                            target.value = nextVal;
-                        }
-                        target.dispatchEvent(new Event('change', { bubbles: true }));
-                        if (window.$) window.$(target).trigger('input').trigger('change');
-                        anyChanged = true;
-                    }
-                } else {
-                    if (target.value !== field.value) {
-                        target.value = field.value;
-                        target.dispatchEvent(new Event('input', { bubbles: true }));
-                        target.dispatchEvent(new Event('change', { bubbles: true }));
-                        if (window.$) window.$(target).trigger('input').trigger('change');
-                        anyChanged = true;
-                    }
-                }
-            });
- 
-            const totalChanged = anyChanged || anyLbeChanged;
-
-            if (totalChanged && window.$) {
-                window.$(sourceEl).triggerHandler('change');
-            }
- 
-            if (totalChanged) {
-                scheduleWorldInfoPersist(sourceEl);
-                try {
-                    if (typeof window.saveSettingsDebounced === 'function') window.saveSettingsDebounced();
-                } catch (e) { /* ignore */ }
-            }
-        } finally {
-            if (isSyncingRef) isSyncingRef.active = false;
-        }
-    }
-
-    function mirrorActionButtonToSource(btn, clonedEl, sourceEl, isSyncingRef) {
-        if (!btn || !clonedEl || !sourceEl) return false;
-        if (isSyncingRef && isSyncingRef.active) return false;
-
-        const clonedButtons = Array.from(clonedEl.querySelectorAll('button, [role="button"], .menu_button'));
-        const sourceButtons = Array.from(sourceEl.querySelectorAll('button, [role="button"], .menu_button'));
-        const btnIdx = clonedButtons.indexOf(btn);
-
-        // クラス名・属性から種別と同一行インデックスを特定
-        const clsList = Array.from(btn.classList || []);
-        const matchedCls = clsList.find(c => /^lbe-(template|variable|choice)-(add|del)$/.test(c));
-
-        let matchedSrcBtn = null;
-        if (matchedCls) {
-            const srcSameCls = Array.from(sourceEl.querySelectorAll('.' + escapeCssAttrValue(matchedCls)));
-            const clonedSameCls = Array.from(clonedEl.querySelectorAll('.' + escapeCssAttrValue(matchedCls)));
-            const sameIdx = clonedSameCls.indexOf(btn);
-            if (sameIdx >= 0 && srcSameCls[sameIdx]) {
-                matchedSrcBtn = srcSameCls[sameIdx];
-            } else if (srcSameCls[0]) {
-                matchedSrcBtn = srcSameCls[0];
-            }
-        }
-        
-        const labelText = (
-            btn.textContent ||
-            btn.getAttribute('title') ||
-            btn.getAttribute('aria-label') ||
-            btn.getAttribute('data-action') ||
-            btn.className ||
-            ''
-        ).trim();
-
-        if (!matchedSrcBtn && btn.id) {
-            matchedSrcBtn = sourceEl.querySelector(`#${escapeCssAttrValue(btn.id)}`);
-        }
-        if (!matchedSrcBtn && labelText) {
-            const norm = labelText.replace(/\s+/g, ' ').trim();
-            matchedSrcBtn = sourceButtons.find(sb => {
-                const sbTxt = (sb.textContent || sb.getAttribute('title') || sb.getAttribute('aria-label') || '')
-                    .replace(/\s+/g, ' ').trim();
-                return sbTxt && sbTxt === norm;
-            }) || null;
-        }
-        if (!matchedSrcBtn && btnIdx >= 0 && sourceButtons[btnIdx]) {
-            matchedSrcBtn = sourceButtons[btnIdx];
-        }
-
-        if (!matchedSrcBtn) return false;
-
-        if (isSyncingRef) isSyncingRef.active = true;
-        try {
-            // 先に現在の入力値（解像度・プロンプト・変数・選択肢等）を sourceEl へ反映してからボタン操作を実行
-            syncClonedEntryToSource(clonedEl, sourceEl, { active: false });
-            matchedSrcBtn.click();
-        } catch (e) { /* ignore */ }
-        finally {
-            if (isSyncingRef) setTimeout(() => { isSyncingRef.active = false; }, 80);
-        }
-
-        return true;
-    }
-
-    function rebuildSnapshot(el) {
-        if (!el) return null;
-        const next = captureEntrySnapshot(el);
-        el.querySelectorAll('input, textarea, select').forEach((f, i) => {
-            updateSnapshotForField(next, f, i);
-        });
-        return next;
-    }
+    }    
     
     let _worldInfoSaveTimer = null;
     function scheduleWorldInfoPersist(sourceEl) {
@@ -1120,19 +815,37 @@ function applyEntrySnapshotToEl(el, snap) {
         }, 250);
     }
     
-
+    function restoreMountedWorldEntry(hostEl) {
+        if (!hostEl) return;
+        const movedEl = hostEl._movedEntryEl;
+        const placeholder = hostEl._entryPlaceholder;
+        if (movedEl && placeholder && placeholder.parentNode) {
+            placeholder.parentNode.insertBefore(movedEl, placeholder);
+            placeholder.remove();
+            scheduleWorldInfoPersist(movedEl);
+            try {
+                if (typeof window.saveSettingsDebounced === 'function') {
+                    window.saveSettingsDebounced();
+                }
+            } catch (e) { /* ignore */ }
+        } else if (placeholder && placeholder.parentNode) {
+            placeholder.remove();
+        }
+        hostEl.innerHTML = '';
+        hostEl.style.display = 'none';
+        delete hostEl._sourceEntryEl;
+        delete hostEl._movedEntryEl;
+        delete hostEl._entryPlaceholder;
+        delete hostEl._syncEntry;
+    }
+    
 async function mountWorldEntryInCellModal(cell) {
         const modal = currentCellModal;
         if (!modal || !cell) return;
         const hostEl = modal.querySelector('#stj_cell_modal_entry_host');
         if (!hostEl) return;
 
-        hostEl.innerHTML = '';
-        hostEl.style.display = 'none';
-        delete hostEl._sourceEntryEl;
-        delete hostEl._clonedEntryEl;
-        delete hostEl._syncEntry;
-        delete hostEl._guardObserver;
+        restoreMountedWorldEntry(hostEl);
 
         if (cell.classList.contains('stj-special-item')) return;
         const kw = getCellKeyword(cell).trim();
@@ -1155,210 +868,31 @@ async function mountWorldEntryInCellModal(cell) {
         const sourceEl = findSourceWorldEntryEl(entries, targetEntry, kw);
         if (!sourceEl) return;
 
-        // クローン前に元要素のドロワーを展開し、SillyTavern本体に中身を生成させる
+        // 本体要素のドロワーを展開し、SillyTavern本体と LBE のコントロールを初期化させる
         await ensureSourceEntryExpanded(sourceEl);
 
         if (currentCellModal !== modal || currentModalCell !== cell) return;
 
-        const cloned = sourceEl.cloneNode(true);
-        cloned.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
-
-        sourceEl.querySelectorAll('select').forEach((srcSelect) => {
-            const name = srcSelect.getAttribute('name');
-            const dstSelect = name
-                ? cloned.querySelector(`select[name="${escapeCssAttrValue(name)}"]`)
-                : null;
-            if (dstSelect) {
-                dstSelect.value = srcSelect.value;
-                dstSelect.selectedIndex = srcSelect.selectedIndex;
-            }
-        });
-
-        expandClonedEntryPanels(cloned);
-        collapseLbeExtrasPanel(cloned);
-
-        // 詳細設定トグル（.lbe-extras-toggle）に手動開閉動作を付与
-        cloned.querySelectorAll('.lbe-extras-toggle').forEach((toggle) => {
-            toggle.addEventListener('click', (e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                const isClosed = cloned.dataset.lbeExtrasUserOpened !== '1';
-                const icon = toggle.querySelector('.lbe-extras-icon, i');
-                if (isClosed) {
-                    cloned.dataset.lbeExtrasUserOpened = '1';
-                    cloned.classList.remove('lbe-extras-collapsed');
-                    if (icon) {
-                        icon.classList.remove('down', 'fa-circle-chevron-down');
-                        icon.classList.add('up', 'fa-circle-chevron-up');
-                    }
-                    cloned.querySelectorAll('.lbe-extras-panel').forEach((panel) => {
-                        panel.classList.remove('lbe-extras-collapsed', 'collapsed');
-                        panel.style.setProperty('display', 'block', 'important');
-                    });
-                } else {
-                    delete cloned.dataset.lbeExtrasUserOpened;
-                    collapseLbeExtrasPanel(cloned);
-                }
-            });
-        });
-
-        // クローン側の開閉ボタンにも手動トグル動作を付与
-        cloned.querySelectorAll('.inline-drawer-toggle').forEach((toggle) => {
-            toggle.addEventListener('click', (e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                const drawer = toggle.closest('.inline-drawer') || cloned;
-                const content = drawer.querySelector('.inline-drawer-content');
-                const opening = toggle.classList.contains('down');
-                if (opening) {
-                    toggle.classList.remove('down', 'fa-circle-chevron-down');
-                    toggle.classList.add('up', 'fa-circle-chevron-up');
-                    if (content) content.style.setProperty('display', 'block', 'important');
-                } else {
-                    toggle.classList.remove('up', 'fa-circle-chevron-up');
-                    toggle.classList.add('down', 'fa-circle-chevron-down');
-                    if (content) content.style.setProperty('display', 'none', 'important');
-                }
-            });
-        });
-
-        const snap = captureEntrySnapshot(cloned);
-        const syncState = { active: false };
-        const syncNow = () => syncClonedEntryToSource(cloned, sourceEl, syncState);
-
-        const bindFieldListeners = (field) => {
-            if (field.dataset.stjBound === '1') return;
-            field.dataset.stjBound = '1';
-            const recordUserEdit = () => {
-                const curFields = Array.from(cloned.querySelectorAll('input, textarea, select'));
-                const curIdx = curFields.indexOf(field);
-                if (field.tagName === 'TEXTAREA') {
-                    field.style.height = 'auto';
-                    field.style.height = field.scrollHeight + 'px';
-                }
-                if (curIdx >= 0) updateSnapshotForField(snap, field, curIdx);
-                syncNow();
-                // 同期後（template切替や変数行再描画後）の最新値を cloned / snap に反映
-                if (field.classList.contains('lbe-template-select')) {
-                    ['.lbe-resolution-select', '.lbe-img-prompt', '.lbe-negative-prompt'].forEach((sel) => {
-                        const cf = cloned.querySelector(sel);
-                        const sf = sourceEl.querySelector(sel);
-                        if (cf && sf) {
-                            cf.value = sf.value;
-                            if (cf.tagName === 'SELECT') {
-                                const idx = Array.from(cf.options || []).findIndex(o => o.value === sf.value);
-                                cf.selectedIndex = idx >= 0 ? idx : sf.selectedIndex;
-                            }
-                        }
-                    });
-                }
-                const updatedFields = Array.from(cloned.querySelectorAll('input, textarea, select'));
-                const updatedIdx = updatedFields.indexOf(field);
-                if (updatedIdx >= 0) updateSnapshotForField(snap, field, updatedIdx);
-                Object.assign(snap, rebuildSnapshot(cloned) || snap);
-            };
-            field.addEventListener('pointerdown', () => {
-                const curIdx = Array.from(cloned.querySelectorAll('input, textarea, select')).indexOf(field);
-                if (curIdx >= 0) updateSnapshotForField(snap, field, curIdx);
-            });
-            field.addEventListener('input', recordUserEdit);
-            field.addEventListener('change', recordUserEdit);
-        };
-
-        Array.from(cloned.querySelectorAll('input, textarea, select')).forEach((field) => {
-            bindFieldListeners(field);
-        });
-
-        cloned.addEventListener('click', (e) => {
-            const actionBtn = e.target.closest('button, [role="button"], .menu_button');
-            if (actionBtn && !actionBtn.closest('.lbe-extras-toggle') && !actionBtn.closest('.inline-drawer-toggle')) {
-                e.preventDefault();
-                e.stopPropagation();
-                const mirrored = mirrorActionButtonToSource(actionBtn, cloned, sourceEl, syncState);
-                setTimeout(() => {
-                    if (mirrored && document.body.contains(sourceEl) && document.body.contains(cloned)) {
-                        // sourceEl 側の追加・削除・テンプレート変更結果をクローン側へ再反映
-                        const hostEl = cloned.parentElement;
-                        const freshClone = sourceEl.cloneNode(true);
-                        freshClone.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
-                        expandClonedEntryPanels(freshClone);
-                        if (hostEl) {
-                            if (hostEl._guardObserver) {
-                                try { hostEl._guardObserver.disconnect(); } catch (err) { /* ignore */ }
-                            }
-                            hostEl.innerHTML = '';
-                            hostEl.appendChild(freshClone);
-                            // 新しいクローンへ再バインドするため mountWorldEntryInCellModal を再実行
-                            if (currentModalCell) {
-                                mountWorldEntryInCellModal(currentModalCell).catch(() => {});
-                            }
-                            return;
-                        }
-                    }
-                    Array.from(cloned.querySelectorAll('input, textarea, select')).forEach((field, idx) => {
-                        bindFieldListeners(field, idx);
-                        updateSnapshotForField(snap, field, idx);
-                    });
-                    syncNow();
-                    scheduleWorldInfoPersist(sourceEl);
-                }, 50);
-                return;
-            }
-
-            if (e.target.closest('button, input, select, textarea, .lbe-extras-toggle')) {
-                setTimeout(() => {
-                    Array.from(cloned.querySelectorAll('input, textarea, select')).forEach((field, idx) => {
-                        bindFieldListeners(field, idx);
-                        if (field === e.target || field.contains(e.target)) {
-                            updateSnapshotForField(snap, field, idx);
-                        }
-                    });
-                    syncNow();
-                    Array.from(cloned.querySelectorAll('input, textarea, select')).forEach((field, idx) => {
-                        updateSnapshotForField(snap, field, idx);
-                    });
-                }, 0);
-            }
-        });
-
-        let guardTimer = null;
-        const guardObserver = new MutationObserver(() => {
-            if (syncState.active) return;
-            if (guardTimer) clearTimeout(guardTimer);
-            guardTimer = setTimeout(() => {
-                if (!document.body.contains(cloned) || syncState.active) return;
-                applyEntrySnapshotToEl(cloned, snap);
-            }, 0);
-        });
-        guardObserver.observe(cloned, {
-            childList: true,
-            subtree: true,
-            attributes: true,
-            attributeFilter: ['style', 'class', 'value', 'checked', 'selected'],
-        });
+        // 元の位置にプレースホルダを残して本体要素を直接 hostEl へ移動
+        const placeholder = document.createComment('stj-world-entry-placeholder');
+        if (sourceEl.parentNode) {
+            sourceEl.parentNode.insertBefore(placeholder, sourceEl);
+        }
+        expandClonedEntryPanels(sourceEl);
+        collapseLbeExtrasPanel(sourceEl);
 
         hostEl._sourceEntryEl = sourceEl;
-        hostEl._clonedEntryEl = cloned;
-        hostEl._syncEntry = syncNow;
-        hostEl._guardObserver = guardObserver;
-        hostEl.appendChild(cloned);
+        hostEl._movedEntryEl = sourceEl;
+        hostEl._entryPlaceholder = placeholder;
+        hostEl._syncEntry = () => scheduleWorldInfoPersist(sourceEl);
+        hostEl.appendChild(sourceEl);
         hostEl.style.display = 'block';
         hostEl.style.height = '35%';
-
-        const enforceOpen = () => {
-            if (currentCellModal === modal && currentModalCell === cell && document.body.contains(cloned)) {
-                expandClonedEntryPanels(cloned);
-                applyEntrySnapshotToEl(cloned, snap);
-            }
-        };
-        setTimeout(enforceOpen, 50);
-        setTimeout(enforceOpen, 200);
 
         if (window.LorebookExpansion?.forceInject) {
             setTimeout(() => {
                 if (currentCellModal === modal && currentModalCell === cell) {
                     window.LorebookExpansion.forceInject().catch(() => {});
-                    enforceOpen();
                 }
             }, 150);
         }
@@ -2498,16 +2032,7 @@ function closeCellModal(revert) {
         if (!currentCellModal) return;
         const entryHostEl = currentCellModal.querySelector('#stj_cell_modal_entry_host');
         if (entryHostEl) {
-            if (entryHostEl._guardObserver) {
-                try { entryHostEl._guardObserver.disconnect(); } catch (e) { /* ignore */ }
-            }
-            entryHostEl.innerHTML = '';
-            entryHostEl.style.display = 'block';
-            entryHostEl.style.height = '35%';
-            delete entryHostEl._sourceEntryEl;
-            delete entryHostEl._clonedEntryEl;
-            delete entryHostEl._syncEntry;
-            delete entryHostEl._guardObserver;
+            restoreMountedWorldEntry(entryHostEl);
         }
         const zoom = document.getElementById('stj_media_zoom');
         if (zoom) zoom.remove();
@@ -2590,17 +2115,8 @@ function closeCellModal(revert) {
         } catch (e) { /* ignore */ }
         const entryHostEl = currentCellModal.querySelector('#stj_cell_modal_entry_host');
         if (entryHostEl) {
-            if (entryHostEl._guardObserver) {
-                try { entryHostEl._guardObserver.disconnect(); } catch (e) { /* ignore */ }
-            }
             if (typeof entryHostEl._syncEntry === 'function') entryHostEl._syncEntry();
-            entryHostEl.innerHTML = '';
-            entryHostEl.style.display = 'block';
-            entryHostEl.style.height = '35%';
-            delete entryHostEl._sourceEntryEl;
-            delete entryHostEl._clonedEntryEl;
-            delete entryHostEl._syncEntry;
-            delete entryHostEl._guardObserver;
+            restoreMountedWorldEntry(entryHostEl);
         }
         const zoom = document.getElementById('stj_media_zoom');
         if (zoom) zoom.remove();
