@@ -819,6 +819,9 @@ function applyEntrySnapshotToEl(el, snap) {
                 '.lbe-choice-input',
             ];
             let anyLbeChanged = false;
+            let templateChanged = false;
+            const syncedClonedFields = new Set();
+
             for (const sel of lbeSpecs) {
                 const cList = Array.from(clonedEl.querySelectorAll(sel));
                 const sList = Array.from(sourceEl.querySelectorAll(sel));
@@ -826,6 +829,7 @@ function applyEntrySnapshotToEl(el, snap) {
                     const sField = sList[i];
                     if (!sField) return;
                     usedTargets.add(sField);
+                    syncedClonedFields.add(cField);
                     if (cField.tagName === 'SELECT') {
                         if (sField.value !== cField.value || sField.selectedIndex !== cField.selectedIndex) {
                             const hasOpt = Array.from(sField.options || []).some(o => o.value === cField.value);
@@ -839,6 +843,9 @@ function applyEntrySnapshotToEl(el, snap) {
                             sField.dispatchEvent(new Event('change', { bubbles: true }));
                             if (window.$) window.$(sField).trigger('change');
                             anyLbeChanged = true;
+                            if (sel === '.lbe-template-select') {
+                                templateChanged = true;
+                            }
                         }
                     } else {
                         if (sField.value !== cField.value) {
@@ -851,7 +858,28 @@ function applyEntrySnapshotToEl(el, snap) {
                     }
                 });
             }
-            
+
+            // template が切り替わった場合、sourceEl 側でロードされたテンプレート固有の
+            // プロンプト・解像度を clonedEl 側へ取り込み、古い値での上書きを防ぐ
+            if (templateChanged) {
+                const syncPairsFromSource = [
+                    ['.lbe-resolution-select', true],
+                    ['.lbe-img-prompt', false],
+                    ['.lbe-negative-prompt', false],
+                ];
+                for (const [sel, isSelect] of syncPairsFromSource) {
+                    const cField = clonedEl.querySelector(sel);
+                    const sField = sourceEl.querySelector(sel);
+                    if (!cField || !sField) continue;
+                    if (isSelect) {
+                        cField.value = sField.value;
+                        cField.selectedIndex = sField.selectedIndex;
+                    } else {
+                        cField.value = sField.value;
+                    }
+                }
+            }
+           
             const isResolutionField = (el) => {
                 const sig = [
                     el.getAttribute('name') || '',
@@ -928,6 +956,8 @@ function applyEntrySnapshotToEl(el, snap) {
             const fields = Array.from(clonedEl.querySelectorAll('input, textarea, select'));
             fields.forEach((field, idx) => {
                 if (isEntryNameField(field)) return;
+                if (syncedClonedFields.has(field)) return;
+                if (templateChanged && field.matches('.lbe-resolution-select, .lbe-img-prompt, .lbe-negative-prompt')) return;
                 const matchedTarget = findTarget(field, idx);
                 if (!matchedTarget || usedTargets.has(matchedTarget) || isEntryNameField(matchedTarget)) return;
                 usedTargets.add(matchedTarget);
@@ -1202,6 +1232,17 @@ async function mountWorldEntryInCellModal(cell) {
                 }
                 if (curIdx >= 0) updateSnapshotForField(snap, field, curIdx);
                 syncNow();
+                // 同期後（template切替や変数行再描画後）の最新値を cloned / snap に反映
+                if (field.classList.contains('lbe-template-select')) {
+                    ['.lbe-resolution-select', '.lbe-img-prompt', '.lbe-negative-prompt'].forEach((sel) => {
+                        const cf = cloned.querySelector(sel);
+                        const sf = sourceEl.querySelector(sel);
+                        if (cf && sf) {
+                            cf.value = sf.value;
+                            if (cf.tagName === 'SELECT') cf.selectedIndex = sf.selectedIndex;
+                        }
+                    });
+                }
                 const updatedFields = Array.from(cloned.querySelectorAll('input, textarea, select'));
                 const updatedIdx = updatedFields.indexOf(field);
                 if (updatedIdx >= 0) updateSnapshotForField(snap, field, updatedIdx);
@@ -2529,6 +2570,14 @@ function closeCellModal(revert) {
         updateCellPreview(cell);
         runLiveTest();
         autoSave({ immediate: true });
+        try {
+            if (window.LorebookExpansion?.cleanupLexDuplicateKeys) {
+                window.LorebookExpansion.cleanupLexDuplicateKeys();
+            }
+            if (typeof window.saveSettingsDebounced === 'function') {
+                window.saveSettingsDebounced();
+            }
+        } catch (e) { /* ignore */ }
         const entryHostEl = currentCellModal.querySelector('#stj_cell_modal_entry_host');
         if (entryHostEl) {
             if (entryHostEl._guardObserver) {
