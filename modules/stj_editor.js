@@ -527,712 +527,6 @@
         return [];
     }
 
-    function _getLexData(worldName, entry) {
-        const uid = entry?.uid;
-        let apiObj = null;
-        try {
-            if (window.LorebookExpansion?.getDataFor && worldName && uid !== undefined && uid !== null) {
-                apiObj = window.LorebookExpansion.getDataFor(worldName, uid, entry);
-            }
-        } catch (e) { /* ignore */ }
-
-        const extObj = entry?.extensions?.lorebook_expansion;
-        const src = (apiObj && typeof apiObj === 'object')
-            ? apiObj
-            : ((extObj && typeof extObj === 'object') ? extObj : {});
-
-        return JSON.parse(JSON.stringify(src));
-    }
-
-    function _setLexData(worldName, entry, dataObj) {
-        if (!entry || !dataObj || typeof dataObj !== 'object') return;
-        const copy = JSON.parse(JSON.stringify(dataObj));
-        if (!entry.extensions || typeof entry.extensions !== 'object') {
-            entry.extensions = {};
-        }
-        entry.extensions.lorebook_expansion = copy;
-
-        const lex = window.LorebookExpansion;
-        const uid = entry.uid;
-        if (lex && worldName && uid !== undefined && uid !== null) {
-            for (const fn of ['setDataFor', 'saveDataFor', 'updateEntryData']) {
-                if (typeof lex[fn] === 'function') {
-                    try { lex[fn](worldName, uid, copy, entry); } catch (e) { /* ignore */ }
-                }
-            }
-        }
-    }
-
-    function _syncClonedEntryToTarget(clonedEl, sourceEl, worldName, targetEntry) {
-        if (!clonedEl || !targetEntry) return;
-
-        const lexData = _getLexData(worldName, targetEntry);
-        let lexChanged = false;
-
-        const controls = Array.from(clonedEl.querySelectorAll('input, textarea, select'));
-        const srcControls = sourceEl ? Array.from(sourceEl.querySelectorAll('input, textarea, select')) : [];
-
-        controls.forEach((ctrl, idx) => {
-            const name = (ctrl.getAttribute('name') || '').trim();
-            const dataKey = (ctrl.getAttribute('data-field') || ctrl.getAttribute('data-name') || ctrl.getAttribute('data-key') || '').trim();
-            const cls = (ctrl.className || '').toLowerCase();
-            const idAttr = (ctrl.getAttribute('data-lbe-field') || ctrl.dataset?.field || '').trim();
-            const keyHint = (idAttr || dataKey || name || cls).toLowerCase();
-
-            // 元DOM要素へ同期
-            let srcCtrl = null;
-            if (sourceEl && name) {
-                srcCtrl = sourceEl.querySelector(`[name="${escapeCssAttrValue(name)}"]`);
-            }
-            if (!srcCtrl && sourceEl && dataKey) {
-                srcCtrl = sourceEl.querySelector(
-                    `[data-field="${escapeCssAttrValue(dataKey)}"], [data-name="${escapeCssAttrValue(dataKey)}"], [data-key="${escapeCssAttrValue(dataKey)}"]`
-                );
-            }
-            if (!srcCtrl && srcControls[idx] && srcControls[idx].tagName === ctrl.tagName) {
-                srcCtrl = srcControls[idx];
-            }
-
-            if (srcCtrl) {
-                if (ctrl.type === 'checkbox' || ctrl.type === 'radio') {
-                    if (srcCtrl.checked !== ctrl.checked) {
-                        srcCtrl.checked = ctrl.checked;
-                        srcCtrl.dispatchEvent(new Event('change', { bubbles: true }));
-                    }
-                } else if (srcCtrl.value !== ctrl.value) {
-                    srcCtrl.value = ctrl.value;
-                    srcCtrl.dispatchEvent(new Event(ctrl.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }));
-                    if (ctrl.tagName !== 'SELECT') {
-                        srcCtrl.dispatchEvent(new Event('change', { bubbles: true }));
-                    }
-                }
-            }
-
-            // 標準WIフィールドの同期
-            if (name === 'comment') {
-                targetEntry.comment = ctrl.value;
-            } else if (name === 'key' || name === 'keys') {
-                const arr = String(ctrl.value || '').split(',').map(s => s.trim()).filter(Boolean);
-                targetEntry.key = arr;
-                targetEntry.keys = arr;
-            } else if (name === 'content') {
-                targetEntry.content = ctrl.value;
-            } else if (name === 'position') {
-                const num = Number(ctrl.value);
-                targetEntry.position = Number.isNaN(num) ? ctrl.value : num;
-            } else if (name === 'entryStateSelector') {
-                targetEntry.entryStateSelector = ctrl.value;
-            }
-
-            // LorebookExpansion 拡張フィールド（プロンプト・選択肢・解像度など）の同期
-            const propName = idAttr || dataKey || (name && !['comment', 'key', 'keys', 'content', 'position', 'entryStateSelector'].includes(name) ? name : '');
-            if (propName) {
-                const nextVal = ctrl.type === 'checkbox' ? ctrl.checked : ctrl.value;
-                if (lexData[propName] !== nextVal) {
-                    lexData[propName] = nextVal;
-                    lexChanged = true;
-                }
-            } else if (keyHint.includes('prompt') && typeof ctrl.value === 'string') {
-                if (lexData.img_prompt !== ctrl.value) {
-                    lexData.img_prompt = ctrl.value;
-                    lexChanged = true;
-                }
-            }
-        });
-
-        // 選択肢（choices）要素がDOM上に存在する場合の同期
-        const choiceInputs = clonedEl.querySelectorAll('[data-choice-index], .lbe-choice-input, input[name*="choice"], textarea[name*="choice"]');
-        if (choiceInputs.length > 0) {
-            const nextChoices = Array.from(choiceInputs).map(el => el.value).filter(v => typeof v === 'string');
-            if (JSON.stringify(lexData.choices || []) !== JSON.stringify(nextChoices)) {
-                lexData.choices = nextChoices;
-                lexChanged = true;
-            }
-        }
-
-        if (lexChanged || !targetEntry.extensions?.lorebook_expansion) {
-            _setLexData(worldName, targetEntry, lexData);
-        }
-    }
-
-    let _saveQueue = Promise.resolve();
-
-    async function _persistEntryNow(worldName, targetEntry, sourceEl, clonedEl) {
-        if (!worldName || !targetEntry || targetEntry.uid === undefined || targetEntry.uid === null) return;
-
-        _saveQueue = _saveQueue.then(async () => {
-            if (clonedEl) {
-                _syncClonedEntryToTarget(clonedEl, sourceEl, worldName, targetEntry);
-            }
-            const uid = String(targetEntry.uid);
-            const lexSnap = _getLexData(worldName, targetEntry);
-
-            const ctx = getSTContext();
-            const headers = (ctx && typeof ctx.getRequestHeaders === 'function')
-                ? ctx.getRequestHeaders()
-                : { 'Content-Type': 'application/json' };
-
-            const getResp = await fetch('/api/worldinfo/get', {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({ name: worldName }),
-                cache: 'no-store',
-            });
-            if (!getResp.ok) return;
-
-            const wiJson = await getResp.json();
-            const entriesObj = wiJson?.entries || wiJson?.data?.entries;
-            if (!entriesObj || !entriesObj[uid]) return;
-
-            const srvEntry = entriesObj[uid];
-            if (targetEntry.comment !== undefined) srvEntry.comment = targetEntry.comment;
-            if (targetEntry.key !== undefined) srvEntry.key = targetEntry.key;
-            if (targetEntry.keys !== undefined) srvEntry.keys = targetEntry.keys;
-            if (targetEntry.content !== undefined) srvEntry.content = targetEntry.content;
-            if (targetEntry.position !== undefined) srvEntry.position = targetEntry.position;
-            if (targetEntry.entryStateSelector !== undefined) srvEntry.entryStateSelector = targetEntry.entryStateSelector;
-
-            const mergedLex = {
-                ..._getLexData(worldName, srvEntry),
-                ...lexSnap,
-            };
-            _setLexData(worldName, srvEntry, mergedLex);
-
-            await fetch('/api/worldinfo/edit', {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({
-                    name: worldName,
-                    data: { entries: entriesObj },
-                }),
-            });
-
-            window.LorebookExpansion?.clearWorldInfoEntriesCache?.(worldName);
-        }).catch(err => {
-            console.warn('[STJ Editor] エントリ保存エラー:', err);
-        });
-
-        return _saveQueue;
-    }
-
-    function _getLexDataSafe(worldName, entry) {
-        const uid = entry?.uid;
-        let apiData = null;
-        try {
-            if (window.LorebookExpansion?.getDataFor && worldName && uid !== undefined && uid !== null) {
-                apiData = window.LorebookExpansion.getDataFor(worldName, uid, entry);
-            }
-        } catch (err) { /* ignore */ }
-
-        const extData = entry?.extensions?.lorebook_expansion;
-        const base = (apiData && typeof apiData === 'object')
-            ? apiData
-            : ((extData && typeof extData === 'object') ? extData : {});
-
-        try {
-            return JSON.parse(JSON.stringify(base));
-        } catch (err) {
-            return {};
-        }
-    }
-
-    function _setLexDataSafe(worldName, entry, dataObj) {
-        if (!entry || !dataObj || typeof dataObj !== 'object') return;
-        const copy = JSON.parse(JSON.stringify(dataObj));
-        if (!entry.extensions || typeof entry.extensions !== 'object') {
-            entry.extensions = {};
-        }
-        entry.extensions.lorebook_expansion = copy;
-
-        const lex = window.LorebookExpansion;
-        const uid = entry.uid;
-        if (lex && worldName && uid !== undefined && uid !== null) {
-            for (const fnName of ['setDataFor', 'saveDataFor', 'updateEntryData']) {
-                if (typeof lex[fnName] === 'function') {
-                    try { lex[fnName](worldName, uid, copy, entry); } catch (err) { /* ignore */ }
-                }
-            }
-        }
-    }
-
-    function _syncClonedEntryFields(clonedEl, sourceEl, worldName, targetEntry) {
-        if (!clonedEl || !targetEntry) return;
-
-        const lexData = _getLexDataSafe(worldName, targetEntry);
-        let lexUpdated = false;
-
-        const clonedControls = Array.from(clonedEl.querySelectorAll('input, textarea, select'));
-        const sourceControls = sourceEl ? Array.from(sourceEl.querySelectorAll('input, textarea, select')) : [];
-
-        clonedControls.forEach((ctrl, idx) => {
-            const name = (ctrl.getAttribute('name') || '').trim();
-            const dataKey = (
-                ctrl.getAttribute('data-field') ||
-                ctrl.getAttribute('data-name') ||
-                ctrl.getAttribute('data-key') ||
-                ctrl.dataset?.field ||
-                ''
-            ).trim();
-            const cls = (ctrl.className || '').toLowerCase();
-
-            let srcCtrl = null;
-            if (sourceEl && name) {
-                srcCtrl = sourceEl.querySelector(`[name="${escapeCssAttrValue(name)}"]`);
-            }
-            if (!srcCtrl && sourceEl && dataKey) {
-                srcCtrl = sourceEl.querySelector(
-                    `[data-field="${escapeCssAttrValue(dataKey)}"], [data-name="${escapeCssAttrValue(dataKey)}"], [data-key="${escapeCssAttrValue(dataKey)}"]`
-                );
-            }
-            if (!srcCtrl && sourceControls[idx] && sourceControls[idx].tagName === ctrl.tagName) {
-                srcCtrl = sourceControls[idx];
-            }
-
-            if (srcCtrl) {
-                if (ctrl.type === 'checkbox' || ctrl.type === 'radio') {
-                    if (srcCtrl.checked !== ctrl.checked) {
-                        srcCtrl.checked = ctrl.checked;
-                        srcCtrl.dispatchEvent(new Event('change', { bubbles: true }));
-                    }
-                } else if (srcCtrl.value !== ctrl.value) {
-                    srcCtrl.value = ctrl.value;
-                    srcCtrl.dispatchEvent(new Event('input', { bubbles: true }));
-                    srcCtrl.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-            }
-
-            if (name === 'comment') {
-                targetEntry.comment = ctrl.value;
-            } else if (name === 'key' || name === 'keys') {
-                const keysArr = String(ctrl.value || '').split(',').map(s => s.trim()).filter(Boolean);
-                targetEntry.key = keysArr;
-                targetEntry.keys = keysArr;
-            } else if (name === 'content') {
-                targetEntry.content = ctrl.value;
-            } else if (name === 'position') {
-                const parsedNum = Number(ctrl.value);
-                targetEntry.position = Number.isNaN(parsedNum) ? ctrl.value : parsedNum;
-            } else if (name === 'entryStateSelector') {
-                targetEntry.entryStateSelector = ctrl.value;
-            }
-
-            const lexKey = dataKey || (
-                name && !['comment', 'key', 'keys', 'content', 'position', 'entryStateSelector'].includes(name)
-                    ? name
-                    : ''
-            );
-            if (lexKey) {
-                const nextVal = ctrl.type === 'checkbox' ? ctrl.checked : ctrl.value;
-                if (lexData[lexKey] !== nextVal) {
-                    lexData[lexKey] = nextVal;
-                    lexUpdated = true;
-                }
-            } else if ((name.toLowerCase().includes('prompt') || cls.includes('prompt')) && typeof ctrl.value === 'string') {
-                if (lexData.img_prompt !== ctrl.value) {
-                    lexData.img_prompt = ctrl.value;
-                    lexUpdated = true;
-                }
-            }
-        });
-
-        const choiceEls = clonedEl.querySelectorAll('[data-choice-index], .lbe-choice-input, input[name*="choice"], textarea[name*="choice"]');
-        if (choiceEls.length > 0) {
-            const choicesArr = Array.from(choiceEls).map(el => el.value).filter(v => typeof v === 'string');
-            if (JSON.stringify(lexData.choices || []) !== JSON.stringify(choicesArr)) {
-                lexData.choices = choicesArr;
-                lexUpdated = true;
-            }
-        }
-
-        if (lexUpdated || !targetEntry.extensions?.lorebook_expansion) {
-            _setLexDataSafe(worldName, targetEntry, lexData);
-        }
-    }
-
-    let _persistChain = Promise.resolve();
-
-    async function _saveLorebookEntryDirect(worldName, targetEntry, sourceEl, clonedEl) {
-        if (!worldName || !targetEntry || targetEntry.uid === undefined || targetEntry.uid === null) return;
-
-        _persistChain = _persistChain.then(async () => {
-            if (clonedEl) {
-                _syncClonedEntryFields(clonedEl, sourceEl, worldName, targetEntry);
-            }
-
-            const uid = String(targetEntry.uid);
-            const lexSnap = _getLexDataSafe(worldName, targetEntry);
-            _setLexDataSafe(worldName, targetEntry, lexSnap);
-
-            const ctx = getSTContext();
-            const headers = (ctx && typeof ctx.getRequestHeaders === 'function')
-                ? ctx.getRequestHeaders()
-                : { 'Content-Type': 'application/json' };
-
-            const getResp = await fetch('/api/worldinfo/get', {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({ name: worldName }),
-                cache: 'no-store',
-            });
-            if (!getResp.ok) return;
-
-            const wiJson = await getResp.json();
-            const entriesMap = wiJson?.entries || wiJson?.data?.entries;
-            if (!entriesMap || !entriesMap[uid]) return;
-
-            const srvEntry = entriesMap[uid];
-            if (targetEntry.comment !== undefined) srvEntry.comment = targetEntry.comment;
-            if (targetEntry.key !== undefined) srvEntry.key = targetEntry.key;
-            if (targetEntry.keys !== undefined) srvEntry.keys = targetEntry.keys;
-            if (targetEntry.content !== undefined) srvEntry.content = targetEntry.content;
-            if (targetEntry.position !== undefined) srvEntry.position = targetEntry.position;
-            if (targetEntry.entryStateSelector !== undefined) srvEntry.entryStateSelector = targetEntry.entryStateSelector;
-
-            const mergedLex = {
-                ..._getLexDataSafe(worldName, srvEntry),
-                ...lexSnap,
-            };
-            _setLexDataSafe(worldName, srvEntry, mergedLex);
-
-            await fetch('/api/worldinfo/edit', {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({
-                    name: worldName,
-                    data: { entries: entriesMap },
-                }),
-            });
-
-            window.LorebookExpansion?.clearWorldInfoEntriesCache?.(worldName);
-        }).catch((err) => {
-            console.warn('[STJ Editor] ロアブック保存エラー:', err);
-        });
-
-        return _persistChain;
-    }
-
-    async function _applyKeywordToCellAndLorebook(newKwRaw) {
-        const cell = currentModalCell;
-        if (!cell || cell.classList.contains('stj-special-item')) return;
-
-        const newKw = String(newKwRaw || '').trim();
-        const oldKw = getCellKeyword(cell).trim();
-        if (!newKw || newKw === oldKw) return;
-
-        if (findDuplicateKeyword(cell, newKw)) {
-            showKeywordDuplicateWarning(newKw);
-            return;
-        }
-
-        const charName = document.getElementById('stj_char_name_display')?.textContent || detectCharacterNameFromDOM() || '';
-        const worldName = getCharacterWorldInfoName();
-        const entryHostEl = currentCellModal?.querySelector('#stj_cell_modal_entry_host');
-
-        let targetEntry = entryHostEl?._targetEntry || null;
-        if (!targetEntry && worldName) {
-            const entries = await loadWorldInfoEntries(worldName);
-            targetEntry = findEntryByKeyword(entries, oldKw) || findEntryByKeyword(entries, newKw);
-        }
-
-        const lexSnap = (worldName && targetEntry) ? _getLexDataSafe(worldName, targetEntry) : null;
-
-        if (targetEntry) {
-            targetEntry.comment = newKw;
-            const curKeys = getEntryKeys(targetEntry);
-            if (curKeys.length === 0 || (curKeys.length === 1 && String(curKeys[0]).trim() === oldKw)) {
-                targetEntry.key = [newKw];
-                targetEntry.keys = [newKw];
-            }
-            if (worldName && lexSnap) {
-                _setLexDataSafe(worldName, targetEntry, lexSnap);
-            }
-        }
-
-        if (charName) {
-            const curMap = getCurrentImageMapFromCharData(charName) || {};
-            if (Object.prototype.hasOwnProperty.call(curMap, oldKw)) {
-                const nextMap = {};
-                for (const [k, v] of Object.entries(curMap)) {
-                    if (k === oldKw) {
-                        nextMap[newKw] = v;
-                    } else if (!Object.prototype.hasOwnProperty.call(nextMap, k)) {
-                        nextMap[k] = v;
-                    }
-                }
-                saveImageMapToCharData(charName, nextMap);
-            }
-        }
-
-        setCellKeyword(cell, newKw);
-        modalOriginalKeyword = newKw;
-
-        if (entryHostEl?._clonedEntryEl) {
-            const cComment = entryHostEl._clonedEntryEl.querySelector('textarea[name="comment"], input[name="comment"]');
-            if (cComment) cComment.value = newKw;
-        }
-        if (entryHostEl?._sourceEntryEl) {
-            const sComment = entryHostEl._sourceEntryEl.querySelector('textarea[name="comment"], input[name="comment"]');
-            if (sComment) {
-                sComment.value = newKw;
-                sComment.dispatchEvent(new Event('input', { bubbles: true }));
-                sComment.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-        }
-
-        if (worldName && targetEntry) {
-            await _saveLorebookEntryDirect(
-                worldName,
-                targetEntry,
-                entryHostEl?._sourceEntryEl || null,
-                entryHostEl?._clonedEntryEl || null
-            );
-        }
-
-        updateCellPreview(cell);
-        autoSave({ immediate: true });
-    }
-    
-    function _installKeywordDisplayDelegate() {
-        if (window._stjKeywordDisplayDelegateInstalled) return;
-        window._stjKeywordDisplayDelegateInstalled = true;
-
-        document.addEventListener('click', (e) => {
-            const kwDisplayEl = e.target.closest('#stj_cell_modal_keyword_display, .stj-cell-modal-keyword-display');
-            if (!kwDisplayEl) return;
-            if (e.target.closest('input.stj-kw-inline-input')) return;
-            if (!currentModalCell || currentModalCell.classList.contains('stj-special-item')) return;
-
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
-
-            const startText = getCellKeyword(currentModalCell) || kwDisplayEl.textContent || '';
-            const input = document.createElement('input');
-            input.type = 'text';
-            input.className = 'stj-kw-inline-input';
-            input.value = startText;
-            input.style.cssText = [
-                'width: 100%',
-                'max-width: 480px',
-                'padding: 4px 10px',
-                'font-size: 20px',
-                'font-weight: bold',
-                'color: #ffffff',
-                'background: #0f172a',
-                'border: 2px solid #38bdf8',
-                'border-radius: 6px',
-                'outline: none',
-                'box-sizing: border-box',
-                'position: relative',
-                'z-index: 30',
-            ].join(';');
-
-            let finalized = false;
-            const commitOrCancel = async (shouldSave) => {
-                if (finalized) return;
-                finalized = true;
-                const rawVal = input.value;
-                if (input.parentNode === kwDisplayEl) {
-                    kwDisplayEl.removeChild(input);
-                }
-                const fallbackKw = getCellKeyword(currentModalCell) || '';
-                if (shouldSave) {
-                    const nextKw = rawVal.trim();
-                    if (nextKw && !findDuplicateKeyword(currentModalCell, nextKw)) {
-                        kwDisplayEl.textContent = nextKw;
-                        await _applyKeywordToCellAndLorebook(nextKw);
-                        return;
-                    }
-                }
-                kwDisplayEl.textContent = fallbackKw;
-            };
-
-            input.addEventListener('click', (ev) => {
-                ev.stopPropagation();
-                ev.stopImmediatePropagation();
-            }, true);
-            input.addEventListener('mousedown', (ev) => {
-                ev.stopPropagation();
-                ev.stopImmediatePropagation();
-            }, true);
-            input.addEventListener('keydown', (ev) => {
-                ev.stopPropagation();
-                if (ev.key === 'Enter' && !ev.isComposing) {
-                    ev.preventDefault();
-                    commitOrCancel(true);
-                } else if (ev.key === 'Escape') {
-                    ev.preventDefault();
-                    commitOrCancel(false);
-                }
-            });
-            input.addEventListener('blur', () => {
-                commitOrCancel(true);
-            });
-
-            kwDisplayEl.textContent = '';
-            kwDisplayEl.appendChild(input);
-            requestAnimationFrame(() => {
-                input.focus();
-                input.select();
-            });
-        }, true);
-    }
-    
-    async function _commitKeywordEdit(newKwRaw) {
-        const cell = currentModalCell;
-        if (!cell || cell.classList.contains('stj-special-item')) return;
-
-        const newKw = String(newKwRaw || '').trim();
-        const oldKw = getCellKeyword(cell).trim();
-        if (!newKw || newKw === oldKw) return;
-
-        if (findDuplicateKeyword(cell, newKw)) {
-            showKeywordDuplicateWarning(newKw);
-            return;
-        }
-
-        const charName = document.getElementById('stj_char_name_display')?.textContent || detectCharacterNameFromDOM() || '';
-        const worldName = getCharacterWorldInfoName();
-        const entryHostEl = currentCellModal?.querySelector('#stj_cell_modal_entry_host');
-
-        let targetEntry = entryHostEl?._targetEntry || null;
-        if (!targetEntry && worldName) {
-            const entries = await loadWorldInfoEntries(worldName);
-            targetEntry = findEntryByKeyword(entries, oldKw) || findEntryByKeyword(entries, newKw);
-        }
-
-        const lexSnap = (worldName && targetEntry) ? _getLexData(worldName, targetEntry) : null;
-
-        if (targetEntry) {
-            targetEntry.comment = newKw;
-            const curKeys = getEntryKeys(targetEntry);
-            if (curKeys.length === 0 || (curKeys.length === 1 && String(curKeys[0]).trim() === oldKw)) {
-                targetEntry.key = [newKw];
-                targetEntry.keys = [newKw];
-            }
-            if (worldName && lexSnap) {
-                _setLexData(worldName, targetEntry, lexSnap);
-            }
-        }
-
-        if (charName) {
-            const curMap = getCurrentImageMapFromCharData(charName) || {};
-            if (Object.prototype.hasOwnProperty.call(curMap, oldKw)) {
-                const nextMap = {};
-                for (const [k, v] of Object.entries(curMap)) {
-                    if (k === oldKw) {
-                        nextMap[newKw] = v;
-                    } else if (!Object.prototype.hasOwnProperty.call(nextMap, k)) {
-                        nextMap[k] = v;
-                    }
-                }
-                saveImageMapToCharData(charName, nextMap);
-            }
-        }
-
-        setCellKeyword(cell, newKw);
-        modalOriginalKeyword = newKw;
-
-        if (entryHostEl?._clonedEntryEl) {
-            const cComment = entryHostEl._clonedEntryEl.querySelector('textarea[name="comment"], input[name="comment"]');
-            if (cComment) cComment.value = newKw;
-        }
-        if (entryHostEl?._sourceEntryEl) {
-            const sComment = entryHostEl._sourceEntryEl.querySelector('textarea[name="comment"], input[name="comment"]');
-            if (sComment) {
-                sComment.value = newKw;
-                sComment.dispatchEvent(new Event('input', { bubbles: true }));
-                sComment.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-        }
-
-        if (worldName && targetEntry) {
-            await _persistEntryNow(
-                worldName,
-                targetEntry,
-                entryHostEl?._sourceEntryEl || null,
-                entryHostEl?._clonedEntryEl || null
-            );
-        }
-
-        updateCellPreview(cell);
-        autoSave({ immediate: true });
-    }
-
-    function _enableKeywordInlineEdit(kwDisplayEl) {
-        if (!kwDisplayEl) return;
-        kwDisplayEl.style.cursor = 'pointer';
-        kwDisplayEl.style.pointerEvents = 'auto';
-        kwDisplayEl.title = _t('stj.cell_modal.keyword_edit_hint', 'クリックしてキーワードを編集');
-
-        if (kwDisplayEl._kwEditHandler) {
-            kwDisplayEl.removeEventListener('click', kwDisplayEl._kwEditHandler, true);
-        }
-
-        const onClick = (e) => {
-            if (!currentModalCell || currentModalCell.classList.contains('stj-special-item')) return;
-            if (kwDisplayEl.querySelector('input.stj-kw-inline-edit')) return;
-
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
-
-            const startVal = getCellKeyword(currentModalCell) || kwDisplayEl.textContent || '';
-            const input = document.createElement('input');
-            input.type = 'text';
-            input.className = 'stj-kw-inline-edit';
-            input.value = startVal;
-            input.style.cssText =
-                'width:100%;max-width:460px;padding:4px 10px;font-size:20px;font-weight:bold;' +
-                'color:#fff;background:#0f172a;border:2px solid #60a5fa;' +
-                'border-radius:6px;outline:none;box-sizing:border-box;position:relative;z-index:20;';
-
-            let settled = false;
-            const finalize = async (commit) => {
-                if (settled) return;
-                settled = true;
-                const raw = input.value;
-                if (input.parentNode === kwDisplayEl) {
-                    kwDisplayEl.removeChild(input);
-                }
-                const fallbackKw = getCellKeyword(currentModalCell) || '';
-                if (commit) {
-                    const trimmed = raw.trim();
-                    if (trimmed && !findDuplicateKeyword(currentModalCell, trimmed)) {
-                        kwDisplayEl.textContent = trimmed;
-                        await _commitKeywordEdit(trimmed);
-                        return;
-                    }
-                }
-                kwDisplayEl.textContent = fallbackKw;
-            };
-
-            input.addEventListener('click', (ev) => ev.stopPropagation(), true);
-            input.addEventListener('mousedown', (ev) => ev.stopPropagation(), true);
-            input.addEventListener('keydown', (ev) => {
-                ev.stopPropagation();
-                if (ev.key === 'Enter' && !ev.isComposing) {
-                    ev.preventDefault();
-                    finalize(true);
-                } else if (ev.key === 'Escape') {
-                    ev.preventDefault();
-                    finalize(false);
-                }
-            });
-            input.addEventListener('blur', () => finalize(true));
-
-            kwDisplayEl.textContent = '';
-            kwDisplayEl.appendChild(input);
-            setTimeout(() => {
-                input.focus();
-                input.select();
-            }, 0);
-        };
-
-        kwDisplayEl._kwEditHandler = onClick;
-        kwDisplayEl.addEventListener('click', onClick, true);
-    }
-    
     function getLexDataFor(worldName, uid, entry) {
         if (window.LorebookExpansion?.getDataFor) {
             try {
@@ -1455,322 +749,8 @@
             await new Promise((r) => setTimeout(r, 80));
         }
     }
-
-    function _getLexSnapshot(worldName, entry) {
-        const uid = entry?.uid;
-        let apiData = null;
-        try {
-            if (window.LorebookExpansion?.getDataFor && worldName && uid !== undefined && uid !== null) {
-                apiData = window.LorebookExpansion.getDataFor(worldName, uid, entry);
-            }
-        } catch (e) { /* ignore */ }
-
-        const extData = entry?.extensions?.lorebook_expansion;
-        const base = (apiData && typeof apiData === 'object')
-            ? apiData
-            : ((extData && typeof extData === 'object') ? extData : {});
-
-        try {
-            return JSON.parse(JSON.stringify(base));
-        } catch (e) {
-            return {
-                img_prompt: typeof base.img_prompt === 'string' ? base.img_prompt : '',
-                choices: Array.isArray(base.choices) ? [...base.choices] : [],
-            };
-        }
-    }
-
-    function _applyLexSnapshot(worldName, entry, snap) {
-        if (!entry || !snap || typeof snap !== 'object') return;
-        const copy = JSON.parse(JSON.stringify(snap));
-        if (!entry.extensions || typeof entry.extensions !== 'object') {
-            entry.extensions = {};
-        }
-        entry.extensions.lorebook_expansion = copy;
-
-        const lex = window.LorebookExpansion;
-        const uid = entry.uid;
-        if (lex && worldName && uid !== undefined && uid !== null) {
-            for (const fnName of ['setDataFor', 'saveDataFor', 'updateEntryData']) {
-                if (typeof lex[fnName] === 'function') {
-                    try { lex[fnName](worldName, uid, copy, entry); } catch (e) { /* ignore */ }
-                }
-            }
-        }
-    }
-
-    function _syncClonedFieldsToSource(clonedEl, sourceEl) {
-        if (!clonedEl || !sourceEl) return false;
-        let changed = false;
-
-        const clonedControls = Array.from(clonedEl.querySelectorAll('input, textarea, select'));
-        const sourceControls = Array.from(sourceEl.querySelectorAll('input, textarea, select'));
-
-        clonedControls.forEach((ctrl, idx) => {
-            let target = null;
-            const name = ctrl.getAttribute('name');
-            if (name) {
-                target = sourceEl.querySelector(`[name="${escapeCssAttrValue(name)}"]`);
-            }
-            if (!target) {
-                const dataAttr = ctrl.getAttribute('data-name') || ctrl.getAttribute('data-field') || ctrl.getAttribute('data-key');
-                if (dataAttr) {
-                    target = sourceEl.querySelector(
-                        `[data-name="${escapeCssAttrValue(dataAttr)}"], [data-field="${escapeCssAttrValue(dataAttr)}"], [data-key="${escapeCssAttrValue(dataAttr)}"]`
-                    );
-                }
-            }
-            if (!target && sourceControls[idx] && sourceControls[idx].tagName === ctrl.tagName) {
-                target = sourceControls[idx];
-            }
-            if (!target) return;
-
-            if (ctrl.type === 'checkbox' || ctrl.type === 'radio') {
-                if (target.checked !== ctrl.checked) {
-                    target.checked = ctrl.checked;
-                    target.dispatchEvent(new Event('change', { bubbles: true }));
-                    changed = true;
-                }
-            } else if (ctrl.tagName === 'SELECT') {
-                if (target.value !== ctrl.value) {
-                    target.value = ctrl.value;
-                    target.dispatchEvent(new Event('change', { bubbles: true }));
-                    changed = true;
-                }
-            } else {
-                if (target.value !== ctrl.value) {
-                    target.value = ctrl.value;
-                    target.dispatchEvent(new Event('input', { bubbles: true }));
-                    target.dispatchEvent(new Event('change', { bubbles: true }));
-                    changed = true;
-                }
-            }
-        });
-
-        if (changed && window.$) {
-            window.$(sourceEl).triggerHandler('change');
-        }
-        return changed;
-    }
-
-    let _wiSaveInFlight = null;
     
-    async function _saveWorldEntryToServer(worldName, entry, sourceEl) {
-        if (!worldName || !entry || entry.uid === undefined || entry.uid === null) return;
-
-        if (_wiSaveInFlight) {
-            try { await _wiSaveInFlight; } catch (e) { /* ignore */ }
-        }
-
-        const runSave = async () => {
-            const uid = String(entry.uid);
-            const lexSnap = _getLexSnapshot(worldName, entry);
-
-            if (sourceEl) {
-                const commentCtrl = sourceEl.querySelector('textarea[name="comment"], input[name="comment"]');
-                if (commentCtrl) entry.comment = commentCtrl.value;
-
-                const keyCtrl = sourceEl.querySelector('textarea[name="key"], input[name="key"], textarea[name="keys"], input[name="keys"]');
-                if (keyCtrl) {
-                    const keysArr = String(keyCtrl.value || '').split(',').map(s => s.trim()).filter(Boolean);
-                    entry.key = keysArr;
-                    entry.keys = keysArr;
-                }
-
-                const contentCtrl = sourceEl.querySelector('textarea[name="content"], textarea.world_entry_content');
-                if (contentCtrl) entry.content = contentCtrl.value;
-            }
-
-            _applyLexSnapshot(worldName, entry, lexSnap);
-
-            const ctx = getSTContext();
-            const headers = (ctx && typeof ctx.getRequestHeaders === 'function')
-                ? ctx.getRequestHeaders()
-                : { 'Content-Type': 'application/json' };
-
-            const getResp = await fetch('/api/worldinfo/get', {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({ name: worldName }),
-                cache: 'no-store',
-            });
-            if (!getResp.ok) return;
-
-            const wiData = await getResp.json();
-            if (!wiData?.entries || !wiData.entries[uid]) return;
-
-            const serverEntry = wiData.entries[uid];
-            if (entry.comment !== undefined) serverEntry.comment = entry.comment;
-            if (entry.key !== undefined) serverEntry.key = entry.key;
-            if (entry.keys !== undefined) serverEntry.keys = entry.keys;
-            if (entry.content !== undefined) serverEntry.content = entry.content;
-            if (entry.position !== undefined) serverEntry.position = entry.position;
-            if (entry.disable !== undefined) serverEntry.disable = entry.disable;
-            if (entry.constant !== undefined) serverEntry.constant = entry.constant;
-            if (entry.vectorized !== undefined) serverEntry.vectorized = entry.vectorized;
-
-            const mergedLex = {
-                ..._getLexSnapshot(worldName, serverEntry),
-                ...lexSnap,
-            };
-            _applyLexSnapshot(worldName, serverEntry, mergedLex);
-
-            const editResp = await fetch('/api/worldinfo/edit', {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({
-                    name: worldName,
-                    data: { entries: wiData.entries },
-                }),
-            });
-
-            if (editResp.ok) {
-                window.LorebookExpansion?.clearWorldInfoEntriesCache?.(worldName);
-            }
-        };
-
-        _wiSaveInFlight = runSave().finally(() => {
-            _wiSaveInFlight = null;
-        });
-        return _wiSaveInFlight;
-    }
-
-async function _applyKeywordChangeToCellAndEntry(newKwRaw) {
-        if (!currentModalCell || currentModalCell.classList.contains('stj-special-item')) return;
-        const newKw = String(newKwRaw || '').trim();
-        const oldKw = getCellKeyword(currentModalCell).trim();
-        if (!newKw || newKw === oldKw) return;
-
-        if (findDuplicateKeyword(currentModalCell, newKw)) {
-            showKeywordDuplicateWarning(newKw);
-            return;
-        }
-
-        const charName = document.getElementById('stj_char_name_display')?.textContent || detectCharacterNameFromDOM() || '';
-        const worldName = getCharacterWorldInfoName();
-        const entryHostEl = currentCellModal?.querySelector('#stj_cell_modal_entry_host');
-
-        let targetEntry = entryHostEl?._targetEntry || null;
-        if (!targetEntry && worldName) {
-            const entries = await loadWorldInfoEntries(worldName);
-            targetEntry = findEntryByKeyword(entries, oldKw) || findEntryByKeyword(entries, newKw);
-        }
-
-        const lexSnap = (worldName && targetEntry) ? _getLexSnapshot(worldName, targetEntry) : null;
-
-        if (targetEntry) {
-            targetEntry.comment = newKw;
-            const curKeys = getEntryKeys(targetEntry);
-            if (curKeys.length === 0 || (curKeys.length === 1 && String(curKeys[0]).trim() === oldKw)) {
-                targetEntry.key = [newKw];
-                targetEntry.keys = [newKw];
-            }
-            if (worldName && lexSnap) {
-                _applyLexSnapshot(worldName, targetEntry, lexSnap);
-            }
-        }
-
-        if (charName) {
-            const curMap = getCurrentImageMapFromCharData(charName) || {};
-            if (Object.prototype.hasOwnProperty.call(curMap, oldKw)) {
-                const nextMap = {};
-                for (const [k, v] of Object.entries(curMap)) {
-                    if (k === oldKw) {
-                        nextMap[newKw] = v;
-                    } else if (!Object.prototype.hasOwnProperty.call(nextMap, k)) {
-                        nextMap[k] = v;
-                    }
-                }
-                saveImageMapToCharData(charName, nextMap);
-            }
-        }
-
-        setCellKeyword(currentModalCell, newKw);
-        modalOriginalKeyword = newKw;
-
-        if (entryHostEl?._clonedEntryEl) {
-            const cComment = entryHostEl._clonedEntryEl.querySelector('textarea[name="comment"], input[name="comment"]');
-            if (cComment) cComment.value = newKw;
-        }
-        if (entryHostEl?._sourceEntryEl) {
-            const sComment = entryHostEl._sourceEntryEl.querySelector('textarea[name="comment"], input[name="comment"]');
-            if (sComment) {
-                sComment.value = newKw;
-                sComment.dispatchEvent(new Event('input', { bubbles: true }));
-                sComment.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-        }
-
-        if (worldName && targetEntry) {
-            await _saveWorldEntryToServer(worldName, targetEntry, entryHostEl?._sourceEntryEl || null);
-        }
-
-        updateCellPreview(currentModalCell);
-        autoSave({ immediate: true });
-    }
-
-    function _bindModalKeywordClickEdit(kwDisplayEl) {
-        if (!kwDisplayEl || kwDisplayEl.dataset.kwClickBound === '1') return;
-        kwDisplayEl.dataset.kwClickBound = '1';
-        kwDisplayEl.style.cursor = 'pointer';
-        kwDisplayEl.title = _t('stj.cell_modal.keyword_edit_hint', 'クリックしてキーワードを編集');
-
-        kwDisplayEl.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (!currentModalCell || currentModalCell.classList.contains('stj-special-item')) return;
-            if (kwDisplayEl.querySelector('input.stj-modal-kw-editor')) return;
-
-            const currentKw = getCellKeyword(currentModalCell) || kwDisplayEl.textContent || '';
-            const input = document.createElement('input');
-            input.type = 'text';
-            input.className = 'stj-modal-kw-editor';
-            input.value = currentKw;
-            input.style.cssText =
-                'width:100%;max-width:460px;padding:4px 10px;font-size:20px;font-weight:bold;' +
-                'color:#fff;background:rgba(15,23,42,0.95);border:2px solid #60a5fa;' +
-                'border-radius:6px;outline:none;box-sizing:border-box;';
-
-            let done = false;
-            const finish = async (save) => {
-                if (done) return;
-                done = true;
-                const val = input.value;
-                if (input.parentElement === kwDisplayEl) {
-                    input.remove();
-                }
-                const latestKw = getCellKeyword(currentModalCell) || '';
-                if (save) {
-                    const trimmed = val.trim();
-                    if (trimmed && !findDuplicateKeyword(currentModalCell, trimmed)) {
-                        kwDisplayEl.textContent = trimmed;
-                        await _applyKeywordChangeToCellAndEntry(trimmed);
-                        return;
-                    }
-                }
-                kwDisplayEl.textContent = latestKw;
-            };
-
-            input.addEventListener('click', (ev) => ev.stopPropagation());
-            input.addEventListener('keydown', (ev) => {
-                ev.stopPropagation();
-                if (ev.key === 'Enter' && !ev.isComposing) {
-                    ev.preventDefault();
-                    finish(true);
-                } else if (ev.key === 'Escape') {
-                    ev.preventDefault();
-                    finish(false);
-                }
-            });
-            input.addEventListener('blur', () => finish(true));
-
-            kwDisplayEl.textContent = '';
-            kwDisplayEl.appendChild(input);
-            input.focus();
-            input.select();
-        });
-    }
-    
-    function applyEntrySnapshotToEl(el, snap) {
+function applyEntrySnapshotToEl(el, snap) {
         if (!el || !snap) return;
 
         expandClonedEntryPanels(el);
@@ -1806,206 +786,30 @@ async function _applyKeywordChangeToCellAndEntry(newKwRaw) {
         });
     }
     
-    function findMatchingSourceField(sourceEl, field, fallbackIndex) {
-        if (!sourceEl || !field) return null;
-
-        const name = field.getAttribute('name');
-        if (name) {
-            const byName = sourceEl.querySelector(`[name="${escapeCssAttrValue(name)}"]`);
-            if (byName) return byName;
-        }
-
-        const dataField = field.getAttribute('data-field') || field.getAttribute('data-name') || field.getAttribute('data-key');
-        if (dataField) {
-            const byData = sourceEl.querySelector(`[data-field="${escapeCssAttrValue(dataField)}"], [data-name="${escapeCssAttrValue(dataField)}"], [data-key="${escapeCssAttrValue(dataField)}"]`);
-            if (byData) return byData;
-        }
-
-        const clsList = (field.className || '').trim().split(/\s+/).filter(Boolean);
-        const specificCls = clsList.find(c =>
-            c.startsWith('lbe-') ||
-            c.startsWith('world_entry') ||
-            c.includes('prompt') ||
-            c.includes('choice') ||
-            c.includes('resolution') ||
-            c.includes('width') ||
-            c.includes('height')
-        );
-        if (specificCls) {
-            const byCls = sourceEl.querySelector('.' + escapeCssAttrValue(specificCls));
-            if (byCls) return byCls;
-        }
-
-        if (typeof fallbackIndex === 'number' && fallbackIndex >= 0) {
-            const srcFields = sourceEl.querySelectorAll('input, textarea, select');
-            if (srcFields[fallbackIndex] && srcFields[fallbackIndex].tagName === field.tagName) {
-                return srcFields[fallbackIndex];
-            }
-        }
-
-        return null;
-    }
-
-    function getLorebookExpansionExt(entry) {
-        if (!entry || typeof entry !== 'object') return null;
-        if (!entry.extensions || typeof entry.extensions !== 'object') {
-            entry.extensions = {};
-        }
-        if (!entry.extensions.lorebook_expansion || typeof entry.extensions.lorebook_expansion !== 'object') {
-            entry.extensions.lorebook_expansion = {};
-        }
-        return entry.extensions.lorebook_expansion;
-    }
-
-    function snapshotLorebookExpansionPayload(worldName, entry) {
-        const uid = entry?.uid;
-        let fromApi = null;
-        try {
-            if (window.LorebookExpansion?.getDataFor && worldName && uid !== undefined && uid !== null) {
-                fromApi = window.LorebookExpansion.getDataFor(worldName, uid, entry);
-            }
-        } catch (e) { /* ignore */ }
-
-        const rawExt = entry?.extensions?.lorebook_expansion || {};
-        const merged = {
-            ...JSON.parse(JSON.stringify(rawExt || {})),
-            ...(fromApi && typeof fromApi === 'object' ? JSON.parse(JSON.stringify(fromApi)) : {}),
-        };
-        if (typeof merged.img_prompt !== 'string') merged.img_prompt = '';
-        if (!Array.isArray(merged.choices)) merged.choices = [];
-        return merged;
-    }
-
-    function restoreLorebookExpansionPayload(worldName, entry, payload) {
-        if (!entry || !payload || typeof payload !== 'object') return;
-        const clonedPayload = JSON.parse(JSON.stringify(payload));
-        const ext = getLorebookExpansionExt(entry);
-        for (const [k, v] of Object.entries(clonedPayload)) {
-            ext[k] = v;
-        }
-        try {
-            if (window.LorebookExpansion?.setDataFor && worldName && entry.uid !== undefined && entry.uid !== null) {
-                window.LorebookExpansion.setDataFor(worldName, entry.uid, clonedPayload, entry);
-            } else if (window.LorebookExpansion?.saveDataFor && worldName && entry.uid !== undefined && entry.uid !== null) {
-                window.LorebookExpansion.saveDataFor(worldName, entry.uid, clonedPayload, entry);
-            }
-        } catch (e) { /* ignore */ }
-    }
-
-    async function persistWorldInfoEntryChanges(worldName, targetEntry, sourceEl) {
-        if (!worldName || !targetEntry) return;
-
-        const uid = targetEntry.uid;
-        if (uid === undefined || uid === null) return;
-
-        // 最新のプロンプト・選択肢・フィールド値を保持
-        const preservedLex = snapshotLorebookExpansionPayload(worldName, targetEntry);
-
-        if (sourceEl) {
-            const commentField = sourceEl.querySelector('textarea[name="comment"], input[name="comment"]');
-            if (commentField && typeof commentField.value === 'string') {
-                targetEntry.comment = commentField.value;
-            }
-            const keyField = sourceEl.querySelector('textarea[name="key"], input[name="key"], textarea[name="keys"], input[name="keys"]');
-            if (keyField && typeof keyField.value === 'string') {
-                const parsedKeys = keyField.value.split(',').map(s => s.trim()).filter(Boolean);
-                targetEntry.key = parsedKeys;
-                targetEntry.keys = parsedKeys;
-            }
-            const contentField = sourceEl.querySelector('textarea[name="content"], textarea.world_entry_content');
-            if (contentField && typeof contentField.value === 'string') {
-                targetEntry.content = contentField.value;
-            }
-            const posSelect = sourceEl.querySelector('select[name="position"]');
-            if (posSelect) {
-                const numPos = Number(posSelect.value);
-                targetEntry.position = Number.isNaN(numPos) ? posSelect.value : numPos;
-            }
-            const stateSelect = sourceEl.querySelector('select[name="entryStateSelector"]');
-            if (stateSelect) {
-                targetEntry.entryStateSelector = stateSelect.value;
-            }
-        }
-
-        restoreLorebookExpansionPayload(worldName, targetEntry, preservedLex);
-
-        try {
-            window.LorebookExpansion?.clearWorldInfoEntriesCache?.(worldName);
-        } catch (e) { /* ignore */ }
-
-        try {
-            const ctx = getSTContext();
-            const headers = (ctx && typeof ctx.getRequestHeaders === 'function')
-                ? ctx.getRequestHeaders()
-                : { 'Content-Type': 'application/json' };
-
-            const resp = await fetch('/api/worldinfo/get', {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({ name: worldName }),
-                cache: 'no-store',
-            });
-            if (resp.ok) {
-                const data = await resp.json();
-                if (data && data.entries && data.entries[uid]) {
-                    const serverEntry = data.entries[uid];
-                    if (targetEntry.comment !== undefined) serverEntry.comment = targetEntry.comment;
-                    if (targetEntry.key !== undefined) serverEntry.key = targetEntry.key;
-                    if (targetEntry.keys !== undefined) serverEntry.keys = targetEntry.keys;
-                    if (targetEntry.content !== undefined) serverEntry.content = targetEntry.content;
-                    if (targetEntry.position !== undefined) serverEntry.position = targetEntry.position;
-                    if (targetEntry.entryStateSelector !== undefined) serverEntry.entryStateSelector = targetEntry.entryStateSelector;
-
-                    const serverLex = snapshotLorebookExpansionPayload(worldName, serverEntry);
-                    const finalLex = {
-                        ...serverLex,
-                        ...preservedLex,
-                        img_prompt: preservedLex.img_prompt || serverLex.img_prompt || '',
-                        choices: (Array.isArray(preservedLex.choices) && preservedLex.choices.length > 0)
-                            ? preservedLex.choices
-                            : (serverLex.choices || []),
-                    };
-                    restoreLorebookExpansionPayload(worldName, serverEntry, finalLex);
-
-                    await fetch('/api/worldinfo/edit', {
-                        method: 'POST',
-                        headers,
-                        body: JSON.stringify({
-                            name: worldName,
-                            entries: data.entries,
-                        }),
-                    });
-                }
-            }
-        } catch (e) {
-            console.warn('[STJ Editor] WorldInfo 保存エラー:', e);
-        }
-
-        try {
-            if (window.LorebookExpansion?.forceInject) {
-                await window.LorebookExpansion.forceInject();
-            }
-        } catch (e) { /* ignore */ }
-    }
-    
-    function syncClonedEntryToSource(clonedEl, sourceEl, isSyncingRef, worldName, targetEntry) {
+    function syncClonedEntryToSource(clonedEl, sourceEl, isSyncingRef) {
         if (!clonedEl || !sourceEl) return;
         if (isSyncingRef && isSyncingRef.active) return;
 
-        isSyncingRef.active = true;
-        let changed = false;
-
+        if (isSyncingRef) isSyncingRef.active = true;
         try {
-            const fields = Array.from(clonedEl.querySelectorAll('input, textarea, select'));
-            fields.forEach((field, idx) => {
-                const target = findMatchingSourceField(sourceEl, field, idx);
-                if (!target) return;
+            const fields = clonedEl.querySelectorAll('input, textarea, select');
+            fields.forEach((field) => {
+                const name = field.getAttribute('name');
+                const cls = field.className || '';
+                let target = null;
 
+                if (name) {
+                    target = sourceEl.querySelector(`[name="${escapeCssAttrValue(name)}"]`);
+                } else if (cls) {
+                    const firstCls = cls.trim().split(/\s+/).find(c => c.startsWith('lbe-') || c.startsWith('world_entry'));
+                    if (firstCls) target = sourceEl.querySelector('.' + escapeCssAttrValue(firstCls));
+                }
+
+                if (!target) return;
                 if (field.type === 'checkbox' || field.type === 'radio') {
                     if (target.checked !== field.checked) {
                         target.checked = field.checked;
                         target.dispatchEvent(new Event('change', { bubbles: true }));
-                        changed = true;
                     }
                 } else if (field.tagName === 'SELECT') {
                     if (target.value !== field.value || target.selectedIndex !== field.selectedIndex) {
@@ -2014,39 +818,25 @@ async function _applyKeywordChangeToCellAndEntry(newKwRaw) {
                             target.selectedIndex = field.selectedIndex;
                         }
                         target.dispatchEvent(new Event('change', { bubbles: true }));
-                        changed = true;
                     }
                 } else {
                     if (target.value !== field.value) {
                         target.value = field.value;
                         target.dispatchEvent(new Event('input', { bubbles: true }));
                         target.dispatchEvent(new Event('change', { bubbles: true }));
-                        changed = true;
                     }
                 }
             });
 
-            if (changed) {
-                if (window.$) {
-                    window.$(sourceEl).triggerHandler('change');
-                }
-                if (worldName && targetEntry) {
-                    const lexData = snapshotLorebookExpansionPayload(worldName, targetEntry);
-                    clonedEl.querySelectorAll('input, textarea, select').forEach((f) => {
-                        const n = (f.getAttribute('name') || f.dataset.field || f.className || '').toLowerCase();
-                        if (n.includes('prompt')) lexData.img_prompt = f.value;
-                    });
-                    restoreLorebookExpansionPayload(worldName, targetEntry, lexData);
-                }
+            if (window.$) {
+                window.$(sourceEl).triggerHandler('change');
             }
         } finally {
-            setTimeout(() => {
-                isSyncingRef.active = false;
-            }, 20);
+            if (isSyncingRef) isSyncingRef.active = false;
         }
     }
 
-    async function mountWorldEntryInCellModal(cell) {
+async function mountWorldEntryInCellModal(cell) {
         const modal = currentCellModal;
         if (!modal || !cell) return;
         const hostEl = modal.querySelector('#stj_cell_modal_entry_host');
@@ -2056,9 +846,8 @@ async function _applyKeywordChangeToCellAndEntry(newKwRaw) {
         hostEl.style.display = 'none';
         delete hostEl._sourceEntryEl;
         delete hostEl._clonedEntryEl;
-        delete hostEl._targetEntry;
-        delete hostEl._worldName;
-        delete hostEl._flushSave;
+        delete hostEl._syncEntry;
+        delete hostEl._guardObserver;
 
         if (cell.classList.contains('stj-special-item')) return;
         const kw = getCellKeyword(cell).trim();
@@ -2081,48 +870,146 @@ async function _applyKeywordChangeToCellAndEntry(newKwRaw) {
         const sourceEl = findSourceWorldEntryEl(entries, targetEntry, kw);
         if (!sourceEl) return;
 
+        // クローン前に元要素のドロワーを展開し、SillyTavern本体に中身を生成させる
         await ensureSourceEntryExpanded(sourceEl);
+
         if (currentCellModal !== modal || currentModalCell !== cell) return;
 
         const cloned = sourceEl.cloneNode(true);
         cloned.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
+
+        sourceEl.querySelectorAll('select').forEach((srcSelect) => {
+            const name = srcSelect.getAttribute('name');
+            const dstSelect = name
+                ? cloned.querySelector(`select[name="${escapeCssAttrValue(name)}"]`)
+                : null;
+            if (dstSelect) {
+                dstSelect.value = srcSelect.value;
+                dstSelect.selectedIndex = srcSelect.selectedIndex;
+            }
+        });
+
         expandClonedEntryPanels(cloned);
         collapseLbeExtrasPanel(cloned);
 
-        let saveTimer = null;
-        const syncAndSchedule = () => {
-            _syncClonedEntryToTarget(cloned, sourceEl, worldName, targetEntry);
-            if (saveTimer) clearTimeout(saveTimer);
-            saveTimer = setTimeout(() => {
-                saveTimer = null;
-                _persistEntryNow(worldName, targetEntry, sourceEl, cloned);
-            }, 150);
-        };
+        // 詳細設定トグル（.lbe-extras-toggle）に手動開閉動作を付与
+        cloned.querySelectorAll('.lbe-extras-toggle').forEach((toggle) => {
+            toggle.addEventListener('click', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                const isClosed = cloned.dataset.lbeExtrasUserOpened !== '1';
+                const icon = toggle.querySelector('.lbe-extras-icon, i');
+                if (isClosed) {
+                    cloned.dataset.lbeExtrasUserOpened = '1';
+                    cloned.classList.remove('lbe-extras-collapsed');
+                    if (icon) {
+                        icon.classList.remove('down', 'fa-circle-chevron-down');
+                        icon.classList.add('up', 'fa-circle-chevron-up');
+                    }
+                    cloned.querySelectorAll('.lbe-extras-panel').forEach((panel) => {
+                        panel.classList.remove('lbe-extras-collapsed', 'collapsed');
+                        panel.style.setProperty('display', 'block', 'important');
+                    });
+                } else {
+                    delete cloned.dataset.lbeExtrasUserOpened;
+                    collapseLbeExtrasPanel(cloned);
+                }
+            });
+        });
 
-        const flushSave = async () => {
-            if (saveTimer) {
-                clearTimeout(saveTimer);
-                saveTimer = null;
-            }
-            await _persistEntryNow(worldName, targetEntry, sourceEl, cloned);
-        };
+        // クローン側の開閉ボタンにも手動トグル動作を付与
+        cloned.querySelectorAll('.inline-drawer-toggle').forEach((toggle) => {
+            toggle.addEventListener('click', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                const drawer = toggle.closest('.inline-drawer') || cloned;
+                const content = drawer.querySelector('.inline-drawer-content');
+                const opening = toggle.classList.contains('down');
+                if (opening) {
+                    toggle.classList.remove('down', 'fa-circle-chevron-down');
+                    toggle.classList.add('up', 'fa-circle-chevron-up');
+                    if (content) content.style.setProperty('display', 'block', 'important');
+                } else {
+                    toggle.classList.remove('up', 'fa-circle-chevron-up');
+                    toggle.classList.add('down', 'fa-circle-chevron-down');
+                    if (content) content.style.setProperty('display', 'none', 'important');
+                }
+            });
+        });
 
-        cloned.addEventListener('input', syncAndSchedule);
-        cloned.addEventListener('change', syncAndSchedule);
+        const snap = captureEntrySnapshot(cloned);
+        const syncState = { active: false };
+        const syncNow = () => syncClonedEntryToSource(cloned, sourceEl, syncState);
+
+        const allFields = Array.from(cloned.querySelectorAll('input, textarea, select'));
+        allFields.forEach((field, idx) => {
+            const recordUserEdit = () => {
+                if (field.tagName === 'TEXTAREA') {
+                    field.style.height = 'auto';
+                    field.style.height = field.scrollHeight + 'px';
+                }
+                updateSnapshotForField(snap, field, idx);
+                syncNow();
+            };
+            field.addEventListener('pointerdown', () => updateSnapshotForField(snap, field, idx));
+            field.addEventListener('input', recordUserEdit);
+            field.addEventListener('change', recordUserEdit);
+        });
+
         cloned.addEventListener('click', (e) => {
             if (e.target.closest('button, input, select, textarea, .lbe-extras-toggle')) {
-                setTimeout(syncAndSchedule, 15);
+                setTimeout(() => {
+                    allFields.forEach((field, idx) => {
+                        if (field === e.target || field.contains(e.target)) {
+                            updateSnapshotForField(snap, field, idx);
+                        }
+                    });
+                    syncNow();
+                }, 0);
             }
+        });
+
+        let guardTimer = null;
+        const guardObserver = new MutationObserver(() => {
+            if (syncState.active) return;
+            if (guardTimer) clearTimeout(guardTimer);
+            guardTimer = setTimeout(() => {
+                if (!document.body.contains(cloned) || syncState.active) return;
+                applyEntrySnapshotToEl(cloned, snap);
+            }, 0);
+        });
+        guardObserver.observe(cloned, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['style', 'class', 'value', 'checked', 'selected'],
         });
 
         hostEl._sourceEntryEl = sourceEl;
         hostEl._clonedEntryEl = cloned;
-        hostEl._targetEntry = targetEntry;
-        hostEl._worldName = worldName;
-        hostEl._flushSave = flushSave;
+        hostEl._syncEntry = syncNow;
+        hostEl._guardObserver = guardObserver;
         hostEl.appendChild(cloned);
         hostEl.style.display = 'block';
         hostEl.style.height = '35%';
+
+        const enforceOpen = () => {
+            if (currentCellModal === modal && currentModalCell === cell && document.body.contains(cloned)) {
+                expandClonedEntryPanels(cloned);
+                applyEntrySnapshotToEl(cloned, snap);
+            }
+        };
+        setTimeout(enforceOpen, 50);
+        setTimeout(enforceOpen, 200);
+
+        if (window.LorebookExpansion?.forceInject) {
+            setTimeout(() => {
+                if (currentCellModal === modal && currentModalCell === cell) {
+                    window.LorebookExpansion.forceInject().catch(() => {});
+                    enforceOpen();
+                }
+            }, 150);
+        }
     }
 
     function checkMediaExists(mediaUrl) {
@@ -3335,192 +2222,26 @@ function closeCellModal(revert) {
         doApplyCellModal();
     }
 
-    async function commitModalKeywordEdit(newKwRaw) {
-        if (!currentModalCell || currentModalCell.classList.contains('stj-special-item')) return;
-
-        const newKw = String(newKwRaw || '').trim();
-        const oldKw = getCellKeyword(currentModalCell).trim();
-        if (!newKw || newKw === oldKw) return;
-
-        const dup = findDuplicateKeyword(currentModalCell, newKw);
-        if (dup) {
-            showKeywordDuplicateWarning(newKw);
-            return;
-        }
-
-        const charName = document.getElementById('stj_char_name_display')?.textContent || detectCharacterNameFromDOM() || '';
-        const worldName = getCharacterWorldInfoName();
-
-        let targetEntry = null;
-        let preservedLex = null;
-        if (worldName) {
-            try {
-                const entries = await loadWorldInfoEntries(worldName);
-                targetEntry = findEntryByKeyword(entries, oldKw) || findEntryByKeyword(entries, newKw);
-                if (targetEntry) {
-                    preservedLex = snapshotLorebookExpansionPayload(worldName, targetEntry);
-                    targetEntry.comment = newKw;
-                    const existingKeys = getEntryKeys(targetEntry);
-                    if (existingKeys.length === 0 || (existingKeys.length === 1 && existingKeys[0] === oldKw)) {
-                        targetEntry.key = [newKw];
-                        targetEntry.keys = [newKw];
-                    }
-                    restoreLorebookExpansionPayload(worldName, targetEntry, preservedLex);
-                }
-            } catch (e) {
-                console.warn('[STJ Editor] キーワード反映前のロアブック取得エラー:', e);
-            }
-        }
-
-        if (charName) {
-            const currentMap = getCurrentImageMapFromCharData(charName) || {};
-            if (Object.prototype.hasOwnProperty.call(currentMap, oldKw)) {
-                const updatedMap = {};
-                for (const [k, v] of Object.entries(currentMap)) {
-                    if (k === oldKw) {
-                        updatedMap[newKw] = v;
-                    } else if (!Object.prototype.hasOwnProperty.call(updatedMap, k)) {
-                        updatedMap[k] = v;
-                    }
-                }
-                saveImageMapToCharData(charName, updatedMap);
-            }
-        }
-
-        setCellKeyword(currentModalCell, newKw);
-        modalOriginalKeyword = newKw;
-
-        const entryHostEl = currentCellModal?.querySelector('#stj_cell_modal_entry_host');
-        if (entryHostEl?._clonedEntryEl) {
-            const clonedComment = entryHostEl._clonedEntryEl.querySelector('textarea[name="comment"], input[name="comment"]');
-            if (clonedComment) clonedComment.value = newKw;
-        }
-        if (entryHostEl?._sourceEntryEl) {
-            const srcComment = entryHostEl._sourceEntryEl.querySelector('textarea[name="comment"], input[name="comment"]');
-            if (srcComment) {
-                srcComment.value = newKw;
-                srcComment.dispatchEvent(new Event('input', { bubbles: true }));
-                srcComment.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-        }
-
-        if (worldName && targetEntry) {
-            if (preservedLex) {
-                restoreLorebookExpansionPayload(worldName, targetEntry, preservedLex);
-            }
-            await persistWorldInfoEntryChanges(worldName, targetEntry, entryHostEl?._sourceEntryEl || null);
-        }
-
-        runLiveTest();
-        autoSave({ immediate: true });
-        _stjScheduleTreeLayout();
-    }
-
-    function attachKeywordDisplayEditor(modal, kwDisplayEl) {
-        if (!modal || !kwDisplayEl || kwDisplayEl.dataset.editableReady === '1') return;
-        kwDisplayEl.dataset.editableReady = '1';
-        kwDisplayEl.style.cursor = 'text';
-        kwDisplayEl.title = _t('stj.cell_modal.keyword_edit_hint', 'クリックしてキーワードを編集');
-
-        kwDisplayEl.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (!currentModalCell || currentModalCell.classList.contains('stj-special-item')) return;
-            if (kwDisplayEl.querySelector('input.stj-keyword-inline-input')) return;
-
-            const currentVal = getCellKeyword(currentModalCell) || kwDisplayEl.textContent || '';
-            const input = document.createElement('input');
-            input.type = 'text';
-            input.className = 'stj-keyword-inline-input';
-            input.value = currentVal;
-            input.style.cssText = [
-                'width: 100%',
-                'max-width: 480px',
-                'padding: 4px 10px',
-                'font-size: 20px',
-                'font-weight: bold',
-                'color: #fff',
-                'background: rgba(15, 23, 42, 0.92)',
-                'border: 2px solid #60a5fa',
-                'border-radius: 6px',
-                'outline: none',
-                'box-sizing: border-box',
-            ].join(';');
-
-            let committed = false;
-            const finishEdit = async (shouldSave) => {
-                if (committed) return;
-                committed = true;
-                const val = input.value;
-                input.remove();
-                if (shouldSave) {
-                    const trimmed = val.trim();
-                    if (trimmed && !findDuplicateKeyword(currentModalCell, trimmed)) {
-                        kwDisplayEl.textContent = trimmed;
-                        await commitModalKeywordEdit(trimmed);
-                    } else {
-                        kwDisplayEl.textContent = getCellKeyword(currentModalCell) || '';
-                    }
-                } else {
-                    kwDisplayEl.textContent = getCellKeyword(currentModalCell) || '';
-                }
-            };
-
-            input.addEventListener('click', (ev) => ev.stopPropagation());
-            input.addEventListener('keydown', (ev) => {
-                ev.stopPropagation();
-                if (ev.key === 'Enter' && !ev.isComposing) {
-                    ev.preventDefault();
-                    finishEdit(true);
-                } else if (ev.key === 'Escape') {
-                    ev.preventDefault();
-                    finishEdit(false);
-                }
-            });
-            input.addEventListener('blur', () => finishEdit(true));
-
-            kwDisplayEl.textContent = '';
-            kwDisplayEl.appendChild(input);
-            input.focus();
-            input.select();
-        });
-    }
-
     function doApplyCellModal() {
         if (!currentCellModal || !currentModalCell) return;
         const cell = currentModalCell;
-
-        const kwDisplayEl = currentCellModal.querySelector('#stj_cell_modal_keyword_display');
-        const inlineInput = kwDisplayEl?.querySelector('input.stj-kw-inline-edit');
-        const pendingKw = inlineInput ? inlineInput.value.trim() : '';
-
+        updateCellPreview(cell);
+        runLiveTest();
+        autoSave({ immediate: true });
         const entryHostEl = currentCellModal.querySelector('#stj_cell_modal_entry_host');
-        const flushFn = entryHostEl?._flushSave;
-
         if (entryHostEl) {
             if (entryHostEl._guardObserver) {
                 try { entryHostEl._guardObserver.disconnect(); } catch (e) { /* ignore */ }
             }
-            if (typeof flushFn === 'function') {
-                flushFn();
-            }
+            if (typeof entryHostEl._syncEntry === 'function') entryHostEl._syncEntry();
             entryHostEl.innerHTML = '';
             entryHostEl.style.display = 'block';
             entryHostEl.style.height = '35%';
             delete entryHostEl._sourceEntryEl;
             delete entryHostEl._clonedEntryEl;
-            delete entryHostEl._targetEntry;
-            delete entryHostEl._worldName;
-            delete entryHostEl._flushSave;
+            delete entryHostEl._syncEntry;
             delete entryHostEl._guardObserver;
         }
-
-        if (pendingKw && !cell.classList.contains('stj-special-item')) {
-            _commitKeywordEdit(pendingKw);
-        }
-
-        updateCellPreview(cell);
-        autoSave({ immediate: true });
-
         const zoom = document.getElementById('stj_media_zoom');
         if (zoom) zoom.remove();
         document.body.classList.remove('stj-zoom-active');
