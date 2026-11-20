@@ -679,56 +679,11 @@
     function expandClonedEntryPanels(clonedEl) {
         if (!clonedEl) return;
 
-        // ※ 本物の .world_entry 要素からヘッダ・矢印ボタン・キーワード欄を削除しない
-        //   （モーダル内でのみ CSS で非表示にする）
-
-        const collapseClasses = [
-            'collapsed',
-            'closed',
-            'is-collapsed',
-            'inline-drawer-collapsed',
-        ];
         if (!clonedEl.dataset.stjSavedClasses) {
             clonedEl.dataset.stjSavedClasses = clonedEl.className;
         }
-        clonedEl.classList.remove(...collapseClasses);
-        clonedEl.classList.add('open', 'expanded', 'stj-modal-expanded-entry');
-
-        // トグルアイコンを下向き(down)から上向き(up)に切り替え（lbe-extras-toggle は除外）
-        clonedEl.querySelectorAll('.inline-drawer-toggle').forEach((toggle) => {
-            toggle.classList.remove('down', 'fa-circle-chevron-down', 'fa-chevron-down', 'fa-caret-down');
-            toggle.classList.add('up', 'fa-circle-chevron-up');
-        });
-
-        clonedEl.querySelectorAll('*').forEach((el) => {
-            // 詳細設定パネル(.lbe-extras-panel)とその内部は常時展開の対象から除外する
-            if (el.closest('.lbe-extras-panel') || el.classList.contains('lbe-extras-panel')) {
-                return;
-            }
-            collapseClasses.forEach((cls) => {
-                if (el.classList.contains(cls)) {
-                    el.classList.remove(cls);
-                }
-            });
-            if (
-                el.classList.contains('inline-drawer-content') ||
-                el.classList.contains('world_entry_edit') ||
-                el.classList.contains('world_entry_form') ||
-                el.classList.contains('world_entry_body') ||
-                el.getAttribute('name') === 'PositionBlock'
-            ) {
-                if (!el.dataset.stjSavedStyle) {
-                    el.dataset.stjSavedStyle = el.getAttribute('style') || '';
-                }
-                el.classList.add('open', 'expanded');
-                el.style.setProperty('display', 'block', 'important');
-            }
-        });
-
-        // 詳細設定パネルが手動で開かれていなければ閉じた状態を維持
-        if (clonedEl.dataset.lbeExtrasUserOpened !== '1') {
-            collapseLbeExtrasPanel(clonedEl);
-        }
+        clonedEl.classList.add('stj-modal-expanded-entry');
+        // .lbe-extras-toggle による折りたたみは Lorebook_Expansion.js 本体の挙動に任せる
     }
 
     function cleanupEntryModalState(el) {
@@ -738,14 +693,16 @@
             el.className = el.dataset.stjSavedClasses;
             delete el.dataset.stjSavedClasses;
         }
-        el.querySelectorAll('*').forEach((child) => {
-            if (child.dataset && child.dataset.stjSavedStyle !== undefined) {
-                const saved = child.dataset.stjSavedStyle;
-                if (saved) child.setAttribute('style', saved);
-                else child.removeAttribute('style');
-                delete child.dataset.stjSavedStyle;
-            }
-        });
+        // モーダル内で展開したドロワーを ST 標準の閉じた状態に戻し、ロアブック側での再展開を正常化
+        const toggle = el.querySelector('.inline-drawer-toggle');
+        const content = el.querySelector('.inline-drawer-content');
+        if (toggle && toggle.classList.contains('up')) {
+            toggle.classList.remove('up', 'fa-circle-chevron-up');
+            toggle.classList.add('down', 'fa-circle-chevron-down');
+        }
+        if (content) {
+            content.style.display = 'none';
+        }
     }
 
     async function ensureSourceEntryExpanded(sourceEl) {
@@ -903,12 +860,9 @@ async function mountWorldEntryInCellModal(cell) {
         hostEl.style.display = 'block';
         hostEl.style.height = '35%';
 
+        // 移動直後に LBE UI（template / 解像度 / プロンプト / 変数 / 選択肢）を確実に注入
         if (window.LorebookExpansion?.forceInject) {
-            setTimeout(() => {
-                if (currentCellModal === modal && currentModalCell === cell) {
-                    window.LorebookExpansion.forceInject().catch(() => {});
-                }
-            }, 150);
+            await window.LorebookExpansion.forceInject().catch(() => {});
         }
     }
 
