@@ -750,7 +750,7 @@
         }
     }
     
-function applyEntrySnapshotToEl(el, snap) {
+    function applyEntrySnapshotToEl(el, snap) {
         if (!el || !snap) return;
 
         expandClonedEntryPanels(el);
@@ -786,30 +786,206 @@ function applyEntrySnapshotToEl(el, snap) {
         });
     }
     
-    function syncClonedEntryToSource(clonedEl, sourceEl, isSyncingRef) {
+    function findMatchingSourceField(sourceEl, field, fallbackIndex) {
+        if (!sourceEl || !field) return null;
+
+        const name = field.getAttribute('name');
+        if (name) {
+            const byName = sourceEl.querySelector(`[name="${escapeCssAttrValue(name)}"]`);
+            if (byName) return byName;
+        }
+
+        const dataField = field.getAttribute('data-field') || field.getAttribute('data-name') || field.getAttribute('data-key');
+        if (dataField) {
+            const byData = sourceEl.querySelector(`[data-field="${escapeCssAttrValue(dataField)}"], [data-name="${escapeCssAttrValue(dataField)}"], [data-key="${escapeCssAttrValue(dataField)}"]`);
+            if (byData) return byData;
+        }
+
+        const clsList = (field.className || '').trim().split(/\s+/).filter(Boolean);
+        const specificCls = clsList.find(c =>
+            c.startsWith('lbe-') ||
+            c.startsWith('world_entry') ||
+            c.includes('prompt') ||
+            c.includes('choice') ||
+            c.includes('resolution') ||
+            c.includes('width') ||
+            c.includes('height')
+        );
+        if (specificCls) {
+            const byCls = sourceEl.querySelector('.' + escapeCssAttrValue(specificCls));
+            if (byCls) return byCls;
+        }
+
+        if (typeof fallbackIndex === 'number' && fallbackIndex >= 0) {
+            const srcFields = sourceEl.querySelectorAll('input, textarea, select');
+            if (srcFields[fallbackIndex] && srcFields[fallbackIndex].tagName === field.tagName) {
+                return srcFields[fallbackIndex];
+            }
+        }
+
+        return null;
+    }
+
+function getLorebookExpansionExt(entry) {
+        if (!entry || typeof entry !== 'object') return null;
+        if (!entry.extensions || typeof entry.extensions !== 'object') {
+            entry.extensions = {};
+        }
+        if (!entry.extensions.lorebook_expansion || typeof entry.extensions.lorebook_expansion !== 'object') {
+            entry.extensions.lorebook_expansion = {};
+        }
+        return entry.extensions.lorebook_expansion;
+    }
+
+    function snapshotLorebookExpansionPayload(worldName, entry) {
+        const uid = entry?.uid;
+        let fromApi = null;
+        try {
+            if (window.LorebookExpansion?.getDataFor && worldName && uid !== undefined && uid !== null) {
+                fromApi = window.LorebookExpansion.getDataFor(worldName, uid, entry);
+            }
+        } catch (e) { /* ignore */ }
+
+        const rawExt = entry?.extensions?.lorebook_expansion || {};
+        const merged = {
+            ...JSON.parse(JSON.stringify(rawExt || {})),
+            ...(fromApi && typeof fromApi === 'object' ? JSON.parse(JSON.stringify(fromApi)) : {}),
+        };
+        if (typeof merged.img_prompt !== 'string') merged.img_prompt = '';
+        if (!Array.isArray(merged.choices)) merged.choices = [];
+        return merged;
+    }
+
+    function restoreLorebookExpansionPayload(worldName, entry, payload) {
+        if (!entry || !payload || typeof payload !== 'object') return;
+        const clonedPayload = JSON.parse(JSON.stringify(payload));
+        const ext = getLorebookExpansionExt(entry);
+        for (const [k, v] of Object.entries(clonedPayload)) {
+            ext[k] = v;
+        }
+        try {
+            if (window.LorebookExpansion?.setDataFor && worldName && entry.uid !== undefined && entry.uid !== null) {
+                window.LorebookExpansion.setDataFor(worldName, entry.uid, clonedPayload, entry);
+            } else if (window.LorebookExpansion?.saveDataFor && worldName && entry.uid !== undefined && entry.uid !== null) {
+                window.LorebookExpansion.saveDataFor(worldName, entry.uid, clonedPayload, entry);
+            }
+        } catch (e) { /* ignore */ }
+    }
+
+    async function persistWorldInfoEntryChanges(worldName, targetEntry, sourceEl) {
+        if (!worldName || !targetEntry) return;
+
+        const uid = targetEntry.uid;
+        if (uid === undefined || uid === null) return;
+
+        // 最新のプロンプト・選択肢・フィールド値を保持
+        const preservedLex = snapshotLorebookExpansionPayload(worldName, targetEntry);
+
+        if (sourceEl) {
+            const commentField = sourceEl.querySelector('textarea[name="comment"], input[name="comment"]');
+            if (commentField && typeof commentField.value === 'string') {
+                targetEntry.comment = commentField.value;
+            }
+            const keyField = sourceEl.querySelector('textarea[name="key"], input[name="key"], textarea[name="keys"], input[name="keys"]');
+            if (keyField && typeof keyField.value === 'string') {
+                const parsedKeys = keyField.value.split(',').map(s => s.trim()).filter(Boolean);
+                targetEntry.key = parsedKeys;
+                targetEntry.keys = parsedKeys;
+            }
+            const contentField = sourceEl.querySelector('textarea[name="content"], textarea.world_entry_content');
+            if (contentField && typeof contentField.value === 'string') {
+                targetEntry.content = contentField.value;
+            }
+            const posSelect = sourceEl.querySelector('select[name="position"]');
+            if (posSelect) {
+                const numPos = Number(posSelect.value);
+                targetEntry.position = Number.isNaN(numPos) ? posSelect.value : numPos;
+            }
+            const stateSelect = sourceEl.querySelector('select[name="entryStateSelector"]');
+            if (stateSelect) {
+                targetEntry.entryStateSelector = stateSelect.value;
+            }
+        }
+
+        restoreLorebookExpansionPayload(worldName, targetEntry, preservedLex);
+
+        try {
+            window.LorebookExpansion?.clearWorldInfoEntriesCache?.(worldName);
+        } catch (e) { /* ignore */ }
+
+        try {
+            const ctx = getSTContext();
+            const headers = (ctx && typeof ctx.getRequestHeaders === 'function')
+                ? ctx.getRequestHeaders()
+                : { 'Content-Type': 'application/json' };
+
+            const resp = await fetch('/api/worldinfo/get', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ name: worldName }),
+                cache: 'no-store',
+            });
+            if (resp.ok) {
+                const data = await resp.json();
+                if (data && data.entries && data.entries[uid]) {
+                    const serverEntry = data.entries[uid];
+                    if (targetEntry.comment !== undefined) serverEntry.comment = targetEntry.comment;
+                    if (targetEntry.key !== undefined) serverEntry.key = targetEntry.key;
+                    if (targetEntry.keys !== undefined) serverEntry.keys = targetEntry.keys;
+                    if (targetEntry.content !== undefined) serverEntry.content = targetEntry.content;
+                    if (targetEntry.position !== undefined) serverEntry.position = targetEntry.position;
+                    if (targetEntry.entryStateSelector !== undefined) serverEntry.entryStateSelector = targetEntry.entryStateSelector;
+
+                    const serverLex = snapshotLorebookExpansionPayload(worldName, serverEntry);
+                    const finalLex = {
+                        ...serverLex,
+                        ...preservedLex,
+                        img_prompt: preservedLex.img_prompt || serverLex.img_prompt || '',
+                        choices: (Array.isArray(preservedLex.choices) && preservedLex.choices.length > 0)
+                            ? preservedLex.choices
+                            : (serverLex.choices || []),
+                    };
+                    restoreLorebookExpansionPayload(worldName, serverEntry, finalLex);
+
+                    await fetch('/api/worldinfo/edit', {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify({
+                            name: worldName,
+                            entries: data.entries,
+                        }),
+                    });
+                }
+            }
+        } catch (e) {
+            console.warn('[STJ Editor] WorldInfo 保存エラー:', e);
+        }
+
+        try {
+            if (window.LorebookExpansion?.forceInject) {
+                await window.LorebookExpansion.forceInject();
+            }
+        } catch (e) { /* ignore */ }
+    }
+    
+    function syncClonedEntryToSource(clonedEl, sourceEl, isSyncingRef, worldName, targetEntry) {
         if (!clonedEl || !sourceEl) return;
         if (isSyncingRef && isSyncingRef.active) return;
 
-        if (isSyncingRef) isSyncingRef.active = true;
+        isSyncingRef.active = true;
+        let changed = false;
+
         try {
-            const fields = clonedEl.querySelectorAll('input, textarea, select');
-            fields.forEach((field) => {
-                const name = field.getAttribute('name');
-                const cls = field.className || '';
-                let target = null;
-
-                if (name) {
-                    target = sourceEl.querySelector(`[name="${escapeCssAttrValue(name)}"]`);
-                } else if (cls) {
-                    const firstCls = cls.trim().split(/\s+/).find(c => c.startsWith('lbe-') || c.startsWith('world_entry'));
-                    if (firstCls) target = sourceEl.querySelector('.' + escapeCssAttrValue(firstCls));
-                }
-
+            const fields = Array.from(clonedEl.querySelectorAll('input, textarea, select'));
+            fields.forEach((field, idx) => {
+                const target = findMatchingSourceField(sourceEl, field, idx);
                 if (!target) return;
+
                 if (field.type === 'checkbox' || field.type === 'radio') {
                     if (target.checked !== field.checked) {
                         target.checked = field.checked;
                         target.dispatchEvent(new Event('change', { bubbles: true }));
+                        changed = true;
                     }
                 } else if (field.tagName === 'SELECT') {
                     if (target.value !== field.value || target.selectedIndex !== field.selectedIndex) {
@@ -818,25 +994,39 @@ function applyEntrySnapshotToEl(el, snap) {
                             target.selectedIndex = field.selectedIndex;
                         }
                         target.dispatchEvent(new Event('change', { bubbles: true }));
+                        changed = true;
                     }
                 } else {
                     if (target.value !== field.value) {
                         target.value = field.value;
                         target.dispatchEvent(new Event('input', { bubbles: true }));
                         target.dispatchEvent(new Event('change', { bubbles: true }));
+                        changed = true;
                     }
                 }
             });
 
-            if (window.$) {
-                window.$(sourceEl).triggerHandler('change');
+            if (changed) {
+                if (window.$) {
+                    window.$(sourceEl).triggerHandler('change');
+                }
+                if (worldName && targetEntry) {
+                    const lexData = snapshotLorebookExpansionPayload(worldName, targetEntry);
+                    clonedEl.querySelectorAll('input, textarea, select').forEach((f) => {
+                        const n = (f.getAttribute('name') || f.dataset.field || f.className || '').toLowerCase();
+                        if (n.includes('prompt')) lexData.img_prompt = f.value;
+                    });
+                    restoreLorebookExpansionPayload(worldName, targetEntry, lexData);
+                }
             }
         } finally {
-            if (isSyncingRef) isSyncingRef.active = false;
+            setTimeout(() => {
+                isSyncingRef.active = false;
+            }, 20);
         }
     }
 
-async function mountWorldEntryInCellModal(cell) {
+    async function mountWorldEntryInCellModal(cell) {
         const modal = currentCellModal;
         if (!modal || !cell) return;
         const hostEl = modal.querySelector('#stj_cell_modal_entry_host');
@@ -847,6 +1037,7 @@ async function mountWorldEntryInCellModal(cell) {
         delete hostEl._sourceEntryEl;
         delete hostEl._clonedEntryEl;
         delete hostEl._syncEntry;
+        delete hostEl._persistEntry;
         delete hostEl._guardObserver;
 
         if (cell.classList.contains('stj-special-item')) return;
@@ -870,7 +1061,6 @@ async function mountWorldEntryInCellModal(cell) {
         const sourceEl = findSourceWorldEntryEl(entries, targetEntry, kw);
         if (!sourceEl) return;
 
-        // クローン前に元要素のドロワーを展開し、SillyTavern本体に中身を生成させる
         await ensureSourceEntryExpanded(sourceEl);
 
         if (currentCellModal !== modal || currentModalCell !== cell) return;
@@ -892,7 +1082,6 @@ async function mountWorldEntryInCellModal(cell) {
         expandClonedEntryPanels(cloned);
         collapseLbeExtrasPanel(cloned);
 
-        // 詳細設定トグル（.lbe-extras-toggle）に手動開閉動作を付与
         cloned.querySelectorAll('.lbe-extras-toggle').forEach((toggle) => {
             toggle.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -917,7 +1106,6 @@ async function mountWorldEntryInCellModal(cell) {
             });
         });
 
-        // クローン側の開閉ボタンにも手動トグル動作を付与
         cloned.querySelectorAll('.inline-drawer-toggle').forEach((toggle) => {
             toggle.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -939,7 +1127,31 @@ async function mountWorldEntryInCellModal(cell) {
 
         const snap = captureEntrySnapshot(cloned);
         const syncState = { active: false };
-        const syncNow = () => syncClonedEntryToSource(cloned, sourceEl, syncState);
+        let persistTimer = null;
+
+        const schedulePersist = () => {
+            if (persistTimer) clearTimeout(persistTimer);
+            persistTimer = setTimeout(() => {
+                persistTimer = null;
+                persistWorldInfoEntryChanges(worldName, targetEntry, sourceEl).catch(err =>
+                    console.warn('[STJ Editor] persistWorldInfoEntryChanges error:', err)
+                );
+            }, 250);
+        };
+
+        const syncNow = () => {
+            syncClonedEntryToSource(cloned, sourceEl, syncState, worldName, targetEntry);
+            schedulePersist();
+        };
+
+        const flushPersistNow = async () => {
+            if (persistTimer) {
+                clearTimeout(persistTimer);
+                persistTimer = null;
+            }
+            syncClonedEntryToSource(cloned, sourceEl, syncState, worldName, targetEntry);
+            await persistWorldInfoEntryChanges(worldName, targetEntry, sourceEl);
+        };
 
         const allFields = Array.from(cloned.querySelectorAll('input, textarea, select'));
         allFields.forEach((field, idx) => {
@@ -987,7 +1199,10 @@ async function mountWorldEntryInCellModal(cell) {
 
         hostEl._sourceEntryEl = sourceEl;
         hostEl._clonedEntryEl = cloned;
+        hostEl._targetEntry = targetEntry;
+        hostEl._worldName = worldName;
         hostEl._syncEntry = syncNow;
+        hostEl._persistEntry = flushPersistNow;
         hostEl._guardObserver = guardObserver;
         hostEl.appendChild(cloned);
         hostEl.style.display = 'block';
@@ -2222,26 +2437,196 @@ function closeCellModal(revert) {
         doApplyCellModal();
     }
 
+    async function commitModalKeywordEdit(newKwRaw) {
+        if (!currentModalCell || currentModalCell.classList.contains('stj-special-item')) return;
+
+        const newKw = String(newKwRaw || '').trim();
+        const oldKw = getCellKeyword(currentModalCell).trim();
+        if (!newKw || newKw === oldKw) return;
+
+        const dup = findDuplicateKeyword(currentModalCell, newKw);
+        if (dup) {
+            showKeywordDuplicateWarning(newKw);
+            return;
+        }
+
+        const charName = document.getElementById('stj_char_name_display')?.textContent || detectCharacterNameFromDOM() || '';
+        const worldName = getCharacterWorldInfoName();
+
+        let targetEntry = null;
+        let preservedLex = null;
+        if (worldName) {
+            try {
+                const entries = await loadWorldInfoEntries(worldName);
+                targetEntry = findEntryByKeyword(entries, oldKw) || findEntryByKeyword(entries, newKw);
+                if (targetEntry) {
+                    preservedLex = snapshotLorebookExpansionPayload(worldName, targetEntry);
+                    targetEntry.comment = newKw;
+                    const existingKeys = getEntryKeys(targetEntry);
+                    if (existingKeys.length === 0 || (existingKeys.length === 1 && existingKeys[0] === oldKw)) {
+                        targetEntry.key = [newKw];
+                        targetEntry.keys = [newKw];
+                    }
+                    restoreLorebookExpansionPayload(worldName, targetEntry, preservedLex);
+                }
+            } catch (e) {
+                console.warn('[STJ Editor] キーワード反映前のロアブック取得エラー:', e);
+            }
+        }
+
+        if (charName) {
+            const currentMap = getCurrentImageMapFromCharData(charName) || {};
+            if (Object.prototype.hasOwnProperty.call(currentMap, oldKw)) {
+                const updatedMap = {};
+                for (const [k, v] of Object.entries(currentMap)) {
+                    if (k === oldKw) {
+                        updatedMap[newKw] = v;
+                    } else if (!Object.prototype.hasOwnProperty.call(updatedMap, k)) {
+                        updatedMap[k] = v;
+                    }
+                }
+                saveImageMapToCharData(charName, updatedMap);
+            }
+        }
+
+        setCellKeyword(currentModalCell, newKw);
+        modalOriginalKeyword = newKw;
+
+        const entryHostEl = currentCellModal?.querySelector('#stj_cell_modal_entry_host');
+        if (entryHostEl?._clonedEntryEl) {
+            const clonedComment = entryHostEl._clonedEntryEl.querySelector('textarea[name="comment"], input[name="comment"]');
+            if (clonedComment) clonedComment.value = newKw;
+        }
+        if (entryHostEl?._sourceEntryEl) {
+            const srcComment = entryHostEl._sourceEntryEl.querySelector('textarea[name="comment"], input[name="comment"]');
+            if (srcComment) {
+                srcComment.value = newKw;
+                srcComment.dispatchEvent(new Event('input', { bubbles: true }));
+                srcComment.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        }
+
+        if (worldName && targetEntry) {
+            if (preservedLex) {
+                restoreLorebookExpansionPayload(worldName, targetEntry, preservedLex);
+            }
+            await persistWorldInfoEntryChanges(worldName, targetEntry, entryHostEl?._sourceEntryEl || null);
+        }
+
+        runLiveTest();
+        autoSave({ immediate: true });
+        _stjScheduleTreeLayout();
+    }
+
+    function attachKeywordDisplayEditor(modal, kwDisplayEl) {
+        if (!modal || !kwDisplayEl || kwDisplayEl.dataset.editableReady === '1') return;
+        kwDisplayEl.dataset.editableReady = '1';
+        kwDisplayEl.style.cursor = 'text';
+        kwDisplayEl.title = _t('stj.cell_modal.keyword_edit_hint', 'クリックしてキーワードを編集');
+
+        kwDisplayEl.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (!currentModalCell || currentModalCell.classList.contains('stj-special-item')) return;
+            if (kwDisplayEl.querySelector('input.stj-keyword-inline-input')) return;
+
+            const currentVal = getCellKeyword(currentModalCell) || kwDisplayEl.textContent || '';
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'stj-keyword-inline-input';
+            input.value = currentVal;
+            input.style.cssText = [
+                'width: 100%',
+                'max-width: 480px',
+                'padding: 4px 10px',
+                'font-size: 20px',
+                'font-weight: bold',
+                'color: #fff',
+                'background: rgba(15, 23, 42, 0.92)',
+                'border: 2px solid #60a5fa',
+                'border-radius: 6px',
+                'outline: none',
+                'box-sizing: border-box',
+            ].join(';');
+
+            let committed = false;
+            const finishEdit = async (shouldSave) => {
+                if (committed) return;
+                committed = true;
+                const val = input.value;
+                input.remove();
+                if (shouldSave) {
+                    const trimmed = val.trim();
+                    if (trimmed && !findDuplicateKeyword(currentModalCell, trimmed)) {
+                        kwDisplayEl.textContent = trimmed;
+                        await commitModalKeywordEdit(trimmed);
+                    } else {
+                        kwDisplayEl.textContent = getCellKeyword(currentModalCell) || '';
+                    }
+                } else {
+                    kwDisplayEl.textContent = getCellKeyword(currentModalCell) || '';
+                }
+            };
+
+            input.addEventListener('click', (ev) => ev.stopPropagation());
+            input.addEventListener('keydown', (ev) => {
+                ev.stopPropagation();
+                if (ev.key === 'Enter' && !ev.isComposing) {
+                    ev.preventDefault();
+                    finishEdit(true);
+                } else if (ev.key === 'Escape') {
+                    ev.preventDefault();
+                    finishEdit(false);
+                }
+            });
+            input.addEventListener('blur', () => finishEdit(true));
+
+            kwDisplayEl.textContent = '';
+            kwDisplayEl.appendChild(input);
+            input.focus();
+            input.select();
+        });
+    }
+
     function doApplyCellModal() {
         if (!currentCellModal || !currentModalCell) return;
         const cell = currentModalCell;
+
+        const kwDisplayEl = currentCellModal.querySelector('#stj_cell_modal_keyword_display');
+        const inlineInput = kwDisplayEl?.querySelector('input.stj-keyword-inline-input');
+        const pendingKw = inlineInput ? inlineInput.value.trim() : '';
+
         updateCellPreview(cell);
         runLiveTest();
         autoSave({ immediate: true });
+
         const entryHostEl = currentCellModal.querySelector('#stj_cell_modal_entry_host');
+        const persistFn = entryHostEl?._persistEntry;
+        const syncFn = entryHostEl?._syncEntry;
+
         if (entryHostEl) {
             if (entryHostEl._guardObserver) {
                 try { entryHostEl._guardObserver.disconnect(); } catch (e) { /* ignore */ }
             }
-            if (typeof entryHostEl._syncEntry === 'function') entryHostEl._syncEntry();
+            if (typeof syncFn === 'function') syncFn();
+            if (typeof persistFn === 'function') {
+                persistFn().catch(err => console.warn('[STJ Editor] apply persist error:', err));
+            }
             entryHostEl.innerHTML = '';
             entryHostEl.style.display = 'block';
             entryHostEl.style.height = '35%';
             delete entryHostEl._sourceEntryEl;
             delete entryHostEl._clonedEntryEl;
+            delete entryHostEl._targetEntry;
+            delete entryHostEl._worldName;
             delete entryHostEl._syncEntry;
+            delete entryHostEl._persistEntry;
             delete entryHostEl._guardObserver;
         }
+
+        if (pendingKw && !cell.classList.contains('stj-special-item')) {
+            commitModalKeywordEdit(pendingKw).catch(err => console.warn('[STJ Editor] keyword commit error:', err));
+        }
+
         const zoom = document.getElementById('stj_media_zoom');
         if (zoom) zoom.remove();
         document.body.classList.remove('stj-zoom-active');
