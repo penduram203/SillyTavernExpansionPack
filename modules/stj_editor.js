@@ -795,6 +795,51 @@ function applyEntrySnapshotToEl(el, snap) {
             const srcFields = Array.from(sourceEl.querySelectorAll('input, textarea, select'));
             const usedTargets = new Set();
 
+            // LBE 専用コントロール（template / 解像度 / プロンプト / 変数 / 選択肢）をクラス＋行順で厳密同期
+            const lbeSpecs = [
+                '.lbe-template-select',
+                '.lbe-resolution-select',
+                '.lbe-img-prompt',
+                '.lbe-negative-prompt',
+                '.lbe-variable-type',
+                '.lbe-variable-name',
+                '.lbe-variable-value',
+                '.lbe-choice-input',
+            ];
+            let anyLbeChanged = false;
+            for (const sel of lbeSpecs) {
+                const cList = Array.from(clonedEl.querySelectorAll(sel));
+                const sList = Array.from(sourceEl.querySelectorAll(sel));
+                cList.forEach((cField, i) => {
+                    const sField = sList[i];
+                    if (!sField) return;
+                    usedTargets.add(sField);
+                    if (cField.tagName === 'SELECT') {
+                        if (sField.value !== cField.value || sField.selectedIndex !== cField.selectedIndex) {
+                            const hasOpt = Array.from(sField.options || []).some(o => o.value === cField.value);
+                            if (hasOpt) {
+                                sField.value = cField.value;
+                            } else if (cField.selectedIndex >= 0 && sField.options?.[cField.selectedIndex]) {
+                                sField.selectedIndex = cField.selectedIndex;
+                            } else {
+                                sField.value = cField.value;
+                            }
+                            sField.dispatchEvent(new Event('change', { bubbles: true }));
+                            if (window.$) window.$(sField).trigger('change');
+                            anyLbeChanged = true;
+                        }
+                    } else {
+                        if (sField.value !== cField.value) {
+                            sField.value = cField.value;
+                            sField.dispatchEvent(new Event('input', { bubbles: true }));
+                            sField.dispatchEvent(new Event('change', { bubbles: true }));
+                            if (window.$) window.$(sField).trigger('input').trigger('change');
+                            anyLbeChanged = true;
+                        }
+                    }
+                });
+            }
+            
             const isResolutionField = (el) => {
                 const sig = [
                     el.getAttribute('name') || '',
@@ -871,7 +916,7 @@ function applyEntrySnapshotToEl(el, snap) {
             const fields = Array.from(clonedEl.querySelectorAll('input, textarea, select'));
             fields.forEach((field, idx) => {
                 const target = findTarget(field, idx);
-                if (!target) return;
+                if (!target || usedTargets.has(target)) return;
                 usedTargets.add(target);
 
                 if (field.type === 'checkbox' || field.type === 'radio') {
@@ -907,11 +952,13 @@ function applyEntrySnapshotToEl(el, snap) {
                 }
             });
  
-            if (anyChanged && window.$) {
-                 window.$(sourceEl).triggerHandler('change');
-            }
+            const totalChanged = anyChanged || anyLbeChanged;
 
-            if (anyChanged) {
+            if (totalChanged && window.$) {
+                window.$(sourceEl).triggerHandler('change');
+            }
+ 
+            if (totalChanged) {
                 scheduleWorldInfoPersist(sourceEl);
             }
         } finally {
@@ -1126,25 +1173,32 @@ async function mountWorldEntryInCellModal(cell) {
         const syncState = { active: false };
         const syncNow = () => syncClonedEntryToSource(cloned, sourceEl, syncState);
 
-        const bindFieldListeners = (field, idx) => {
+        const bindFieldListeners = (field) => {
             if (field.dataset.stjBound === '1') return;
             field.dataset.stjBound = '1';
             const recordUserEdit = () => {
+                const curFields = Array.from(cloned.querySelectorAll('input, textarea, select'));
+                const curIdx = curFields.indexOf(field);
                 if (field.tagName === 'TEXTAREA') {
                     field.style.height = 'auto';
                     field.style.height = field.scrollHeight + 'px';
                 }
-                updateSnapshotForField(snap, field, idx);
+                if (curIdx >= 0) updateSnapshotForField(snap, field, curIdx);
                 syncNow();
-                updateSnapshotForField(snap, field, idx);
+                const updatedFields = Array.from(cloned.querySelectorAll('input, textarea, select'));
+                const updatedIdx = updatedFields.indexOf(field);
+                if (updatedIdx >= 0) updateSnapshotForField(snap, field, updatedIdx);
             };
-            field.addEventListener('pointerdown', () => updateSnapshotForField(snap, field, idx));
+            field.addEventListener('pointerdown', () => {
+                const curIdx = Array.from(cloned.querySelectorAll('input, textarea, select')).indexOf(field);
+                if (curIdx >= 0) updateSnapshotForField(snap, field, curIdx);
+            });
             field.addEventListener('input', recordUserEdit);
             field.addEventListener('change', recordUserEdit);
         };
 
-        Array.from(cloned.querySelectorAll('input, textarea, select')).forEach((field, idx) => {
-            bindFieldListeners(field, idx);
+        Array.from(cloned.querySelectorAll('input, textarea, select')).forEach((field) => {
+            bindFieldListeners(field);
         });
 
         cloned.addEventListener('click', (e) => {
@@ -3249,42 +3303,17 @@ function closeCellModal(revert) {
 
         const lowerVariants = new Set([...variants].map(v => v.toLowerCase()));
 
-        // キーワード長の降順（長い＝具体的なキーワード優先）で評価
-        const entriesWithKw = [];
+        // 完全一致のみ判定（部分一致・前方一致は行わない）
         for (const e of list) {
             const kw = getEntryKeyword(e);
-            if (kw) entriesWithKw.push({ entry: e, kw });
+            if (!kw) continue;
+            if (variants.has(kw)) return e;
         }
-        entriesWithKw.sort((a, b) => b.kw.length - a.kw.length);
-
-        // 1. 完全一致（大文字小文字区別）
-        for (const { entry, kw } of entriesWithKw) {
-            if (variants.has(kw)) return entry;
+        for (const e of list) {
+            const kw = getEntryKeyword(e);
+            if (!kw) continue;
+            if (lowerVariants.has(kw.toLowerCase())) return e;
         }
-        // 1b. 完全一致（大文字小文字無視）
-        for (const { entry, kw } of entriesWithKw) {
-            if (lowerVariants.has(kw.toLowerCase())) return entry;
-        }
-        // 2. 選択肢がキーワードで始まる
-        for (const { entry, kw } of entriesWithKw) {
-            for (const v of variants) {
-                if (v.startsWith(kw)) return entry;
-            }
-        }
-        for (const { entry, kw } of entriesWithKw) {
-            const kwL = kw.toLowerCase();
-            for (const v of variants) {
-                if (v.toLowerCase().startsWith(kwL)) return entry;
-            }
-        }
-        // 3. 選択肢にキーワードが含まれる（2文字以上のキーワードのみ・誤爆防止）
-        for (const { entry, kw } of entriesWithKw) {
-            if (kw.length < 2) continue;
-            for (const v of variants) {
-                if (v.includes(kw)) return entry;
-            }
-        }
-
         return null;
     }
 
