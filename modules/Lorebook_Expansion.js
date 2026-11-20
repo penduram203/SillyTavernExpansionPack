@@ -482,6 +482,9 @@ function migrateCurrentCharacterToWorldStore() {
 
         // ★ 重複キーをクリーンアップ
         cleanupLexDuplicateKeys();
+        if (typeof saveSettingsDebounced === 'function') {
+            saveSettingsDebounced();
+        }
     } catch (e) {
         console.warn(LOG, 'migrateCurrentCharacterToWorldStore エラー:', e);
     }
@@ -655,6 +658,9 @@ function setDataFor(worldName, uid, entry, data) {
     const store = getWorldLexStore(worldName);
     store[charKey] = normalized;
     saveLexStore();
+    if (typeof saveSettingsDebounced === 'function') {
+        saveSettingsDebounced();
+    }
     debugLog(`per-world store に保存: ${worldName}::${charKey}`);
 
     // ── 2) character.data にもミラー保存（JSONエクスポート/インポート用）──
@@ -1599,6 +1605,13 @@ function buildExpansionSection(uid, worldName, data, onChange) {
                 onChange(data);
             });
 
+            // 外部同期（JSON編集モーダル等）で value が変更された場合も型・プレースホルダを同期
+            typeSelect.addEventListener('input', () => {
+                v.type = typeSelect.value === 'number' ? 'number' : 'string';
+                updateValuePlaceholder(valueInput, v.type);
+                onChange(data);
+            });
+            
             const delBtn = document.createElement('button');
             delBtn.type = 'button';
             delBtn.className = 'lbe-variable-del menu_button';
