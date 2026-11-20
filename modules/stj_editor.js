@@ -679,10 +679,8 @@
     function expandClonedEntryPanels(clonedEl) {
         if (!clonedEl) return;
 
-        // ドラッグハンドルおよび指定の2要素を削除
-        clonedEl.querySelectorAll('.drag-handle, .inline-drawer-header, [name="keywordsAndLogicBlock"]').forEach((el) => {
-            el.remove();
-        });
+        // ※ 本物の .world_entry 要素からヘッダ・矢印ボタン・キーワード欄を削除しない
+        //   （モーダル内でのみ CSS で非表示にする）
 
         const collapseClasses = [
             'collapsed',
@@ -690,8 +688,11 @@
             'is-collapsed',
             'inline-drawer-collapsed',
         ];
+        if (!clonedEl.dataset.stjSavedClasses) {
+            clonedEl.dataset.stjSavedClasses = clonedEl.className;
+        }
         clonedEl.classList.remove(...collapseClasses);
-        clonedEl.classList.add('open', 'expanded');
+        clonedEl.classList.add('open', 'expanded', 'stj-modal-expanded-entry');
 
         // トグルアイコンを下向き(down)から上向き(up)に切り替え（lbe-extras-toggle は除外）
         clonedEl.querySelectorAll('.inline-drawer-toggle').forEach((toggle) => {
@@ -716,15 +717,11 @@
                 el.classList.contains('world_entry_body') ||
                 el.getAttribute('name') === 'PositionBlock'
             ) {
+                if (!el.dataset.stjSavedStyle) {
+                    el.dataset.stjSavedStyle = el.getAttribute('style') || '';
+                }
                 el.classList.add('open', 'expanded');
                 el.style.setProperty('display', 'block', 'important');
-                el.style.setProperty('visibility', 'visible', 'important');
-                el.style.setProperty('opacity', '1', 'important');
-                el.style.setProperty('height', 'auto', 'important');
-                el.style.setProperty('max-height', 'none', 'important');
-                el.style.setProperty('overflow', 'visible', 'important');
-            } else if (el.style && el.style.display === 'none') {
-                el.style.setProperty('display', '', 'important');
             }
         });
 
@@ -732,6 +729,23 @@
         if (clonedEl.dataset.lbeExtrasUserOpened !== '1') {
             collapseLbeExtrasPanel(clonedEl);
         }
+    }
+
+    function cleanupEntryModalState(el) {
+        if (!el) return;
+        el.classList.remove('stj-modal-expanded-entry');
+        if (el.dataset.stjSavedClasses !== undefined) {
+            el.className = el.dataset.stjSavedClasses;
+            delete el.dataset.stjSavedClasses;
+        }
+        el.querySelectorAll('*').forEach((child) => {
+            if (child.dataset && child.dataset.stjSavedStyle !== undefined) {
+                const saved = child.dataset.stjSavedStyle;
+                if (saved) child.setAttribute('style', saved);
+                else child.removeAttribute('style');
+                delete child.dataset.stjSavedStyle;
+            }
+        });
     }
 
     async function ensureSourceEntryExpanded(sourceEl) {
@@ -820,9 +834,9 @@ function applyEntrySnapshotToEl(el, snap) {
         const movedEl = hostEl._movedEntryEl;
         const placeholder = hostEl._entryPlaceholder;
         if (movedEl && placeholder && placeholder.parentNode) {
+            cleanupEntryModalState(movedEl);
             placeholder.parentNode.insertBefore(movedEl, placeholder);
             placeholder.remove();
-            scheduleWorldInfoPersist(movedEl);
             try {
                 if (typeof window.saveSettingsDebounced === 'function') {
                     window.saveSettingsDebounced();
