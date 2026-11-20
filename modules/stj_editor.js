@@ -878,6 +878,7 @@ function applyEntrySnapshotToEl(el, snap) {
                     if (target.checked !== field.checked) {
                         target.checked = field.checked;
                         target.dispatchEvent(new Event('change', { bubbles: true }));
+                        if (window.$) window.$(target).trigger('change');
                         anyChanged = true;
                     }
                 } else if (field.tagName === 'SELECT') {
@@ -892,6 +893,7 @@ function applyEntrySnapshotToEl(el, snap) {
                             target.value = nextVal;
                         }
                         target.dispatchEvent(new Event('change', { bubbles: true }));
+                        if (window.$) window.$(target).trigger('input').trigger('change');
                         anyChanged = true;
                     }
                 } else {
@@ -899,6 +901,7 @@ function applyEntrySnapshotToEl(el, snap) {
                         target.value = field.value;
                         target.dispatchEvent(new Event('input', { bubbles: true }));
                         target.dispatchEvent(new Event('change', { bubbles: true }));
+                        if (window.$) window.$(target).trigger('input').trigger('change');
                         anyChanged = true;
                     }
                 }
@@ -931,7 +934,7 @@ function applyEntrySnapshotToEl(el, snap) {
 
         const isAddAction = /add|追加|\+|＋|new|create/i.test(labelText) ||
             !!btn.querySelector('.fa-plus, .fa-circle-plus, .fa-square-plus');
-        const isRemoveAction = /remove|delete|del|削除|×|✕|trash/i.test(labelText) ||
+        const isRemoveAction = /remove|delete|del|削除|×|✕|trash|minus/i.test(labelText) ||
             !!btn.querySelector('.fa-trash, .fa-xmark, .fa-times, .fa-minus');
         const isTargetAction = /var|変数|choice|選択肢|template|テンプレート/i.test(
             labelText + ' ' + (btn.closest('[class*="var"], [class*="choice"], [class*="template"], [data-name*="var"], [data-name*="choice"], [data-name*="template"]')?.className || '')
@@ -982,13 +985,17 @@ function applyEntrySnapshotToEl(el, snap) {
             matchedSrcBtn = sourceButtons[btnIdx];
         }
 
-        if (matchedSrcBtn && isSyncingRef) {
-            isSyncingRef.active = true;
+        if (matchedSrcBtn) {
+            if (isSyncingRef) isSyncingRef.active = true;
             try {
-                matchedSrcBtn.click();
+                if (window.$) {
+                    window.$(matchedSrcBtn).trigger('click');
+                } else {
+                    matchedSrcBtn.click();
+                }
             } catch (e) { /* ignore */ }
             finally {
-                isSyncingRef.active = false;
+                if (isSyncingRef) setTimeout(() => { isSyncingRef.active = false; }, 50);
             }
         }
 
@@ -4386,42 +4393,40 @@ function populateFormFromImageMap(imageMap, preserveOrder = false) {
             }, true);
         }
 
-        const addBtn = document.getElementById('stj_add_keyword');
-        if (addBtn) addBtn.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            if (isDialogActive) return;
+    const addBtn = document.getElementById('stj_add_keyword');
+    if (addBtn) addBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (isDialogActive || _syncLorebookInFlight) return;
+ 
+        addBtn.disabled = true;
+        try {
+            autoSave({ immediate: true });
+            const added = await syncLorebookEntriesToImageMap();
 
-            try {
-                autoSave({ immediate: true });
-                const added = await syncLorebookEntriesToImageMap();
-
-                const showToast = window.GicApi?.showBottomToast;
-                if (added > 0) {
-                    if (typeof showToast === 'function') {
-                        showToast(_t('stj.toast.sync_added', `ロアブックと同期しました（${added} 件追加）`, { count: added }));
-                    }
-                } else {
-                    if (typeof showToast === 'function') {
-                        showToast(_t('stj.toast.sync_no_add', '同期する新規セルはありませんでした'), { type: 'warning' });
-                    }
-                }
-
-                if (stjModalEl && stjModalEl.style.display === 'block') {
-                    const charName = detectCharacterNameFromDOM();
-                    if (charName) {
-                        const currentMap = getCurrentImageMapFromCharData(charName);
-                        if (currentMap) populateFormFromImageMap(currentMap);
-                    }
-                    runLiveTest();
-                }
-            } catch (err) {
-                console.warn('[STJ Editor] 同期エラー:', err);
-                const showToast = window.GicApi?.showBottomToast;
+            const showToast = window.GicApi?.showBottomToast;
+            if (added > 0) {
                 if (typeof showToast === 'function') {
-                    showToast(_t('stj.toast.sync_failed', '同期に失敗しました'), { type: 'error' });
+                    showToast(_t('stj.toast.sync_added', `ロアブックと同期しました（${added} 件追加）`, { count: added }));
+                }
+            } else {
+                if (typeof showToast === 'function') {
+                    showToast(_t('stj.toast.sync_no_add', '同期する新規セルはありませんでした'), { type: 'warning' });
                 }
             }
-        });
+
+            if (stjModalEl && stjModalEl.style.display === 'block') {
+                runLiveTest();
+            }
+        } catch (err) {
+            console.warn('[STJ Editor] 同期エラー:', err);
+            const showToast = window.GicApi?.showBottomToast;
+            if (typeof showToast === 'function') {
+                showToast(_t('stj.toast.sync_failed', '同期に失敗しました'), { type: 'error' });
+            }
+        } finally {
+            addBtn.disabled = false;
+        }
+    });
 
         const cancelBtn = document.getElementById('stj_cancel_export');
         if (cancelBtn) {
@@ -4799,7 +4804,19 @@ function getStjCharSettings(charName) {
     return settings[charName];
 }
 
+let _syncLorebookInFlight = null;
+
 async function syncLorebookEntriesToImageMap() {
+    if (_syncLorebookInFlight) {
+        return _syncLorebookInFlight;
+    }
+    _syncLorebookInFlight = _syncLorebookEntriesToImageMapImpl().finally(() => {
+        _syncLorebookInFlight = null;
+    });
+    return _syncLorebookInFlight;
+}
+
+async function _syncLorebookEntriesToImageMapImpl() {
     const charName = detectCharacterNameFromDOM();
     if (!charName) {
         return 0;
@@ -4810,14 +4827,11 @@ async function syncLorebookEntriesToImageMap() {
         return 0;
     }
 
-    try {
-        window.LorebookExpansion?.clearWorldInfoEntriesCache?.(worldName);
-    } catch (err) { /* ignore */ }
-
     const entries = await loadWorldInfoEntries(worldName);
-    if (!entries) return 0;
+    if (!entries || typeof entries !== 'object') return 0;
 
     const list = Array.isArray(entries) ? entries : Object.values(entries);
+    if (list.length === 0) return 0;
     let imageMap = getCurrentImageMapFromCharData(charName);
     if (!imageMap) imageMap = {};
 
