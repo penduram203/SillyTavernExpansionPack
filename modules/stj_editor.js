@@ -923,6 +923,26 @@ function applyEntrySnapshotToEl(el, snap) {
         if (!btn || !clonedEl || !sourceEl) return false;
         if (isSyncingRef && isSyncingRef.active) return false;
 
+        const clonedButtons = Array.from(clonedEl.querySelectorAll('button, [role="button"], .menu_button'));
+        const sourceButtons = Array.from(sourceEl.querySelectorAll('button, [role="button"], .menu_button'));
+        const btnIdx = clonedButtons.indexOf(btn);
+
+        // クラス名・属性から種別と同一行インデックスを特定
+        const clsList = Array.from(btn.classList || []);
+        const matchedCls = clsList.find(c => /^lbe-(template|variable|choice)-(add|del)$/.test(c));
+
+        let matchedSrcBtn = null;
+        if (matchedCls) {
+            const srcSameCls = Array.from(sourceEl.querySelectorAll('.' + escapeCssAttrValue(matchedCls)));
+            const clonedSameCls = Array.from(clonedEl.querySelectorAll('.' + escapeCssAttrValue(matchedCls)));
+            const sameIdx = clonedSameCls.indexOf(btn);
+            if (sameIdx >= 0 && srcSameCls[sameIdx]) {
+                matchedSrcBtn = srcSameCls[sameIdx];
+            } else if (srcSameCls[0]) {
+                matchedSrcBtn = srcSameCls[0];
+            }
+        }
+        
         const labelText = (
             btn.textContent ||
             btn.getAttribute('title') ||
@@ -932,45 +952,7 @@ function applyEntrySnapshotToEl(el, snap) {
             ''
         ).trim();
 
-        const isAddAction = /add|追加|\+|＋|new|create/i.test(labelText) ||
-            !!btn.querySelector('.fa-plus, .fa-circle-plus, .fa-square-plus');
-        const isRemoveAction = /remove|delete|del|削除|×|✕|trash|minus/i.test(labelText) ||
-            !!btn.querySelector('.fa-trash, .fa-xmark, .fa-times, .fa-minus');
-        const isTargetAction = /var|変数|choice|選択肢|template|テンプレート/i.test(
-            labelText + ' ' + (btn.closest('[class*="var"], [class*="choice"], [class*="template"], [data-name*="var"], [data-name*="choice"], [data-name*="template"]')?.className || '')
-        );
-
-        if (!isAddAction && !isRemoveAction && !isTargetAction) return false;
-
-        // クローン側で対応する行・テンプレート要素を追加/削除
-        const container =
-            btn.closest('[class*="choice"], [class*="var"], [class*="template"], .list-container, .items-container') ||
-            btn.parentElement;
-        const rowItem = btn.closest('.choice-item, .var-item, .template-item, .list-item, .entry-row, [data-index], tr');
-
-        if (isRemoveAction && rowItem && container && container.contains(rowItem)) {
-            rowItem.remove();
-        } else if (isAddAction && container) {
-            const sampleRow = container.querySelector('.choice-item, .var-item, .template-item, .list-item, .entry-row, [data-index], tr') ||
-                (rowItem ? rowItem : null);
-            if (sampleRow) {
-                const newRow = sampleRow.cloneNode(true);
-                newRow.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
-                newRow.querySelectorAll('input, textarea').forEach(inp => {
-                    if (inp.type === 'checkbox' || inp.type === 'radio') inp.checked = false;
-                    else inp.value = '';
-                });
-                btn.insertAdjacentElement('beforebegin', newRow);
-            }
-        }
-
-        // sourceEl 側の同一ボタンを見つけてクリック（本体/拡張側のハンドラを起動）
-        const clonedButtons = Array.from(clonedEl.querySelectorAll('button, [role="button"], .menu_button'));
-        const btnIdx = clonedButtons.indexOf(btn);
-        const sourceButtons = Array.from(sourceEl.querySelectorAll('button, [role="button"], .menu_button'));
-
-        let matchedSrcBtn = null;
-        if (btn.id) {
+        if (!matchedSrcBtn && btn.id) {
             matchedSrcBtn = sourceEl.querySelector(`#${escapeCssAttrValue(btn.id)}`);
         }
         if (!matchedSrcBtn && labelText) {
@@ -985,18 +967,16 @@ function applyEntrySnapshotToEl(el, snap) {
             matchedSrcBtn = sourceButtons[btnIdx];
         }
 
-        if (matchedSrcBtn) {
-            if (isSyncingRef) isSyncingRef.active = true;
-            try {
-                if (window.$) {
-                    window.$(matchedSrcBtn).trigger('click');
-                } else {
-                    matchedSrcBtn.click();
-                }
-            } catch (e) { /* ignore */ }
-            finally {
-                if (isSyncingRef) setTimeout(() => { isSyncingRef.active = false; }, 50);
-            }
+        if (!matchedSrcBtn) return false;
+
+        if (isSyncingRef) isSyncingRef.active = true;
+        try {
+            // 先に現在の入力値（解像度・プロンプト・変数・選択肢等）を sourceEl へ反映してからボタン操作を実行
+            syncClonedEntryToSource(clonedEl, sourceEl, { active: false });
+            matchedSrcBtn.click();
+        } catch (e) { /* ignore */ }
+        finally {
+            if (isSyncingRef) setTimeout(() => { isSyncingRef.active = false; }, 80);
         }
 
         return true;
@@ -1172,15 +1152,34 @@ async function mountWorldEntryInCellModal(cell) {
             if (actionBtn && !actionBtn.closest('.lbe-extras-toggle') && !actionBtn.closest('.inline-drawer-toggle')) {
                 e.preventDefault();
                 e.stopPropagation();
-                mirrorActionButtonToSource(actionBtn, cloned, sourceEl, syncState);
+                const mirrored = mirrorActionButtonToSource(actionBtn, cloned, sourceEl, syncState);
                 setTimeout(() => {
+                    if (mirrored && document.body.contains(sourceEl) && document.body.contains(cloned)) {
+                        // sourceEl 側の追加・削除・テンプレート変更結果をクローン側へ再反映
+                        const hostEl = cloned.parentElement;
+                        const freshClone = sourceEl.cloneNode(true);
+                        freshClone.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
+                        expandClonedEntryPanels(freshClone);
+                        if (hostEl) {
+                            if (hostEl._guardObserver) {
+                                try { hostEl._guardObserver.disconnect(); } catch (err) { /* ignore */ }
+                            }
+                            hostEl.innerHTML = '';
+                            hostEl.appendChild(freshClone);
+                            // 新しいクローンへ再バインドするため mountWorldEntryInCellModal を再実行
+                            if (currentModalCell) {
+                                mountWorldEntryInCellModal(currentModalCell).catch(() => {});
+                            }
+                            return;
+                        }
+                    }
                     Array.from(cloned.querySelectorAll('input, textarea, select')).forEach((field, idx) => {
                         bindFieldListeners(field, idx);
                         updateSnapshotForField(snap, field, idx);
                     });
                     syncNow();
                     scheduleWorldInfoPersist(sourceEl);
-                }, 30);
+                }, 50);
                 return;
             }
 
