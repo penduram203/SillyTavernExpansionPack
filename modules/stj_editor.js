@@ -795,7 +795,39 @@ function applyEntrySnapshotToEl(el, snap) {
             const srcFields = Array.from(sourceEl.querySelectorAll('input, textarea, select'));
             const usedTargets = new Set();
 
+            const isResolutionField = (el) => {
+                const sig = [
+                    el.getAttribute('name') || '',
+                    el.getAttribute('id') || '',
+                    typeof el.className === 'string' ? el.className : '',
+                    el.dataset?.name || '',
+                    el.dataset?.field || '',
+                    el.dataset?.key || '',
+                ].join(' ').toLowerCase();
+                if (/resol|width|height|size|aspect|ratio|解像度/.test(sig)) return true;
+                const wrap = el.closest('div, p, label, .flex-container, .form-group');
+                const wrapTxt = (wrap?.textContent || '').toLowerCase();
+                return /解像度|resolution/.test(wrapTxt);
+            };
+
+            const findResolutionTarget = (field) => {
+                const name = field.getAttribute('name');
+                if (name) {
+                    const exact = Array.from(sourceEl.querySelectorAll(`[name="${escapeCssAttrValue(name)}"]`))
+                        .find(c => !usedTargets.has(c) && c.tagName === field.tagName);
+                    if (exact) return exact;
+                }
+                const candidates = Array.from(sourceEl.querySelectorAll('input, textarea, select'))
+                    .filter(c => !usedTargets.has(c) && c.tagName === field.tagName && isResolutionField(c));
+                return candidates[0] || null;
+            };
+
             const findTarget = (field, idx) => {
+                if (isResolutionField(field)) {
+                    const resTarget = findResolutionTarget(field);
+                    if (resTarget) return resTarget;
+                }
+
                 const name = field.getAttribute('name');
                 const dataName = field.getAttribute('data-name') || field.dataset?.field || field.dataset?.key;
                 const idAttr = field.getAttribute('id');
@@ -884,6 +916,94 @@ function applyEntrySnapshotToEl(el, snap) {
         }
     }
 
+    function mirrorActionButtonToSource(btn, clonedEl, sourceEl, isSyncingRef) {
+        if (!btn || !clonedEl || !sourceEl) return false;
+        if (isSyncingRef && isSyncingRef.active) return false;
+
+        const labelText = (
+            btn.textContent ||
+            btn.getAttribute('title') ||
+            btn.getAttribute('aria-label') ||
+            btn.getAttribute('data-action') ||
+            btn.className ||
+            ''
+        ).trim();
+
+        const isAddAction = /add|追加|\+|＋|new|create/i.test(labelText) ||
+            !!btn.querySelector('.fa-plus, .fa-circle-plus, .fa-square-plus');
+        const isRemoveAction = /remove|delete|del|削除|×|✕|trash/i.test(labelText) ||
+            !!btn.querySelector('.fa-trash, .fa-xmark, .fa-times, .fa-minus');
+        const isTargetAction = /var|変数|choice|選択肢|template|テンプレート/i.test(
+            labelText + ' ' + (btn.closest('[class*="var"], [class*="choice"], [class*="template"], [data-name*="var"], [data-name*="choice"], [data-name*="template"]')?.className || '')
+        );
+
+        if (!isAddAction && !isRemoveAction && !isTargetAction) return false;
+
+        // クローン側で対応する行・テンプレート要素を追加/削除
+        const container =
+            btn.closest('[class*="choice"], [class*="var"], [class*="template"], .list-container, .items-container') ||
+            btn.parentElement;
+        const rowItem = btn.closest('.choice-item, .var-item, .template-item, .list-item, .entry-row, [data-index], tr');
+
+        if (isRemoveAction && rowItem && container && container.contains(rowItem)) {
+            rowItem.remove();
+        } else if (isAddAction && container) {
+            const sampleRow = container.querySelector('.choice-item, .var-item, .template-item, .list-item, .entry-row, [data-index], tr') ||
+                (rowItem ? rowItem : null);
+            if (sampleRow) {
+                const newRow = sampleRow.cloneNode(true);
+                newRow.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
+                newRow.querySelectorAll('input, textarea').forEach(inp => {
+                    if (inp.type === 'checkbox' || inp.type === 'radio') inp.checked = false;
+                    else inp.value = '';
+                });
+                btn.insertAdjacentElement('beforebegin', newRow);
+            }
+        }
+
+        // sourceEl 側の同一ボタンを見つけてクリック（本体/拡張側のハンドラを起動）
+        const clonedButtons = Array.from(clonedEl.querySelectorAll('button, [role="button"], .menu_button'));
+        const btnIdx = clonedButtons.indexOf(btn);
+        const sourceButtons = Array.from(sourceEl.querySelectorAll('button, [role="button"], .menu_button'));
+
+        let matchedSrcBtn = null;
+        if (btn.id) {
+            matchedSrcBtn = sourceEl.querySelector(`#${escapeCssAttrValue(btn.id)}`);
+        }
+        if (!matchedSrcBtn && labelText) {
+            const norm = labelText.replace(/\s+/g, ' ').trim();
+            matchedSrcBtn = sourceButtons.find(sb => {
+                const sbTxt = (sb.textContent || sb.getAttribute('title') || sb.getAttribute('aria-label') || '')
+                    .replace(/\s+/g, ' ').trim();
+                return sbTxt && sbTxt === norm;
+            }) || null;
+        }
+        if (!matchedSrcBtn && btnIdx >= 0 && sourceButtons[btnIdx]) {
+            matchedSrcBtn = sourceButtons[btnIdx];
+        }
+
+        if (matchedSrcBtn && isSyncingRef) {
+            isSyncingRef.active = true;
+            try {
+                matchedSrcBtn.click();
+            } catch (e) { /* ignore */ }
+            finally {
+                isSyncingRef.active = false;
+            }
+        }
+
+        return true;
+    }
+
+    function rebuildSnapshot(el) {
+        if (!el) return null;
+        const next = captureEntrySnapshot(el);
+        el.querySelectorAll('input, textarea, select').forEach((f, i) => {
+            updateSnapshotForField(next, f, i);
+        });
+        return next;
+    }
+    
     let _worldInfoSaveTimer = null;
     function scheduleWorldInfoPersist(sourceEl) {
         if (_worldInfoSaveTimer) clearTimeout(_worldInfoSaveTimer);
@@ -1019,8 +1139,9 @@ async function mountWorldEntryInCellModal(cell) {
         const syncState = { active: false };
         const syncNow = () => syncClonedEntryToSource(cloned, sourceEl, syncState);
 
-        const allFields = Array.from(cloned.querySelectorAll('input, textarea, select'));
-        allFields.forEach((field, idx) => {
+        const bindFieldListeners = (field, idx) => {
+            if (field.dataset.stjBound === '1') return;
+            field.dataset.stjBound = '1';
             const recordUserEdit = () => {
                 if (field.tagName === 'TEXTAREA') {
                     field.style.height = 'auto';
@@ -1033,12 +1154,33 @@ async function mountWorldEntryInCellModal(cell) {
             field.addEventListener('pointerdown', () => updateSnapshotForField(snap, field, idx));
             field.addEventListener('input', recordUserEdit);
             field.addEventListener('change', recordUserEdit);
+        };
+
+        Array.from(cloned.querySelectorAll('input, textarea, select')).forEach((field, idx) => {
+            bindFieldListeners(field, idx);
         });
 
         cloned.addEventListener('click', (e) => {
+            const actionBtn = e.target.closest('button, [role="button"], .menu_button');
+            if (actionBtn && !actionBtn.closest('.lbe-extras-toggle') && !actionBtn.closest('.inline-drawer-toggle')) {
+                e.preventDefault();
+                e.stopPropagation();
+                mirrorActionButtonToSource(actionBtn, cloned, sourceEl, syncState);
+                setTimeout(() => {
+                    Array.from(cloned.querySelectorAll('input, textarea, select')).forEach((field, idx) => {
+                        bindFieldListeners(field, idx);
+                        updateSnapshotForField(snap, field, idx);
+                    });
+                    syncNow();
+                    scheduleWorldInfoPersist(sourceEl);
+                }, 30);
+                return;
+            }
+
             if (e.target.closest('button, input, select, textarea, .lbe-extras-toggle')) {
                 setTimeout(() => {
-                    allFields.forEach((field, idx) => {
+                    Array.from(cloned.querySelectorAll('input, textarea, select')).forEach((field, idx) => {
+                        bindFieldListeners(field, idx);
                         if (field === e.target || field.contains(e.target)) {
                             updateSnapshotForField(snap, field, idx);
                         }
