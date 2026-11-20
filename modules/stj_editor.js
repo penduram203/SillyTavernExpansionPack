@@ -792,49 +792,127 @@ function applyEntrySnapshotToEl(el, snap) {
 
         if (isSyncingRef) isSyncingRef.active = true;
         try {
-            const fields = clonedEl.querySelectorAll('input, textarea, select');
-            fields.forEach((field) => {
+            const srcFields = Array.from(sourceEl.querySelectorAll('input, textarea, select'));
+            const usedTargets = new Set();
+
+            const findTarget = (field, idx) => {
                 const name = field.getAttribute('name');
-                const cls = field.className || '';
-                let target = null;
+                const dataName = field.getAttribute('data-name') || field.dataset?.field || field.dataset?.key;
+                const idAttr = field.getAttribute('id');
 
                 if (name) {
-                    target = sourceEl.querySelector(`[name="${escapeCssAttrValue(name)}"]`);
-                } else if (cls) {
-                    const firstCls = cls.trim().split(/\s+/).find(c => c.startsWith('lbe-') || c.startsWith('world_entry'));
-                    if (firstCls) target = sourceEl.querySelector('.' + escapeCssAttrValue(firstCls));
+                    const candidates = Array.from(sourceEl.querySelectorAll(`[name="${escapeCssAttrValue(name)}"]`));
+                    const unused = candidates.find(c => !usedTargets.has(c));
+                    if (unused) return unused;
+                    if (candidates[0]) return candidates[0];
+                }
+                if (dataName) {
+                    const c = sourceEl.querySelector(
+                        `[data-name="${escapeCssAttrValue(dataName)}"], [data-field="${escapeCssAttrValue(dataName)}"], [data-key="${escapeCssAttrValue(dataName)}"]`
+                    );
+                    if (c && !usedTargets.has(c)) return c;
                 }
 
+                if (idAttr) {
+                    const c = sourceEl.querySelector(`#${escapeCssAttrValue(idAttr)}`);
+                    if (c && !usedTargets.has(c)) return c;
+                }
+
+                const clsTokens = (typeof field.className === 'string' ? field.className : '')
+                    .trim()
+                    .split(/\s+/)
+                    .filter(c => c && !c.startsWith('stj-'));
+                for (const token of clsTokens) {
+                    const candidates = Array.from(sourceEl.querySelectorAll('.' + escapeCssAttrValue(token)))
+                        .filter(el => el.matches('input, textarea, select'));
+                    const unused = candidates.find(c => !usedTargets.has(c));
+                    if (unused) return unused;
+                }
+
+                if (srcFields[idx] && srcFields[idx].tagName === field.tagName && !usedTargets.has(srcFields[idx])) {
+                    return srcFields[idx];
+                }
+                return null;
+            };
+
+            let anyChanged = false;
+            const fields = Array.from(clonedEl.querySelectorAll('input, textarea, select'));
+            fields.forEach((field, idx) => {
+                const target = findTarget(field, idx);
                 if (!target) return;
+                usedTargets.add(target);
+
                 if (field.type === 'checkbox' || field.type === 'radio') {
                     if (target.checked !== field.checked) {
                         target.checked = field.checked;
                         target.dispatchEvent(new Event('change', { bubbles: true }));
+                        anyChanged = true;
                     }
                 } else if (field.tagName === 'SELECT') {
-                    if (target.value !== field.value || target.selectedIndex !== field.selectedIndex) {
-                        target.value = field.value;
-                        if (target.value !== field.value && field.selectedIndex >= 0) {
+                    const matchedByVal = Array.from(target.options || []).some(o => o.value === field.value);
+                    const nextVal = matchedByVal ? field.value : (target.options?.[field.selectedIndex]?.value ?? field.value);
+                    if (target.value !== nextVal || (matchedByVal && target.selectedIndex !== field.selectedIndex)) {
+                        if (matchedByVal) {
+                            target.value = nextVal;
+                        } else if (field.selectedIndex >= 0 && target.options?.[field.selectedIndex]) {
                             target.selectedIndex = field.selectedIndex;
+                        } else {
+                            target.value = nextVal;
                         }
                         target.dispatchEvent(new Event('change', { bubbles: true }));
+                        anyChanged = true;
                     }
                 } else {
                     if (target.value !== field.value) {
                         target.value = field.value;
                         target.dispatchEvent(new Event('input', { bubbles: true }));
                         target.dispatchEvent(new Event('change', { bubbles: true }));
+                        anyChanged = true;
                     }
                 }
             });
+ 
+            if (anyChanged && window.$) {
+                 window.$(sourceEl).triggerHandler('change');
+            }
 
-            if (window.$) {
-                window.$(sourceEl).triggerHandler('change');
+            if (anyChanged) {
+                scheduleWorldInfoPersist(sourceEl);
             }
         } finally {
             if (isSyncingRef) isSyncingRef.active = false;
         }
     }
+
+    let _worldInfoSaveTimer = null;
+    function scheduleWorldInfoPersist(sourceEl) {
+        if (_worldInfoSaveTimer) clearTimeout(_worldInfoSaveTimer);
+        _worldInfoSaveTimer = setTimeout(async () => {
+            _worldInfoSaveTimer = null;
+            try {
+                const ctx = getSTContext();
+                const worldName = getCharacterWorldInfoName();
+                if (!worldName) return;
+
+                if (typeof window.saveWorldInfo === 'function') {
+                    await window.saveWorldInfo(worldName, null, true);
+                } else if (ctx && typeof ctx.saveWorldInfo === 'function') {
+                    await ctx.saveWorldInfo(worldName);
+                }
+
+                if (window.LorebookExpansion?.clearWorldInfoEntriesCache) {
+                    window.LorebookExpansion.clearWorldInfoEntriesCache(worldName);
+                }
+                if (ctx?.eventSource && ctx?.eventTypes?.WORLDINFO_UPDATED) {
+                    const uid = sourceEl?.getAttribute?.('uid');
+                    ctx.eventSource.emit(ctx.eventTypes.WORLDINFO_UPDATED, worldName, uid);
+                }
+            } catch (err) {
+                console.warn('[STJ Editor] ロアブック保存エラー:', err);
+            }
+        }, 250);
+    }
+    
 
 async function mountWorldEntryInCellModal(cell) {
         const modal = currentCellModal;
@@ -950,6 +1028,7 @@ async function mountWorldEntryInCellModal(cell) {
                 }
                 updateSnapshotForField(snap, field, idx);
                 syncNow();
+                updateSnapshotForField(snap, field, idx);
             };
             field.addEventListener('pointerdown', () => updateSnapshotForField(snap, field, idx));
             field.addEventListener('input', recordUserEdit);
@@ -965,6 +1044,9 @@ async function mountWorldEntryInCellModal(cell) {
                         }
                     });
                     syncNow();
+                    Array.from(cloned.querySelectorAll('input, textarea, select')).forEach((field, idx) => {
+                        updateSnapshotForField(snap, field, idx);
+                    });
                 }, 0);
             }
         });
