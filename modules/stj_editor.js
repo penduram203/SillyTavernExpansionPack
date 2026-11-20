@@ -927,10 +927,11 @@ function applyEntrySnapshotToEl(el, snap) {
             let anyChanged = false;
             const fields = Array.from(clonedEl.querySelectorAll('input, textarea, select'));
             fields.forEach((field, idx) => {
-                if (!target || usedTargets.has(target) || isEntryNameField(target)) return;
-                const target = findTarget(field, idx);
-                if (!target || usedTargets.has(target)) return;
-                usedTargets.add(target);
+                if (isEntryNameField(field)) return;
+                const matchedTarget = findTarget(field, idx);
+                if (!matchedTarget || usedTargets.has(matchedTarget) || isEntryNameField(matchedTarget)) return;
+                usedTargets.add(matchedTarget);
+                const target = matchedTarget;
 
                 if (field.type === 'checkbox' || field.type === 'radio') {
                     if (target.checked !== field.checked) {
@@ -973,6 +974,9 @@ function applyEntrySnapshotToEl(el, snap) {
  
             if (totalChanged) {
                 scheduleWorldInfoPersist(sourceEl);
+                try {
+                    if (typeof window.saveSettingsDebounced === 'function') window.saveSettingsDebounced();
+                } catch (e) { /* ignore */ }
             }
         } finally {
             if (isSyncingRef) isSyncingRef.active = false;
