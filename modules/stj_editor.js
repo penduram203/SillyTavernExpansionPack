@@ -795,6 +795,18 @@ function applyEntrySnapshotToEl(el, snap) {
             const srcFields = Array.from(sourceEl.querySelectorAll('input, textarea, select'));
             const usedTargets = new Set();
 
+            const isEntryNameField = (el) => {
+                if (!el) return false;
+                const name = (el.getAttribute('name') || '').toLowerCase();
+                if (name === 'comment' || name === 'title' || name === 'entry_name') return true;
+                if (el.closest('.world_entry_comment, .entry_name, [data-field="comment"], [data-field="title"]')) {
+                    return true;
+                }
+                return false;
+            };
+
+            srcFields.filter(isEntryNameField).forEach(f => usedTargets.add(f));
+
             // LBE 専用コントロール（template / 解像度 / プロンプト / 変数 / 選択肢）をクラス＋行順で厳密同期
             const lbeSpecs = [
                 '.lbe-template-select',
@@ -915,6 +927,7 @@ function applyEntrySnapshotToEl(el, snap) {
             let anyChanged = false;
             const fields = Array.from(clonedEl.querySelectorAll('input, textarea, select'));
             fields.forEach((field, idx) => {
+                if (!target || usedTargets.has(target) || isEntryNameField(target)) return;
                 const target = findTarget(field, idx);
                 if (!target || usedTargets.has(target)) return;
                 usedTargets.add(target);
