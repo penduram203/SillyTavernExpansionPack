@@ -1875,6 +1875,8 @@ function buildFallbackEntryFromDOM(entryEl, uid, worldName) {
 
 async function injectExpansionSections() {
     if (!settings.enabled) return;
+    // セルモーダル編集中は本体ロアブック DOM への再注入・レイアウト再編をスキップ
+    if (document.body.classList.contains('stj-cell-modal-active')) return;
 
     const worldName = getCurrentWorldName();
     if (!worldName) {
@@ -2153,6 +2155,7 @@ function _lbeScheduleRestore() {
     document.addEventListener('scroll', (e) => {
         const t = e.target;
         if (!t || !t.closest || !t.closest('#world_popup')) return;
+        if (document.body.classList.contains('stj-cell-modal-active')) return;
         _lastWorldPopupScrollAt = Date.now();
         const recentInput = (Date.now() - _lbeLastUserInputAt) < 100;
         if (recentInput || t.scrollTop > _lbeLastScrollTop) {
