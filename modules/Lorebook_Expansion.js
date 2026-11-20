@@ -1875,8 +1875,6 @@ function buildFallbackEntryFromDOM(entryEl, uid, worldName) {
 
 async function injectExpansionSections() {
     if (!settings.enabled) return;
-    // セルモーダル編集中は本体ロアブック DOM への再注入・レイアウト再編をスキップ
-    if (document.body.classList.contains('stj-cell-modal-active')) return;
 
     const worldName = getCurrentWorldName();
     if (!worldName) {
@@ -1885,7 +1883,7 @@ async function injectExpansionSections() {
     }
 
     const entryEls = document.querySelectorAll(
-        '#world_popup .world_entry[uid], .world_entry[uid]'
+        '#stj_cell_modal_entry_host .world_entry[uid], #world_popup .world_entry[uid], .world_entry[uid]'
     );
 
     let needsWork = false;
@@ -1989,7 +1987,11 @@ async function injectExpansionSections() {
     for (const entryEl of entryEls) {
         const uid = String(entryEl.getAttribute('uid'));
         if (uid === null || uid === 'null' || uid === 'undefined') continue;
-
+        // セルモーダル表示中は、モーダル外の #world_popup 内エントリーには触れない
+        if (document.body.classList.contains('stj-cell-modal-active') && !entryEl.closest('#stj_cell_modal_entry_host')) {
+            continue;
+        }
+        
         let entry = entries[uid];
         if (!entry) {
             entry = buildFallbackEntryFromDOM(entryEl, uid, worldName);
