@@ -661,6 +661,13 @@ function setDataFor(worldName, uid, entry, data) {
     if (typeof saveSettingsDebounced === 'function') {
         saveSettingsDebounced();
     }
+    // ギャラリー再オープンやリロード前に確実に永続化されるよう即時保存も試行
+    try {
+        const ctx = getContext();
+        if (ctx && typeof ctx.saveSettings === 'function') {
+            ctx.saveSettings();
+        }
+    } catch (e) { /* ignore */ }
     debugLog(`per-world store に保存: ${worldName}::${charKey}`);
 
     // ── 2) character.data にもミラー保存（JSONエクスポート/インポート用）──
@@ -1611,7 +1618,11 @@ function buildExpansionSection(uid, worldName, data, onChange) {
                 updateValuePlaceholder(valueInput, v.type);
                 onChange(data);
             });
-            
+            // renderVariables 再描画後に DOM 側の option 選択状態を明示的に一致させる
+            typeSelect.value = v.type === 'number' ? 'number' : 'string';
+            Array.from(typeSelect.options).forEach(opt => {
+                opt.selected = (opt.value === typeSelect.value);
+            });
             const delBtn = document.createElement('button');
             delBtn.type = 'button';
             delBtn.className = 'lbe-variable-del menu_button';
