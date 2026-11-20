@@ -831,16 +831,20 @@ function applyEntrySnapshotToEl(el, snap) {
                     usedTargets.add(sField);
                     syncedClonedFields.add(cField);
                     if (cField.tagName === 'SELECT') {
-                        if (sField.value !== cField.value || sField.selectedIndex !== cField.selectedIndex) {
-                            const hasOpt = Array.from(sField.options || []).some(o => o.value === cField.value);
+                        const targetVal = cField.value;
+                        const hasOpt = Array.from(sField.options || []).some(o => o.value === targetVal);
+                        if (sField.value !== targetVal || (hasOpt && sField.selectedIndex !== cField.selectedIndex)) {
                             if (hasOpt) {
-                                sField.value = cField.value;
+                                sField.value = targetVal;
+                                const matchedIdx = Array.from(sField.options || []).findIndex(o => o.value === targetVal);
+                                if (matchedIdx >= 0) sField.selectedIndex = matchedIdx;
                             } else if (cField.selectedIndex >= 0 && sField.options?.[cField.selectedIndex]) {
                                 sField.selectedIndex = cField.selectedIndex;
                             } else {
-                                sField.value = cField.value;
+                                sField.value = targetVal;
                             }
                             sField.dispatchEvent(new Event('change', { bubbles: true }));
+                            sField.dispatchEvent(new Event('input', { bubbles: true }));
                             if (window.$) window.$(sField).trigger('change');
                             anyLbeChanged = true;
                             if (sel === '.lbe-template-select') {
@@ -873,10 +877,12 @@ function applyEntrySnapshotToEl(el, snap) {
                     if (!cField || !sField) continue;
                     if (isSelect) {
                         cField.value = sField.value;
-                        cField.selectedIndex = sField.selectedIndex;
+                        const idx = Array.from(cField.options || []).findIndex(o => o.value === sField.value);
+                        cField.selectedIndex = idx >= 0 ? idx : sField.selectedIndex;
                     } else {
                         cField.value = sField.value;
                     }
+                    syncedClonedFields.add(cField);    
                 }
             }
            
@@ -1239,13 +1245,17 @@ async function mountWorldEntryInCellModal(cell) {
                         const sf = sourceEl.querySelector(sel);
                         if (cf && sf) {
                             cf.value = sf.value;
-                            if (cf.tagName === 'SELECT') cf.selectedIndex = sf.selectedIndex;
+                            if (cf.tagName === 'SELECT') {
+                                const idx = Array.from(cf.options || []).findIndex(o => o.value === sf.value);
+                                cf.selectedIndex = idx >= 0 ? idx : sf.selectedIndex;
+                            }
                         }
                     });
                 }
                 const updatedFields = Array.from(cloned.querySelectorAll('input, textarea, select'));
                 const updatedIdx = updatedFields.indexOf(field);
                 if (updatedIdx >= 0) updateSnapshotForField(snap, field, updatedIdx);
+                Object.assign(snap, rebuildSnapshot(cloned) || snap);
             };
             field.addEventListener('pointerdown', () => {
                 const curIdx = Array.from(cloned.querySelectorAll('input, textarea, select')).indexOf(field);
