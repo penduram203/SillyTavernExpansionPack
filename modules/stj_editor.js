@@ -1074,13 +1074,13 @@
             }
         }
 
-        const bottomPad = Math.ceil(20 * scale);
-        const minNeededH = Math.max(Math.ceil(120 * scale), Math.ceil(contentBottom + bottomPad));
-        const baseMinH = Math.max(Math.ceil(100 * scale), Math.ceil(rawTreeBottom + bottomPad));
+        const areaPad = Math.ceil(20 * scale);
+        const minNeededH = Math.max(Math.ceil(120 * scale), Math.ceil(contentBottom + areaPad));
+        const baseMinH = Math.max(Math.ceil(100 * scale), Math.ceil(rawTreeBottom + areaPad));
         const finalW = maxRight > 0
-            ? Math.max(Math.ceil(200 * scale), Math.ceil(maxRight + bottomPad))
+            ? Math.max(Math.ceil(200 * scale), Math.ceil(maxRight + areaPad))
             : Math.ceil(300 * scale);
-        const baseMinW = Math.max(Math.ceil(180 * scale), Math.ceil(finalW - bottomPad));
+        const baseMinW = Math.max(Math.ceil(180 * scale), Math.ceil(finalW - areaPad));
 
         containerEl.dataset.stjBaseMinW = String(baseMinW);
         containerEl.dataset.stjBaseMinH = String(baseMinH);
