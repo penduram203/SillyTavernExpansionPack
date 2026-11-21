@@ -806,20 +806,15 @@ function applyEntrySnapshotToEl(el, snap) {
     function applyTreeScaleToContainer(containerEl) {
         if (!containerEl || !containerEl.classList.contains('stj-tree-mode')) return 1;
         const scale = getTreeScale(containerEl);
-        const prevScale = parseFloat(containerEl.dataset.stjAppliedScale || '');
-        if (Number.isFinite(prevScale) && prevScale > 0 && Math.abs(prevScale - scale) > 0.001) {
-            delete containerEl.dataset.stjBaseMinW;
-            delete containerEl.dataset.stjBaseMinH;
-        }
         containerEl.style.setProperty('--stj-tree-scale', String(scale));
 
         const minW = parseFloat(containerEl.style.minWidth);
         const minH = parseFloat(containerEl.style.minHeight);
         if (Number.isFinite(minW) && !containerEl.dataset.stjBaseMinW) {
-            containerEl.dataset.stjBaseMinW = String(minW / scale);
+            containerEl.dataset.stjBaseMinW = String(minW);
         }
         if (Number.isFinite(minH) && !containerEl.dataset.stjBaseMinH) {
-            containerEl.dataset.stjBaseMinH = String(minH / scale);
+            containerEl.dataset.stjBaseMinH = String(minH);
         }
         if (containerEl.dataset.stjBaseMinW) {
             containerEl.style.minWidth = `${parseFloat(containerEl.dataset.stjBaseMinW) * scale}px`;
@@ -834,12 +829,6 @@ function applyEntrySnapshotToEl(el, snap) {
         const itemFontPx = `${(14 * scale).toFixed(2)}px`;
         
         containerEl.querySelectorAll('.stj-keyword-item').forEach((item) => {
-            if (Number.isFinite(prevScale) && prevScale > 0 && Math.abs(prevScale - scale) > 0.001) {
-                delete item.dataset.stjBaseLeft;
-                delete item.dataset.stjBaseTop;
-                delete item.dataset.stjBaseWidth;
-                delete item.dataset.stjBaseHeight;
-            }
             const left = parseFloat(item.style.left);
             const top = parseFloat(item.style.top);
             const width = parseFloat(item.style.width);
@@ -850,27 +839,34 @@ function applyEntrySnapshotToEl(el, snap) {
             let nextHeight = height;
             
             if (Number.isFinite(left)) {
-                if (!item.dataset.stjBaseLeft) item.dataset.stjBaseLeft = String(left / scale);
+                if (!item.dataset.stjBaseLeft) item.dataset.stjBaseLeft = String(left);
                 nextLeft = parseFloat(item.dataset.stjBaseLeft) * scale;
                 item.style.left = `${nextLeft}px`;
             }
             if (Number.isFinite(top)) {
-                if (!item.dataset.stjBaseTop) item.dataset.stjBaseTop = String(top / scale);
+                if (!item.dataset.stjBaseTop) item.dataset.stjBaseTop = String(top);
                 nextTop = parseFloat(item.dataset.stjBaseTop) * scale;
                 item.style.top = `${nextTop}px`;
             }
             if (Number.isFinite(width)) {
-                if (!item.dataset.stjBaseWidth) item.dataset.stjBaseWidth = String(width / scale);
+                if (!item.dataset.stjBaseWidth) item.dataset.stjBaseWidth = String(width);
                 nextWidth = parseFloat(item.dataset.stjBaseWidth) * scale;
                 item.style.width = `${nextWidth}px`;
             }
             if (Number.isFinite(height)) {
-                if (!item.dataset.stjBaseHeight) item.dataset.stjBaseHeight = String(height / scale);
+                if (!item.dataset.stjBaseHeight) item.dataset.stjBaseHeight = String(height);
                 nextHeight = parseFloat(item.dataset.stjBaseHeight) * scale;
                 item.style.height = `${nextHeight}px`;
             }
             item.style.setProperty('font-size', itemFontPx, 'important');
 
+            // .stj-image-preview の高さも拡大後のセル高さに合わせて確保
+            const previewEl = item.querySelector('.stj-image-preview');
+            if (previewEl && Number.isFinite(nextHeight)) {
+                const labelReserve = Math.round(34 * scale);
+                previewEl.style.height = `${Math.max(40, nextHeight - labelReserve)}px`;
+            }
+            
             item.querySelectorAll('.stj-keyword-display, .stj-preview-text').forEach((txtEl) => {
                 txtEl.style.setProperty('font-size', displayFontPx, 'important');
                 txtEl.style.setProperty('line-height', '1.25', 'important');
@@ -886,14 +882,10 @@ function applyEntrySnapshotToEl(el, snap) {
 
         const svg = containerEl.querySelector('.stj-tree-svg');
         if (svg) {
-            if (Number.isFinite(prevScale) && prevScale > 0 && Math.abs(prevScale - scale) > 0.001) {
-                delete svg.dataset.stjBaseW;
-                delete svg.dataset.stjBaseH;
-            }
             const svgW = parseFloat(svg.getAttribute('width') || svg.style.width);
             const svgH = parseFloat(svg.getAttribute('height') || svg.style.height);
-            if (Number.isFinite(svgW) && !svg.dataset.stjBaseW) svg.dataset.stjBaseW = String(svgW / scale);
-            if (Number.isFinite(svgH) && !svg.dataset.stjBaseH) svg.dataset.stjBaseH = String(svgH / scale);
+            if (Number.isFinite(svgW) && !svg.dataset.stjBaseW) svg.dataset.stjBaseW = String(svgW);
+            if (Number.isFinite(svgH) && !svg.dataset.stjBaseH) svg.dataset.stjBaseH = String(svgH);
             const nextW = svg.dataset.stjBaseW ? parseFloat(svg.dataset.stjBaseW) * scale : svgW;
             const nextH = svg.dataset.stjBaseH ? parseFloat(svg.dataset.stjBaseH) * scale : svgH;
             if (Number.isFinite(nextW)) {
@@ -909,11 +901,8 @@ function applyEntrySnapshotToEl(el, snap) {
             svg.querySelectorAll('path').forEach((pathEl) => {
                 const d = pathEl.getAttribute('d');
                 if (!d) return;
-                if (Number.isFinite(prevScale) && prevScale > 0 && Math.abs(prevScale - scale) > 0.001) {
-                    delete pathEl.dataset.stjBaseD;
-                }
                 if (!pathEl.dataset.stjBaseD) {
-                    pathEl.dataset.stjBaseD = d.replace(/-?\d+(?:\.\d+)?/g, (num) => String(parseFloat(num) / scale));
+                    pathEl.dataset.stjBaseD = d;
                 }
                 const scaledD = pathEl.dataset.stjBaseD.replace(/-?\d+(?:\.\d+)?/g, (num) => String(parseFloat(num) * scale));
                 pathEl.setAttribute('d', scaledD);
@@ -922,11 +911,8 @@ function applyEntrySnapshotToEl(el, snap) {
             svg.querySelectorAll('polygon').forEach((polyEl) => {
                 const pts = polyEl.getAttribute('points');
                 if (!pts) return;
-                if (Number.isFinite(prevScale) && prevScale > 0 && Math.abs(prevScale - scale) > 0.001) {
-                    delete polyEl.dataset.stjBasePoints;
-                }
                 if (!polyEl.dataset.stjBasePoints) {
-                    polyEl.dataset.stjBasePoints = pts.replace(/-?\d+(?:\.\d+)?/g, (num) => String(parseFloat(num) / scale));
+                    polyEl.dataset.stjBasePoints = pts;
                 }
                 const scaledPts = polyEl.dataset.stjBasePoints.replace(/-?\d+(?:\.\d+)?/g, (num) => String(parseFloat(num) * scale));
                 polyEl.setAttribute('points', scaledPts);
