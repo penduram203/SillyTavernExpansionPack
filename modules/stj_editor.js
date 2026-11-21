@@ -858,7 +858,7 @@ async function mountWorldEntryInCellModal(cell) {
         hostEl._syncEntry = () => scheduleWorldInfoPersist(sourceEl);
         hostEl.appendChild(sourceEl);
         hostEl.style.display = 'block';
-        hostEl.style.height = '35%';
+        hostEl.style.height = '43%';
 
         // 移動直後に LBE UI（template / 解像度 / プロンプト / 変数 / 選択肢）を確実に注入
         if (window.LorebookExpansion?.forceInject) {
@@ -1755,25 +1755,33 @@ function extractChoiceTriggerText(choiceStr) {
                 #stj_cell_modal .stj-cell-modal-content {
                     display: flex !important;
                     flex-direction: column !important;
-                    width: calc(var(--stj-cell-modal-base-w, 720px) * 1.35) !important;
+                    width: calc(var(--stj-cell-modal-base-w, 820px) * 1.35) !important;
                     max-width: 96vw !important;
-                    height: calc(var(--stj-cell-modal-base-h, 80vh) * 1.15) !important;
+                    height: calc(var(--stj-cell-modal-base-h, 86vh) * 1.15) !important;
                     max-height: 96vh !important;
                     overflow: hidden;
                 }
-                #stj_cell_modal .stj-cell-modal-header {
+                #stj_cell_modal .stj-cell-modal-header,
+                .stj-cell-modal-header {
+                    height: calc(var(--exp-scale, 1) * 30px);
+                    min-height: calc(var(--exp-scale, 1) * 30px);
+                    max-height: calc(var(--exp-scale, 1) * 60px);
                     display: flex !important;
                     flex-direction: row !important;
                     flex-wrap: nowrap !important;
                     align-items: center !important;
-                    gap: 8px;
+                    gap: calc(var(--exp-scale, 1) * 6px);
+                    padding: 0 calc(var(--exp-scale, 1) * 8px);
+                    background: #2d3748;
+                    border-bottom: 1px solid #4a5568;
                     width: 100%;
                     flex-shrink: 0;
+                    position: relative;
                 }
                 #stj_cell_modal .stj-cell-modal-entry-host {
                     display: block !important;
                     width: 100%;
-                    height: 35% !important;
+                    height: 43% !important;
                     min-height: 0;
                     overflow-y: auto;
                     margin: 6px 0 10px;
@@ -1782,7 +1790,17 @@ function extractChoiceTriggerText(choiceStr) {
                     border-radius: 6px;
                     background: rgba(0, 0, 0, 0.25);
                     box-sizing: border-box;
-                    flex: 0 0 35% !important;
+                    flex: 0 0 43% !important;
+                }
+                .lbe-variable-row {
+                    display: flex;
+                    gap: 6px;
+                    align-items: center;
+                    width: 100%;
+                    max-width: 100%;
+                    box-sizing: border-box;
+                    flex-wrap: nowrap;
+                    height: 10%;
                 }
                 #stj_cell_modal .stj-cell-modal-entry-host .world_entry {
                     display: block !important;
