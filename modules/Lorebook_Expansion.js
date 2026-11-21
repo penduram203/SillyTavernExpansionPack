@@ -1629,7 +1629,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         addBtn.type = 'button';
         addBtn.className = 'lbe-variable-add menu_button';
         addBtn.textContent = _t('lbe.var.add', '＋ 変数を追加');
-        addBtn.style.cssText = 'margin:0;padding:2px 6px;height:auto;line-height:1.2;font-size:12px;align-self:flex-start;';
+        addBtn.style.cssText = 'margin: 0px; padding: 2px 6px; height: auto; line-height: 2; font-size: 13px; align-self: flex-start;';
         addBtn.addEventListener('click', () => {
             if (!Array.isArray(data.variables)) data.variables = [];
             data.variables.push({ type: 'string', name: '', value: '' });
@@ -1686,7 +1686,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         addBtn.type = 'button';
         addBtn.className = 'lbe-choice-add menu_button';
         addBtn.textContent = _t('lbe.choice.add', '＋ 選択肢を追加');
-        addBtn.style.cssText = 'margin:0;padding:2px 6px;height:auto;line-height:1.2;font-size:12px;align-self:flex-start;';
+        addBtn.style.cssText = 'margin: 0px; padding: 2px 6px; height: auto; line-height: 2; font-size: 13px; align-self: flex-start;';
         addBtn.addEventListener('click', () => {
             if (!Array.isArray(data.choices)) data.choices = [];
             data.choices.push('');
@@ -1723,10 +1723,7 @@ function shrinkContentTextarea(entryEl) {
     }
 
     const originalRows = parseInt(ta.dataset.lbeOriginalRows || '8', 10);
-    const ratio = (typeof settings.contentHeightRatio === 'number' && settings.contentHeightRatio > 0)
-        ? settings.contentHeightRatio
-        : 0.45;
-    const newRows = Math.max(2, Math.round(originalRows * ratio));
+    const newRows = 3;
 
     if (parseInt(ta.getAttribute('rows') || '0', 10) !== newRows) {
         ta.setAttribute('rows', String(newRows));
