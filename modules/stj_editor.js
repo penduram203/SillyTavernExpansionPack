@@ -825,8 +825,8 @@
         });
 
         // 「デフォルト表示」「サムネイル表示」の実サイズを現在の半分（幅70px・高さ63px × scale）に強制
-        const miniW = Math.round(70 * scale);
-        const miniH = Math.round(63 * scale);
+        const miniW = Math.round(140 * scale);
+        const miniH = Math.round(126 * scale);
         topLeftBox.querySelectorAll('.stj-special-pair').forEach((pair) => {
             pair.style.setProperty('width', `${miniW}px`, 'important');
         });
