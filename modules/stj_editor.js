@@ -1100,32 +1100,6 @@
         window.addEventListener('resize', () => {
             requestAnimationFrame(syncAllTreeScales);
         });
-        const startTreeObserver = () => {
-            const target = document.body || document.documentElement;
-            if (!target || target._stjTreeScaleObserved) return;
-            target._stjTreeScaleObserved = true;
-            let timer = null;
-            const obs = new MutationObserver((mutations) => {
-                const hasTreeChange = mutations.some((m) =>
-                    Array.from(m.addedNodes || []).some((n) =>
-                        n.nodeType === 1 && (
-                            n.matches?.('#stj_keywords_container, .stj-grid-container, .stj-tree-mode, .stj-keyword-item, .stj-tree-svg') ||
-                            n.querySelector?.('.stj-keyword-item, .stj-tree-svg')
-                        )
-                    ) || (m.target?.nodeType === 1 && m.target.closest?.('.stj-tree-mode'))
-                );
-                if (!hasTreeChange) return;
-                if (timer) clearTimeout(timer);
-                timer = setTimeout(syncAllTreeScales, 40);
-            });
-            obs.observe(target, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
-            syncAllTreeScales();
-        };
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', startTreeObserver, { once: true });
-        } else {
-            startTreeObserver();
-        }
     }
 
     function restoreMountedWorldEntry(hostEl) {
@@ -1620,6 +1594,7 @@
         parent.insertBefore(a, b);
         parent.insertBefore(b, placeholder);
         parent.removeChild(placeholder);
+        _stjScheduleTreeLayout();
     }
 
     function findScrollableAncestor(el) {
@@ -3078,6 +3053,7 @@
         modal.scrollTop = modal.scrollHeight;
         runLiveTest();
         autoSave({ immediate: true });
+        _stjScheduleTreeLayout();
     }
 
     function buildImageMapFromLegacySavedData(data, charName) {
@@ -3510,22 +3486,36 @@
 
     let _stjTreeLayoutInFlight = false;
     let _stjTreeLayoutPending = false;
+    let _stjLastGraphSignature = '';
 
+    function _stjBuildGraphSignature(graph) {
+        if (!graph) return '';
+        const nodes = Array.from(graph.allNodes || []).sort();
+        const edges = [];
+        for (const [parentKw, childKws] of (graph.children || new Map()).entries()) {
+            for (const childKw of (childKws || [])) {
+                edges.push(`${parentKw}->${childKw}`);
+            }
+        }
+        edges.sort();
+        return `${nodes.join('|')}#${edges.join(',')}`;
+    }
+    
     async function _stjApplyTreeLayout() {
         if (_stjTreeLayoutInFlight) {
             _stjTreeLayoutPending = true;
             return;
         }
         _stjTreeLayoutInFlight = true;
-
+ 
         try {
             const container = document.getElementById('stj_keywords_container');
             if (!container) return;
             if (container.offsetParent === null) return;
-
+ 
             const startCharName = document.getElementById('stj_char_name_display')?.textContent;
             if (!startCharName) return;
-
+ 
             // 前回の他セル・特殊要素の配置を一旦リセットしてから再計算
             container.querySelectorAll('.stj-tree-bottom-left-other .stj-keyword-item').forEach((cell) => {
                 delete cell.dataset.stjIsOtherCell;
@@ -3533,11 +3523,13 @@
             });
 
             const imageMap = {};
+            let cellCount = 0;
             container.querySelectorAll(':scope > .stj-keyword-item').forEach(cell => {
+                cellCount++;
                 const kw = getCellKeyword(cell).trim();
                 if (kw) imageMap[kw] = getCellImages(cell);
             });
-
+ 
             if (Object.keys(imageMap).length === 0) {
                 container.classList.add('stj-tree-mode');
                 container.querySelectorAll(':scope > .stj-keyword-item').forEach(cell => {
@@ -3547,16 +3539,29 @@
                     cell.style.width = STJ_TREE_CELL_W + 'px';
                     cell.style.height = STJ_TREE_CELL_H + 'px';
                 });
+                const emptySig = `cells:${cellCount}#`;
+                const prevHeight = parseFloat(container.style.height) || 0;
+                const graphChanged = _stjLastGraphSignature !== emptySig;
+                _stjLastGraphSignature = emptySig;
                 applyTreeScaleToContainer(container);
+                if (!graphChanged && prevHeight > 0) {
+                    container.style.setProperty('min-height', `${prevHeight}px`);
+                    container.style.setProperty('height', `${prevHeight}px`);
+                }
                 return;
             }
 
             const graph = await _stjBuildChoiceGraph(imageMap);
-
+ 
             const endCharName = document.getElementById('stj_char_name_display')?.textContent;
             if (endCharName !== startCharName) return;
             if (!document.body.contains(container)) return;
 
+            const nextSignature = `cells:${cellCount}#${_stjBuildGraphSignature(graph)}`;
+            const graphOrCellChanged = _stjLastGraphSignature !== nextSignature;
+            const prevHeight = parseFloat(container.style.height) || 0;
+            _stjLastGraphSignature = nextSignature;
+ 
             const { positions, children } = _stjComputeTreeLayout(graph);
 
             let maxX = 0, maxY = 0, minX = 0, minY = 0;
