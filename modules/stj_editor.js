@@ -1074,12 +1074,13 @@
             }
         }
 
-        const minNeededH = Math.max(Math.ceil(120 * scale), Math.ceil(contentBottom + pad));
-        const baseMinH = Math.max(Math.ceil(100 * scale), Math.ceil(rawTreeBottom + pad));
+        const bottomPad = Math.ceil(20 * scale);
+        const minNeededH = Math.max(Math.ceil(120 * scale), Math.ceil(contentBottom + bottomPad));
+        const baseMinH = Math.max(Math.ceil(100 * scale), Math.ceil(rawTreeBottom + bottomPad));
         const finalW = maxRight > 0
-            ? Math.max(Math.ceil(200 * scale), Math.ceil(maxRight + pad))
+            ? Math.max(Math.ceil(200 * scale), Math.ceil(maxRight + bottomPad))
             : Math.ceil(300 * scale);
-        const baseMinW = Math.max(Math.ceil(180 * scale), Math.ceil(finalW - pad));
+        const baseMinW = Math.max(Math.ceil(180 * scale), Math.ceil(finalW - bottomPad));
 
         containerEl.dataset.stjBaseMinW = String(baseMinW);
         containerEl.dataset.stjBaseMinH = String(baseMinH);
