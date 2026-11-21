@@ -826,7 +826,7 @@
 
         // 「デフォルト表示」「サムネイル表示」の実サイズを現在の半分（幅70px・高さ63px × scale）に強制
         const miniW = Math.round(140 * scale);
-        const miniH = Math.round(126 * scale);
+        const miniH = Math.round(160 * scale);
         topLeftBox.querySelectorAll('.stj-special-pair').forEach((pair) => {
             pair.style.setProperty('width', `${miniW}px`, 'important');
         });
@@ -2072,11 +2072,11 @@
                 #stj_keywords_container.stj-tree-mode .stj-tree-top-left-modes .stj-special-preview,
                 #stj_keywords_container.stj-tree-mode .stj-tree-top-left-modes .stj-image-preview {
                     width: calc(var(--stj-tree-scale, 1) * 140px) !important;
-                    height: calc(var(--stj-tree-scale, 1) * 126px) !important;
+                    height: calc(var(--stj-tree-scale, 1) * 160px) !important;
                     min-width: 0 !important;
                     min-height: 0 !important;
                     max-width: calc(var(--stj-tree-scale, 1) * 140px) !important;
-                    max-height: calc(var(--stj-tree-scale, 1) * 126px) !important;
+                    max-height: calc(var(--stj-tree-scale, 1) * 160px) !important;
                 }
                 #stj_keywords_container.stj-tree-mode .stj-tree-top-left-modes .stj-special-label {
                     font-size: calc(var(--stj-tree-scale, 1) * 10px) !important;
