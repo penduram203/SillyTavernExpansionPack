@@ -817,46 +817,63 @@
                 item.style.height = `${h}px`;
                 delete item.dataset.stjBaseLeft;
                 delete item.dataset.stjBaseTop;
-                if (item.parentElement !== bottomLeftBox) {
-                    bottomLeftBox.appendChild(item);
+                    if (item.parentElement !== bottomLeftBox) {
+                        bottomLeftBox.appendChild(item);
+                    }
+                    otherCells.push(item);
                 }
-                otherCells.push(item);
-            }
-        });
-
-        // 「デフォルト表示」「サムネイル表示」の実サイズを現在の半分（幅70px・高さ63px × scale）に強制
-        const miniW = Math.round(140 * scale);
-        const miniH = Math.round(160 * scale);
-        topLeftBox.querySelectorAll('.stj-special-pair').forEach((pair) => {
-            pair.style.setProperty('width', `${miniW}px`, 'important');
-        });
-        topLeftBox.querySelectorAll('.stj-special-preview, .stj-image-preview').forEach((el) => {
-            el.style.setProperty('width', `${miniW}px`, 'important');
-            el.style.setProperty('height', `${miniH}px`, 'important');
-            el.style.setProperty('min-width', '0', 'important');
-            el.style.setProperty('min-height', '0', 'important');
-            el.style.setProperty('max-width', `${miniW}px`, 'important');
-            el.style.setProperty('max-height', `${miniH}px`, 'important');
-        });
-
-        // 「他セル」をツリー全体の最下端のさらに下（ツリー左下）へ配置
-        let treeActualBottom = parseFloat(containerEl.dataset.stjTreeBottom || '0');
+            });
+    
+            // 「デフォルト表示」「サムネイル表示」の実サイズを現在の半分（幅70px・高さ63px × scale）に強制
+            const miniW = Math.round(140 * scale);
+            const miniH = Math.round(160 * scale);
+            topLeftBox.querySelectorAll('.stj-special-pair').forEach((pair) => {
+                pair.style.setProperty('width', `${miniW}px`, 'important');
+            });
+            topLeftBox.querySelectorAll('.stj-special-preview, .stj-image-preview').forEach((el) => {
+                el.style.setProperty('width', `${miniW}px`, 'important');
+                el.style.setProperty('height', `${miniH}px`, 'important');
+                el.style.setProperty('min-width', '0', 'important');
+                el.style.setProperty('min-height', '0', 'important');
+                el.style.setProperty('max-width', `${miniW}px`, 'important');
+                el.style.setProperty('max-height', `${miniH}px`, 'important');
+            });
+    
+        // ツリーセルの実最下端を算出（「他セル」や「左上プレビュー」は除外）
+        let treeActualBottom = 0;
         containerEl.querySelectorAll(':scope > .stj-keyword-item').forEach((node) => {
+            if (node.dataset.stjIsOtherCell === '1') return;
             const t = parseFloat(node.style.top) || 0;
             const h = parseFloat(node.style.height) || (STJ_TREE_CELL_H * scale);
             if (t + h > treeActualBottom) treeActualBottom = t + h;
         });
-        const topLeftRectH = topLeftBox.offsetHeight || (miniH * 2 + 40 * scale);
-        const bottomLeftTop = Math.ceil(Math.max(treeActualBottom, topLeftRectH) + 24 * scale);
-        const otherH = otherCells.length > 0 ? (STJ_TREE_CELL_H * scale) : 0;
+        if (treeActualBottom <= 0) {
+            treeActualBottom = parseFloat(containerEl.dataset.stjTreeBottom || '0') || (120 * scale);
+        }
 
-        bottomLeftBox.style.setProperty('top', `${bottomLeftTop}px`, 'important');
-        bottomLeftBox.style.setProperty('bottom', 'auto', 'important');
-        bottomLeftBox.style.setProperty('left', `${Math.round(12 * scale)}px`, 'important');
+        const topLeftRectH = topLeftBox.offsetHeight || (miniH * 2 + 24 * scale);
+        const gap = Math.ceil(16 * scale);
+        const bottomLeftTop = Math.ceil(Math.max(treeActualBottom, topLeftRectH) + gap);
 
-        const neededH = Math.ceil(bottomLeftTop + otherH + 24 * scale);
-        containerEl.style.minHeight = `${neededH}px`;
-        containerEl.style.height = `${neededH}px`;        
+        if (otherCells.length > 0) {
+            bottomLeftBox.style.setProperty('display', 'flex', 'important');
+            bottomLeftBox.style.setProperty('top', `${bottomLeftTop}px`, 'important');
+            bottomLeftBox.style.setProperty('bottom', 'auto', 'important');
+            bottomLeftBox.style.setProperty('left', `${Math.round(12 * scale)}px`, 'important');
+        } else {
+            bottomLeftBox.style.setProperty('display', 'none', 'important');
+        }
+
+        const otherActualH = otherCells.length > 0
+            ? (bottomLeftBox.offsetHeight || Math.ceil(STJ_TREE_CELL_H * scale))
+            : 0;
+        const bottomEdge = otherCells.length > 0
+            ? (bottomLeftTop + otherActualH)
+            : Math.max(treeActualBottom, topLeftRectH);
+        const neededH = Math.max(Math.ceil(120 * scale), Math.ceil(bottomEdge + gap));
+
+        containerEl.style.setProperty('min-height', `${neededH}px`);
+        containerEl.style.setProperty('height', `${neededH}px`);
     }
 
     function getTreeScale(containerEl) {
@@ -1031,6 +1048,45 @@
                 parent.style.minHeight = '0px';
             }
         }
+
+        const baseMinW = Math.round(940 * scale);
+        const pad = Math.ceil(20 * scale);
+        const rawTreeBottom = maxBottom > 0 ? maxBottom : (120 * scale);
+        containerEl.dataset.stjTreeBottom = String(Math.ceil(rawTreeBottom));
+
+        arrangeTreeControlsAndCompress(containerEl);
+
+        let contentBottom = rawTreeBottom;
+        const bottomLeftBox = containerEl.querySelector('.stj-tree-bottom-left-other');
+        if (bottomLeftBox) {
+            const boxTop = parseFloat(bottomLeftBox.style.top) || 0;
+            const boxH = bottomLeftBox.offsetHeight || 0;
+            if (boxH > 0) {
+                contentBottom = Math.max(contentBottom, boxTop + boxH);
+            }
+        }
+        const topLeftBox = containerEl.querySelector('.stj-tree-top-left-modes');
+        if (topLeftBox) {
+            const tlTop = parseFloat(topLeftBox.style.top) || 0;
+            const tlH = topLeftBox.offsetHeight || 0;
+            if (tlH > 0) {
+                contentBottom = Math.max(contentBottom, tlTop + tlH);
+            }
+        }
+
+        const minNeededH = Math.max(Math.ceil(120 * scale), Math.ceil(contentBottom + pad));
+        const baseMinH = Math.max(Math.ceil(100 * scale), Math.ceil(rawTreeBottom + pad));
+        const finalW = maxRight > 0
+            ? Math.max(Math.ceil(200 * scale), Math.ceil(maxRight + pad))
+            : Math.ceil(300 * scale);
+        const baseMinW = Math.max(Math.ceil(180 * scale), Math.ceil(finalW - pad));
+
+        containerEl.dataset.stjBaseMinW = String(baseMinW);
+        containerEl.dataset.stjBaseMinH = String(baseMinH);
+        containerEl.style.setProperty('min-width', `${finalW}px`);
+        containerEl.style.setProperty('width', `${finalW}px`);
+        containerEl.style.setProperty('min-height', `${minNeededH}px`);
+        containerEl.style.setProperty('height', `${minNeededH}px`);
 
         containerEl.dataset.stjAppliedScale = String(scale);
         return scale;
@@ -3410,8 +3466,8 @@
             maxX = Math.max(maxX, pos.x + STJ_TREE_CELL_W);
             maxY = Math.max(maxY, pos.y + STJ_TREE_CELL_H);
         }
-        const svgW = maxX + STJ_TREE_PADDING * 2;
-        const svgH = maxY + STJ_TREE_PADDING * 2;
+        const svgW = maxX + STJ_TREE_PADDING;
+        const svgH = maxY + STJ_TREE_PADDING;
 
         const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
         svg.classList.add('stj-tree-svg');
