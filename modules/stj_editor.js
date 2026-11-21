@@ -2050,6 +2050,13 @@
                 #stj_keywords_container.stj-tree-mode .stj-tree-svg {
                     transform-origin: top left;
                 }
+                .stj-top-section {
+                    display: flex;
+                    gap: calc(var(--exp-scale, 1) * 20px);
+                    margin-bottom: calc(var(--exp-scale, 1) * 25px);
+                    align-items: stretch;
+                    visibility: collapse;
+                }
                 .stj-info-panel {
                     display: none !important;
                 }
