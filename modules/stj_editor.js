@@ -806,6 +806,11 @@ function applyEntrySnapshotToEl(el, snap) {
     function applyTreeScaleToContainer(containerEl) {
         if (!containerEl || !containerEl.classList.contains('stj-tree-mode')) return 1;
         const scale = getTreeScale(containerEl);
+        const prevScale = parseFloat(containerEl.dataset.stjAppliedScale || '');
+        if (Number.isFinite(prevScale) && prevScale > 0 && Math.abs(prevScale - scale) > 0.001) {
+            delete containerEl.dataset.stjBaseMinW;
+            delete containerEl.dataset.stjBaseMinH;
+        }
         containerEl.style.setProperty('--stj-tree-scale', String(scale));
 
         const minW = parseFloat(containerEl.style.minWidth);
@@ -825,8 +830,16 @@ function applyEntrySnapshotToEl(el, snap) {
         
         let maxBottom = 0;
         let maxRight = 0;
-
+        const displayFontPx = `${(13 * scale).toFixed(2)}px`;
+        const itemFontPx = `${(14 * scale).toFixed(2)}px`;
+        
         containerEl.querySelectorAll('.stj-keyword-item').forEach((item) => {
+            if (Number.isFinite(prevScale) && prevScale > 0 && Math.abs(prevScale - scale) > 0.001) {
+                delete item.dataset.stjBaseLeft;
+                delete item.dataset.stjBaseTop;
+                delete item.dataset.stjBaseWidth;
+                delete item.dataset.stjBaseHeight;
+            }
             const left = parseFloat(item.style.left);
             const top = parseFloat(item.style.top);
             const width = parseFloat(item.style.width);
@@ -856,7 +869,13 @@ function applyEntrySnapshotToEl(el, snap) {
                 nextHeight = parseFloat(item.dataset.stjBaseHeight) * scale;
                 item.style.height = `${nextHeight}px`;
             }
+            item.style.setProperty('font-size', itemFontPx, 'important');
 
+            item.querySelectorAll('.stj-keyword-display, .stj-preview-text').forEach((txtEl) => {
+                txtEl.style.setProperty('font-size', displayFontPx, 'important');
+                txtEl.style.setProperty('line-height', '1.25', 'important');
+            });
+            
             if (Number.isFinite(nextLeft) && Number.isFinite(nextWidth)) {
                 maxRight = Math.max(maxRight, nextLeft + nextWidth);
             }
@@ -867,6 +886,10 @@ function applyEntrySnapshotToEl(el, snap) {
 
         const svg = containerEl.querySelector('.stj-tree-svg');
         if (svg) {
+            if (Number.isFinite(prevScale) && prevScale > 0 && Math.abs(prevScale - scale) > 0.001) {
+                delete svg.dataset.stjBaseW;
+                delete svg.dataset.stjBaseH;
+            }
             const svgW = parseFloat(svg.getAttribute('width') || svg.style.width);
             const svgH = parseFloat(svg.getAttribute('height') || svg.style.height);
             if (Number.isFinite(svgW) && !svg.dataset.stjBaseW) svg.dataset.stjBaseW = String(svgW / scale);
@@ -886,6 +909,9 @@ function applyEntrySnapshotToEl(el, snap) {
             svg.querySelectorAll('path').forEach((pathEl) => {
                 const d = pathEl.getAttribute('d');
                 if (!d) return;
+                if (Number.isFinite(prevScale) && prevScale > 0 && Math.abs(prevScale - scale) > 0.001) {
+                    delete pathEl.dataset.stjBaseD;
+                }
                 if (!pathEl.dataset.stjBaseD) {
                     pathEl.dataset.stjBaseD = d.replace(/-?\d+(?:\.\d+)?/g, (num) => String(parseFloat(num) / scale));
                 }
@@ -896,6 +922,9 @@ function applyEntrySnapshotToEl(el, snap) {
             svg.querySelectorAll('polygon').forEach((polyEl) => {
                 const pts = polyEl.getAttribute('points');
                 if (!pts) return;
+                if (Number.isFinite(prevScale) && prevScale > 0 && Math.abs(prevScale - scale) > 0.001) {
+                    delete polyEl.dataset.stjBasePoints;
+                }
                 if (!polyEl.dataset.stjBasePoints) {
                     polyEl.dataset.stjBasePoints = pts.replace(/-?\d+(?:\.\d+)?/g, (num) => String(parseFloat(num) / scale));
                 }
@@ -913,15 +942,19 @@ function applyEntrySnapshotToEl(el, snap) {
             containerEl.style.minHeight = `${Math.ceil(maxBottom + pad)}px`;
         }
 
-        // 親スクロール領域に高さ制限がある場合、ツリー全体までスクロールできるよう解放
+        // 親スクロール領域の高さ・オーバーフロー制限を緩和し、下端までスクロール可能にする
         let parent = containerEl.parentElement;
         for (let depth = 0; depth < 3 && parent && parent !== document.body; depth++, parent = parent.parentElement) {
             const pStyle = getComputedStyle(parent);
             if (pStyle.maxHeight && pStyle.maxHeight !== 'none') {
                 parent.style.maxHeight = 'none';
             }
+            if (pStyle.overflowY === 'hidden') {
+                parent.style.overflowY = 'auto';
+            }
         }
 
+        containerEl.dataset.stjAppliedScale = String(scale);
         return scale;
     }
     
