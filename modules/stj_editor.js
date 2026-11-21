@@ -794,95 +794,96 @@ function applyEntrySnapshotToEl(el, snap) {
             document.body,
         ].filter(Boolean);
 
-        const isInsideTreeBoxes = (el) =>
-            Boolean(el.closest('.stj-tree-top-left-modes, .stj-tree-bottom-left-other'));
+        // 1. 操作方法説明（.stj-info-panel）を非表示化
+        roots.forEach((root) => {
+            root.querySelectorAll('.stj-info-panel').forEach((panel) => {
+                panel.style.setProperty('display', 'none', 'important');
+            });
+        });
 
-        // ラベル文言を持つ要素から、実際に画面上で操作/表示単位となっている親要素（button / ラッパー等）を解決する
-        const resolveControlUnit = (el, maxDepth = 4) => {
-            if (!el) return null;
-            let cur = el;
-            for (let i = 0; i < maxDepth && cur && cur.parentElement; i++) {
-                const parent = cur.parentElement;
-                if (parent === document.body || parent.contains(containerEl) || parent.id === 'stj_keywords_container') {
-                    break;
-                }
-                const tag = parent.tagName;
-                if (tag === 'BUTTON' || parent.getAttribute?.('role') === 'button' || parent.classList?.contains('menu_button')) {
-                    cur = parent;
-                    continue;
-                }
-                // 小さなカード/ラッパー（画像＋ラベルやアイコン＋ラベルをまとめる要素）なら親へ昇格
-                const rect = parent.getBoundingClientRect?.();
-                if (rect && rect.width > 0 && rect.width < 420 && rect.height > 0 && rect.height < 260) {
-                    cur = parent;
-                    continue;
-                }
-                break;
-            }
-            return cur;
-        };
-
-        const findControlUnitByLabels = (labels) => {
-            for (const root of roots) {
-                const matched = Array.from(root.querySelectorAll('*'))
-                    .find((el) => {
-                        if (!el || el.closest('#stj_keywords_container') || el.contains(containerEl) || isInsideTreeBoxes(el)) {
-                            return false;
-                        }
-                        // 子要素に同じテキストを持つ要素がある場合は最も内側の要素を選ぶ
-                        const hasChildWithSameText = Array.from(el.children || []).some((ch) => {
-                            const cTxt = (ch.textContent || '').replace(/\s+/g, ' ').trim();
-                            return labels.includes(cTxt);
-                        });
-                        if (hasChildWithSameText) return false;
-                        const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
-                        return labels.includes(txt);
-                    });
-                if (matched) {
-                    const unit = resolveControlUnit(matched);
-                    if (unit && !unit.contains(containerEl) && !isInsideTreeBoxes(unit)) {
-                        return unit;
-                    }
-                }
-            }
-            return null;
-        };
-
-        // 1. 「操作方法説明」を非表示化
-        const helpUnit = findControlUnitByLabels(['操作方法説明', '操作説明']);
-        if (helpUnit) {
-            helpUnit.style.setProperty('display', 'none', 'important');
-        }
-
-        // 2. 「デフォルト表示」「サムネイル表示」をツリー左上へ組み込み（画像やボタンごと移動）
+        // 2. デフォルト表示・サムネイル表示のプレビュー画像と .stj-special-label をツリー左上へ組み込み
         let topLeftBox = containerEl.querySelector('.stj-tree-top-left-modes');
         if (!topLeftBox) {
             topLeftBox = document.createElement('div');
             topLeftBox.className = 'stj-tree-top-left-modes';
             containerEl.appendChild(topLeftBox);
         }
-        [['デフォルト表示'], ['サムネイル表示']].forEach((labels) => {
-            const unit = findControlUnitByLabels(labels);
-            if (unit && unit.parentElement !== topLeftBox) {
-                unit.style.setProperty('display', '', 'important');
-                unit.style.position = 'static';
-                topLeftBox.appendChild(unit);
+
+        const collectSpecialPair = (previewId, labelText) => {
+            const group = document.createElement('div');
+            group.style.cssText = 'display:flex;flex-direction:column;align-items:flex-start;gap:2px;';
+
+            let previewEl = null;
+            let labelEl = null;
+            for (const root of roots) {
+                if (!previewEl) {
+                    previewEl = root.querySelector(`#${previewId}`);
+                }
+                if (!labelEl) {
+                    labelEl = Array.from(root.querySelectorAll('.stj-special-label')).find(
+                        (lbl) => (lbl.textContent || '').trim() === labelText
+                    ) || null;
+                }
+            }
+
+            // プレビュー画像とラベルが共通の小さなラッパー内にある場合はラッパーごと移動
+            if (previewEl && labelEl && previewEl.parentElement && previewEl.parentElement === labelEl.parentElement) {
+                const wrapper = previewEl.parentElement;
+                if (wrapper !== containerEl && wrapper !== topLeftBox && !wrapper.contains(containerEl)) {
+                    wrapper.style.position = 'static';
+                    wrapper.style.left = 'auto';
+                    wrapper.style.top = 'auto';
+                    return wrapper;
+                }
+            }
+
+            if (labelEl && labelEl.parentElement !== group) {
+                labelEl.style.position = 'static';
+                labelEl.style.left = 'auto';
+                labelEl.style.top = 'auto';
+                group.appendChild(labelEl);
+            }
+            if (previewEl && previewEl.parentElement !== group) {
+                previewEl.style.position = 'relative';
+                previewEl.style.left = 'auto';
+                previewEl.style.top = 'auto';
+                group.appendChild(previewEl);
+            }
+            return group.childElementCount > 0 ? group : null;
+        };
+
+        [
+            { id: 'stj_preview_default', label: 'デフォルト表示' },
+            { id: 'stj_preview_thumbnail', label: 'サムネイル表示' },
+        ].forEach(({ id, label }) => {
+            const existing = topLeftBox.querySelector(`#${id}`);
+            if (existing) return;
+            const pair = collectSpecialPair(id, label);
+            if (pair) {
+                topLeftBox.appendChild(pair);
             }
         });
 
-        // 3. 「他セル」（その他セル）をツリー左下へ組み込み
+        // 3. 「他セル」（画像リストが空 `[]` や未紐付けのセル等）をツリー左下へ組み込み
         let bottomLeftBox = containerEl.querySelector('.stj-tree-bottom-left-other');
         if (!bottomLeftBox) {
             bottomLeftBox = document.createElement('div');
             bottomLeftBox.className = 'stj-tree-bottom-left-other';
             containerEl.appendChild(bottomLeftBox);
         }
-        const otherUnit = findControlUnitByLabels(['他セル', 'その他セル']);
-        if (otherUnit && otherUnit.parentElement !== bottomLeftBox) {
-            otherUnit.style.setProperty('display', '', 'important');
-            otherUnit.style.position = 'static';
-            bottomLeftBox.appendChild(otherUnit);
-        }
+        containerEl.querySelectorAll('.stj-keyword-item').forEach((item) => {
+            if (item.closest('.stj-tree-bottom-left-other')) return;
+            const imgListAttr = (item.getAttribute('data-image-list') || '').trim();
+            const isUnlinked = imgListAttr === '' || imgListAttr === '[]';
+            if (isUnlinked) {
+                item.style.position = 'relative';
+                item.style.left = 'auto';
+                item.style.top = 'auto';
+                delete item.dataset.stjBaseLeft;
+                delete item.dataset.stjBaseTop;
+                bottomLeftBox.appendChild(item);
+            }
+        });
     }
     
     function getTreeScale(containerEl) {
@@ -2062,9 +2063,7 @@ function extractChoiceTriggerText(choiceStr) {
                 #stj_keywords_container.stj-tree-mode .stj-tree-svg {
                     transform-origin: top left;
                 }
-                .stj-help-btn,
-                [data-action="help"],
-                .stj-tree-help-btn {
+                .stj-info-panel {
                     display: none !important;
                 }
                 .stj-tree-top-left-modes {
