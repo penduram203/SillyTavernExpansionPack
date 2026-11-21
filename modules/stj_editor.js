@@ -788,16 +788,36 @@ function applyEntrySnapshotToEl(el, snap) {
 
     function arrangeTreeControlsAndCompress(containerEl) {
         if (!containerEl || !containerEl.classList.contains('stj-tree-mode')) return;
-
-        const modalRoot = containerEl.closest('.stj-modal, #stj_editor_modal, .popup, dialog') || document;
-
-        // 1. 「操作方法説明」ボタンを非表示化
-        modalRoot.querySelectorAll('button, [role="button"], .menu_button, a, span').forEach((el) => {
-            if (el.closest('#stj_keywords_container')) return;
-            const txt = (el.textContent || '').trim();
-            if (txt === '操作方法説明' || txt === '操作説明' || txt === 'ヘルプ') {
-                el.style.setProperty('display', 'none', 'important');
+ 
+        const roots = [
+            containerEl.closest('.stj-modal, #stj_editor_modal, .popup, dialog'),
+            document.body,
+        ].filter(Boolean);
+ 
+        const findMatchingEl = (labels) => {
+            for (const root of roots) {
+                const found = Array.from(root.querySelectorAll('button, [role="button"], .menu_button, a, span, label, div'))
+                    .find((el) => {
+                        if (!el || el.closest('#stj_keywords_container') || el.contains(containerEl)) return false;
+                        if (el.querySelector('button, input, select')) return false;
+                        const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
+                        return labels.includes(txt);
+                    });
+                if (found) return found;
             }
+            return null;
+        };
+
+        // 1. 「操作方法説明」を非表示化
+        roots.forEach((root) => {
+            root.querySelectorAll('button, [role="button"], .menu_button, a, span, label, div').forEach((el) => {
+                if (el.closest('#stj_keywords_container')) return;
+                if (el.querySelector('button, input, select')) return;
+                const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
+                if (txt === '操作方法説明' || txt === '操作説明' || txt.includes('操作方法説明')) {
+                    el.style.setProperty('display', 'none', 'important');
+                }
+            });
         });
 
         // 2. 「デフォルト表示」「サムネイル表示」をツリー左上へ組み込み
@@ -807,10 +827,11 @@ function applyEntrySnapshotToEl(el, snap) {
             topLeftBox.className = 'stj-tree-top-left-modes';
             containerEl.appendChild(topLeftBox);
         }
-        ['デフォルト表示', 'サムネイル表示'].forEach((label) => {
-            const btn = Array.from(modalRoot.querySelectorAll('button, [role="button"], .menu_button, label'))
-                .find((el) => !el.closest('#stj_keywords_container') && (el.textContent || '').trim() === label);
+
+        [['デフォルト表示'], ['サムネイル表示']].forEach((labels) => {
+            const btn = findMatchingEl(labels);
             if (btn && btn.parentElement !== topLeftBox) {
+                btn.style.setProperty('display', '', 'important');
                 topLeftBox.appendChild(btn);
             }
         });
@@ -822,17 +843,12 @@ function applyEntrySnapshotToEl(el, snap) {
             bottomLeftBox.className = 'stj-tree-bottom-left-other';
             containerEl.appendChild(bottomLeftBox);
         }
-        const otherEl = Array.from(modalRoot.querySelectorAll('button, [role="button"], .menu_button, .stj-other-cells, div, span, label'))
-            .find((el) => {
-                if (el.closest('#stj_keywords_container') || el.contains(containerEl)) return false;
-                const txt = (el.textContent || '').trim();
-                return txt === '他セル' || txt === 'その他セル';
-            });
-        if (otherEl && otherEl.parentElement !== bottomLeftBox && !otherEl.querySelector('button, input, select')) {
+        const otherEl = findMatchingEl(['他セル', 'その他セル']);
+        if (otherEl && otherEl.parentElement !== bottomLeftBox) {
+            otherEl.style.setProperty('display', '', 'important');
             bottomLeftBox.appendChild(otherEl);
         }
     }
-
     
     function getTreeScale(containerEl) {
         if (!containerEl) return 1;
@@ -855,7 +871,6 @@ function applyEntrySnapshotToEl(el, snap) {
         if (!containerEl || !containerEl.classList.contains('stj-tree-mode')) return 1;
         arrangeTreeControlsAndCompress(containerEl);
         const scale = getTreeScale(containerEl);
-        const vCompress = 0.72;
         containerEl.style.setProperty('--stj-tree-scale', String(scale));
 
         const minW = parseFloat(containerEl.style.minWidth);
@@ -864,7 +879,7 @@ function applyEntrySnapshotToEl(el, snap) {
             containerEl.dataset.stjBaseMinW = String(minW);
         }
         if (Number.isFinite(minH) && !containerEl.dataset.stjBaseMinH) {
-            containerEl.dataset.stjBaseMinH = String(minH * vCompress);
+            containerEl.dataset.stjBaseMinH = String(minH);
         }
         if (containerEl.dataset.stjBaseMinW) {
             containerEl.style.minWidth = `${parseFloat(containerEl.dataset.stjBaseMinW) * scale}px`;
@@ -895,7 +910,7 @@ function applyEntrySnapshotToEl(el, snap) {
             }
             if (Number.isFinite(top)) {
                 if (!item.dataset.stjBaseTop) item.dataset.stjBaseTop = String(top);
-                nextTop = parseFloat(item.dataset.stjBaseTop) * vCompress * scale;
+                nextTop = parseFloat(item.dataset.stjBaseTop) * scale;
                 item.style.top = `${nextTop}px`;
             }
             if (Number.isFinite(width)) {
@@ -905,7 +920,7 @@ function applyEntrySnapshotToEl(el, snap) {
             }
             if (Number.isFinite(height)) {
                 if (!item.dataset.stjBaseHeight) item.dataset.stjBaseHeight = String(height);
-                nextHeight = parseFloat(item.dataset.stjBaseHeight) * vCompress * scale;
+                nextHeight = parseFloat(item.dataset.stjBaseHeight) * scale;
                 item.style.height = `${nextHeight}px`;
             }
             item.style.setProperty('font-size', itemFontPx, 'important');
@@ -935,7 +950,7 @@ function applyEntrySnapshotToEl(el, snap) {
             const svgW = parseFloat(svg.getAttribute('width') || svg.style.width);
             const svgH = parseFloat(svg.getAttribute('height') || svg.style.height);
             if (Number.isFinite(svgW) && !svg.dataset.stjBaseW) svg.dataset.stjBaseW = String(svgW);
-            if (Number.isFinite(svgH) && !svg.dataset.stjBaseH) svg.dataset.stjBaseH = String(svgH * vCompress);
+            if (Number.isFinite(svgH) && !svg.dataset.stjBaseH) svg.dataset.stjBaseH = String(svgH);
             const nextW = svg.dataset.stjBaseW ? parseFloat(svg.dataset.stjBaseW) * scale : svgW;
             const nextH = svg.dataset.stjBaseH ? parseFloat(svg.dataset.stjBaseH) * scale : svgH;
             if (Number.isFinite(nextW)) {
@@ -954,10 +969,7 @@ function applyEntrySnapshotToEl(el, snap) {
                 if (!pathEl.dataset.stjBaseD) {
                     pathEl.dataset.stjBaseD = d;
                 }
-                const scaledD = pathEl.dataset.stjBaseD.replace(
-                    /(M|L)\s*(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)/g,
-                    (_m, cmd, x, y) => `${cmd} ${parseFloat(x) * scale} ${parseFloat(y) * vCompress * scale}`
-                );
+                const scaledD = pathEl.dataset.stjBaseD.replace(/-?\d+(?:\.\d+)?/g, (num) => String(parseFloat(num) * scale));
                 pathEl.setAttribute('d', scaledD);
                 pathEl.setAttribute('stroke-width', String(2 * scale));
             });
@@ -967,13 +979,7 @@ function applyEntrySnapshotToEl(el, snap) {
                 if (!polyEl.dataset.stjBasePoints) {
                     polyEl.dataset.stjBasePoints = pts;
                 }
-                const nums = (polyEl.dataset.stjBasePoints.match(/-?\d+(?:\.\d+)?/g) || []).map(parseFloat);
-                const scaledPts = [];
-                for (let i = 0; i + 1 < nums.length; i += 2) {
-                    const sx = nums[i] * scale;
-                    const sy = nums[i + 1] * vCompress * scale;
-                    scaledPts.push(`${sx},${sy}`);
-                }
+                const scaledPts = polyEl.dataset.stjBasePoints.replace(/-?\d+(?:\.\d+)?/g, (num) => String(parseFloat(num) * scale));
                 polyEl.setAttribute('points', scaledPts);
             });
         }
@@ -2016,7 +2022,6 @@ function extractChoiceTriggerText(choiceStr) {
             s.textContent = `
                 #stj_keywords_container.stj-tree-mode {
                     --stj-tree-scale: var(--exp-scale, 1);
-                    --stj-tree-v-compress: 0.72;
                     position: relative;
                 }
                 #stj_keywords_container.stj-tree-mode .stj-tree-svg {
