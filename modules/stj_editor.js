@@ -2067,7 +2067,7 @@
                     flex-direction: column !important;
                     align-items: flex-start !important;
                     gap: calc(var(--stj-tree-scale, 1) * 2px) !important;
-                    width: calc(var(--stj-tree-scale, 1) * 70px) !important;
+                    width: calc(var(--stj-tree-scale, 1) * 140px) !important;
                 }
                 #stj_keywords_container.stj-tree-mode .stj-tree-top-left-modes .stj-special-preview,
                 #stj_keywords_container.stj-tree-mode .stj-tree-top-left-modes .stj-image-preview {
