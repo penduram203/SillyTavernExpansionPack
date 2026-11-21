@@ -788,51 +788,85 @@ function applyEntrySnapshotToEl(el, snap) {
 
     function arrangeTreeControlsAndCompress(containerEl) {
         if (!containerEl || !containerEl.classList.contains('stj-tree-mode')) return;
- 
+
         const roots = [
             containerEl.closest('.stj-modal, #stj_editor_modal, .popup, dialog'),
             document.body,
         ].filter(Boolean);
- 
-        const findMatchingEl = (labels) => {
+
+        const isInsideTreeBoxes = (el) =>
+            Boolean(el.closest('.stj-tree-top-left-modes, .stj-tree-bottom-left-other'));
+
+        // ラベル文言を持つ要素から、実際に画面上で操作/表示単位となっている親要素（button / ラッパー等）を解決する
+        const resolveControlUnit = (el, maxDepth = 4) => {
+            if (!el) return null;
+            let cur = el;
+            for (let i = 0; i < maxDepth && cur && cur.parentElement; i++) {
+                const parent = cur.parentElement;
+                if (parent === document.body || parent.contains(containerEl) || parent.id === 'stj_keywords_container') {
+                    break;
+                }
+                const tag = parent.tagName;
+                if (tag === 'BUTTON' || parent.getAttribute?.('role') === 'button' || parent.classList?.contains('menu_button')) {
+                    cur = parent;
+                    continue;
+                }
+                // 小さなカード/ラッパー（画像＋ラベルやアイコン＋ラベルをまとめる要素）なら親へ昇格
+                const rect = parent.getBoundingClientRect?.();
+                if (rect && rect.width > 0 && rect.width < 420 && rect.height > 0 && rect.height < 260) {
+                    cur = parent;
+                    continue;
+                }
+                break;
+            }
+            return cur;
+        };
+
+        const findControlUnitByLabels = (labels) => {
             for (const root of roots) {
-                const found = Array.from(root.querySelectorAll('button, [role="button"], .menu_button, a, span, label, div'))
+                const matched = Array.from(root.querySelectorAll('*'))
                     .find((el) => {
-                        if (!el || el.closest('#stj_keywords_container') || el.contains(containerEl)) return false;
-                        if (el.querySelector('button, input, select')) return false;
+                        if (!el || el.closest('#stj_keywords_container') || el.contains(containerEl) || isInsideTreeBoxes(el)) {
+                            return false;
+                        }
+                        // 子要素に同じテキストを持つ要素がある場合は最も内側の要素を選ぶ
+                        const hasChildWithSameText = Array.from(el.children || []).some((ch) => {
+                            const cTxt = (ch.textContent || '').replace(/\s+/g, ' ').trim();
+                            return labels.includes(cTxt);
+                        });
+                        if (hasChildWithSameText) return false;
                         const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
                         return labels.includes(txt);
                     });
-                if (found) return found;
+                if (matched) {
+                    const unit = resolveControlUnit(matched);
+                    if (unit && !unit.contains(containerEl) && !isInsideTreeBoxes(unit)) {
+                        return unit;
+                    }
+                }
             }
             return null;
         };
 
         // 1. 「操作方法説明」を非表示化
-        roots.forEach((root) => {
-            root.querySelectorAll('button, [role="button"], .menu_button, a, span, label, div').forEach((el) => {
-                if (el.closest('#stj_keywords_container')) return;
-                if (el.querySelector('button, input, select')) return;
-                const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
-                if (txt === '操作方法説明' || txt === '操作説明' || txt.includes('操作方法説明')) {
-                    el.style.setProperty('display', 'none', 'important');
-                }
-            });
-        });
+        const helpUnit = findControlUnitByLabels(['操作方法説明', '操作説明']);
+        if (helpUnit) {
+            helpUnit.style.setProperty('display', 'none', 'important');
+        }
 
-        // 2. 「デフォルト表示」「サムネイル表示」をツリー左上へ組み込み
+        // 2. 「デフォルト表示」「サムネイル表示」をツリー左上へ組み込み（画像やボタンごと移動）
         let topLeftBox = containerEl.querySelector('.stj-tree-top-left-modes');
         if (!topLeftBox) {
             topLeftBox = document.createElement('div');
             topLeftBox.className = 'stj-tree-top-left-modes';
             containerEl.appendChild(topLeftBox);
         }
-
         [['デフォルト表示'], ['サムネイル表示']].forEach((labels) => {
-            const btn = findMatchingEl(labels);
-            if (btn && btn.parentElement !== topLeftBox) {
-                btn.style.setProperty('display', '', 'important');
-                topLeftBox.appendChild(btn);
+            const unit = findControlUnitByLabels(labels);
+            if (unit && unit.parentElement !== topLeftBox) {
+                unit.style.setProperty('display', '', 'important');
+                unit.style.position = 'static';
+                topLeftBox.appendChild(unit);
             }
         });
 
@@ -843,10 +877,11 @@ function applyEntrySnapshotToEl(el, snap) {
             bottomLeftBox.className = 'stj-tree-bottom-left-other';
             containerEl.appendChild(bottomLeftBox);
         }
-        const otherEl = findMatchingEl(['他セル', 'その他セル']);
-        if (otherEl && otherEl.parentElement !== bottomLeftBox) {
-            otherEl.style.setProperty('display', '', 'important');
-            bottomLeftBox.appendChild(otherEl);
+        const otherUnit = findControlUnitByLabels(['他セル', 'その他セル']);
+        if (otherUnit && otherUnit.parentElement !== bottomLeftBox) {
+            otherUnit.style.setProperty('display', '', 'important');
+            otherUnit.style.position = 'static';
+            bottomLeftBox.appendChild(otherUnit);
         }
     }
     
