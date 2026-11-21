@@ -1028,7 +1028,7 @@
 
         arrangeTreeControlsAndCompress(containerEl);
 
-        const pad = Math.ceil(40 * scale);
+        const areaPad = Math.ceil(40 * scale);
         const finalW = maxRight > 0 ? Math.ceil(maxRight + pad) : null;
         if (finalW !== null) {
             containerEl.style.minWidth = `${finalW}px`;
@@ -1050,7 +1050,7 @@
         }
 
         const baseMinW = Math.round(940 * scale);
-        const pad = Math.ceil(20 * scale);
+        const areaPad = Math.ceil(20 * scale);
         const rawTreeBottom = maxBottom > 0 ? maxBottom : (120 * scale);
         containerEl.dataset.stjTreeBottom = String(Math.ceil(rawTreeBottom));
 
