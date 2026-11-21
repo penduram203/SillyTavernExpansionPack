@@ -788,16 +788,25 @@ function applyEntrySnapshotToEl(el, snap) {
 
     function getTreeScale(containerEl) {
         if (!containerEl) return 1;
-        const raw = getComputedStyle(containerEl).getPropertyValue('--exp-scale')
+        const raw = (getComputedStyle(containerEl).getPropertyValue('--exp-scale')
             || getComputedStyle(document.documentElement).getPropertyValue('--exp-scale')
-            || '1';
+            || '').trim();
         const parsed = parseFloat(raw);
-        return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+        if (Number.isFinite(parsed) && parsed > 0) {
+            return parsed;
+        }
+        // --exp-scale 未指定時のフォールバック（1920px 基準の画面幅比率）
+        if (typeof window !== 'undefined' && window.innerWidth > 0) {
+            const ratio = window.innerWidth / 1920;
+            return ratio > 0 ? ratio : 1;
+        }
+        return 1;
     }
 
     function applyTreeScaleToContainer(containerEl) {
         if (!containerEl || !containerEl.classList.contains('stj-tree-mode')) return 1;
         const scale = getTreeScale(containerEl);
+        containerEl.style.setProperty('--stj-tree-scale', String(scale));
 
         const minW = parseFloat(containerEl.style.minWidth);
         const minH = parseFloat(containerEl.style.minHeight);
@@ -874,6 +883,44 @@ function applyEntrySnapshotToEl(el, snap) {
             });
         }
         return scale;
+    }
+    
+    function syncAllTreeScales() {
+        document.querySelectorAll('#stj_keywords_container.stj-tree-mode, .stj-grid-container.stj-tree-mode')
+            .forEach((el) => applyTreeScaleToContainer(el));
+    }
+
+    if (typeof window !== 'undefined' && !window._stjTreeScaleWatcherInstalled) {
+        window._stjTreeScaleWatcherInstalled = true;
+        window.addEventListener('resize', () => {
+            requestAnimationFrame(syncAllTreeScales);
+        });
+        const startTreeObserver = () => {
+            const target = document.body || document.documentElement;
+            if (!target || target._stjTreeScaleObserved) return;
+            target._stjTreeScaleObserved = true;
+            let timer = null;
+            const obs = new MutationObserver((mutations) => {
+                const hasTreeChange = mutations.some((m) =>
+                    Array.from(m.addedNodes || []).some((n) =>
+                        n.nodeType === 1 && (
+                            n.matches?.('#stj_keywords_container, .stj-grid-container, .stj-tree-mode, .stj-keyword-item, .stj-tree-svg') ||
+                            n.querySelector?.('.stj-keyword-item, .stj-tree-svg')
+                        )
+                    ) || (m.target?.nodeType === 1 && m.target.closest?.('.stj-tree-mode'))
+                );
+                if (!hasTreeChange) return;
+                if (timer) clearTimeout(timer);
+                timer = setTimeout(syncAllTreeScales, 30);
+            });
+            obs.observe(target, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
+            syncAllTreeScales();
+        };
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', startTreeObserver, { once: true });
+        } else {
+            startTreeObserver();
+        }
     }
     
     function restoreMountedWorldEntry(hostEl) {
