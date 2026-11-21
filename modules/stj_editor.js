@@ -1027,14 +1027,16 @@
         }
 
         arrangeTreeControlsAndCompress(containerEl);
-
+ 
         const edgePad = Math.ceil(40 * scale);
-        const finalW = maxRight > 0 ? Math.ceil(maxRight + pad) : null;
+        const finalW = maxRight > 0
+            ? Math.max(Math.ceil(200 * scale), Math.ceil(maxRight + edgePad))
+            : Math.ceil(300 * scale);
         if (finalW !== null) {
             containerEl.style.minWidth = `${finalW}px`;
             containerEl.style.width = `${finalW}px`;
         }
-
+ 
         let parent = containerEl.parentElement;
         for (let depth = 0; depth < 8 && parent && parent !== document.body && parent !== document.documentElement; depth++, parent = parent.parentElement) {
             const pStyle = getComputedStyle(parent);
@@ -1048,14 +1050,13 @@
                 parent.style.minHeight = '0px';
             }
         }
-
-        const baseMinW = Math.round(940 * scale);
-        const edgePad = Math.ceil(20 * scale);
+ 
+        const areaPad = Math.ceil(20 * scale);
         const rawTreeBottom = maxBottom > 0 ? maxBottom : (120 * scale);
         containerEl.dataset.stjTreeBottom = String(Math.ceil(rawTreeBottom));
-
+ 
         arrangeTreeControlsAndCompress(containerEl);
-
+ 
         let contentBottom = rawTreeBottom;
         const bottomLeftBox = containerEl.querySelector('.stj-tree-bottom-left-other');
         if (bottomLeftBox) {
@@ -1073,13 +1074,9 @@
                 contentBottom = Math.max(contentBottom, tlTop + tlH);
             }
         }
-
-        const areaPad = Math.ceil(20 * scale);
+ 
         const minNeededH = Math.max(Math.ceil(120 * scale), Math.ceil(contentBottom + areaPad));
         const baseMinH = Math.max(Math.ceil(100 * scale), Math.ceil(rawTreeBottom + areaPad));
-        const finalW = maxRight > 0
-            ? Math.max(Math.ceil(200 * scale), Math.ceil(maxRight + areaPad))
-            : Math.ceil(300 * scale);
         const baseMinW = Math.max(Math.ceil(180 * scale), Math.ceil(finalW - areaPad));
 
         containerEl.dataset.stjBaseMinW = String(baseMinW);
