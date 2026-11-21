@@ -919,18 +919,22 @@ function applyEntrySnapshotToEl(el, snap) {
             });
         }
 
-        // 拡大後の最下端・最右端に合わせてコンテナの最小サイズを拡張し、スクロール到達不能を防ぐ
+        // 拡大後の最下端・最右端に合わせてコンテナのサイズを拡張し、スクロール到達不能を防ぐ
         const pad = Math.ceil(40 * scale);
-        if (maxRight > 0) {
-            containerEl.style.minWidth = `${Math.ceil(maxRight + pad)}px`;
+        const finalW = maxRight > 0 ? Math.ceil(maxRight + pad) : null;
+        const finalH = maxBottom > 0 ? Math.ceil(maxBottom + pad) : null;
+        if (finalW !== null) {
+            containerEl.style.minWidth = `${finalW}px`;
+            containerEl.style.width = `${finalW}px`;
         }
-        if (maxBottom > 0) {
-            containerEl.style.minHeight = `${Math.ceil(maxBottom + pad)}px`;
+        if (finalH !== null) {
+            containerEl.style.minHeight = `${finalH}px`;
+            containerEl.style.height = `${finalH}px`;
         }
-
-        // 親スクロール領域の高さ・オーバーフロー制限を緩和し、下端までスクロール可能にする
+ 
+        // 祖先要素のうち高さ制限やはみ出し切り捨てがあるものを緩和し、ツリー下端までスクロールできるようにする
         let parent = containerEl.parentElement;
-        for (let depth = 0; depth < 3 && parent && parent !== document.body; depth++, parent = parent.parentElement) {
+        for (let depth = 0; depth < 8 && parent && parent !== document.body && parent !== document.documentElement; depth++, parent = parent.parentElement) {
             const pStyle = getComputedStyle(parent);
             if (pStyle.maxHeight && pStyle.maxHeight !== 'none') {
                 parent.style.maxHeight = 'none';
@@ -938,8 +942,11 @@ function applyEntrySnapshotToEl(el, snap) {
             if (pStyle.overflowY === 'hidden') {
                 parent.style.overflowY = 'auto';
             }
+            if (pStyle.minHeight && pStyle.minHeight !== '0px') {
+                parent.style.minHeight = '0px';
+            }
         }
-
+ 
         containerEl.dataset.stjAppliedScale = String(scale);
         return scale;
     }
