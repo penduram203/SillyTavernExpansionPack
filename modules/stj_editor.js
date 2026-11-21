@@ -66,18 +66,9 @@
     let _autoSaveTimer = null;
 
     // ===== エディタ初期化中フラグ =====
-    //   openExportModal の読み込み完了までは true。
-    //   この間の空フォーム autosave はスキップする（実データ保護）。
-    //   読み込み完了後は false になり、全セル削除後の空フォームも保存される。
     let _editorLoading = false;
-    // ★ 明示的に削除されたキーを追跡
-    //   「フォームに無い既存キー」を null 送信で誤削除しないための管理。
-    //   一括削除でのみ追加され、autoSave 成功後にクリアされる。
     const _explicitlyDeletedKeys = new Set();
-    // ============================================================
-    // ★ 別キャラ画像エントリの「一度きり」マイグレーション管理
-    //   image-display.js と同じフラグを共有する。
-    // ============================================================
+
     const STJ_MIGRATION_META_NS = 'image_display_extension_meta';
     const STJ_MIGRATION_FLAG_KEY = 'foreign_cleaned_version';
     const STJ_MIGRATION_VERSION = 1;
@@ -106,7 +97,6 @@
             }
             char.data.extensions[STJ_MIGRATION_META_NS][STJ_MIGRATION_FLAG_KEY] = STJ_MIGRATION_VERSION;
             if (window.CharStore?.saveCharacterExtension) {
-                // ★ STコアの再取得でデータが上書きされるのを防ぐため即時保存
                 window.CharStore.saveCharacterExtension(
                     STJ_MIGRATION_META_NS,
                     char.data.extensions[STJ_MIGRATION_META_NS],
@@ -206,6 +196,12 @@
                 overflow: visible;
                 z-index: 0;
             }
+            #stj_keywords_container.stj-tree-mode .stj-tree-bottom-left-other .stj-keyword-item {
+                position: relative !important;
+                left: auto !important;
+                top: auto !important;
+                flex: 0 0 auto !important;
+            }
         `;
         document.head.appendChild(style);
     })();
@@ -238,9 +234,6 @@
         if (display) display.textContent = kw || '';
     }
 
-    // ============================================================
-    // ★ キーワード重複チェック（完全一致）
-    // ============================================================
     function findDuplicateKeyword(currentCell, keyword) {
         if (!currentCell || !keyword || typeof keyword !== 'string') return null;
         const target = keyword.trim();
@@ -318,9 +311,6 @@
         return !!url.match(/\.(mp4|webm)(\?|#|$)/i);
     }
 
-    // ============================================================
-    // ★ サムネイル名 → 元ファイル名 変換
-    // ============================================================
     function resolveThumbToOriginal(fileName) {
         if (!fileName || typeof fileName !== 'string') return fileName;
 
@@ -338,9 +328,6 @@
         return fileName;
     }
 
-    // ============================================================
-    // ★ 動画 / アニメ GIF / APNG 用 🎬 バッジ（async）
-    // ============================================================
     async function attachVideoBadge(parentEl, isVideo, fileName, charName) {
         if (!parentEl) return;
 
@@ -415,9 +402,6 @@
         return null;
     }
 
-    // ============================================================
-    // ★ 動画サムネイルキャッシュ用ヘルパー
-    // ============================================================
     function videoFileToThumbName(videoFileName) {
         if (!videoFileName || typeof videoFileName !== 'string') return null;
         const m = videoFileName.match(/^(.+)\.(mp4|webm)$/i);
@@ -462,9 +446,6 @@
         return null;
     }
 
-    // ============================================================
-    // ★ ロアブック連携ヘルパー（エントリ移植用）
-    // ============================================================
     function getCharacterWorldInfoName() {
         const ctx = getSTContext();
         if (!ctx) return null;
@@ -557,14 +538,11 @@
         const target = String(kw).trim();
         if (!target) return null;
 
-        // ★ 1st pass: getEntryKeyword（comment 優先）で一致判定
-        //   ツリーレイアウト（_stjBuildChoiceGraph）と同一ロジックに揃える
         for (const entry of list) {
             if (!entry) continue;
             if (getEntryKeyword(entry) === target) return entry;
         }
 
-        // ★ 2nd pass: keys 配列でも一致判定（後方互換）
         for (const entry of list) {
             if (!entry) continue;
             const keys = getEntryKeys(entry);
@@ -573,8 +551,6 @@
             }
         }
 
-        // ★ 3rd pass: 緩い一致（全角/半角・接頭辞・部分一致）
-        //   ツリー側と同じ救済経路を通す
         return _stjFindEntryByKeywordLoose(list, target);
     }
 
@@ -610,51 +586,6 @@
         return null;
     }
 
-    function captureEntrySnapshot(el) {
-        if (!el) return null;
-        const fields = new Map();
-        const heights = new Map();
-        el.querySelectorAll('input, textarea, select').forEach((field, idx) => {
-            const key = field.getAttribute('name') || `idx_${idx}`;
-            if (field.type === 'checkbox' || field.type === 'radio') {
-                fields.set(key, { type: 'check', checked: field.checked });
-            } else if (field.tagName === 'SELECT') {
-                fields.set(key, {
-                    type: 'select',
-                    value: field.value,
-                    selectedIndex: field.selectedIndex,
-                });
-            } else {
-                fields.set(key, { type: 'val', value: field.value });
-            }
-            if (field.tagName === 'TEXTAREA') {
-                const h = field.style.height;
-                if (h) heights.set(key, h);
-            }
-        });
-        return { fields, heights, userModified: new Set() };
-    }
-
-    function updateSnapshotForField(snap, field, idx) {
-        if (!snap || !field) return;
-        const key = field.getAttribute('name') || `idx_${idx}`;
-        snap.userModified.add(key);
-        if (field.type === 'checkbox' || field.type === 'radio') {
-            snap.fields.set(key, { type: 'check', checked: field.checked });
-        } else if (field.tagName === 'SELECT') {
-            snap.fields.set(key, {
-                type: 'select',
-                value: field.value,
-                selectedIndex: field.selectedIndex,
-            });
-        } else {
-            snap.fields.set(key, { type: 'val', value: field.value });
-        }
-        if (field.tagName === 'TEXTAREA' && field.style.height) {
-            snap.heights.set(key, field.style.height);
-        }
-    }
-
     function collapseLbeExtrasPanel(clonedEl) {
         if (!clonedEl) return;
 
@@ -683,7 +614,6 @@
             clonedEl.dataset.stjSavedClasses = clonedEl.className;
         }
         clonedEl.classList.add('stj-modal-expanded-entry');
-        // .lbe-extras-toggle による折りたたみは Lorebook_Expansion.js 本体の挙動に任せる
     }
 
     function cleanupEntryModalState(el) {
@@ -693,7 +623,6 @@
             el.className = el.dataset.stjSavedClasses;
             delete el.dataset.stjSavedClasses;
         }
-        // モーダル内で展開したドロワーを ST 標準の閉じた状態に戻し、ロアブック側での再展開を正常化
         const toggle = el.querySelector('.inline-drawer-toggle');
         const content = el.querySelector('.inline-drawer-content');
         if (toggle && toggle.classList.contains('up')) {
@@ -720,43 +649,7 @@
             await new Promise((r) => setTimeout(r, 80));
         }
     }
-    
-function applyEntrySnapshotToEl(el, snap) {
-        if (!el || !snap) return;
 
-        expandClonedEntryPanels(el);
-
-        el.querySelectorAll('input, textarea, select').forEach((field, idx) => {
-            const key = field.getAttribute('name') || `idx_${idx}`;
-            const info = snap.fields.get(key);
-            if (!info) return;
-
-            if (info.type === 'check') {
-                if (field.checked !== info.checked) {
-                    field.checked = info.checked;
-                }
-            } else if (info.type === 'select') {
-                const matchedOpt = Array.from(field.options || []).find(opt => opt.value === info.value);
-                if (matchedOpt && field.value !== info.value) {
-                    field.value = info.value;
-                } else if (info.selectedIndex >= 0 && field.selectedIndex !== info.selectedIndex) {
-                    field.selectedIndex = info.selectedIndex;
-                }
-            } else {
-                if (field.value !== info.value) {
-                    field.value = info.value;
-                }
-            }
-
-            if (field.tagName === 'TEXTAREA' && snap.heights.has(key)) {
-                const h = snap.heights.get(key);
-                if (field.style.height !== h) {
-                    field.style.height = h;
-                }
-            }
-        });
-    }    
-    
     let _worldInfoSaveTimer = null;
     function scheduleWorldInfoPersist(sourceEl) {
         if (_worldInfoSaveTimer) clearTimeout(_worldInfoSaveTimer);
@@ -786,6 +679,9 @@ function applyEntrySnapshotToEl(el, snap) {
         }, 250);
     }
 
+    // ============================================================
+    // ★ 特殊プレビュー（「デフォルト表示」「サムネイル表示」）と「他セル」の復元・配置
+    // ============================================================
     function restoreSpecialPreviewsToOrigin() {
         document.querySelectorAll('.stj-special-pair[data-stj-moved-pair="1"]').forEach((pair) => {
             Array.from(pair.children).forEach((child) => {
@@ -807,25 +703,16 @@ function applyEntrySnapshotToEl(el, snap) {
             });
             pair.remove();
         });
-    }
-
-    if (typeof window !== 'undefined' && !window._stjTreeCloseRestoreInstalled) {
-        window._stjTreeCloseRestoreInstalled = true;
-        document.addEventListener('click', (e) => {
-            const target = e.target?.closest?.('button, [role="button"], .menu_button, .stj-modal-close');
-            if (!target) return;
-            const txt = (target.textContent || '').trim();
-            if (txt === '終了' || txt === '閉じる' || target.classList.contains('stj-modal-close')) {
-                restoreSpecialPreviewsToOrigin();
-            }
-        }, true);
+        document.querySelectorAll('.stj-tree-top-left-modes, .stj-tree-bottom-left-other').forEach((box) => {
+            box.remove();
+        });
     }
 
     function arrangeTreeControlsAndCompress(containerEl) {
         if (!containerEl || !containerEl.classList.contains('stj-tree-mode')) return;
 
         const roots = [
-            containerEl.closest('.stj-modal, #stj_editor_modal, .popup, dialog'),
+            containerEl.closest('.stj-modal, #stj_editor_modal, #stj_export_modal, .popup, dialog'),
             document.body,
         ].filter(Boolean);
 
@@ -900,34 +787,60 @@ function applyEntrySnapshotToEl(el, snap) {
             { id: 'stj_preview_default', label: 'デフォルト表示' },
             { id: 'stj_preview_thumbnail', label: 'サムネイル表示' },
         ].forEach(({ id, label }) => {
-
             collectSpecialPair(id, label);
         });
 
-        // 3. 「他セル」（画像リストが空 `[]` や未紐付けのセル等）をツリー左下へ組み込み
+        // 3. 「他セル」（未紐付け / data-image-list="[]"）をツリー左下へ組み込み
         let bottomLeftBox = containerEl.querySelector('.stj-tree-bottom-left-other');
         if (!bottomLeftBox) {
             bottomLeftBox = document.createElement('div');
             bottomLeftBox.className = 'stj-tree-bottom-left-other';
             containerEl.appendChild(bottomLeftBox);
         }
+
+        const scale = getTreeScale(containerEl);
+        const otherCells = [];
         containerEl.querySelectorAll('.stj-keyword-item').forEach((item) => {
-            if (item.closest('.stj-tree-bottom-left-other')) return;
             if (item.closest('.stj-tree-top-left-modes')) return;
             const imgListAttr = (item.getAttribute('data-image-list') || '').trim();
             const isUnlinked = imgListAttr === '' || imgListAttr === '[]';
             if (isUnlinked) {
                 item.dataset.stjIsOtherCell = '1';
-                item.style.position = 'relative';
-                item.style.left = 'auto';
-                item.style.top = 'auto';
+                if (!item.dataset.stjBaseWidth) item.dataset.stjBaseWidth = String(STJ_TREE_CELL_W);
+                if (!item.dataset.stjBaseHeight) item.dataset.stjBaseHeight = String(STJ_TREE_CELL_H);
+                const w = parseFloat(item.dataset.stjBaseWidth) * scale;
+                const h = parseFloat(item.dataset.stjBaseHeight) * scale;
+                item.style.setProperty('position', 'relative', 'important');
+                item.style.setProperty('left', 'auto', 'important');
+                item.style.setProperty('top', 'auto', 'important');
+                item.style.width = `${w}px`;
+                item.style.height = `${h}px`;
                 delete item.dataset.stjBaseLeft;
                 delete item.dataset.stjBaseTop;
-                bottomLeftBox.appendChild(item);
+                if (item.parentElement !== bottomLeftBox) {
+                    bottomLeftBox.appendChild(item);
+                }
+                otherCells.push(item);
             }
         });
+
+        // 他セルがツリー左下部に配置されるよう bottomLeftBox の位置をツリー下端基準に調整
+        const treeBottom = parseFloat(containerEl.dataset.stjTreeBottom || '0');
+        const otherH = otherCells.length > 0 ? (STJ_TREE_CELL_H * scale) : 0;
+        const bottomLeftTop = Math.max(
+            (treeBottom > 0 ? treeBottom : 420) + 12 * scale,
+            220 * scale
+        );
+        bottomLeftBox.style.top = `${bottomLeftTop}px`;
+        bottomLeftBox.style.bottom = 'auto';
+        const neededH = Math.ceil(bottomLeftTop + otherH + 24 * scale);
+        const curMinH = parseFloat(containerEl.style.minHeight) || 0;
+        if (neededH > curMinH) {
+            containerEl.style.minHeight = `${neededH}px`;
+            containerEl.style.height = `${neededH}px`;
+        }
     }
-    
+
     function getTreeScale(containerEl) {
         if (!containerEl) return 1;
         const raw = (getComputedStyle(containerEl).getPropertyValue('--exp-scale')
@@ -937,7 +850,6 @@ function applyEntrySnapshotToEl(el, snap) {
         if (Number.isFinite(parsed) && parsed > 0) {
             return parsed;
         }
-        // --exp-scale 未指定時のフォールバック（1920px 基準の画面幅比率）
         if (typeof window !== 'undefined' && window.innerWidth > 0) {
             const ratio = window.innerWidth / 1920;
             return ratio > 0 ? ratio : 1;
@@ -947,7 +859,6 @@ function applyEntrySnapshotToEl(el, snap) {
 
     function applyTreeScaleToContainer(containerEl) {
         if (!containerEl || !containerEl.classList.contains('stj-tree-mode')) return 1;
-        arrangeTreeControlsAndCompress(containerEl);
         const scale = getTreeScale(containerEl);
         containerEl.style.setProperty('--stj-tree-scale', String(scale));
 
@@ -965,13 +876,14 @@ function applyEntrySnapshotToEl(el, snap) {
         if (containerEl.dataset.stjBaseMinH) {
             containerEl.style.minHeight = `${parseFloat(containerEl.dataset.stjBaseMinH) * scale}px`;
         }
-        
+
         let maxBottom = 0;
         let maxRight = 0;
         const displayFontPx = `${(13 * scale).toFixed(2)}px`;
         const itemFontPx = `${(14 * scale).toFixed(2)}px`;
-        
+
         containerEl.querySelectorAll('.stj-keyword-item').forEach((item) => {
+            const isOther = item.dataset.stjIsOtherCell === '1' || Boolean(item.closest('.stj-tree-bottom-left-other'));
             const left = parseFloat(item.style.left);
             const top = parseFloat(item.style.top);
             const width = parseFloat(item.style.width);
@@ -980,13 +892,15 @@ function applyEntrySnapshotToEl(el, snap) {
             let nextTop = top;
             let nextWidth = width;
             let nextHeight = height;
-            
-            // 左下（.stj-tree-bottom-left-other）に配置した「他セル」は絶対座標ではなく標準セルサイズ（140x160 * scale）を維持
-            if (item.dataset.stjIsOtherCell === '1' || item.closest('.stj-tree-bottom-left-other')) {
-                if (!item.dataset.stjBaseWidth) item.dataset.stjBaseWidth = '140';
-                if (!item.dataset.stjBaseHeight) item.dataset.stjBaseHeight = '160';
+
+            if (isOther) {
+                if (!item.dataset.stjBaseWidth) item.dataset.stjBaseWidth = String(STJ_TREE_CELL_W);
+                if (!item.dataset.stjBaseHeight) item.dataset.stjBaseHeight = String(STJ_TREE_CELL_H);
                 nextWidth = parseFloat(item.dataset.stjBaseWidth) * scale;
                 nextHeight = parseFloat(item.dataset.stjBaseHeight) * scale;
+                item.style.setProperty('position', 'relative', 'important');
+                item.style.setProperty('left', 'auto', 'important');
+                item.style.setProperty('top', 'auto', 'important');
                 item.style.width = `${nextWidth}px`;
                 item.style.height = `${nextHeight}px`;
             } else {
@@ -1013,23 +927,24 @@ function applyEntrySnapshotToEl(el, snap) {
             }
             item.style.setProperty('font-size', itemFontPx, 'important');
 
-            // .stj-image-preview の高さも拡大後のセル高さに合わせて確保
             const previewEl = item.querySelector('.stj-image-preview');
             if (previewEl && Number.isFinite(nextHeight)) {
                 const labelReserve = Math.round(34 * scale);
                 previewEl.style.height = `${Math.max(40, nextHeight - labelReserve)}px`;
             }
-            
+
             item.querySelectorAll('.stj-keyword-display, .stj-preview-text').forEach((txtEl) => {
                 txtEl.style.setProperty('font-size', displayFontPx, 'important');
                 txtEl.style.setProperty('line-height', '1.25', 'important');
             });
-            
-            if (Number.isFinite(nextLeft) && Number.isFinite(nextWidth)) {
-                maxRight = Math.max(maxRight, nextLeft + nextWidth);
-            }
-            if (Number.isFinite(nextTop) && Number.isFinite(nextHeight)) {
-                maxBottom = Math.max(maxBottom, nextTop + nextHeight);
+
+            if (!isOther) {
+                if (Number.isFinite(nextLeft) && Number.isFinite(nextWidth)) {
+                    maxRight = Math.max(maxRight, nextLeft + nextWidth);
+                }
+                if (Number.isFinite(nextTop) && Number.isFinite(nextHeight)) {
+                    maxBottom = Math.max(maxBottom, nextTop + nextHeight);
+                }
             }
         });
 
@@ -1072,20 +987,19 @@ function applyEntrySnapshotToEl(el, snap) {
             });
         }
 
-        // 拡大後の最下端・最右端に合わせてコンテナのサイズを拡張し、スクロール到達不能を防ぐ
+        if (maxBottom > 0) {
+            containerEl.dataset.stjTreeBottom = String(maxBottom);
+        }
+
+        arrangeTreeControlsAndCompress(containerEl);
+
         const pad = Math.ceil(40 * scale);
         const finalW = maxRight > 0 ? Math.ceil(maxRight + pad) : null;
-        const finalH = maxBottom > 0 ? Math.ceil(maxBottom + pad) : null;
         if (finalW !== null) {
             containerEl.style.minWidth = `${finalW}px`;
             containerEl.style.width = `${finalW}px`;
         }
-        if (finalH !== null) {
-            containerEl.style.minHeight = `${finalH}px`;
-            containerEl.style.height = `${finalH}px`;
-        }
- 
-        // 祖先要素のうち高さ制限やはみ出し切り捨てがあるものを緩和し、ツリー下端までスクロールできるようにする
+
         let parent = containerEl.parentElement;
         for (let depth = 0; depth < 8 && parent && parent !== document.body && parent !== document.documentElement; depth++, parent = parent.parentElement) {
             const pStyle = getComputedStyle(parent);
@@ -1099,11 +1013,11 @@ function applyEntrySnapshotToEl(el, snap) {
                 parent.style.minHeight = '0px';
             }
         }
- 
+
         containerEl.dataset.stjAppliedScale = String(scale);
         return scale;
     }
-    
+
     function syncAllTreeScales() {
         document.querySelectorAll('#stj_keywords_container.stj-tree-mode, .stj-grid-container.stj-tree-mode')
             .forEach((el) => applyTreeScaleToContainer(el));
@@ -1130,7 +1044,7 @@ function applyEntrySnapshotToEl(el, snap) {
                 );
                 if (!hasTreeChange) return;
                 if (timer) clearTimeout(timer);
-                timer = setTimeout(syncAllTreeScales, 30);
+                timer = setTimeout(syncAllTreeScales, 40);
             });
             obs.observe(target, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
             syncAllTreeScales();
@@ -1141,7 +1055,7 @@ function applyEntrySnapshotToEl(el, snap) {
             startTreeObserver();
         }
     }
-    
+
     function restoreMountedWorldEntry(hostEl) {
         if (!hostEl) return;
         const movedEl = hostEl._movedEntryEl;
@@ -1165,8 +1079,8 @@ function applyEntrySnapshotToEl(el, snap) {
         delete hostEl._entryPlaceholder;
         delete hostEl._syncEntry;
     }
-    
-async function mountWorldEntryInCellModal(cell) {
+
+    async function mountWorldEntryInCellModal(cell) {
         const modal = currentCellModal;
         if (!modal || !cell) return;
         const hostEl = modal.querySelector('#stj_cell_modal_entry_host');
@@ -1195,12 +1109,10 @@ async function mountWorldEntryInCellModal(cell) {
         const sourceEl = findSourceWorldEntryEl(entries, targetEntry, kw);
         if (!sourceEl) return;
 
-        // 本体要素のドロワーを展開し、SillyTavern本体と LBE のコントロールを初期化させる
         await ensureSourceEntryExpanded(sourceEl);
 
         if (currentCellModal !== modal || currentModalCell !== cell) return;
 
-        // 元の位置にプレースホルダを残して本体要素を直接 hostEl へ移動
         const placeholder = document.createComment('stj-world-entry-placeholder');
         if (sourceEl.parentNode) {
             sourceEl.parentNode.insertBefore(placeholder, sourceEl);
@@ -1216,7 +1128,6 @@ async function mountWorldEntryInCellModal(cell) {
         hostEl.style.display = 'block';
         hostEl.style.height = '43%';
 
-        // 移動直後に LBE UI（template / 解像度 / プロンプト / 変数 / 選択肢）を確実に注入
         if (window.LorebookExpansion?.forceInject) {
             await window.LorebookExpansion.forceInject().catch(() => {});
         }
@@ -1281,27 +1192,26 @@ async function mountWorldEntryInCellModal(cell) {
         return exists ? path : null;
     }
 
-// --- 選択肢の正規化ヘルパー (stj_editor.js用) ---
-function normalizeChoiceItem(item) {
-    if (typeof item === 'string') {
-        return item.trim();
-    }
-    if (item && typeof item === 'object') {
-        const num = (item.id ?? item.number ?? item.code ?? '').toString().trim();
-        const txt = (item.text ?? item.content ?? item.label ?? '').toString().trim();
-        if (num && txt) {
-            return txt.startsWith(num) ? txt : `${num}${txt}`;
+    function normalizeChoiceItem(item) {
+        if (typeof item === 'string') {
+            return item.trim();
         }
-        return num || txt;
+        if (item && typeof item === 'object') {
+            const num = (item.id ?? item.number ?? item.code ?? '').toString().trim();
+            const txt = (item.text ?? item.content ?? item.label ?? '').toString().trim();
+            if (num && txt) {
+                return txt.startsWith(num) ? txt : `${num}${txt}`;
+            }
+            return num || txt;
+        }
+        return '';
     }
-    return '';
-}
 
-function extractChoiceTriggerText(choiceStr) {
-    const str = String(choiceStr || '').trim();
-    if (!str) return '';
-    return str;
-}
+    function extractChoiceTriggerText(choiceStr) {
+        const str = String(choiceStr || '').trim();
+        if (!str) return '';
+        return str;
+    }
 
     function extractFileNameFromPath(path) {
         if (!path || typeof path !== 'string') return '';
@@ -1946,12 +1856,12 @@ function extractChoiceTriggerText(choiceStr) {
                     insertCellAt(s.sourceItem, s.insertZone.reference, s.insertZone.position);
                     runLiveTest();
                     autoSave({ immediate: true });
-                    _stjScheduleTreeLayout();  // ★ 追加
+                    _stjScheduleTreeLayout();
                 } else if (s.currentTarget && s.currentTarget !== s.sourceItem) {
                     swapCells(s.sourceItem, s.currentTarget);
                     runLiveTest();
                     autoSave({ immediate: true });
-                    _stjScheduleTreeLayout();  // ★ 追加
+                    _stjScheduleTreeLayout();
                 }
             } else {
                 const src = s.sourceItem;
@@ -1978,6 +1888,8 @@ function extractChoiceTriggerText(choiceStr) {
     }
 
     function resetFormToEmpty() {
+        restoreSpecialPreviewsToOrigin();
+
         const defaultCell = document.querySelector('.stj-special-item:nth-child(1)');
         if (defaultCell) {
             setCellImages(defaultCell, []);
@@ -1992,6 +1904,10 @@ function extractChoiceTriggerText(choiceStr) {
 
         const container = document.getElementById('stj_keywords_container');
         if (container) {
+            delete container.dataset.stjBaseMinW;
+            delete container.dataset.stjBaseMinH;
+            delete container.dataset.stjTreeBottom;
+            delete container.dataset.stjAppliedScale;
             container.innerHTML = '';
             addKeywordRowWithData(container, 0, { keyword: '', images: [] });
         }
@@ -2071,7 +1987,8 @@ function extractChoiceTriggerText(choiceStr) {
             }
         } catch (e) { /* ignore */ }
         closeCellModal(false);
-        stjModalEl.style.display = 'none'; // ← ここで非表示にしているか確認
+        restoreSpecialPreviewsToOrigin();
+        stjModalEl.style.display = 'none';
         document.body.classList.remove('stj-editor-open');
     }
 
@@ -2134,9 +2051,17 @@ function extractChoiceTriggerText(choiceStr) {
                     gap: calc(var(--stj-tree-scale, 1) * 2px);
                     width: calc(var(--stj-tree-scale, 1) * 70px);
                 }
+                .stj-tree-top-left-modes .stj-special-preview {
+                    width: calc(var(--stj-tree-scale, 1) * 70px) !important;
+                    height: calc(var(--stj-tree-scale, 1) * 63px) !important;
+                    min-width: 0 !important;
+                    min-height: 0 !important;
+                }
                 .stj-tree-top-left-modes .stj-image-preview {
                     width: calc(var(--stj-tree-scale, 1) * 70px) !important;
                     height: calc(var(--stj-tree-scale, 1) * 63px) !important;
+                    min-width: 0 !important;
+                    min-height: 0 !important;
                 }
                 .stj-tree-top-left-modes .stj-special-label {
                     font-size: calc(var(--stj-tree-scale, 1) * 10px) !important;
@@ -2145,11 +2070,11 @@ function extractChoiceTriggerText(choiceStr) {
                 .stj-tree-bottom-left-other {
                     position: absolute;
                     left: calc(var(--stj-tree-scale, 1) * 12px);
-                    bottom: calc(var(--stj-tree-scale, 1) * 12px);
                     z-index: 5;
                     display: flex;
                     flex-direction: row;
                     align-items: flex-end;
+                    flex-wrap: wrap;
                     gap: calc(var(--stj-tree-scale, 1) * 8px);
                 }
                 #stj_keywords_container.stj-tree-mode .stj-keyword-item {
@@ -2408,7 +2333,7 @@ function extractChoiceTriggerText(choiceStr) {
 
         currentModalCell = cell;
         modalOriginalImages = [...getCellImages(cell)];
-        modalOriginalKeyword = getCellKeyword(cell); // キーワード保持のみ（表示・編集はしない）
+        modalOriginalKeyword = getCellKeyword(cell);
 
         const isSpecial = cell.classList.contains('stj-special-item');
         const entryHostEl = currentCellModal.querySelector('#stj_cell_modal_entry_host');
@@ -2460,7 +2385,7 @@ function extractChoiceTriggerText(choiceStr) {
         });
     }
 
-function closeCellModal(revert) {
+    function closeCellModal(revert) {
         if (!currentCellModal) return;
         const entryHostEl = currentCellModal.querySelector('#stj_cell_modal_entry_host');
         if (entryHostEl) {
@@ -2850,6 +2775,7 @@ function closeCellModal(revert) {
 
         try { runLiveTest(); } catch (_) {}
         autoSave({ immediate: true });
+        _stjScheduleTreeLayout();
         console.log(`[STJ Editor] 🖼️ ドロップで追加: ${fileName}`);
     }
 
@@ -2976,9 +2902,6 @@ function closeCellModal(revert) {
         console.log('[STJ Editor] 🎯 カスタムドロップリスナーを設置しました');
     }
 
-    // ============================================================
-    // セル個別のリスナー（❌ボタン関連コードを削除）
-    // ============================================================
     function attachKeywordRowListeners(item, index) {
         const previewEl = item.querySelector('.stj-image-preview');
         if (previewEl) {
@@ -3223,29 +3146,11 @@ function closeCellModal(revert) {
 
             populateFormFromImageMap(existingMap);
             try { saveData({ silent: true }); } catch (e) { /* ignore */ }
-        } else {
-            let hasEmptyExt = false;
-            try {
-                const ctx = getSTContext();
-                const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
-                if (char?.name === charName) {
-                    const ext = char?.data?.extensions?.image_display_extension;
-                    hasEmptyExt = ext !== undefined && typeof ext === 'object';
-                }
-            } catch (e) { /* ignore */ }
         }
 
         return hasCharData;
     }
 
-    // ============================================================
-    // ★ 選択肢分岐ツリーレイアウト
-    //   - imageMap の各キー(=エントリ)について LEX の choices を読み、
-    //     選択肢番号→対応エントリキー の有向グラフを構築
-    //   - 左→右のツリーとして絶対座標を算出（親は子の中央）
-    //   - 単独セル（親なし・子なし）は左端に縦積み
-    //   - 接続線は SVG の elbow パスで描画
-    // ============================================================
     const STJ_TREE_CELL_W = 140;
     const STJ_TREE_CELL_H = 160;
     const STJ_TREE_H_GAP = 100;
@@ -3266,7 +3171,6 @@ function closeCellModal(revert) {
 
     function _stjExtractChoiceNumber(text) {
         if (!text || typeof text !== 'string') return null;
-        // ★ 全角数字を半角化してから抽出（LorebookExpansion 側は全角非対応）
         const normalized = _stjToHalfWidth(text);
         if (window.LorebookExpansion?.extractChoiceNumber) {
             return window.LorebookExpansion.extractChoiceNumber(normalized);
@@ -3309,12 +3213,10 @@ function closeCellModal(revert) {
         const raw = String(choiceStr).trim();
         if (!raw) return null;
 
-        // 全角/半角の相互バリアント
         const variants = new Set([raw]);
         variants.add(_stjToHalfWidth(raw));
         variants.add(_stjToFullWidth(raw));
 
-        // 接頭辞除去バリアント（選択肢 / choice / 先頭番号）
         const base = [...variants];
         for (const v of base) {
             const s1 = v.replace(/^選択肢[「『"']?/, '').replace(/[」』"']$/, '').trim();
@@ -3327,7 +3229,6 @@ function closeCellModal(revert) {
 
         const lowerVariants = new Set([...variants].map(v => v.toLowerCase()));
 
-        // 完全一致のみ判定（部分一致・前方一致は行わない）
         for (const e of list) {
             const kw = getEntryKeyword(e);
             if (!kw) continue;
@@ -3380,14 +3281,11 @@ function closeCellModal(revert) {
             const childKws = [];
 
             for (const choiceStr of choices) {
-                // ① 数字抽出で試す（既存動作を保持）
                 let target = null;
                 const num = _stjExtractChoiceNumber(choiceStr);
                 if (num) {
                     target = _stjFindEntryByChoice(list, num);
                 }
-                // ② 数字で見つからない、または数字が抽出できない場合、
-                //    選択肢文字列を直接キーワードとしてマッチ（非数値キー対応）
                 if (!target) {
                     target = _stjFindEntryByKeywordLoose(list, choiceStr);
                 }
@@ -3559,11 +3457,18 @@ function closeCellModal(revert) {
             const startCharName = document.getElementById('stj_char_name_display')?.textContent;
             if (!startCharName) return;
 
+            // 前回の他セル・特殊要素の配置を一旦リセットしてから再計算
+            container.querySelectorAll('.stj-tree-bottom-left-other .stj-keyword-item').forEach((cell) => {
+                delete cell.dataset.stjIsOtherCell;
+                container.appendChild(cell);
+            });
+
             const imageMap = {};
             container.querySelectorAll(':scope > .stj-keyword-item').forEach(cell => {
                 const kw = getCellKeyword(cell).trim();
                 if (kw) imageMap[kw] = getCellImages(cell);
             });
+
             if (Object.keys(imageMap).length === 0) {
                 container.classList.add('stj-tree-mode');
                 container.querySelectorAll(':scope > .stj-keyword-item').forEach(cell => {
@@ -3573,6 +3478,7 @@ function closeCellModal(revert) {
                     cell.style.width = STJ_TREE_CELL_W + 'px';
                     cell.style.height = STJ_TREE_CELL_H + 'px';
                 });
+                applyTreeScaleToContainer(container);
                 return;
             }
 
@@ -3599,9 +3505,15 @@ function closeCellModal(revert) {
                 const kw = getCellKeyword(cell).trim();
                 const pos = kw ? positions.get(kw) : null;
                 if (pos) {
+                    const baseL = pos.x + offsetX;
+                    const baseT = pos.y + offsetY;
+                    cell.dataset.stjBaseLeft = String(baseL);
+                    cell.dataset.stjBaseTop = String(baseT);
+                    cell.dataset.stjBaseWidth = String(STJ_TREE_CELL_W);
+                    cell.dataset.stjBaseHeight = String(STJ_TREE_CELL_H);
                     cell.style.position = 'absolute';
-                    cell.style.left = (pos.x + offsetX) + 'px';
-                    cell.style.top = (pos.y + offsetY) + 'px';
+                    cell.style.left = baseL + 'px';
+                    cell.style.top = baseT + 'px';
                     cell.style.width = STJ_TREE_CELL_W + 'px';
                     cell.style.height = STJ_TREE_CELL_H + 'px';
                 } else {
@@ -3613,6 +3525,10 @@ function closeCellModal(revert) {
             if (unpositioned.length > 0) {
                 let unposY = totalHeight;
                 for (const cell of unpositioned) {
+                    cell.dataset.stjBaseLeft = String(STJ_TREE_PADDING);
+                    cell.dataset.stjBaseTop = String(unposY);
+                    cell.dataset.stjBaseWidth = String(STJ_TREE_CELL_W);
+                    cell.dataset.stjBaseHeight = String(STJ_TREE_CELL_H);
                     cell.style.position = 'absolute';
                     cell.style.left = STJ_TREE_PADDING + 'px';
                     cell.style.top = unposY + 'px';
@@ -3624,7 +3540,9 @@ function closeCellModal(revert) {
             }
 
             container.classList.add('stj-tree-mode');
-            container.style.minWidth = (maxX - minX + STJ_TREE_PADDING * 2) + 'px';
+            container.dataset.stjBaseMinW = String(maxX - minX + STJ_TREE_PADDING * 2);
+            container.dataset.stjBaseMinH = String(totalHeight);
+            container.style.minWidth = container.dataset.stjBaseMinW + 'px';
             container.style.minHeight = totalHeight + 'px';
 
             const offsetPositions = new Map();
@@ -3632,6 +3550,8 @@ function closeCellModal(revert) {
                 offsetPositions.set(kw, { x: pos.x + offsetX, y: pos.y + offsetY });
             }
             _stjDrawConnections(container, offsetPositions, children);
+
+            applyTreeScaleToContainer(container);
         } catch (e) {
             console.warn('[STJ Editor] ツリーレイアウト適用エラー:', e);
         } finally {
@@ -3652,98 +3572,86 @@ function closeCellModal(revert) {
         }, 100);
     }
 
-// ロアブックの正しい並び順を完全に維持してJSON編集画面のセルを構築・同期する関数
-function populateFormFromImageMap(imageMap, preserveOrder = false) {
-    const toFileNames = (val) => {
-        if (val === null || val === undefined) return [];
-        const arr = Array.isArray(val) ? val : [val];
-        return arr
-            .filter(p => p !== null && p !== undefined)
-            .map(p => extractFileNameFromPath(p))
-            .filter(Boolean);
-    };
+    function populateFormFromImageMap(imageMap, preserveOrder = false) {
+        const toFileNames = (val) => {
+            if (val === null || val === undefined) return [];
+            const arr = Array.isArray(val) ? val : [val];
+            return arr
+                .filter(p => p !== null && p !== undefined)
+                .map(p => extractFileNameFromPath(p))
+                .filter(Boolean);
+        };
 
-    const defaultCell = document.querySelector('.stj-special-item:nth-child(1)');
-    if (defaultCell) {
-        const files = imageMap.default !== undefined ? toFileNames(imageMap.default) : [];
-        setCellImages(defaultCell, files);
-        updateCellPreview(defaultCell);
-    }
+        restoreSpecialPreviewsToOrigin();
 
-    const thumbnailCell = document.querySelector('.stj-special-item:nth-child(2)');
-    if (thumbnailCell) {
-        const files = imageMap.thumbnail !== undefined ? toFileNames(imageMap.thumbnail) : [];
-        setCellImages(thumbnailCell, files);
-        updateCellPreview(thumbnailCell);
-    }
+        const defaultCell = document.querySelector('.stj-special-item:nth-child(1)');
+        if (defaultCell) {
+            const files = imageMap.default !== undefined ? toFileNames(imageMap.default) : [];
+            setCellImages(defaultCell, files);
+            updateCellPreview(defaultCell);
+        }
 
-    const container = document.getElementById('stj_keywords_container');
-    if (!container) return;
+        const thumbnailCell = document.querySelector('.stj-special-item:nth-child(2)');
+        if (thumbnailCell) {
+            const files = imageMap.thumbnail !== undefined ? toFileNames(imageMap.thumbnail) : [];
+            setCellImages(thumbnailCell, files);
+            updateCellPreview(thumbnailCell);
+        }
 
-    // 現在 imageMap に存在する有効なキーワードのリスト（＝ロアブックの現在の正しい並び順）
-    const activeKeys = Object.keys(imageMap).filter(k => k !== 'default' && k !== 'thumbnail');
+        const container = document.getElementById('stj_keywords_container');
+        if (!container) return;
 
-    if (preserveOrder) {
-        const existingItems = Array.from(container.querySelectorAll('.stj-keyword-item'));
-        const itemMapByKeyword = new Map();
+        const activeKeys = Object.keys(imageMap).filter(k => k !== 'default' && k !== 'thumbnail');
 
-        // 既存のDOM要素を現在のキーワード名でマップ化
-        existingItems.forEach(item => {
-            const kw = getCellKeyword(item);
-            if (kw) {
-                itemMapByKeyword.set(kw, item);
+        if (preserveOrder) {
+            const existingItems = Array.from(container.querySelectorAll('.stj-keyword-item'));
+            const itemMapByKeyword = new Map();
+
+            existingItems.forEach(item => {
+                const kw = getCellKeyword(item);
+                if (kw) {
+                    itemMapByKeyword.set(kw, item);
+                }
+            });
+
+            const unmatchedItems = existingItems.filter(item => !activeKeys.includes(getCellKeyword(item)));
+
+            activeKeys.forEach((key, index) => {
+                let item = itemMapByKeyword.get(key);
+
+                if (!item && unmatchedItems.length > 0) {
+                    item = unmatchedItems.shift();
+                    setCellKeyword(item, key);
+                }
+
+                if (item) {
+                    const files = toFileNames(imageMap[key]);
+                    setCellImages(item, files);
+                    updateCellPreview(item);
+                    container.appendChild(item);
+                } else {
+                    addKeywordRowWithData(container, index, { keyword: key, images: toFileNames(imageMap[key]) });
+                }
+            });
+
+            unmatchedItems.forEach(item => item.remove());
+
+            if (container.querySelectorAll('.stj-keyword-item').length === 0) {
+                addKeywordRowWithData(container, 0, { keyword: '', images: [] });
             }
-        });
-
-        // 変更されたキー（改名等）の追従：マップにないDOM要素があれば、まだ使われていない古いDOMをそれに割り当てる
-        const unmatchedItems = existingItems.filter(item => !activeKeys.includes(getCellKeyword(item)));
-
-        // ロアブックの正しい並び順（activeKeys）に従ってDOM要素を並べ替えながら更新する
-        activeKeys.forEach((key, index) => {
-            let item = itemMapByKeyword.get(key);
-
-            // もし完全一致するDOMがなく、使い回せる未マッチのDOMがあればそれをリネームして再利用（位置を維持）
-            if (!item && unmatchedItems.length > 0) {
-                item = unmatchedItems.shift();
-                setCellKeyword(item, key);
-            }
-
-            if (item) {
-                // データを更新
-                const files = toFileNames(imageMap[key]);
-                setCellImages(item, files);
-                updateCellPreview(item);
-
-                // 正しい順番（ロアブックのインデックス順）にDOMをコンテナ内で移動させる
-                container.appendChild(item);
-            } else {
-                // 完全に新規のキーの場合は新しく行を追加
+        } else {
+            container.innerHTML = '';
+            let index = 0;
+            activeKeys.forEach(key => {
                 addKeywordRowWithData(container, index, { keyword: key, images: toFileNames(imageMap[key]) });
+                index++;
+            });
+            if (index === 0) {
+                addKeywordRowWithData(container, 0, { keyword: '', images: [] });
             }
-        });
-
-        // ロアブックから削除された古いDOM要素をすべて削除
-        unmatchedItems.forEach(item => item.remove());
-
-        // セルが1つも無くなった場合のフォールバック
-        if (container.querySelectorAll('.stj-keyword-item').length === 0) {
-            addKeywordRowWithData(container, 0, { keyword: '', images: [] });
         }
-    } else {
-        // 初期ロード時など
-        container.innerHTML = '';
-        let index = 0;
-        activeKeys.forEach(key => {
-            addKeywordRowWithData(container, index, { keyword: key, images: toFileNames(imageMap[key]) });
-            index++;
-        });
-        if (index === 0) {
-            addKeywordRowWithData(container, 0, { keyword: '', images: [] });
-        }
+        _stjScheduleTreeLayout();
     }
-    // ★ 追加: 選択肢分岐のツリーレイアウトを適用
-    _stjScheduleTreeLayout();
-}
 
     function setupPreviewListeners() { updatePreview(); }
 
@@ -4369,7 +4277,6 @@ function populateFormFromImageMap(imageMap, preserveOrder = false) {
             </div>
         `;
 
-        // ★ スクロール追従停止 + トグルボタン用CSS
         if (!document.getElementById('stj-test-section-style')) {
             const s = document.createElement('style');
             s.id = 'stj-test-section-style';
@@ -4445,40 +4352,40 @@ function populateFormFromImageMap(imageMap, preserveOrder = false) {
             }, true);
         }
 
-    const addBtn = document.getElementById('stj_add_keyword');
-    if (addBtn) addBtn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        if (isDialogActive || _syncLorebookInFlight) return;
- 
-        addBtn.disabled = true;
-        try {
-            autoSave({ immediate: true });
-            const added = await syncLorebookEntriesToImageMap();
+        const addBtn = document.getElementById('stj_add_keyword');
+        if (addBtn) addBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            if (isDialogActive || _syncLorebookInFlight) return;
 
-            const showToast = window.GicApi?.showBottomToast;
-            if (added > 0) {
-                if (typeof showToast === 'function') {
-                    showToast(_t('stj.toast.sync_added', `ロアブックと同期しました（${added} 件追加）`, { count: added }));
-                }
-            } else {
-                if (typeof showToast === 'function') {
-                    showToast(_t('stj.toast.sync_no_add', '同期する新規セルはありませんでした'), { type: 'warning' });
-                }
-            }
+            addBtn.disabled = true;
+            try {
+                autoSave({ immediate: true });
+                const added = await syncLorebookEntriesToImageMap();
 
-            if (stjModalEl && stjModalEl.style.display === 'block') {
-                runLiveTest();
+                const showToast = window.GicApi?.showBottomToast;
+                if (added > 0) {
+                    if (typeof showToast === 'function') {
+                        showToast(_t('stj.toast.sync_added', `ロアブックと同期しました（${added} 件追加）`, { count: added }));
+                    }
+                } else {
+                    if (typeof showToast === 'function') {
+                        showToast(_t('stj.toast.sync_no_add', '同期する新規セルはありませんでした'), { type: 'warning' });
+                    }
+                }
+
+                if (stjModalEl && stjModalEl.style.display === 'block') {
+                    runLiveTest();
+                }
+            } catch (err) {
+                console.warn('[STJ Editor] 同期エラー:', err);
+                const showToast = window.GicApi?.showBottomToast;
+                if (typeof showToast === 'function') {
+                    showToast(_t('stj.toast.sync_failed', '同期に失敗しました'), { type: 'error' });
+                }
+            } finally {
+                addBtn.disabled = false;
             }
-        } catch (err) {
-            console.warn('[STJ Editor] 同期エラー:', err);
-            const showToast = window.GicApi?.showBottomToast;
-            if (typeof showToast === 'function') {
-                showToast(_t('stj.toast.sync_failed', '同期に失敗しました'), { type: 'error' });
-            }
-        } finally {
-            addBtn.disabled = false;
-        }
-    });
+        });
 
         const cancelBtn = document.getElementById('stj_cancel_export');
         if (cancelBtn) {
@@ -4598,7 +4505,6 @@ function populateFormFromImageMap(imageMap, preserveOrder = false) {
                 return;
             }
 
-            let affectedCells = 0;
             let removedCount = 0;
 
             document.querySelectorAll('.stj-special-item, .stj-keyword-item').forEach(cell => {
@@ -4619,7 +4525,6 @@ function populateFormFromImageMap(imageMap, preserveOrder = false) {
                 if (filtered.length !== currentImages.length) {
                     setCellImages(cell, filtered);
                     updateCellPreview(cell);
-                    affectedCells++;
 
                     if (currentModalCell === cell && currentCellModal && currentCellModal.classList.contains('visible')) {
                         renderCellModalGrid(cell).catch(e => console.warn('[STJ Editor] render error:', e));
@@ -4634,472 +4539,447 @@ function populateFormFromImageMap(imageMap, preserveOrder = false) {
         });
     }
 
-const AUTO_SYNC_COMMON_RULE_NAME = '00_共通ルール';
+    const AUTO_SYNC_COMMON_RULE_NAME = '00_共通ルール';
 
-function normalizeCellImages(val) {
-    if (!val) return [];
-    if (Array.isArray(val)) return val.filter(v => typeof v === 'string');
-    if (typeof val === 'string') return [val];
-    return [];
-}
-
-function getCurrentImageMapFromCharData(charName) {
-    try {
-        const ctx = getSTContext();
-        const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
-        if (!char || char.name !== charName) return null;
-        const ext = char?.data?.extensions?.image_display_extension;
-        if (!ext || typeof ext !== 'object') return {};
-        return JSON.parse(JSON.stringify(ext));
-    } catch (e) {
-        console.warn('[STJ Editor] getCurrentImageMapFromCharData error:', e);
-        return null;
-    }
-}
-
-function saveImageMapToCharData(charName, imageMap) {
-    try {
-        const ctx = getSTContext();
-        const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
-        if (!char || char.name !== charName) {
-            return false;
-        }
-        if (!char.data) char.data = {};
-        if (!char.data.extensions) char.data.extensions = {};
-        char.data.extensions.image_display_extension = imageMap;
-
-        window.CharStore?.saveCharacterExtension?.(
-            'image_display_extension',
-            imageMap,
-            { immediate: true }
-        );
-        window.dispatchEvent(new CustomEvent('lbe-image-map-updated', {
-            detail: { charName, imageMap }
-        }));
-        return true;
-    } catch (e) {
-        console.warn('[STJ Editor] saveImageMapToCharData error:', e);
-        return false;
-    }
-}
-
-function isCommonRuleName(name) {
-    if (!name) return false;
-    const trimmed = String(name).trim();
-    if (!trimmed) return false;
-    if (trimmed === AUTO_SYNC_COMMON_RULE_NAME) return true;
-    if (trimmed.startsWith(AUTO_SYNC_COMMON_RULE_NAME)) return true;
-    return false;
-}
-
-function _isEmptyImageValue(v) {
-    if (v === null || v === undefined) return true;
-    if (Array.isArray(v)) return v.length === 0;
-    if (typeof v === 'string') return v.trim() === '';
-    return false;
-}
-
-function _restoreImageMapFromBagState(charName) {
-    try {
-        const ctx = getSTContext();
-        const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
-        if (!char || char.name !== charName) return null;
-        const bagState = char?.data?.extensions?.image_display_bag_state;
-        if (!bagState || typeof bagState !== 'object') return null;
-
-        const restored = {};
-        for (const [bagKey, state] of Object.entries(bagState)) {
-            if (!bagKey.startsWith('kw::')) continue;
-            const kw = bagKey.slice('kw::'.length);
-            const flags = state?.flags || {};
-            const files = Object.keys(flags).filter(p => typeof p === 'string' && p);
-            if (files.length > 0) {
-                restored[kw] = files.length === 1 ? files[0] : files;
-            }
-        }
-        if (Object.keys(restored).length === 0) return null;
-        return restored;
-    } catch (e) {
-        console.warn('[STJ Editor] bag_state 復元エラー:', e);
-        return null;
-    }
-}
-
-function _countImageFiles(v) {
-    if (Array.isArray(v)) return v.length;
-    if (typeof v === 'string' && v) return 1;
-    return 0;
-}
-
-function _parseImageFileKey(charName, fileName) {
-    if (!fileName || typeof fileName !== 'string') return null;
-    const base = fileName.replace(/\.(png|jpe?g|webp|gif|avif|bmp)$/i, '');
-    const tsMatch = base.match(/_(\d{4}-\d{2}-\d{2}@\d{2}h\d{2}m\d{2}s\d{3}ms)$/);
-    if (!tsMatch) return null;
-    const beforeTs = base.slice(0, base.length - tsMatch[0].length);
-    if (beforeTs === charName) return '__default__';
-    const prefix = `${charName}_`;
-    if (!beforeTs.startsWith(prefix)) return null;
-    const rest = beforeTs.slice(prefix.length);
-    if (rest === '') return '__default__';
-    if (/^\d+$/.test(rest)) return rest;
-    return null;
-}
-
-const _diskScanCache = new Map();
-const DISK_SCAN_TTL_MS = 5000;
-
-async function _scanImagesFromDisk(charName) {
-    if (!charName) return {};
-
-    const cached = _diskScanCache.get(charName);
-    if (cached && Date.now() - cached.ts < DISK_SCAN_TTL_MS) {
-        return cached.data;
+    function normalizeCellImages(val) {
+        if (!val) return [];
+        if (Array.isArray(val)) return val.filter(v => typeof v === 'string');
+        if (typeof val === 'string') return [val];
+        return [];
     }
 
-    try {
-        const origFetch = window.__gicOriginalFetch || window.fetch;
-        let headers = { 'Content-Type': 'application/json' };
+    function getCurrentImageMapFromCharData(charName) {
         try {
             const ctx = getSTContext();
-            if (ctx && typeof ctx.getRequestHeaders === 'function') {
-                const h = ctx.getRequestHeaders();
-                if (h && typeof h === 'object') headers = h;
-            }
-        } catch (e) { /* ignore */ }
-
-        const resp = await origFetch.call(window, '/api/images/list', {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({ folder: charName }),
-        });
-        if (!resp.ok) return {};
-        const files = await resp.json();
-        if (!Array.isArray(files)) return {};
-
-        const grouped = {};
-        for (const f of files) {
-            if (typeof f !== 'string') continue;
-            if (/_thum\.png$/i.test(f)) continue;
-            if (/_img_thum\.png$/i.test(f)) continue;
-            const key = _parseImageFileKey(charName, f);
-            if (!key) continue;
-            if (!grouped[key]) grouped[key] = [];
-            grouped[key].push(`user/images/${charName}/${f}`);
-        }
-
-        _diskScanCache.set(charName, { data: grouped, ts: Date.now() });
-        return grouped;
-    } catch (e) {
-        console.warn('[STJ Editor] _scanImagesFromDisk error:', e);
-        return {};
-    }
-}
-
-function _invalidateDiskScanCache(charName) {
-    if (charName) _diskScanCache.delete(charName);
-    else _diskScanCache.clear();
-}
-
-async function _restoreImageMapUnified(charName) {
-    const restored = {};
-
-    const bagMap = _restoreImageMapFromBagState(charName);
-    if (bagMap) {
-        for (const [k, v] of Object.entries(bagMap)) {
-            restored[k] = v;
+            const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
+            if (!char || char.name !== charName) return null;
+            const ext = char?.data?.extensions?.image_display_extension;
+            if (!ext || typeof ext !== 'object') return {};
+            return JSON.parse(JSON.stringify(ext));
+        } catch (e) {
+            console.warn('[STJ Editor] getCurrentImageMapFromCharData error:', e);
+            return null;
         }
     }
 
-    const diskMap = await _scanImagesFromDisk(charName);
-    for (const [k, v] of Object.entries(diskMap)) {
-        if (k === '__default__') {
-            if (!('default' in restored) || _isEmptyImageValue(restored['default'])) {
-                restored['default'] = v;
+    function saveImageMapToCharData(charName, imageMap) {
+        try {
+            const ctx = getSTContext();
+            const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
+            if (!char || char.name !== charName) {
+                return false;
             }
-        } else {
-            if (!(k in restored) || _isEmptyImageValue(restored[k])) {
+            if (!char.data) char.data = {};
+            if (!char.data.extensions) char.data.extensions = {};
+            char.data.extensions.image_display_extension = imageMap;
+
+            window.CharStore?.saveCharacterExtension?.(
+                'image_display_extension',
+                imageMap,
+                { immediate: true }
+            );
+            window.dispatchEvent(new CustomEvent('lbe-image-map-updated', {
+                detail: { charName, imageMap }
+            }));
+            return true;
+        } catch (e) {
+            console.warn('[STJ Editor] saveImageMapToCharData error:', e);
+            return false;
+        }
+    }
+
+    function isCommonRuleName(name) {
+        if (!name) return false;
+        const trimmed = String(name).trim();
+        if (!trimmed) return false;
+        if (trimmed === AUTO_SYNC_COMMON_RULE_NAME) return true;
+        if (trimmed.startsWith(AUTO_SYNC_COMMON_RULE_NAME)) return true;
+        return false;
+    }
+
+    function _isEmptyImageValue(v) {
+        if (v === null || v === undefined) return true;
+        if (Array.isArray(v)) return v.length === 0;
+        if (typeof v === 'string') return v.trim() === '';
+        return false;
+    }
+
+    function _restoreImageMapFromBagState(charName) {
+        try {
+            const ctx = getSTContext();
+            const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
+            if (!char || char.name !== charName) return null;
+            const bagState = char?.data?.extensions?.image_display_bag_state;
+            if (!bagState || typeof bagState !== 'object') return null;
+
+            const restored = {};
+            for (const [bagKey, state] of Object.entries(bagState)) {
+                if (!bagKey.startsWith('kw::')) continue;
+                const kw = bagKey.slice('kw::'.length);
+                const flags = state?.flags || {};
+                const files = Object.keys(flags).filter(p => typeof p === 'string' && p);
+                if (files.length > 0) {
+                    restored[kw] = files.length === 1 ? files[0] : files;
+                }
+            }
+            if (Object.keys(restored).length === 0) return null;
+            return restored;
+        } catch (e) {
+            console.warn('[STJ Editor] bag_state 復元エラー:', e);
+            return null;
+        }
+    }
+
+    function _countImageFiles(v) {
+        if (Array.isArray(v)) return v.length;
+        if (typeof v === 'string' && v) return 1;
+        return 0;
+    }
+
+    function _parseImageFileKey(charName, fileName) {
+        if (!fileName || typeof fileName !== 'string') return null;
+        const base = fileName.replace(/\.(png|jpe?g|webp|gif|avif|bmp)$/i, '');
+        const tsMatch = base.match(/_(\d{4}-\d{2}-\d{2}@\d{2}h\d{2}m\d{2}s\d{3}ms)$/);
+        if (!tsMatch) return null;
+        const beforeTs = base.slice(0, base.length - tsMatch[0].length);
+        if (beforeTs === charName) return '__default__';
+        const prefix = `${charName}_`;
+        if (!beforeTs.startsWith(prefix)) return null;
+        const rest = beforeTs.slice(prefix.length);
+        if (rest === '') return '__default__';
+        if (/^\d+$/.test(rest)) return rest;
+        return null;
+    }
+
+    const _diskScanCache = new Map();
+    const DISK_SCAN_TTL_MS = 5000;
+
+    async function _scanImagesFromDisk(charName) {
+        if (!charName) return {};
+
+        const cached = _diskScanCache.get(charName);
+        if (cached && Date.now() - cached.ts < DISK_SCAN_TTL_MS) {
+            return cached.data;
+        }
+
+        try {
+            const origFetch = window.__gicOriginalFetch || window.fetch;
+            let headers = { 'Content-Type': 'application/json' };
+            try {
+                const ctx = getSTContext();
+                if (ctx && typeof ctx.getRequestHeaders === 'function') {
+                    const h = ctx.getRequestHeaders();
+                    if (h && typeof h === 'object') headers = h;
+                }
+            } catch (e) { /* ignore */ }
+
+            const resp = await origFetch.call(window, '/api/images/list', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ folder: charName }),
+            });
+            if (!resp.ok) return {};
+            const files = await resp.json();
+            if (!Array.isArray(files)) return {};
+
+            const grouped = {};
+            for (const f of files) {
+                if (typeof f !== 'string') continue;
+                if (/_thum\.png$/i.test(f)) continue;
+                if (/_img_thum\.png$/i.test(f)) continue;
+                const key = _parseImageFileKey(charName, f);
+                if (!key) continue;
+                if (!grouped[key]) grouped[key] = [];
+                grouped[key].push(`user/images/${charName}/${f}`);
+            }
+
+            _diskScanCache.set(charName, { data: grouped, ts: Date.now() });
+            return grouped;
+        } catch (e) {
+            console.warn('[STJ Editor] _scanImagesFromDisk error:', e);
+            return {};
+        }
+    }
+
+    function _invalidateDiskScanCache(charName) {
+        if (charName) _diskScanCache.delete(charName);
+        else _diskScanCache.clear();
+    }
+
+    async function _restoreImageMapUnified(charName) {
+        const restored = {};
+
+        const bagMap = _restoreImageMapFromBagState(charName);
+        if (bagMap) {
+            for (const [k, v] of Object.entries(bagMap)) {
                 restored[k] = v;
             }
         }
+
+        const diskMap = await _scanImagesFromDisk(charName);
+        for (const [k, v] of Object.entries(diskMap)) {
+            if (k === '__default__') {
+                if (!('default' in restored) || _isEmptyImageValue(restored['default'])) {
+                    restored['default'] = v;
+                }
+            } else {
+                if (!(k in restored) || _isEmptyImageValue(restored[k])) {
+                    restored[k] = v;
+                }
+            }
+        }
+
+        return restored;
     }
 
-    return restored;
-}
+    function getEntryKeyword(entry) {
+        if (!entry) return '';
+        const comment = (typeof entry.comment === 'string' ? entry.comment.trim() : '');
+        if (comment && !isCommonRuleName(comment)) return comment;
+        const keys = getEntryKeys(entry);
+        if (keys.length > 0 && String(keys[0]).trim()) return String(keys[0]).trim();
+        return '';
+    }
 
-function _getBagStateFilesForKeyword(charName, keyword) {
-    try {
-        const ctx = getSTContext();
-        const char = ctx?.characters?.[ctx?.characterId] || ctx?.character;
-        if (!char || char.name !== charName) return [];
-        const bagState = char?.data?.extensions?.image_display_bag_state;
-        if (!bagState || typeof bagState !== 'object') return [];
-        const state = bagState[`kw::${keyword}`];
-        if (!state?.flags) return [];
-        return Object.keys(state.flags).filter(p => typeof p === 'string' && p);
-    } catch (e) { return []; }
-}
+    let _syncLorebookInFlight = null;
 
-function getEntryKeyword(entry) {
-    if (!entry) return '';
-    const comment = (typeof entry.comment === 'string' ? entry.comment.trim() : '');
-    if (comment && !isCommonRuleName(comment)) return comment;
-    const keys = getEntryKeys(entry);
-    if (keys.length > 0 && String(keys[0]).trim()) return String(keys[0]).trim();
-    return '';
-}
-
-function getStjCharSettings(charName) {
-    const settings = getExtensionSettings();
-    if (!settings[charName]) settings[charName] = {};
-    if (!settings[charName].uidMap) settings[charName].uidMap = {};
-    return settings[charName];
-}
-
-let _syncLorebookInFlight = null;
-
-async function syncLorebookEntriesToImageMap() {
-    if (_syncLorebookInFlight) {
+    async function syncLorebookEntriesToImageMap() {
+        if (_syncLorebookInFlight) {
+            return _syncLorebookInFlight;
+        }
+        _syncLorebookInFlight = _syncLorebookEntriesToImageMapImpl().finally(() => {
+            _syncLorebookInFlight = null;
+        });
         return _syncLorebookInFlight;
     }
-    _syncLorebookInFlight = _syncLorebookEntriesToImageMapImpl().finally(() => {
-        _syncLorebookInFlight = null;
-    });
-    return _syncLorebookInFlight;
-}
 
-async function _syncLorebookEntriesToImageMapImpl() {
-    const charName = detectCharacterNameFromDOM();
-    if (!charName) {
-        return 0;
-    }
+    async function _syncLorebookEntriesToImageMapImpl() {
+        const charName = detectCharacterNameFromDOM();
+        if (!charName) {
+            return 0;
+        }
 
-    const worldName = getCharacterWorldInfoName();
-    if (!worldName) {
-        return 0;
-    }
+        const worldName = getCharacterWorldInfoName();
+        if (!worldName) {
+            return 0;
+        }
 
-    const entries = await loadWorldInfoEntries(worldName);
-    if (!entries || typeof entries !== 'object') return 0;
+        const entries = await loadWorldInfoEntries(worldName);
+        if (!entries || typeof entries !== 'object') return 0;
 
-    const list = Array.isArray(entries) ? entries : Object.values(entries);
-    if (list.length === 0) return 0;
-    let imageMap = getCurrentImageMapFromCharData(charName);
-    if (!imageMap) imageMap = {};
+        const list = Array.isArray(entries) ? entries : Object.values(entries);
+        if (list.length === 0) return 0;
+        let imageMap = getCurrentImageMapFromCharData(charName);
+        if (!imageMap) imageMap = {};
 
-    const activeKeywords = new Set();
-    for (const entry of list) {
-        if (!entry) continue;
-        const kw = getEntryKeyword(entry);
-        if (!kw || isCommonRuleName(kw)) continue;
-        activeKeywords.add(kw);
-    }
+        const activeKeywords = new Set();
+        for (const entry of list) {
+            if (!entry) continue;
+            const kw = getEntryKeyword(entry);
+            if (!kw || isCommonRuleName(kw)) continue;
+            activeKeywords.add(kw);
+        }
 
-    let hasEmptyKeys = Object.entries(imageMap).some(
-        ([k, v]) => !UNREGISTER_EXCLUDED_KEYS.has(k) && _isEmptyImageValue(v)
-    );
-    let restoreData = {};
-    if (hasEmptyKeys) {
-        restoreData = await _restoreImageMapUnified(charName);
-    }
+        let hasEmptyKeys = Object.entries(imageMap).some(
+            ([k, v]) => !UNREGISTER_EXCLUDED_KEYS.has(k) && _isEmptyImageValue(v)
+        );
+        let restoreData = {};
+        if (hasEmptyKeys) {
+            restoreData = await _restoreImageMapUnified(charName);
+        }
 
-// --- 1. 確実な改名（リネーム）検出と、元の位置を維持したキーのインプレース置換 ---
-    const existingImageKeys = Object.keys(imageMap).filter(k => !UNREGISTER_EXCLUDED_KEYS.has(k));
-    const missingKeys = existingImageKeys.filter(k => !activeKeywords.has(k));
-    const newKeywords = [...activeKeywords].filter(k => imageMap[k] === undefined);
+        const existingImageKeys = Object.keys(imageMap).filter(k => !UNREGISTER_EXCLUDED_KEYS.has(k));
+        const missingKeys = existingImageKeys.filter(k => !activeKeywords.has(k));
+        const newKeywords = [...activeKeywords].filter(k => imageMap[k] === undefined);
 
-    if (missingKeys.length > 0 && newKeywords.length > 0) {
-        const count = Math.min(missingKeys.length, newKeywords.length);
-        for (let i = 0; i < count; i++) {
-            const oldKw = missingKeys[i];
-            const newKw = newKeywords[i];
-            if (imageMap[oldKw] !== undefined) {
-                const oldData = imageMap[oldKw];
+        if (missingKeys.length > 0 && newKeywords.length > 0) {
+            const count = Math.min(missingKeys.length, newKeywords.length);
+            for (let i = 0; i < count; i++) {
+                const oldKw = missingKeys[i];
+                const newKw = newKeywords[i];
+                if (imageMap[oldKw] !== undefined) {
+                    const oldData = imageMap[oldKw];
 
-                // ★ 古いキーの「オブジェクト内の位置（順序）」を完全に維持したまま新しいキー名に変更する
-                const newImageMap = {};
-                for (const [k, v] of Object.entries(imageMap)) {
-                    if (k === oldKw) {
-                        // 古いキーの位置にそのまま新しいキー名でデータを配置
-                        newImageMap[newKw] = !_isEmptyImageValue(oldData) ? oldData : [];
-                    } else if (!Object.prototype.hasOwnProperty.call(newImageMap, k)) {
-                        newImageMap[k] = v;
+                    const newImageMap = {};
+                    for (const [k, v] of Object.entries(imageMap)) {
+                        if (k === oldKw) {
+                            newImageMap[newKw] = !_isEmptyImageValue(oldData) ? oldData : [];
+                        } else if (!Object.prototype.hasOwnProperty.call(newImageMap, k)) {
+                            newImageMap[k] = v;
+                        }
                     }
+                    imageMap = newImageMap;
+                    console.log(`[STJ Editor] 🔄 位置を維持して改名キーを置換: "${oldKw}" → "${newKw}"`);
                 }
-                imageMap = newImageMap;
-                console.log(`[STJ Editor] 🔄 位置を維持して改名キーを置換: "${oldKw}" → "${newKw}"`);
             }
         }
-    }
 
-    // --- 2. 完全に削除されたエントリのクリーンアップ ---
-    const removedKeys = [];
-    for (const key of Object.keys(imageMap)) {
-        if (UNREGISTER_EXCLUDED_KEYS.has(key)) continue;
-        if (!activeKeywords.has(key)) {
-            delete imageMap[key];
-            removedKeys.push(key);
-        }
-    }
-
-    // --- 3. 新規追加・既存維持・復元処理 ---
-    const addedKeys = [];
-    const restoredKeys = [];
-    for (const keyword of activeKeywords) {
-        if (UNREGISTER_EXCLUDED_KEYS.has(keyword)) continue;
-
-        const exists = Object.prototype.hasOwnProperty.call(imageMap, keyword) && !_isEmptyImageValue(imageMap[keyword]);
-        const rv = restoreData[keyword];
-        const hasRestore = rv && !_isEmptyImageValue(rv);
-
-        if (!exists) {
-            if (hasRestore) {
-                imageMap[keyword] = rv;
-                restoredKeys.push(keyword);
-            } else if (imageMap[keyword] === undefined || _isEmptyImageValue(imageMap[keyword])) {
-                imageMap[keyword] = [];
-                addedKeys.push(keyword);
+        const removedKeys = [];
+        for (const key of Object.keys(imageMap)) {
+            if (UNREGISTER_EXCLUDED_KEYS.has(key)) continue;
+            if (!activeKeywords.has(key)) {
+                delete imageMap[key];
+                removedKeys.push(key);
             }
         }
+
+        const addedKeys = [];
+        const restoredKeys = [];
+        for (const keyword of activeKeywords) {
+            if (UNREGISTER_EXCLUDED_KEYS.has(keyword)) continue;
+
+            const exists = Object.prototype.hasOwnProperty.call(imageMap, keyword) && !_isEmptyImageValue(imageMap[keyword]);
+            const rv = restoreData[keyword];
+            const hasRestore = rv && !_isEmptyImageValue(rv);
+
+            if (!exists) {
+                if (hasRestore) {
+                    imageMap[keyword] = rv;
+                    restoredKeys.push(keyword);
+                } else if (imageMap[keyword] === undefined || _isEmptyImageValue(imageMap[keyword])) {
+                    imageMap[keyword] = [];
+                    addedKeys.push(keyword);
+                }
+            }
+        }
+
+        const changed = removedKeys.length > 0 || addedKeys.length > 0 || restoredKeys.length > 0 || missingKeys.length > 0;
+
+        if (changed) {
+            saveImageMapToCharData(charName, imageMap);
+
+            if (stjModalEl && stjModalEl.style.display === 'block' && !_editorLoading) {
+                try {
+                    populateFormFromImageMap(imageMap, true);
+                    runLiveTest();
+                    autoSave({ immediate: true });
+                    console.log('[STJ Editor] 🔄 順序を完全に維持してJSON編集画面を更新しました');
+                } catch (e) {
+                    console.warn('[STJ Editor] UI 再描画エラー:', e);
+                }
+            }
+        }
+
+        return addedKeys.length;
     }
 
-    const changed = removedKeys.length > 0 || addedKeys.length > 0 || restoredKeys.length > 0 || missingKeys.length > 0;
+    async function handleImageGeneratedForKeyword(e) {
+        const { charName, entryKey, fileName } = e.detail || {};
+        if (!charName || !entryKey || !fileName) return;
 
-    if (changed) {
+        const currentCharName = detectCharacterNameFromDOM();
+        if (currentCharName !== charName) {
+            return;
+        }
+
+        if (isCommonRuleName(entryKey)) {
+            return;
+        }
+
+        const worldName = getCharacterWorldInfoName();
+        if (!worldName) {
+            return;
+        }
+
+        try {
+            window.LorebookExpansion?.clearWorldInfoEntriesCache?.(worldName);
+        } catch (err) { /* ignore */ }
+
+        let entries = null;
+        try {
+            entries = await loadWorldInfoEntries(worldName);
+        } catch (err) { /* ignore */ }
+        if (!entries) {
+            return;
+        }
+
+        const list = Array.isArray(entries) ? entries : Object.values(entries);
+
+        let entryExists = false;
+        for (const entry of list) {
+            if (!entry) continue;
+            const comment = (typeof entry.comment === 'string' ? entry.comment.trim() : '');
+            const keys = getEntryKeys(entry);
+            const firstKey = keys.length > 0 ? String(keys[0]).trim() : '';
+            if (comment === entryKey || firstKey === entryKey) {
+                entryExists = true;
+                break;
+            }
+        }
+
+        if (!entryExists) {
+            return;
+        }
+
+        const imageMap = getCurrentImageMapFromCharData(charName);
+        if (!imageMap) return;
+
+        if (!Object.prototype.hasOwnProperty.call(imageMap, entryKey)) {
+            imageMap[entryKey] = [];
+        }
+
+        const fullPath = `user/images/${charName}/${fileName}`;
+        const currentList = normalizeCellImages(imageMap[entryKey]);
+
+        const isDuplicate = currentList.some(p => {
+            if (typeof p !== 'string') return false;
+            const base = p.split('/').pop().split('?')[0].split('#')[0];
+            try { return decodeURIComponent(base) === fileName; } catch (err) { return base === fileName; }
+        });
+        if (isDuplicate) {
+            return;
+        }
+
+        currentList.push(fullPath);
+        imageMap[entryKey] = currentList;
+
         saveImageMapToCharData(charName, imageMap);
 
-        if (stjModalEl && stjModalEl.style.display === 'block' && !_editorLoading) {
+        if (stjModalEl && stjModalEl.style.display === 'block') {
             try {
-                populateFormFromImageMap(imageMap, true);
-                runLiveTest();
+                populateFormFromImageMap(imageMap);
                 autoSave({ immediate: true });
-                console.log('[STJ Editor] 🔄 順序を完全に維持してJSON編集画面を更新しました');
-            } catch (e) {
-                console.warn('[STJ Editor] UI 再描画エラー:', e);
+            } catch (err) {
+                console.warn('[STJ Editor] UI 更新エラー:', err);
             }
         }
     }
 
-    return addedKeys.length;
-}
+    function setupLorebookEntryWatcher() {
+        if (window.__stjLorebookEntryWatcherInstalled) return;
+        window.__stjLorebookEntryWatcherInstalled = true;
 
-async function handleImageGeneratedForKeyword(e) {
-    const { charName, entryKey, fileName } = e.detail || {};
-    if (!charName || !entryKey || !fileName) return;
-
-    const currentCharName = detectCharacterNameFromDOM();
-    if (currentCharName !== charName) {
-        return;
-    }
-
-    if (isCommonRuleName(entryKey)) {
-        return;
-    }
-
-    const worldName = getCharacterWorldInfoName();
-    if (!worldName) {
-        return;
-    }
-
-    try {
-        window.LorebookExpansion?.clearWorldInfoEntriesCache?.(worldName);
-    } catch (err) { /* ignore */ }
-
-    let entries = null;
-    try {
-        entries = await loadWorldInfoEntries(worldName);
-    } catch (err) { /* ignore */ }
-    if (!entries) {
-        return;
-    }
-
-    const list = Array.isArray(entries) ? entries : Object.values(entries);
-
-    let entryExists = false;
-    for (const entry of list) {
-        if (!entry) continue;
-        const comment = (typeof entry.comment === 'string' ? entry.comment.trim() : '');
-        const keys = getEntryKeys(entry);
-        const firstKey = keys.length > 0 ? String(keys[0]).trim() : '';
-        if (comment === entryKey || firstKey === entryKey) {
-            entryExists = true;
-            break;
+        const ctx = getSTContext();
+        if (!ctx?.eventSource || !ctx?.eventTypes) {
+            setTimeout(setupLorebookEntryWatcher, 1000);
+            return;
         }
+
+        const es = ctx.eventSource;
+        const et = ctx.eventTypes;
+
+        const syncLater = (delay = 500) => {
+            setTimeout(() => {
+                syncLorebookEntriesToImageMap().catch(e => console.warn('[STJ Editor] syncLorebook error:', e));
+            }, delay);
+        };
+
+        ['WORLDINFO_UPDATED', 'WORLDINFO_SETTINGS_UPDATED'].forEach(name => {
+            if (et[name] && typeof es.on === 'function') {
+                es.on(et[name], () => syncLater(600));
+            }
+        });
+
+        ['CHAT_CHANGED', 'CHARACTER_SELECTED', 'CHARACTER_PAGE_LOADED'].forEach(name => {
+            if (et[name] && typeof es.on === 'function') {
+                es.on(et[name], () => syncLater(800));
+            }
+        });
+
+        window.addEventListener('gic-image-generated-for-keyword', handleImageGeneratedForKeyword);
+
+        syncLater(1500);
     }
-
-    if (!entryExists) {
-        return;
-    }
-
-    const imageMap = getCurrentImageMapFromCharData(charName);
-    if (!imageMap) return;
-
-    if (!Object.prototype.hasOwnProperty.call(imageMap, entryKey)) {
-        imageMap[entryKey] = [];
-    }
-
-    const fullPath = `user/images/${charName}/${fileName}`;
-    const currentList = normalizeCellImages(imageMap[entryKey]);
-
-    const isDuplicate = currentList.some(p => {
-        if (typeof p !== 'string') return false;
-        const base = p.split('/').pop().split('?')[0].split('#')[0];
-        try { return decodeURIComponent(base) === fileName; } catch (err) { return base === fileName; }
-    });
-    if (isDuplicate) {
-        return;
-    }
-
-    currentList.push(fullPath);
-    imageMap[entryKey] = currentList;
-
-    saveImageMapToCharData(charName, imageMap);
-
-    if (stjModalEl && stjModalEl.style.display === 'block') {
-        try {
-            populateFormFromImageMap(imageMap);
-            autoSave({ immediate: true });
-        } catch (err) {
-            console.warn('[STJ Editor] UI 更新エラー:', err);
-        }
-    }
-}
-
-function setupLorebookEntryWatcher() {
-    if (window.__stjLorebookEntryWatcherInstalled) return;
-    window.__stjLorebookEntryWatcherInstalled = true;
-
-    const ctx = getSTContext();
-    if (!ctx?.eventSource || !ctx?.eventTypes) {
-        setTimeout(setupLorebookEntryWatcher, 1000);
-        return;
-    }
-
-    const es = ctx.eventSource;
-    const et = ctx.eventTypes;
-
-    const syncLater = (delay = 500) => {
-        setTimeout(() => {
-            syncLorebookEntriesToImageMap().catch(e => console.warn('[STJ Editor] syncLorebook error:', e));
-        }, delay);
-    };
-
-    ['WORLDINFO_UPDATED', 'WORLDINFO_SETTINGS_UPDATED'].forEach(name => {
-        if (et[name] && typeof es.on === 'function') {
-            es.on(et[name], () => syncLater(600));
-        }
-    });
-
-    ['CHAT_CHANGED', 'CHARACTER_SELECTED', 'CHARACTER_PAGE_LOADED'].forEach(name => {
-        if (et[name] && typeof es.on === 'function') {
-            es.on(et[name], () => syncLater(800));
-        }
-    });
-
-    window.addEventListener('gic-image-generated-for-keyword', handleImageGeneratedForKeyword);
-
-    syncLater(1500);
-}
 
     function retranslateStjUI() {
         if (!stjModalEl) return;
