@@ -1755,7 +1755,7 @@ function extractChoiceTriggerText(choiceStr) {
                 #stj_cell_modal .stj-cell-modal-content {
                     display: flex !important;
                     flex-direction: column !important;
-                    width: calc(var(--stj-cell-modal-base-w, 820px) * 1.35) !important;
+                    width: calc(var(--stj-cell-modal-base-w, 80vh) * 1.35) !important;
                     max-width: 96vw !important;
                     height: calc(var(--stj-cell-modal-base-h, 86vh) * 1.15) !important;
                     max-height: 96vh !important;
@@ -1800,7 +1800,7 @@ function extractChoiceTriggerText(choiceStr) {
                     border: 1px solid #aaa;
                     border-radius: calc(var(--exp-scale, 1) * 4px);
                     cursor: pointer;
-                    font-size: calc(var(--exp-scale, 1) * 16px);
+                    font-size: calc(var(--exp-scale, 1) * 24px);
                     font-weight: bold;
                     flex-shrink: 0;
                 }
@@ -1812,7 +1812,7 @@ function extractChoiceTriggerText(choiceStr) {
                     border: 1px solid #718096;
                     border-radius: calc(var(--exp-scale, 1) * 4px);
                     cursor: pointer;
-                    font-size: calc(var(--exp-scale, 1) * 16px);
+                    font-size: calc(var(--exp-scale, 1) * 24px);
                     font-weight: bold;
                     flex-shrink: 0;
                 }
@@ -1879,7 +1879,7 @@ function extractChoiceTriggerText(choiceStr) {
                     min-width: 0;
                     padding: 10px 16px;
                     margin: 0;
-                    font-size: 28px;
+                    font-size: calc(var(--exp-scale, 1) * 28px);
                     font-weight: bold;
                     color: #ffffff;
                     text-align: left;
@@ -1894,6 +1894,15 @@ function extractChoiceTriggerText(choiceStr) {
                 }
                 .stj-cell-modal-keyword-display:empty {
                     display: none;
+                }
+                .lbe-label-row > .lbe-resolution-select {
+                    flex: 0 0 auto;
+                    width: auto;
+                    min-width: 150px;
+                    max-width: calc(var(--exp-scale, 1) * 300px);
+                    font-size: 0.82em;
+                    padding: 2px 4px;
+                    box-sizing: border-box;
                 }
             `;
             document.head.appendChild(s);
