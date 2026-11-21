@@ -1028,7 +1028,7 @@
 
         arrangeTreeControlsAndCompress(containerEl);
 
-        const areaPad = Math.ceil(40 * scale);
+        const edgePad = Math.ceil(40 * scale);
         const finalW = maxRight > 0 ? Math.ceil(maxRight + pad) : null;
         if (finalW !== null) {
             containerEl.style.minWidth = `${finalW}px`;
