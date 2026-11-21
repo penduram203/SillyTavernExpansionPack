@@ -786,6 +786,41 @@ function applyEntrySnapshotToEl(el, snap) {
         }, 250);
     }
 
+    function restoreSpecialPreviewsToOrigin() {
+        document.querySelectorAll('.stj-special-pair[data-stj-moved-pair="1"]').forEach((pair) => {
+            Array.from(pair.children).forEach((child) => {
+                const origParentId = child.dataset?.stjOrigParentId;
+                const origIndex = parseInt(child.dataset?.stjOrigIndex || '-1', 10);
+                const origParent = origParentId ? document.getElementById(origParentId) : null;
+                if (origParent) {
+                    if (origIndex >= 0 && origIndex < origParent.children.length) {
+                        origParent.insertBefore(child, origParent.children[origIndex]);
+                    } else {
+                        origParent.appendChild(child);
+                    }
+                }
+                child.style.position = child.dataset?.stjOrigPosition || '';
+                child.style.left = child.dataset?.stjOrigLeft || '';
+                child.style.top = child.dataset?.stjOrigTop || '';
+                child.style.width = child.dataset?.stjOrigWidth || '';
+                child.style.height = child.dataset?.stjOrigHeight || '';
+            });
+            pair.remove();
+        });
+    }
+
+    if (typeof window !== 'undefined' && !window._stjTreeCloseRestoreInstalled) {
+        window._stjTreeCloseRestoreInstalled = true;
+        document.addEventListener('click', (e) => {
+            const target = e.target?.closest?.('button, [role="button"], .menu_button, .stj-modal-close');
+            if (!target) return;
+            const txt = (target.textContent || '').trim();
+            if (txt === '終了' || txt === '閉じる' || target.classList.contains('stj-modal-close')) {
+                restoreSpecialPreviewsToOrigin();
+            }
+        }, true);
+    }
+
     function arrangeTreeControlsAndCompress(containerEl) {
         if (!containerEl || !containerEl.classList.contains('stj-tree-mode')) return;
 
@@ -801,7 +836,7 @@ function applyEntrySnapshotToEl(el, snap) {
             });
         });
 
-        // 2. デフォルト表示・サムネイル表示のプレビュー画像と .stj-special-label をツリー左上へ組み込み
+        // 2. デフォルト表示・サムネイル表示をツリー左上へ組み込み（サイズは現在の半分）
         let topLeftBox = containerEl.querySelector('.stj-tree-top-left-modes');
         if (!topLeftBox) {
             topLeftBox = document.createElement('div');
@@ -809,10 +844,30 @@ function applyEntrySnapshotToEl(el, snap) {
             containerEl.appendChild(topLeftBox);
         }
 
-        const collectSpecialPair = (previewId, labelText) => {
-            const group = document.createElement('div');
-            group.style.cssText = 'display:flex;flex-direction:column;align-items:flex-start;gap:2px;';
+        const moveSpecialElementOnce = (el, targetParent) => {
+            if (!el || !targetParent || el.parentElement === targetParent) return;
+            if (!el.dataset.stjOrigRecorded) {
+                el.dataset.stjOrigRecorded = '1';
+                if (el.parentElement && !el.parentElement.id) {
+                    el.parentElement.id = `stj_orig_parent_${Math.random().toString(36).slice(2, 9)}`;
+                }
+                el.dataset.stjOrigParentId = el.parentElement?.id || '';
+                el.dataset.stjOrigIndex = el.parentElement
+                    ? String(Array.from(el.parentElement.children).indexOf(el))
+                    : '-1';
+                el.dataset.stjOrigPosition = el.style.position || '';
+                el.dataset.stjOrigLeft = el.style.left || '';
+                el.dataset.stjOrigTop = el.style.top || '';
+                el.dataset.stjOrigWidth = el.style.width || '';
+                el.dataset.stjOrigHeight = el.style.height || '';
+            }
+            el.style.position = 'static';
+            el.style.left = 'auto';
+            el.style.top = 'auto';
+            targetParent.appendChild(el);
+        };
 
+        const collectSpecialPair = (previewId, labelText) => {
             let previewEl = null;
             let labelEl = null;
             for (const root of roots) {
@@ -825,43 +880,28 @@ function applyEntrySnapshotToEl(el, snap) {
                     ) || null;
                 }
             }
+            if (!previewEl && !labelEl) return null;
 
-            // プレビュー画像とラベルが共通の小さなラッパー内にある場合はラッパーごと移動
-            if (previewEl && labelEl && previewEl.parentElement && previewEl.parentElement === labelEl.parentElement) {
-                const wrapper = previewEl.parentElement;
-                if (wrapper !== containerEl && wrapper !== topLeftBox && !wrapper.contains(containerEl)) {
-                    wrapper.style.position = 'static';
-                    wrapper.style.left = 'auto';
-                    wrapper.style.top = 'auto';
-                    return wrapper;
-                }
+            let pair = topLeftBox.querySelector(`[data-stj-pair-key="${previewId}"]`);
+            if (!pair) {
+                pair = document.createElement('div');
+                pair.className = 'stj-special-pair';
+                pair.dataset.stjMovedPair = '1';
+                pair.dataset.stjPairKey = previewId;
+                topLeftBox.appendChild(pair);
             }
 
-            if (labelEl && labelEl.parentElement !== group) {
-                labelEl.style.position = 'static';
-                labelEl.style.left = 'auto';
-                labelEl.style.top = 'auto';
-                group.appendChild(labelEl);
-            }
-            if (previewEl && previewEl.parentElement !== group) {
-                previewEl.style.position = 'relative';
-                previewEl.style.left = 'auto';
-                previewEl.style.top = 'auto';
-                group.appendChild(previewEl);
-            }
-            return group.childElementCount > 0 ? group : null;
+            moveSpecialElementOnce(labelEl, pair);
+            moveSpecialElementOnce(previewEl, pair);
+            return pair;
         };
 
         [
             { id: 'stj_preview_default', label: 'デフォルト表示' },
             { id: 'stj_preview_thumbnail', label: 'サムネイル表示' },
         ].forEach(({ id, label }) => {
-            const existing = topLeftBox.querySelector(`#${id}`);
-            if (existing) return;
-            const pair = collectSpecialPair(id, label);
-            if (pair) {
-                topLeftBox.appendChild(pair);
-            }
+
+            collectSpecialPair(id, label);
         });
 
         // 3. 「他セル」（画像リストが空 `[]` や未紐付けのセル等）をツリー左下へ組み込み
@@ -873,9 +913,11 @@ function applyEntrySnapshotToEl(el, snap) {
         }
         containerEl.querySelectorAll('.stj-keyword-item').forEach((item) => {
             if (item.closest('.stj-tree-bottom-left-other')) return;
+            if (item.closest('.stj-tree-top-left-modes')) return;
             const imgListAttr = (item.getAttribute('data-image-list') || '').trim();
             const isUnlinked = imgListAttr === '' || imgListAttr === '[]';
             if (isUnlinked) {
+                item.dataset.stjIsOtherCell = '1';
                 item.style.position = 'relative';
                 item.style.left = 'auto';
                 item.style.top = 'auto';
@@ -2068,21 +2110,37 @@ function extractChoiceTriggerText(choiceStr) {
                 }
                 .stj-tree-top-left-modes {
                     position: absolute;
-                    left: calc(var(--stj-tree-scale, 1) * 16px);
-                    top: calc(var(--stj-tree-scale, 1) * 16px);
+                    left: calc(var(--stj-tree-scale, 1) * 12px);
+                    top: calc(var(--stj-tree-scale, 1) * 12px);
                     z-index: 5;
                     display: flex;
                     flex-direction: column;
                     gap: calc(var(--stj-tree-scale, 1) * 6px);
                 }
+                .stj-tree-top-left-modes .stj-special-pair {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: flex-start;
+                    gap: calc(var(--stj-tree-scale, 1) * 2px);
+                    width: calc(var(--stj-tree-scale, 1) * 70px);
+                }
+                .stj-tree-top-left-modes .stj-image-preview {
+                    width: calc(var(--stj-tree-scale, 1) * 70px) !important;
+                    height: calc(var(--stj-tree-scale, 1) * 63px) !important;
+                }
+                .stj-tree-top-left-modes .stj-special-label {
+                    font-size: calc(var(--stj-tree-scale, 1) * 10px) !important;
+                    line-height: 1.2 !important;
+                }
                 .stj-tree-bottom-left-other {
                     position: absolute;
-                    left: calc(var(--stj-tree-scale, 1) * 16px);
-                    bottom: calc(var(--stj-tree-scale, 1) * 16px);
+                    left: calc(var(--stj-tree-scale, 1) * 12px);
+                    bottom: calc(var(--stj-tree-scale, 1) * 12px);
                     z-index: 5;
                     display: flex;
-                    align-items: center;
-                    gap: calc(var(--stj-tree-scale, 1) * 6px);
+                    flex-direction: row;
+                    align-items: flex-end;
+                    gap: calc(var(--stj-tree-scale, 1) * 8px);
                 }
                 #stj_keywords_container.stj-tree-mode .stj-keyword-item {
                     box-sizing: border-box;
