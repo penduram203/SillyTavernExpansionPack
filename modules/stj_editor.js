@@ -1050,7 +1050,7 @@
         }
 
         const baseMinW = Math.round(940 * scale);
-        const areaPad = Math.ceil(20 * scale);
+        const edgePad = Math.ceil(20 * scale);
         const rawTreeBottom = maxBottom > 0 ? maxBottom : (120 * scale);
         containerEl.dataset.stjTreeBottom = String(Math.ceil(rawTreeBottom));
 
