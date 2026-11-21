@@ -1270,6 +1270,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
     const section = document.createElement('div');
     section.className = UI_SECTION_CLASS;
     section.setAttribute(ATTR_UID, String(uid));
+    section.style.cssText = 'display:flex;flex-direction:column;gap:3px;margin:2px 0;padding:2px 0;';
 
     // ── data の正規化（念のため） ──
     if (!Array.isArray(data.templates) || data.templates.length === 0) {
@@ -1314,22 +1315,26 @@ function buildExpansionSection(uid, worldName, data, onChange) {
     // ── template ラベル行 ──
     const templateLabelRow = document.createElement('div');
     templateLabelRow.className = 'lbe-label-row lbe-template-row';
-
+    templateLabelRow.style.cssText = 'display:flex;align-items:center;gap:4px;margin:0;padding:0;flex-wrap:wrap;';
+ 
     const templateLabel = document.createElement('label');
     templateLabel.className = 'lbe-label';
     templateLabel.textContent = 'template';
+    templateLabel.style.cssText = 'margin:0;padding:0;line-height:1.2;font-size:12px;';
     templateLabelRow.appendChild(templateLabel);
 
     const templateSelect = document.createElement('select');
     templateSelect.className = 'lbe-template-select text_pole';
     templateSelect.title = _t('lbe.template.title', 'プロンプトのテンプレートを切り替える');
+    templateSelect.style.cssText = 'margin:0;padding:2px 4px;height:auto;width:auto;';
     templateLabelRow.appendChild(templateSelect);
-
+ 
     const templateAddBtn = document.createElement('button');
     templateAddBtn.type = 'button';
     templateAddBtn.className = 'lbe-template-add menu_button';
     templateAddBtn.textContent = _t('lbe.template.add', '追加');
     templateAddBtn.title = _t('lbe.template.add_title', '新しいテンプレートを追加');
+    templateAddBtn.style.cssText = 'margin:0;padding:2px 6px;height:auto;line-height:1.2;font-size:12px;';
     templateLabelRow.appendChild(templateAddBtn);
 
     const templateDelBtn = document.createElement('button');
@@ -1337,57 +1342,44 @@ function buildExpansionSection(uid, worldName, data, onChange) {
     templateDelBtn.className = 'lbe-template-del menu_button';
     templateDelBtn.textContent = _t('lbe.template.del', '削除');
     templateDelBtn.title = _t('lbe.template.del_title', '現在のテンプレートを削除');
+    templateDelBtn.style.cssText = 'margin:0;padding:2px 6px;height:auto;line-height:1.2;font-size:12px;';
     templateLabelRow.appendChild(templateDelBtn);
-
-    section.appendChild(templateLabelRow);
 
     const RESOLUTION_OPTIONS = getResolutionOptionsForLex().concat([
         { value: 'random', label: _t('lbe.random', 'ランダム') },
     ]);
-
+ 
     const isResolutionValid = (v) => RESOLUTION_OPTIONS.some(o => o.value === v);
     const LEX_DEFAULT_RESOLUTION = '1280x720';
     const fallbackResolution = LEX_DEFAULT_RESOLUTION;
-
-    // ── Img_prompt ラベル行 ──
-    const imgLabelRow = document.createElement('div');
-    imgLabelRow.className = 'lbe-label-row';
-
-    const imgLabel = document.createElement('label');
-    imgLabel.className = 'lbe-label';
-    imgLabel.textContent = 'Img_prompt';
-    imgLabelRow.appendChild(imgLabel);
-
+ 
     const resolutionSelect = document.createElement('select');
     resolutionSelect.className = 'lbe-resolution-select text_pole';
     resolutionSelect.title = _t('lbe.resolution.title', 'このエントリで画像を生成する際の解像度');
+    resolutionSelect.style.cssText = 'margin:0 0 0 4px;padding:2px 4px;height:auto;width:auto;';
     for (const opt of RESOLUTION_OPTIONS) {
         const o = document.createElement('option');
         o.value = opt.value;
         o.textContent = opt.label;
         resolutionSelect.appendChild(o);
     }
-    imgLabelRow.appendChild(resolutionSelect);
-
-    section.appendChild(imgLabelRow);
-
+    // template 0 追加 削除 1280×720 の順に1行へ配置
+    templateLabelRow.appendChild(resolutionSelect);
+    section.appendChild(templateLabelRow);
+ 
     // ── Img_prompt textarea ──
     const imgTextarea = document.createElement('textarea');
     imgTextarea.className = 'lbe-img-prompt text_pole';
     imgTextarea.rows = 3;
+    imgTextarea.style.cssText = 'margin:0;padding:3px 6px;min-height:0;line-height:1.25;';
     imgTextarea.placeholder = '例: 5girls:1.4, schoo sailor uniform, miniskirt, sitting on chair, looking at viewer, school, classroom, smile, femdom';
     section.appendChild(imgTextarea);
-
-    // ── Negative_prompt ラベル ──
-    const negLabel = document.createElement('label');
-    negLabel.className = 'lbe-label';
-    negLabel.textContent = 'Negative_prompt';
-    section.appendChild(negLabel);
 
     // ── Negative_prompt textarea ──
     const negTextarea = document.createElement('textarea');
     negTextarea.className = 'lbe-negative-prompt text_pole';
     negTextarea.rows = 2;
+    negTextarea.style.cssText = 'margin:0;padding:3px 6px;min-height:0;line-height:1.25;';
     negTextarea.placeholder = '例: bad hands, extra fingers, lowres, ugly, blurry, watermark';
     section.appendChild(negTextarea);
 
@@ -1540,15 +1532,9 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         onChange(data);
     });
 
-    // ── variables セクション ──
-    const varsLabel = document.createElement('label');
-    varsLabel.className = 'lbe-label';
-    varsLabel.textContent = 'variables';
-    section.appendChild(varsLabel);
-
     const varsContainer = document.createElement('div');
     varsContainer.className = 'lbe-variables-editor';
-    section.appendChild(varsContainer);
+    varsContainer.style.cssText = 'margin:0;padding:0;display:flex;flex-direction:column;gap:2px;';
 
     const updateValuePlaceholder = (input, type) => {
         if (!input) return;
@@ -1568,6 +1554,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         variables.forEach((v, idx) => {
             const row = document.createElement('div');
             row.className = 'lbe-variable-row';
+            row.style.cssText = 'display:flex;align-items:center;gap:4px;margin:0;padding:0;';
 
             const typeSelect = document.createElement('select');
             typeSelect.className = 'lbe-variable-type text_pole';
@@ -1642,6 +1629,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         addBtn.type = 'button';
         addBtn.className = 'lbe-variable-add menu_button';
         addBtn.textContent = _t('lbe.var.add', '＋ 変数を追加');
+        addBtn.style.cssText = 'margin:0;padding:2px 6px;height:auto;line-height:1.2;font-size:12px;align-self:flex-start;';
         addBtn.addEventListener('click', () => {
             if (!Array.isArray(data.variables)) data.variables = [];
             data.variables.push({ type: 'string', name: '', value: '' });
@@ -1653,14 +1641,9 @@ function buildExpansionSection(uid, worldName, data, onChange) {
 
     renderVariables();
 
-    // ── choices セクション (1つのテキスト入力欄に統一) ──
-    const choicesLabel = document.createElement('label');
-    choicesLabel.className = 'lbe-label';
-    choicesLabel.textContent = 'choices';
-    section.appendChild(choicesLabel);
-
     const choicesContainer = document.createElement('div');
     choicesContainer.className = 'lbe-choices-editor';
+    choicesContainer.style.cssText = 'margin:0;padding:0;display:flex;flex-direction:column;gap:2px;';
     section.appendChild(choicesContainer);
 
     const renderChoices = () => {
@@ -1669,14 +1652,14 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         data.choices.forEach((choice, idx) => {
             const row = document.createElement('div');
             row.className = 'lbe-choice-row';
-            row.style.cssText = 'display: flex; align-items: center; gap: 6px; margin-bottom: 6px;';
+            row.style.cssText = 'display:flex;align-items:center;gap:4px;margin:0;padding:0;';
 
             const textInput = document.createElement('input');
             textInput.type = 'text';
             textInput.className = 'lbe-choice-input text_pole';
             textInput.placeholder = _t('lbe.choice.text_ph', '例: 001ドアを開ける / ドアを開ける');
             textInput.value = normalizeChoiceItem(choice);
-            textInput.style.cssText = 'flex: 1; min-width: 0;';
+            textInput.style.cssText = 'flex:1;min-width:0;margin:0;padding:2px 6px;height:auto;line-height:1.25;';
             textInput.addEventListener('input', () => {
                 data.choices[idx] = textInput.value;
                 onChange(data);
@@ -1688,7 +1671,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
             delBtn.className = 'lbe-choice-del menu_button';
             delBtn.textContent = '✕';
             delBtn.title = _t('lbe.choice.del_title', 'この選択肢を削除');
-            delBtn.style.cssText = 'width: auto; padding: 4px 8px; flex-shrink: 0;';
+            delBtn.style.cssText = 'width:auto;margin:0;padding:2px 6px;height:auto;line-height:1.2;font-size:12px;flex-shrink:0;';
             delBtn.addEventListener('click', () => {
                 data.choices.splice(idx, 1);
                 renderChoices();
@@ -1703,6 +1686,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         addBtn.type = 'button';
         addBtn.className = 'lbe-choice-add menu_button';
         addBtn.textContent = _t('lbe.choice.add', '＋ 選択肢を追加');
+        addBtn.style.cssText = 'margin:0;padding:2px 6px;height:auto;line-height:1.2;font-size:12px;align-self:flex-start;';
         addBtn.addEventListener('click', () => {
             if (!Array.isArray(data.choices)) data.choices = [];
             data.choices.push('');
@@ -1711,8 +1695,10 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         });
         choicesContainer.appendChild(addBtn);
     };
-
+ 
     renderChoices();
+    // choices の後ろに変数を配置
+    section.appendChild(varsContainer);
     return section;
 }
 
