@@ -1763,7 +1763,7 @@ function extractChoiceTriggerText(choiceStr) {
                 }
                 #stj_cell_modal .stj-cell-modal-header,
                 .stj-cell-modal-header {
-                    height: calc(var(--exp-scale, 1) * 30px);
+                    height: calc(var(--exp-scale, 1) * 36px);
                     min-height: calc(var(--exp-scale, 1) * 30px);
                     max-height: calc(var(--exp-scale, 1) * 60px);
                     display: flex !important;
@@ -1784,13 +1784,37 @@ function extractChoiceTriggerText(choiceStr) {
                     height: 43% !important;
                     min-height: 0;
                     overflow-y: auto;
-                    margin: 6px 0 10px;
-                    padding: 8px;
+                    margin: 0px;
+                    padding: 1px;
                     border: 1px solid rgba(255, 255, 255, 0.2);
                     border-radius: 6px;
                     background: rgba(0, 0, 0, 0.25);
                     box-sizing: border-box;
                     flex: 0 0 43% !important;
+                }
+                .stj-cell-modal-apply {
+                    height: calc(var(--exp-scale, 1) * 36px);
+                    padding: 0 calc(var(--exp-scale, 1) * 8px);
+                    background: #e0e0e0;
+                    color: #000;
+                    border: 1px solid #aaa;
+                    border-radius: calc(var(--exp-scale, 1) * 4px);
+                    cursor: pointer;
+                    font-size: calc(var(--exp-scale, 1) * 16px);
+                    font-weight: bold;
+                    flex-shrink: 0;
+                }
+                .stj-cell-modal-cancel {
+                    height: calc(var(--exp-scale, 1) * 36px);
+                    padding: 0 calc(var(--exp-scale, 1) * 8px);
+                    background: #4a5568;
+                    color: white;
+                    border: 1px solid #718096;
+                    border-radius: calc(var(--exp-scale, 1) * 4px);
+                    cursor: pointer;
+                    font-size: calc(var(--exp-scale, 1) * 16px);
+                    font-weight: bold;
+                    flex-shrink: 0;
                 }
                 .lbe-variable-row {
                     display: flex;
@@ -1800,7 +1824,7 @@ function extractChoiceTriggerText(choiceStr) {
                     max-width: 100%;
                     box-sizing: border-box;
                     flex-wrap: nowrap;
-                    height: 10%;
+                    height: calc(var(--exp-scale, 1) * 28px);
                 }
                 #stj_cell_modal .stj-cell-modal-entry-host .world_entry {
                     display: block !important;
