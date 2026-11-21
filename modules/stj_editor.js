@@ -824,21 +824,39 @@
             }
         });
 
-        // 他セルがツリー左下部に配置されるよう bottomLeftBox の位置をツリー下端基準に調整
-        const treeBottom = parseFloat(containerEl.dataset.stjTreeBottom || '0');
+        // 「デフォルト表示」「サムネイル表示」の実サイズを現在の半分（幅70px・高さ63px × scale）に強制
+        const miniW = Math.round(70 * scale);
+        const miniH = Math.round(63 * scale);
+        topLeftBox.querySelectorAll('.stj-special-pair').forEach((pair) => {
+            pair.style.setProperty('width', `${miniW}px`, 'important');
+        });
+        topLeftBox.querySelectorAll('.stj-special-preview, .stj-image-preview').forEach((el) => {
+            el.style.setProperty('width', `${miniW}px`, 'important');
+            el.style.setProperty('height', `${miniH}px`, 'important');
+            el.style.setProperty('min-width', '0', 'important');
+            el.style.setProperty('min-height', '0', 'important');
+            el.style.setProperty('max-width', `${miniW}px`, 'important');
+            el.style.setProperty('max-height', `${miniH}px`, 'important');
+        });
+
+        // 「他セル」をツリー全体の最下端のさらに下（ツリー左下）へ配置
+        let treeActualBottom = parseFloat(containerEl.dataset.stjTreeBottom || '0');
+        containerEl.querySelectorAll(':scope > .stj-keyword-item').forEach((node) => {
+            const t = parseFloat(node.style.top) || 0;
+            const h = parseFloat(node.style.height) || (STJ_TREE_CELL_H * scale);
+            if (t + h > treeActualBottom) treeActualBottom = t + h;
+        });
+        const topLeftRectH = topLeftBox.offsetHeight || (miniH * 2 + 40 * scale);
+        const bottomLeftTop = Math.ceil(Math.max(treeActualBottom, topLeftRectH) + 24 * scale);
         const otherH = otherCells.length > 0 ? (STJ_TREE_CELL_H * scale) : 0;
-        const bottomLeftTop = Math.max(
-            (treeBottom > 0 ? treeBottom : 420) + 12 * scale,
-            220 * scale
-        );
-        bottomLeftBox.style.top = `${bottomLeftTop}px`;
-        bottomLeftBox.style.bottom = 'auto';
+
+        bottomLeftBox.style.setProperty('top', `${bottomLeftTop}px`, 'important');
+        bottomLeftBox.style.setProperty('bottom', 'auto', 'important');
+        bottomLeftBox.style.setProperty('left', `${Math.round(12 * scale)}px`, 'important');
+
         const neededH = Math.ceil(bottomLeftTop + otherH + 24 * scale);
-        const curMinH = parseFloat(containerEl.style.minHeight) || 0;
-        if (neededH > curMinH) {
-            containerEl.style.minHeight = `${neededH}px`;
-            containerEl.style.height = `${neededH}px`;
-        }
+        containerEl.style.minHeight = `${neededH}px`;
+        containerEl.style.height = `${neededH}px`;        
     }
 
     function getTreeScale(containerEl) {
@@ -2035,35 +2053,32 @@
                 .stj-info-panel {
                     display: none !important;
                 }
-                .stj-tree-top-left-modes {
-                    position: absolute;
-                    left: calc(var(--stj-tree-scale, 1) * 12px);
-                    top: calc(var(--stj-tree-scale, 1) * 12px);
+                #stj_keywords_container.stj-tree-mode .stj-tree-top-left-modes {
+                    position: absolute !important;
+                    left: calc(var(--stj-tree-scale, 1) * 12px) !important;
+                    top: calc(var(--stj-tree-scale, 1) * 12px) !important;
                     z-index: 5;
-                    display: flex;
-                    flex-direction: column;
-                    gap: calc(var(--stj-tree-scale, 1) * 6px);
+                    display: flex !important;
+                    flex-direction: column !important;
+                    gap: calc(var(--stj-tree-scale, 1) * 6px) !important;
                 }
-                .stj-tree-top-left-modes .stj-special-pair {
-                    display: flex;
-                    flex-direction: column;
-                    align-items: flex-start;
-                    gap: calc(var(--stj-tree-scale, 1) * 2px);
-                    width: calc(var(--stj-tree-scale, 1) * 70px);
+                #stj_keywords_container.stj-tree-mode .stj-tree-top-left-modes .stj-special-pair {
+                    display: flex !important;
+                    flex-direction: column !important;
+                    align-items: flex-start !important;
+                    gap: calc(var(--stj-tree-scale, 1) * 2px) !important;
+                    width: calc(var(--stj-tree-scale, 1) * 70px) !important;
                 }
-                .stj-tree-top-left-modes .stj-special-preview {
+                #stj_keywords_container.stj-tree-mode .stj-tree-top-left-modes .stj-special-preview,
+                #stj_keywords_container.stj-tree-mode .stj-tree-top-left-modes .stj-image-preview {
                     width: calc(var(--stj-tree-scale, 1) * 70px) !important;
                     height: calc(var(--stj-tree-scale, 1) * 63px) !important;
                     min-width: 0 !important;
                     min-height: 0 !important;
+                    max-width: calc(var(--stj-tree-scale, 1) * 70px) !important;
+                    max-height: calc(var(--stj-tree-scale, 1) * 63px) !important;
                 }
-                .stj-tree-top-left-modes .stj-image-preview {
-                    width: calc(var(--stj-tree-scale, 1) * 70px) !important;
-                    height: calc(var(--stj-tree-scale, 1) * 63px) !important;
-                    min-width: 0 !important;
-                    min-height: 0 !important;
-                }
-                .stj-tree-top-left-modes .stj-special-label {
+                #stj_keywords_container.stj-tree-mode .stj-tree-top-left-modes .stj-special-label {
                     font-size: calc(var(--stj-tree-scale, 1) * 10px) !important;
                     line-height: 1.2 !important;
                 }
