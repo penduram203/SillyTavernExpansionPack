@@ -785,6 +785,96 @@ function applyEntrySnapshotToEl(el, snap) {
             }
         }, 250);
     }
+
+    function getTreeScale(containerEl) {
+        if (!containerEl) return 1;
+        const raw = getComputedStyle(containerEl).getPropertyValue('--exp-scale')
+            || getComputedStyle(document.documentElement).getPropertyValue('--exp-scale')
+            || '1';
+        const parsed = parseFloat(raw);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+    }
+
+    function applyTreeScaleToContainer(containerEl) {
+        if (!containerEl || !containerEl.classList.contains('stj-tree-mode')) return 1;
+        const scale = getTreeScale(containerEl);
+
+        const minW = parseFloat(containerEl.style.minWidth);
+        const minH = parseFloat(containerEl.style.minHeight);
+        if (Number.isFinite(minW) && !containerEl.dataset.stjBaseMinW) {
+            containerEl.dataset.stjBaseMinW = String(minW / scale);
+        }
+        if (Number.isFinite(minH) && !containerEl.dataset.stjBaseMinH) {
+            containerEl.dataset.stjBaseMinH = String(minH / scale);
+        }
+        if (containerEl.dataset.stjBaseMinW) {
+            containerEl.style.minWidth = `${parseFloat(containerEl.dataset.stjBaseMinW) * scale}px`;
+        }
+        if (containerEl.dataset.stjBaseMinH) {
+            containerEl.style.minHeight = `${parseFloat(containerEl.dataset.stjBaseMinH) * scale}px`;
+        }
+
+        containerEl.querySelectorAll('.stj-keyword-item').forEach((item) => {
+            const left = parseFloat(item.style.left);
+            const top = parseFloat(item.style.top);
+            const width = parseFloat(item.style.width);
+            const height = parseFloat(item.style.height);
+            if (Number.isFinite(left)) {
+                if (!item.dataset.stjBaseLeft) item.dataset.stjBaseLeft = String(left / scale);
+                item.style.left = `${parseFloat(item.dataset.stjBaseLeft) * scale}px`;
+            }
+            if (Number.isFinite(top)) {
+                if (!item.dataset.stjBaseTop) item.dataset.stjBaseTop = String(top / scale);
+                item.style.top = `${parseFloat(item.dataset.stjBaseTop) * scale}px`;
+            }
+            if (Number.isFinite(width)) {
+                if (!item.dataset.stjBaseWidth) item.dataset.stjBaseWidth = String(width / scale);
+                item.style.width = `${parseFloat(item.dataset.stjBaseWidth) * scale}px`;
+            }
+            if (Number.isFinite(height)) {
+                if (!item.dataset.stjBaseHeight) item.dataset.stjBaseHeight = String(height / scale);
+                item.style.height = `${parseFloat(item.dataset.stjBaseHeight) * scale}px`;
+            }
+        });
+
+        const svg = containerEl.querySelector('.stj-tree-svg');
+        if (svg) {
+            const svgW = parseFloat(svg.getAttribute('width') || svg.style.width);
+            const svgH = parseFloat(svg.getAttribute('height') || svg.style.height);
+            if (Number.isFinite(svgW) && !svg.dataset.stjBaseW) svg.dataset.stjBaseW = String(svgW / scale);
+            if (Number.isFinite(svgH) && !svg.dataset.stjBaseH) svg.dataset.stjBaseH = String(svgH / scale);
+            const nextW = svg.dataset.stjBaseW ? parseFloat(svg.dataset.stjBaseW) * scale : svgW;
+            const nextH = svg.dataset.stjBaseH ? parseFloat(svg.dataset.stjBaseH) * scale : svgH;
+            if (Number.isFinite(nextW)) {
+                svg.setAttribute('width', String(nextW));
+                svg.style.width = `${nextW}px`;
+            }
+            if (Number.isFinite(nextH)) {
+                svg.setAttribute('height', String(nextH));
+                svg.style.height = `${nextH}px`;
+            }
+            svg.querySelectorAll('path').forEach((pathEl) => {
+                const d = pathEl.getAttribute('d');
+                if (!d) return;
+                if (!pathEl.dataset.stjBaseD) {
+                    pathEl.dataset.stjBaseD = d.replace(/-?\d+(?:\.\d+)?/g, (num) => String(parseFloat(num) / scale));
+                }
+                const scaledD = pathEl.dataset.stjBaseD.replace(/-?\d+(?:\.\d+)?/g, (num) => String(parseFloat(num) * scale));
+                pathEl.setAttribute('d', scaledD);
+                pathEl.setAttribute('stroke-width', String(2 * scale));
+            });
+            svg.querySelectorAll('polygon').forEach((polyEl) => {
+                const pts = polyEl.getAttribute('points');
+                if (!pts) return;
+                if (!polyEl.dataset.stjBasePoints) {
+                    polyEl.dataset.stjBasePoints = pts.replace(/-?\d+(?:\.\d+)?/g, (num) => String(parseFloat(num) / scale));
+                }
+                const scaledPts = polyEl.dataset.stjBasePoints.replace(/-?\d+(?:\.\d+)?/g, (num) => String(parseFloat(num) * scale));
+                polyEl.setAttribute('points', scaledPts);
+            });
+        }
+        return scale;
+    }
     
     function restoreMountedWorldEntry(hostEl) {
         if (!hostEl) return;
@@ -1752,6 +1842,25 @@ function extractChoiceTriggerText(choiceStr) {
             const s = document.createElement('style');
             s.id = 'stj-cell-keyword-style';
             s.textContent = `
+                #stj_keywords_container.stj-tree-mode {
+                    --stj-tree-scale: var(--exp-scale, 1);
+                }
+                #stj_keywords_container.stj-tree-mode .stj-tree-svg {
+                    transform-origin: top left;
+                }
+                #stj_keywords_container.stj-tree-mode .stj-keyword-item {
+                    box-sizing: border-box;
+                    font-size: calc(var(--stj-tree-scale, 1) * 14px);
+                }
+                #stj_keywords_container.stj-tree-mode .stj-keyword-display {
+                    padding: calc(var(--stj-tree-scale, 1) * 4px) calc(var(--stj-tree-scale, 1) * 6px);
+                    font-size: calc(var(--stj-tree-scale, 1) * 13px);
+                    line-height: 1.25;
+                    word-break: break-word;
+                }
+                #stj_keywords_container.stj-tree-mode .stj-preview-text {
+                    font-size: calc(var(--stj-tree-scale, 1) * 13px);
+                }
                 #stj_cell_modal .stj-cell-modal-content {
                     display: flex !important;
                     flex-direction: column !important;
