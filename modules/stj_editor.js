@@ -3626,6 +3626,10 @@
             _stjDrawConnections(container, offsetPositions, children);
 
             applyTreeScaleToContainer(container);
+            if (!graphOrCellChanged && prevHeight > 0) {
+                container.style.setProperty('min-height', `${prevHeight}px`);
+                container.style.setProperty('height', `${prevHeight}px`);
+            }
         } catch (e) {
             console.warn('[STJ Editor] ツリーレイアウト適用エラー:', e);
         } finally {
