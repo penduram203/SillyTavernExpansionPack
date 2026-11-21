@@ -822,27 +822,46 @@ function applyEntrySnapshotToEl(el, snap) {
         if (containerEl.dataset.stjBaseMinH) {
             containerEl.style.minHeight = `${parseFloat(containerEl.dataset.stjBaseMinH) * scale}px`;
         }
+        
+        let maxBottom = 0;
+        let maxRight = 0;
 
         containerEl.querySelectorAll('.stj-keyword-item').forEach((item) => {
             const left = parseFloat(item.style.left);
             const top = parseFloat(item.style.top);
             const width = parseFloat(item.style.width);
             const height = parseFloat(item.style.height);
+            let nextLeft = left;
+            let nextTop = top;
+            let nextWidth = width;
+            let nextHeight = height;
+            
             if (Number.isFinite(left)) {
                 if (!item.dataset.stjBaseLeft) item.dataset.stjBaseLeft = String(left / scale);
-                item.style.left = `${parseFloat(item.dataset.stjBaseLeft) * scale}px`;
+                nextLeft = parseFloat(item.dataset.stjBaseLeft) * scale;
+                item.style.left = `${nextLeft}px`;
             }
             if (Number.isFinite(top)) {
                 if (!item.dataset.stjBaseTop) item.dataset.stjBaseTop = String(top / scale);
-                item.style.top = `${parseFloat(item.dataset.stjBaseTop) * scale}px`;
+                nextTop = parseFloat(item.dataset.stjBaseTop) * scale;
+                item.style.top = `${nextTop}px`;
             }
             if (Number.isFinite(width)) {
                 if (!item.dataset.stjBaseWidth) item.dataset.stjBaseWidth = String(width / scale);
-                item.style.width = `${parseFloat(item.dataset.stjBaseWidth) * scale}px`;
+                nextWidth = parseFloat(item.dataset.stjBaseWidth) * scale;
+                item.style.width = `${nextWidth}px`;
             }
             if (Number.isFinite(height)) {
                 if (!item.dataset.stjBaseHeight) item.dataset.stjBaseHeight = String(height / scale);
-                item.style.height = `${parseFloat(item.dataset.stjBaseHeight) * scale}px`;
+                nextHeight = parseFloat(item.dataset.stjBaseHeight) * scale;
+                item.style.height = `${nextHeight}px`;
+            }
+
+            if (Number.isFinite(nextLeft) && Number.isFinite(nextWidth)) {
+                maxRight = Math.max(maxRight, nextLeft + nextWidth);
+            }
+            if (Number.isFinite(nextTop) && Number.isFinite(nextHeight)) {
+                maxBottom = Math.max(maxBottom, nextTop + nextHeight);
             }
         });
 
@@ -857,10 +876,12 @@ function applyEntrySnapshotToEl(el, snap) {
             if (Number.isFinite(nextW)) {
                 svg.setAttribute('width', String(nextW));
                 svg.style.width = `${nextW}px`;
+                maxRight = Math.max(maxRight, nextW);
             }
             if (Number.isFinite(nextH)) {
                 svg.setAttribute('height', String(nextH));
                 svg.style.height = `${nextH}px`;
+                maxBottom = Math.max(maxBottom, nextH);
             }
             svg.querySelectorAll('path').forEach((pathEl) => {
                 const d = pathEl.getAttribute('d');
@@ -882,6 +903,25 @@ function applyEntrySnapshotToEl(el, snap) {
                 polyEl.setAttribute('points', scaledPts);
             });
         }
+
+        // 拡大後の最下端・最右端に合わせてコンテナの最小サイズを拡張し、スクロール到達不能を防ぐ
+        const pad = Math.ceil(40 * scale);
+        if (maxRight > 0) {
+            containerEl.style.minWidth = `${Math.ceil(maxRight + pad)}px`;
+        }
+        if (maxBottom > 0) {
+            containerEl.style.minHeight = `${Math.ceil(maxBottom + pad)}px`;
+        }
+
+        // 親スクロール領域に高さ制限がある場合、ツリー全体までスクロールできるよう解放
+        let parent = containerEl.parentElement;
+        for (let depth = 0; depth < 3 && parent && parent !== document.body; depth++, parent = parent.parentElement) {
+            const pStyle = getComputedStyle(parent);
+            if (pStyle.maxHeight && pStyle.maxHeight !== 'none') {
+                parent.style.maxHeight = 'none';
+            }
+        }
+
         return scale;
     }
     
@@ -1897,16 +1937,16 @@ function extractChoiceTriggerText(choiceStr) {
                 }
                 #stj_keywords_container.stj-tree-mode .stj-keyword-item {
                     box-sizing: border-box;
-                    font-size: calc(var(--stj-tree-scale, 1) * 14px);
+                    font-size: calc(var(--stj-tree-scale, 1) * 14px) !important;
                 }
                 #stj_keywords_container.stj-tree-mode .stj-keyword-display {
                     padding: calc(var(--stj-tree-scale, 1) * 4px) calc(var(--stj-tree-scale, 1) * 6px);
-                    font-size: calc(var(--stj-tree-scale, 1) * 13px);
-                    line-height: 1.25;
+                    font-size: calc(var(--stj-tree-scale, 1) * 13px) !important;
+                    line-height: 1.25 !important;
                     word-break: break-word;
                 }
                 #stj_keywords_container.stj-tree-mode .stj-preview-text {
-                    font-size: calc(var(--stj-tree-scale, 1) * 13px);
+                    font-size: calc(var(--stj-tree-scale, 1) * 13px) !important;
                 }
                 #stj_cell_modal .stj-cell-modal-content {
                     display: flex !important;
