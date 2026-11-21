@@ -981,25 +981,35 @@ function applyEntrySnapshotToEl(el, snap) {
             let nextWidth = width;
             let nextHeight = height;
             
-            if (Number.isFinite(left)) {
-                if (!item.dataset.stjBaseLeft) item.dataset.stjBaseLeft = String(left);
-                nextLeft = parseFloat(item.dataset.stjBaseLeft) * scale;
-                item.style.left = `${nextLeft}px`;
-            }
-            if (Number.isFinite(top)) {
-                if (!item.dataset.stjBaseTop) item.dataset.stjBaseTop = String(top);
-                nextTop = parseFloat(item.dataset.stjBaseTop) * scale;
-                item.style.top = `${nextTop}px`;
-            }
-            if (Number.isFinite(width)) {
-                if (!item.dataset.stjBaseWidth) item.dataset.stjBaseWidth = String(width);
+            // 左下（.stj-tree-bottom-left-other）に配置した「他セル」は絶対座標ではなく標準セルサイズ（140x160 * scale）を維持
+            if (item.dataset.stjIsOtherCell === '1' || item.closest('.stj-tree-bottom-left-other')) {
+                if (!item.dataset.stjBaseWidth) item.dataset.stjBaseWidth = '140';
+                if (!item.dataset.stjBaseHeight) item.dataset.stjBaseHeight = '160';
                 nextWidth = parseFloat(item.dataset.stjBaseWidth) * scale;
-                item.style.width = `${nextWidth}px`;
-            }
-            if (Number.isFinite(height)) {
-                if (!item.dataset.stjBaseHeight) item.dataset.stjBaseHeight = String(height);
                 nextHeight = parseFloat(item.dataset.stjBaseHeight) * scale;
+                item.style.width = `${nextWidth}px`;
                 item.style.height = `${nextHeight}px`;
+            } else {
+                if (Number.isFinite(left)) {
+                    if (!item.dataset.stjBaseLeft) item.dataset.stjBaseLeft = String(left);
+                    nextLeft = parseFloat(item.dataset.stjBaseLeft) * scale;
+                    item.style.left = `${nextLeft}px`;
+                }
+                if (Number.isFinite(top)) {
+                    if (!item.dataset.stjBaseTop) item.dataset.stjBaseTop = String(top);
+                    nextTop = parseFloat(item.dataset.stjBaseTop) * scale;
+                    item.style.top = `${nextTop}px`;
+                }
+                if (Number.isFinite(width)) {
+                    if (!item.dataset.stjBaseWidth) item.dataset.stjBaseWidth = String(width);
+                    nextWidth = parseFloat(item.dataset.stjBaseWidth) * scale;
+                    item.style.width = `${nextWidth}px`;
+                }
+                if (Number.isFinite(height)) {
+                    if (!item.dataset.stjBaseHeight) item.dataset.stjBaseHeight = String(height);
+                    nextHeight = parseFloat(item.dataset.stjBaseHeight) * scale;
+                    item.style.height = `${nextHeight}px`;
+                }
             }
             item.style.setProperty('font-size', itemFontPx, 'important');
 
