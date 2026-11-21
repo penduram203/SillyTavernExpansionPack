@@ -1320,7 +1320,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
     const templateLabel = document.createElement('label');
     templateLabel.className = 'lbe-label';
     templateLabel.textContent = 'template';
-    templateLabel.style.cssText = 'margin:0;padding:0;line-height:1.2;font-size:12px;';
+    templateLabel.style.cssText = 'margin: 0px; padding: 0px; line-height: 1.2; font-size: calc(var(--exp-scale, 1) * 16px);';
     templateLabelRow.appendChild(templateLabel);
 
     const templateSelect = document.createElement('select');
@@ -1334,7 +1334,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
     templateAddBtn.className = 'lbe-template-add menu_button';
     templateAddBtn.textContent = _t('lbe.template.add', '追加');
     templateAddBtn.title = _t('lbe.template.add_title', '新しいテンプレートを追加');
-    templateAddBtn.style.cssText = 'margin:0;padding:2px 6px;height:auto;line-height:1.2;font-size:12px;';
+    templateAddBtn.style.cssText = 'margin: 0px; padding: 2px 6px; height: auto; line-height: 1.2; font-size: calc(var(--exp-scale, 1) * 12px);';
     templateLabelRow.appendChild(templateAddBtn);
 
     const templateDelBtn = document.createElement('button');
@@ -1342,7 +1342,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
     templateDelBtn.className = 'lbe-template-del menu_button';
     templateDelBtn.textContent = _t('lbe.template.del', '削除');
     templateDelBtn.title = _t('lbe.template.del_title', '現在のテンプレートを削除');
-    templateDelBtn.style.cssText = 'margin:0;padding:2px 6px;height:auto;line-height:1.2;font-size:12px;';
+    templateDelBtn.style.cssText = 'margin: 0px; padding: 2px 6px; height: auto; line-height: 1.2; font-size: calc(var(--exp-scale, 1) * 12px);';
     templateLabelRow.appendChild(templateDelBtn);
 
     const RESOLUTION_OPTIONS = getResolutionOptionsForLex().concat([
@@ -1629,7 +1629,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         addBtn.type = 'button';
         addBtn.className = 'lbe-variable-add menu_button';
         addBtn.textContent = _t('lbe.var.add', '＋ 変数を追加');
-        addBtn.style.cssText = 'margin: 0px; padding: 2px 6px; height: auto; line-height: 2; font-size: 13px; align-self: flex-start;';
+        addBtn.style.cssText = 'margin: 0px; padding: 2px 6px; height: auto; line-height: 1.5; font-size: calc(var(--exp-scale, 1) * 13px); align-self: flex-start;';
         addBtn.addEventListener('click', () => {
             if (!Array.isArray(data.variables)) data.variables = [];
             data.variables.push({ type: 'string', name: '', value: '' });
@@ -1686,7 +1686,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
         addBtn.type = 'button';
         addBtn.className = 'lbe-choice-add menu_button';
         addBtn.textContent = _t('lbe.choice.add', '＋ 選択肢を追加');
-        addBtn.style.cssText = 'margin: 0px; padding: 2px 6px; height: auto; line-height: 2; font-size: 13px; align-self: flex-start;';
+        addBtn.style.cssText = 'margin: 0px; padding: 2px 6px; height: auto; line-height: 1.5;  align-self: flex-start;font-size: calc(var(--exp-scale, 1) * 13px);';
         addBtn.addEventListener('click', () => {
             if (!Array.isArray(data.choices)) data.choices = [];
             data.choices.push('');
