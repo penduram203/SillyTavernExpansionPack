@@ -786,6 +786,54 @@ function applyEntrySnapshotToEl(el, snap) {
         }, 250);
     }
 
+    function arrangeTreeControlsAndCompress(containerEl) {
+        if (!containerEl || !containerEl.classList.contains('stj-tree-mode')) return;
+
+        const modalRoot = containerEl.closest('.stj-modal, #stj_editor_modal, .popup, dialog') || document;
+
+        // 1. 「操作方法説明」ボタンを非表示化
+        modalRoot.querySelectorAll('button, [role="button"], .menu_button, a, span').forEach((el) => {
+            if (el.closest('#stj_keywords_container')) return;
+            const txt = (el.textContent || '').trim();
+            if (txt === '操作方法説明' || txt === '操作説明' || txt === 'ヘルプ') {
+                el.style.setProperty('display', 'none', 'important');
+            }
+        });
+
+        // 2. 「デフォルト表示」「サムネイル表示」をツリー左上へ組み込み
+        let topLeftBox = containerEl.querySelector('.stj-tree-top-left-modes');
+        if (!topLeftBox) {
+            topLeftBox = document.createElement('div');
+            topLeftBox.className = 'stj-tree-top-left-modes';
+            containerEl.appendChild(topLeftBox);
+        }
+        ['デフォルト表示', 'サムネイル表示'].forEach((label) => {
+            const btn = Array.from(modalRoot.querySelectorAll('button, [role="button"], .menu_button, label'))
+                .find((el) => !el.closest('#stj_keywords_container') && (el.textContent || '').trim() === label);
+            if (btn && btn.parentElement !== topLeftBox) {
+                topLeftBox.appendChild(btn);
+            }
+        });
+
+        // 3. 「他セル」（その他セル）をツリー左下へ組み込み
+        let bottomLeftBox = containerEl.querySelector('.stj-tree-bottom-left-other');
+        if (!bottomLeftBox) {
+            bottomLeftBox = document.createElement('div');
+            bottomLeftBox.className = 'stj-tree-bottom-left-other';
+            containerEl.appendChild(bottomLeftBox);
+        }
+        const otherEl = Array.from(modalRoot.querySelectorAll('button, [role="button"], .menu_button, .stj-other-cells, div, span, label'))
+            .find((el) => {
+                if (el.closest('#stj_keywords_container') || el.contains(containerEl)) return false;
+                const txt = (el.textContent || '').trim();
+                return txt === '他セル' || txt === 'その他セル';
+            });
+        if (otherEl && otherEl.parentElement !== bottomLeftBox && !otherEl.querySelector('button, input, select')) {
+            bottomLeftBox.appendChild(otherEl);
+        }
+    }
+
+    
     function getTreeScale(containerEl) {
         if (!containerEl) return 1;
         const raw = (getComputedStyle(containerEl).getPropertyValue('--exp-scale')
@@ -805,7 +853,9 @@ function applyEntrySnapshotToEl(el, snap) {
 
     function applyTreeScaleToContainer(containerEl) {
         if (!containerEl || !containerEl.classList.contains('stj-tree-mode')) return 1;
+        arrangeTreeControlsAndCompress(containerEl);
         const scale = getTreeScale(containerEl);
+        const vCompress = 0.72;
         containerEl.style.setProperty('--stj-tree-scale', String(scale));
 
         const minW = parseFloat(containerEl.style.minWidth);
@@ -814,7 +864,7 @@ function applyEntrySnapshotToEl(el, snap) {
             containerEl.dataset.stjBaseMinW = String(minW);
         }
         if (Number.isFinite(minH) && !containerEl.dataset.stjBaseMinH) {
-            containerEl.dataset.stjBaseMinH = String(minH);
+            containerEl.dataset.stjBaseMinH = String(minH * vCompress);
         }
         if (containerEl.dataset.stjBaseMinW) {
             containerEl.style.minWidth = `${parseFloat(containerEl.dataset.stjBaseMinW) * scale}px`;
@@ -845,7 +895,7 @@ function applyEntrySnapshotToEl(el, snap) {
             }
             if (Number.isFinite(top)) {
                 if (!item.dataset.stjBaseTop) item.dataset.stjBaseTop = String(top);
-                nextTop = parseFloat(item.dataset.stjBaseTop) * scale;
+                nextTop = parseFloat(item.dataset.stjBaseTop) * vCompress * scale;
                 item.style.top = `${nextTop}px`;
             }
             if (Number.isFinite(width)) {
@@ -855,7 +905,7 @@ function applyEntrySnapshotToEl(el, snap) {
             }
             if (Number.isFinite(height)) {
                 if (!item.dataset.stjBaseHeight) item.dataset.stjBaseHeight = String(height);
-                nextHeight = parseFloat(item.dataset.stjBaseHeight) * scale;
+                nextHeight = parseFloat(item.dataset.stjBaseHeight) * vCompress * scale;
                 item.style.height = `${nextHeight}px`;
             }
             item.style.setProperty('font-size', itemFontPx, 'important');
@@ -885,7 +935,7 @@ function applyEntrySnapshotToEl(el, snap) {
             const svgW = parseFloat(svg.getAttribute('width') || svg.style.width);
             const svgH = parseFloat(svg.getAttribute('height') || svg.style.height);
             if (Number.isFinite(svgW) && !svg.dataset.stjBaseW) svg.dataset.stjBaseW = String(svgW);
-            if (Number.isFinite(svgH) && !svg.dataset.stjBaseH) svg.dataset.stjBaseH = String(svgH);
+            if (Number.isFinite(svgH) && !svg.dataset.stjBaseH) svg.dataset.stjBaseH = String(svgH * vCompress);
             const nextW = svg.dataset.stjBaseW ? parseFloat(svg.dataset.stjBaseW) * scale : svgW;
             const nextH = svg.dataset.stjBaseH ? parseFloat(svg.dataset.stjBaseH) * scale : svgH;
             if (Number.isFinite(nextW)) {
@@ -904,7 +954,10 @@ function applyEntrySnapshotToEl(el, snap) {
                 if (!pathEl.dataset.stjBaseD) {
                     pathEl.dataset.stjBaseD = d;
                 }
-                const scaledD = pathEl.dataset.stjBaseD.replace(/-?\d+(?:\.\d+)?/g, (num) => String(parseFloat(num) * scale));
+                const scaledD = pathEl.dataset.stjBaseD.replace(
+                    /(M|L)\s*(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)/g,
+                    (_m, cmd, x, y) => `${cmd} ${parseFloat(x) * scale} ${parseFloat(y) * vCompress * scale}`
+                );
                 pathEl.setAttribute('d', scaledD);
                 pathEl.setAttribute('stroke-width', String(2 * scale));
             });
@@ -914,7 +967,13 @@ function applyEntrySnapshotToEl(el, snap) {
                 if (!polyEl.dataset.stjBasePoints) {
                     polyEl.dataset.stjBasePoints = pts;
                 }
-                const scaledPts = polyEl.dataset.stjBasePoints.replace(/-?\d+(?:\.\d+)?/g, (num) => String(parseFloat(num) * scale));
+                const nums = (polyEl.dataset.stjBasePoints.match(/-?\d+(?:\.\d+)?/g) || []).map(parseFloat);
+                const scaledPts = [];
+                for (let i = 0; i + 1 < nums.length; i += 2) {
+                    const sx = nums[i] * scale;
+                    const sy = nums[i + 1] * vCompress * scale;
+                    scaledPts.push(`${sx},${sy}`);
+                }
                 polyEl.setAttribute('points', scaledPts);
             });
         }
@@ -1957,9 +2016,34 @@ function extractChoiceTriggerText(choiceStr) {
             s.textContent = `
                 #stj_keywords_container.stj-tree-mode {
                     --stj-tree-scale: var(--exp-scale, 1);
+                    --stj-tree-v-compress: 0.72;
+                    position: relative;
                 }
                 #stj_keywords_container.stj-tree-mode .stj-tree-svg {
                     transform-origin: top left;
+                }
+                .stj-help-btn,
+                [data-action="help"],
+                .stj-tree-help-btn {
+                    display: none !important;
+                }
+                .stj-tree-top-left-modes {
+                    position: absolute;
+                    left: calc(var(--stj-tree-scale, 1) * 16px);
+                    top: calc(var(--stj-tree-scale, 1) * 16px);
+                    z-index: 5;
+                    display: flex;
+                    flex-direction: column;
+                    gap: calc(var(--stj-tree-scale, 1) * 6px);
+                }
+                .stj-tree-bottom-left-other {
+                    position: absolute;
+                    left: calc(var(--stj-tree-scale, 1) * 16px);
+                    bottom: calc(var(--stj-tree-scale, 1) * 16px);
+                    z-index: 5;
+                    display: flex;
+                    align-items: center;
+                    gap: calc(var(--stj-tree-scale, 1) * 6px);
                 }
                 #stj_keywords_container.stj-tree-mode .stj-keyword-item {
                     box-sizing: border-box;
