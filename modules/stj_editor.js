@@ -4246,10 +4246,10 @@
                     <textarea id="stj_test_input" placeholder="${_t('stj.header.test_placeholder', '試しに文章を入力してください（例：笑顔で挨拶する）...')}"></textarea>
                     <div id="stj_test_result">${_t('stj.test.result_prefix', '判定結果')}: <span style="color: #aaa; font-weight: normal;">${_t('stj.test.empty_hint', '文章を入力するとヒットするキーワードが表示されます')}</span></div>
                 </div>
-                <button type="button" id="stj_special_toggle" class="stj-test-toggle">デフォルト＆サムネイル ▼</button>
-                <div id="stj_special_body" class="stj-horizontal-panel-body" style="display: none;"></div>
                 <div id="stj_standalone_body" class="stj-horizontal-panel-body" style="display: flex;"></div>
             </div>
+            <button type="button" id="stj_special_toggle" class="stj-test-toggle">デフォルト＆サムネイル ▼</button>
+            <div id="stj_special_body" class="stj-horizontal-panel-body" style="display: none;"></div>
 
             <div class="stj-top-section">
                 <div class="stj-special-container">
@@ -4378,6 +4378,12 @@
                 #stj_export_modal #stj_special_body,
                 #stj_export_modal #stj_special_body * {
                     color: rgb(0, 0, 0);
+                }
+                #stj_export_modal #stj_special_toggle {
+                    color: rgb(0, 0, 0) !important;
+                }
+                #stj_export_modal .stj-special-label {
+                    color: rgb(255, 255, 255) !important;
                 }
                 #stj_export_modal #stj_standalone_toggle {
                     display: none !important;
