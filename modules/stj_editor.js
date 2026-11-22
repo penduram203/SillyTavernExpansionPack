@@ -3536,13 +3536,23 @@
                 }
             });
 
-            let maxX = 0, maxY = 0, minX = 0, minY = 0;
+            let hasConnectedPos = false;
+            let maxX = 0, maxY = STJ_TREE_CELL_H, minX = 0, minY = 0;
             for (const [kw, pos] of positions.entries()) {
                 if (!connectedSet.has(kw)) continue;
-                maxX = Math.max(maxX, pos.x + STJ_TREE_CELL_W);
-                maxY = Math.max(maxY, pos.y + STJ_TREE_CELL_H);
-                minX = Math.min(minX, pos.x);
-                minY = Math.min(minY, pos.y);
+
+                if (!hasConnectedPos) {
+                    minX = pos.x;
+                    minY = pos.y;
+                    maxX = pos.x + STJ_TREE_CELL_W;
+                    maxY = pos.y + STJ_TREE_CELL_H;
+                    hasConnectedPos = true;
+                } else {
+                    maxX = Math.max(maxX, pos.x + STJ_TREE_CELL_W);
+                    maxY = Math.max(maxY, pos.y + STJ_TREE_CELL_H);
+                    minX = Math.min(minX, pos.x);
+                    minY = Math.min(minY, pos.y);
+                }
             }
             const offsetX = STJ_TREE_PADDING - minX;
             const offsetY = STJ_TREE_PADDING - minY;
