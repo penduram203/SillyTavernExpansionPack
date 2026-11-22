@@ -4421,7 +4421,7 @@
                     flex-direction: row !important;
                     align-items: center !important;
                     gap: calc(var(--exp-scale, 1) * 10px);
-                    width: 100%;
+                    width: 39%;
                     margin: 0 0 calc(var(--exp-scale, 1) * 6px) 0;
                     box-sizing: border-box;
                 }
