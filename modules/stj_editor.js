@@ -4248,8 +4248,7 @@
                 </div>
                 <button type="button" id="stj_special_toggle" class="stj-test-toggle">デフォルト＆サムネイル ▼</button>
                 <div id="stj_special_body" class="stj-horizontal-panel-body" style="display: none;"></div>
-                <button type="button" id="stj_standalone_toggle" class="stj-test-toggle">独立セル ▼</button>
-                <div id="stj_standalone_body" class="stj-horizontal-panel-body" style="display: none;"></div>
+                <div id="stj_standalone_body" class="stj-horizontal-panel-body" style="display: flex;"></div>
             </div>
 
             <div class="stj-top-section">
@@ -4312,6 +4311,25 @@
                     position: static !important;
                     top: auto !important;
                 }
+                #stj_export_modal {
+                    display: none;
+                    position: fixed;
+                    top: 0;
+                    left: auto;
+                    right: 0;
+                    width: 70.5vw;
+                    min-width: calc(var(--exp-scale, 1) * 500px);
+                    height: 100vh;
+                    background-color: #2d3748;
+                    border: 1px solid #4a5568;
+                    border-radius: calc(var(--exp-scale, 1) * 8px);
+                    padding: calc(var(--exp-scale, 1) * 0px) calc(var(--exp-scale, 1) * 20px) calc(var(--exp-scale, 1) * 90px) calc(var(--exp-scale, 1) * 9px);
+                    box-shadow: 0 calc(var(--exp-scale, 1) * 4px) calc(var(--exp-scale, 1) * 6px) rgba(0,0,0,0.1);
+                    z-index: 10001;
+                    overflow-y: auto;
+                    overflow-x: auto;
+                    box-sizing: border-box;
+                }
                 #stj_export_modal #stj_test_toggle {
                     display: inline-block;
                     width: 45%;
@@ -4356,6 +4374,13 @@
                     width: calc(var(--exp-scale, 1) * 140px);
                     height: calc(var(--exp-scale, 1) * 160px);
                     margin: 0;
+                }
+                #stj_export_modal #stj_special_body,
+                #stj_export_modal #stj_special_body * {
+                    color: rgb(0, 0, 0);
+                }
+                #stj_export_modal #stj_standalone_toggle {
+                    display: none !important;
                 }
                 #stj_export_modal .stj-standalone-empty {
                     color: #a0aec0;
@@ -4409,18 +4434,9 @@
             });
         }
 
-        const standaloneToggleBtn = document.getElementById('stj_standalone_toggle');
         const standaloneBody = document.getElementById('stj_standalone_body');
-        if (standaloneToggleBtn && standaloneBody) {
-            standaloneToggleBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const expanded = standaloneBody.style.display !== 'none';
-                standaloneBody.style.display = expanded ? 'none' : 'flex';
-                standaloneToggleBtn.textContent = expanded ? '独立セル ▼' : '独立セル ▲';
-                if (!expanded) {
-                    _stjScheduleTreeLayout();
-                }
-            });
+        if (standaloneBody) {
+            standaloneBody.style.display = 'flex';
         }
         
         const testInput = document.getElementById('stj_test_input');
