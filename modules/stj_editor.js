@@ -462,7 +462,7 @@
         return null;
     }
 
-    async function loadWorldInfoEntriesFromServer(worldName) {
+    async function loadWorldInfoEntries(worldName) {
         if (!worldName) return null;
 
         for (let attempt = 1; attempt <= 2; attempt++) {
@@ -499,31 +499,6 @@
         return null;
     }
 
-    async function getLiveWorldInfoEntries(worldName) {
-        const sources = [];
-        try { sources.push(getSTContext()?.world_info?.[worldName]?.entries); } catch (e) {}
-        try { sources.push(window.world_info?.[worldName]?.entries); } catch (e) {}
-        try {
-            const mod = await import('../../../../world-info.js');
-            sources.push(mod?.world_info?.[worldName]?.entries);
-        } catch (e) {}
-        for (const s of sources) {
-            if (s && typeof s === 'object' && Object.keys(s).length > 0) return s;
-        }
-        return null;
-    }
-
-    async function loadWorldInfoEntries(worldName) {
-        if (!worldName) return null;
-        const server = await loadWorldInfoEntriesFromServer(worldName);
-        const live = await getLiveWorldInfoEntries(worldName);
-        if (!live) return server;
-        if (!server) return live;
-        const merged = { ...server };
-        for (const [uid, e] of Object.entries(live)) merged[uid] = e;   // メモリ側(最新)を優先
-        return merged;
-    }
-    
     function getEntryKeys(entry) {
         if (!entry) return [];
         if (Array.isArray(entry.keys) && entry.keys.length) return entry.keys;
@@ -3185,32 +3160,6 @@
         return null;
     }
 
-    // 選択肢の「先頭の番号」または全文が、エントリのタイトル/キーと【完全一致】する場合のみ繋ぐ
-    function _stjResolveChoiceTarget(list, choiceStr) {
-        const raw = _stjToHalfWidth(String(choiceStr || '')).trim();
-        if (!raw) return null;
-
-        const candidates = new Set();
-        const m = raw.match(/^(?:選択肢|choice)?[\s:：「『"']*(\d{1,4})(?!\d)/i);
-        if (m) {
-            candidates.add(m[1]);
-            if (m[1].length < 3) candidates.add(m[1].padStart(3, '0'));
-        }
-        candidates.add(raw);
-
-        const valid = list.filter(e => e && !isCommonRuleName(String(e.comment || '').trim()));
-        for (const e of valid) {                       // ① タイトル完全一致を優先
-            const kw = getEntryKeyword(e);
-            if (kw && candidates.has(kw)) return e;
-        }
-        for (const e of valid) {                       // ② キー完全一致
-            for (const k of getEntryKeys(e)) {
-                if (candidates.has(String(k).trim())) return e;
-            }
-        }
-        return null;
-    }
-    
     async function _stjBuildChoiceGraph(imageMap) {
         const empty = { children: new Map(), parents: new Map(), allNodes: new Set() };
         const worldName = getCharacterWorldInfoName();
@@ -3250,11 +3199,18 @@
             const childKws = [];
 
             for (const choiceStr of choices) {
-                const target = _stjResolveChoiceTarget(list, choiceStr);
+                let target = null;
+                const num = _stjExtractChoiceNumber(choiceStr);
+                if (num) {
+                    target = _stjFindEntryByChoice(list, num);
+                }
+                if (!target) {
+                    target = _stjFindEntryByKeywordLoose(list, choiceStr);
+                }
                 if (!target) continue;
 
                 const targetKw = getEntryKeyword(target);
-                if (!targetKw || targetKw === kw || !allNodes.has(targetKw)) continue;  // 自己ループも除外
+                if (!targetKw || !allNodes.has(targetKw)) continue;
                 if (childKws.includes(targetKw)) continue;
                 childKws.push(targetKw);
                 if (!parents.has(targetKw)) parents.set(targetKw, []);
@@ -5211,31 +5167,7 @@
         });
 
         window.addEventListener('gic-image-generated-for-keyword', handleImageGeneratedForKeyword);
-        let _editRefreshTimer = null;
-        const scheduleEditRefresh = (delay = 600) => {
-            if (!stjModalEl || stjModalEl.style.display !== 'block') return;   // JSONツリーが開いている時だけ
-            if (_editRefreshTimer) clearTimeout(_editRefreshTimer);
-            _editRefreshTimer = setTimeout(async () => {
-                _editRefreshTimer = null;
-                if (_editorLoading) return;
-                try { await syncLorebookEntriesToImageMap(); } catch (e) { console.warn('[STJ Editor] sync error:', e); }
-                _stjScheduleTreeLayout();   // 変更が選択肢だけでも必ずツリーを再計算
-            }, delay);
-        };
 
-        // ① 選択肢・変数の編集(Lorebook_Expansion 側から通知)
-        window.addEventListener('lbe-data-changed', () => scheduleEditRefresh(500));
-
-        // ② タイトル(comment)・キーワードの入力
-        document.addEventListener('input', (e) => {
-            const el = e.target;
-            if (!el || !el.closest || !el.closest('.world_entry')) return;
-            if (el.name === 'comment' || el.name === 'key') {
-                // 入力途中の空タイトルでセルが消えないよう、空の間は同期しない
-                if (el.name === 'comment' && !String(el.value || '').trim()) return;
-                scheduleEditRefresh(700);
-            }
-        }, true);
         syncLater(1500);
     }
 
