@@ -3609,7 +3609,8 @@
             container.dataset.stjBaseMinW = String(totalWidth);
             container.dataset.stjBaseMinH = String(totalHeight);
             _stjSyncStandalonePanel(container, graph);
-            if (!graphOrCellChanged && prevHeight > 0) {
+            const currentH = parseFloat(container.style.height) || 0;
+            if (!graphOrCellChanged && prevHeight > 0 && prevHeight <= currentH) {
                 container.style.setProperty('min-height', `${prevHeight}px`);
                 container.style.setProperty('height', `${prevHeight}px`);
             }
@@ -4371,6 +4372,15 @@
                     overflow-x: auto;
                     box-sizing: border-box;
                 }
+                #stj_export_modal #stj_keywords_container.stj-tree-mode {
+                    position: relative !important;
+                    margin-top: calc(var(--exp-scale, 1) * 8px) !important;
+                    z-index: 1;
+                }
+                #stj_export_modal #stj_standalone_body {
+                    position: relative;
+                    z-index: 2;
+                }                
                 #stj_export_modal #stj_test_toggle {
                     display: inline-block;
                     width: 45%;
