@@ -703,7 +703,7 @@
             });
             pair.remove();
         });
-        document.querySelectorAll('.stj-tree-top-left-modes, .stj-tree-bottom-left-other').forEach((box) => {
+        document.querySelectorAll('.stj-tree-top-left-modes, .stj-tree-bottom-left-other, .stj-standalone-cell-item').forEach((box) => {
             box.remove();
         });
     }
@@ -723,126 +723,11 @@
             });
         });
 
-        // 2. デフォルト表示・サムネイル表示をツリー左上へ組み込み（サイズは現在の半分）
-        let topLeftBox = containerEl.querySelector('.stj-tree-top-left-modes');
-        if (!topLeftBox) {
-            topLeftBox = document.createElement('div');
-            topLeftBox.className = 'stj-tree-top-left-modes';
-            containerEl.appendChild(topLeftBox);
-        }
-
-        const moveSpecialElementOnce = (el, targetParent) => {
-            if (!el || !targetParent || el.parentElement === targetParent) return;
-            if (!el.dataset.stjOrigRecorded) {
-                el.dataset.stjOrigRecorded = '1';
-                if (el.parentElement && !el.parentElement.id) {
-                    el.parentElement.id = `stj_orig_parent_${Math.random().toString(36).slice(2, 9)}`;
-                }
-                el.dataset.stjOrigParentId = el.parentElement?.id || '';
-                el.dataset.stjOrigIndex = el.parentElement
-                    ? String(Array.from(el.parentElement.children).indexOf(el))
-                    : '-1';
-                el.dataset.stjOrigPosition = el.style.position || '';
-                el.dataset.stjOrigLeft = el.style.left || '';
-                el.dataset.stjOrigTop = el.style.top || '';
-                el.dataset.stjOrigWidth = el.style.width || '';
-                el.dataset.stjOrigHeight = el.style.height || '';
-            }
-            el.style.position = 'static';
-            el.style.left = 'auto';
-            el.style.top = 'auto';
-            targetParent.appendChild(el);
-        };
-
-        const collectSpecialPair = (previewId, labelText) => {
-            let previewEl = null;
-            let labelEl = null;
-            for (const root of roots) {
-                if (!previewEl) {
-                    previewEl = root.querySelector(`#${previewId}`);
-                }
-                if (!labelEl) {
-                    labelEl = Array.from(root.querySelectorAll('.stj-special-label')).find(
-                        (lbl) => (lbl.textContent || '').trim() === labelText
-                    ) || null;
-                }
-            }
-            if (!previewEl && !labelEl) return null;
-
-            let pair = topLeftBox.querySelector(`[data-stj-pair-key="${previewId}"]`);
-            if (!pair) {
-                pair = document.createElement('div');
-                pair.className = 'stj-special-pair';
-                pair.dataset.stjMovedPair = '1';
-                pair.dataset.stjPairKey = previewId;
-                topLeftBox.appendChild(pair);
-            }
-
-            moveSpecialElementOnce(labelEl, pair);
-            moveSpecialElementOnce(previewEl, pair);
-            return pair;
-        };
-
-        [
-            { id: 'stj_preview_default', label: 'デフォルト表示' },
-            { id: 'stj_preview_thumbnail', label: 'サムネイル表示' },
-        ].forEach(({ id, label }) => {
-            collectSpecialPair(id, label);
-        });
-
-        // 3. 「他セル」（未紐付け / data-image-list="[]"）をツリー左下へ組み込み
-        let bottomLeftBox = containerEl.querySelector('.stj-tree-bottom-left-other');
-        if (!bottomLeftBox) {
-            bottomLeftBox = document.createElement('div');
-            bottomLeftBox.className = 'stj-tree-bottom-left-other';
-            containerEl.appendChild(bottomLeftBox);
-        }
-
         const scale = getTreeScale(containerEl);
-        const otherCells = [];
-        containerEl.querySelectorAll('.stj-keyword-item').forEach((item) => {
-            if (item.closest('.stj-tree-top-left-modes')) return;
-            const imgListAttr = (item.getAttribute('data-image-list') || '').trim();
-            const isUnlinked = imgListAttr === '' || imgListAttr === '[]';
-            if (isUnlinked) {
-                item.dataset.stjIsOtherCell = '1';
-                if (!item.dataset.stjBaseWidth) item.dataset.stjBaseWidth = String(STJ_TREE_CELL_W);
-                if (!item.dataset.stjBaseHeight) item.dataset.stjBaseHeight = String(STJ_TREE_CELL_H);
-                const w = parseFloat(item.dataset.stjBaseWidth) * scale;
-                const h = parseFloat(item.dataset.stjBaseHeight) * scale;
-                item.style.setProperty('position', 'relative', 'important');
-                item.style.setProperty('left', 'auto', 'important');
-                item.style.setProperty('top', 'auto', 'important');
-                item.style.width = `${w}px`;
-                item.style.height = `${h}px`;
-                delete item.dataset.stjBaseLeft;
-                delete item.dataset.stjBaseTop;
-                    if (item.parentElement !== bottomLeftBox) {
-                        bottomLeftBox.appendChild(item);
-                    }
-                    otherCells.push(item);
-                }
-            });
-    
-            // 「デフォルト表示」「サムネイル表示」の実サイズを現在の半分（幅70px・高さ63px × scale）に強制
-            const miniW = Math.round(140 * scale);
-            const miniH = Math.round(160 * scale);
-            topLeftBox.querySelectorAll('.stj-special-pair').forEach((pair) => {
-                pair.style.setProperty('width', `${miniW}px`, 'important');
-            });
-            topLeftBox.querySelectorAll('.stj-special-preview, .stj-image-preview').forEach((el) => {
-                el.style.setProperty('width', `${miniW}px`, 'important');
-                el.style.setProperty('height', `${miniH}px`, 'important');
-                el.style.setProperty('min-width', '0', 'important');
-                el.style.setProperty('min-height', '0', 'important');
-                el.style.setProperty('max-width', `${miniW}px`, 'important');
-                el.style.setProperty('max-height', `${miniH}px`, 'important');
-            });
-    
         // ツリーセルの実最下端を算出（「他セル」や「左上プレビュー」は除外）
         let treeActualBottom = 0;
         containerEl.querySelectorAll(':scope > .stj-keyword-item').forEach((node) => {
-            if (node.dataset.stjIsOtherCell === '1') return;
+            if (node.dataset.stjIsStandaloneCell === '1') return;
             const t = parseFloat(node.style.top) || 0;
             const h = parseFloat(node.style.height) || (STJ_TREE_CELL_H * scale);
             if (t + h > treeActualBottom) treeActualBottom = t + h;
@@ -850,27 +735,9 @@
         if (treeActualBottom <= 0) {
             treeActualBottom = parseFloat(containerEl.dataset.stjTreeBottom || '0') || (120 * scale);
         }
-
-        const topLeftRectH = topLeftBox.offsetHeight || (miniH * 2 + 24 * scale);
+ 
         const gap = Math.ceil(16 * scale);
-        const bottomLeftTop = Math.ceil(Math.max(treeActualBottom, topLeftRectH) + gap);
-
-        if (otherCells.length > 0) {
-            bottomLeftBox.style.setProperty('display', 'flex', 'important');
-            bottomLeftBox.style.setProperty('top', `${bottomLeftTop}px`, 'important');
-            bottomLeftBox.style.setProperty('bottom', 'auto', 'important');
-            bottomLeftBox.style.setProperty('left', `${Math.round(12 * scale)}px`, 'important');
-        } else {
-            bottomLeftBox.style.setProperty('display', 'none', 'important');
-        }
-
-        const otherActualH = otherCells.length > 0
-            ? (bottomLeftBox.offsetHeight || Math.ceil(STJ_TREE_CELL_H * scale))
-            : 0;
-        const bottomEdge = otherCells.length > 0
-            ? (bottomLeftTop + otherActualH)
-            : Math.max(treeActualBottom, topLeftRectH);
-        const neededH = Math.max(Math.ceil(120 * scale), Math.ceil(bottomEdge + gap));
+        const neededH = Math.max(Math.ceil(120 * scale), Math.ceil(treeActualBottom + gap));
 
         containerEl.style.setProperty('min-height', `${neededH}px`);
         containerEl.style.setProperty('height', `${neededH}px`);
@@ -3500,25 +3367,99 @@
         edges.sort();
         return `${nodes.join('|')}#${edges.join(',')}`;
     }
-    
+
+    function _stjSyncStandalonePanel(containerEl, graph) {
+        const panelBody = document.getElementById('stj_standalone_body');
+        if (!panelBody || !containerEl) return;
+
+        const connectedSet = new Set();
+        for (const [parentKw, childKws] of (graph?.children || new Map()).entries()) {
+            if (Array.isArray(childKws) && childKws.length > 0) {
+                connectedSet.add(parentKw);
+                for (const c of childKws) connectedSet.add(c);
+            }
+        }
+        for (const [childKw, parentKws] of (graph?.parents || new Map()).entries()) {
+            if (Array.isArray(parentKws) && parentKws.length > 0) {
+                connectedSet.add(childKw);
+                for (const p of parentKws) connectedSet.add(p);
+            }
+        }
+
+        panelBody.innerHTML = '';
+        const sourceCells = Array.from(containerEl.querySelectorAll(':scope > .stj-keyword-item'));
+        const standaloneCells = sourceCells.filter(cell => {
+            const kw = getCellKeyword(cell).trim();
+            return !kw || !connectedSet.has(kw);
+        });
+
+        if (standaloneCells.length === 0) {
+            const emptyEl = document.createElement('div');
+            emptyEl.className = 'stj-standalone-empty';
+            emptyEl.textContent = '独立セルはありません';
+            panelBody.appendChild(emptyEl);
+            return;
+        }
+
+        standaloneCells.forEach((cell, idx) => {
+            cell.dataset.stjIsStandaloneCell = '1';
+            const card = document.createElement('div');
+            card.className = 'stj-keyword-item stj-standalone-cell-item';
+            card.setAttribute('data-keyword', getCellKeyword(cell));
+            card.setAttribute('data-image-list', cell.getAttribute('data-image-list') || '[]');
+
+            const previewDiv = document.createElement('div');
+            previewDiv.className = 'stj-image-preview';
+            previewDiv.id = `stj_standalone_preview_${idx}`;
+            previewDiv.style.position = 'relative';
+
+            const ph = document.createElement('div');
+            ph.className = 'stj-preview-text';
+            ph.textContent = _t('stj.preview.placeholder', 'プレビュー');
+            previewDiv.appendChild(ph);
+
+            const kwDisplay = document.createElement('div');
+            kwDisplay.className = 'stj-keyword-display';
+            kwDisplay.textContent = getCellKeyword(cell);
+
+            card.appendChild(previewDiv);
+            card.appendChild(kwDisplay);
+            panelBody.appendChild(card);
+
+            card.addEventListener('click', (e) => {
+                if (e.target.closest('button')) return;
+                if (isDialogActive) return;
+                openCellModal(cell);
+            });
+
+            const charName = document.getElementById('stj_char_name_display')?.textContent || '';
+            updateImagePreview(previewDiv.id, charName, getCellImages(cell).join(','));
+        });
+    }
+
     async function _stjApplyTreeLayout() {
         if (_stjTreeLayoutInFlight) {
             _stjTreeLayoutPending = true;
             return;
         }
         _stjTreeLayoutInFlight = true;
- 
+
         try {
             const container = document.getElementById('stj_keywords_container');
             if (!container) return;
             if (container.offsetParent === null) return;
- 
+
             const startCharName = document.getElementById('stj_char_name_display')?.textContent;
             if (!startCharName) return;
- 
-            // 前回の他セル・特殊要素の配置を一旦リセットしてから再計算
-            container.querySelectorAll('.stj-tree-bottom-left-other .stj-keyword-item').forEach((cell) => {
+
+            // 前回の独立セル・特殊要素の配置を一旦リセットしてから再計算
+            container.querySelectorAll('.stj-tree-bottom-left-other .stj-keyword-item, .stj-standalone-cell-item').forEach((cell) => {
                 delete cell.dataset.stjIsOtherCell;
+                delete cell.dataset.stjIsStandaloneCell;
+                if (cell.classList.contains('stj-standalone-cell-item')) {
+                    cell.remove();
+                    return;
+                }
                 container.appendChild(cell);
             });
 
@@ -3576,6 +3517,7 @@
 
             const unpositioned = [];
             container.querySelectorAll(':scope > .stj-keyword-item').forEach(cell => {
+                if (cell.dataset.stjIsStandaloneCell === '1') return;
                 const kw = getCellKeyword(cell).trim();
                 const pos = kw ? positions.get(kw) : null;
                 if (pos) {
@@ -3626,6 +3568,7 @@
             _stjDrawConnections(container, offsetPositions, children);
 
             applyTreeScaleToContainer(container);
+            _stjSyncStandalonePanel(container, graph);
             if (!graphOrCellChanged && prevHeight > 0) {
                 container.style.setProperty('min-height', `${prevHeight}px`);
                 container.style.setProperty('height', `${prevHeight}px`);
@@ -4303,6 +4246,10 @@
                     <textarea id="stj_test_input" placeholder="${_t('stj.header.test_placeholder', '試しに文章を入力してください（例：笑顔で挨拶する）...')}"></textarea>
                     <div id="stj_test_result">${_t('stj.test.result_prefix', '判定結果')}: <span style="color: #aaa; font-weight: normal;">${_t('stj.test.empty_hint', '文章を入力するとヒットするキーワードが表示されます')}</span></div>
                 </div>
+                <button type="button" id="stj_special_toggle" class="stj-test-toggle">デフォルト＆サムネイル ▼</button>
+                <div id="stj_special_body" class="stj-horizontal-panel-body" style="display: none;"></div>
+                <button type="button" id="stj_standalone_toggle" class="stj-test-toggle">独立セル ▼</button>
+                <div id="stj_standalone_body" class="stj-horizontal-panel-body" style="display: none;"></div>
             </div>
 
             <div class="stj-top-section">
@@ -4388,7 +4335,32 @@
                     gap: calc(var(--exp-scale, 1) * 20px);
                     margin-bottom: calc(var(--exp-scale, 1) * 25px);
                     align-items: stretch;
-                    visibility: collapse;
+                    display: none !important;
+                }
+                #stj_export_modal .stj-horizontal-panel-body {
+                    display: flex;
+                    flex-direction: row;
+                    flex-wrap: wrap;
+                    align-items: flex-start;
+                    gap: calc(var(--exp-scale, 1) * 10px);
+                    padding: calc(var(--exp-scale, 1) * 8px);
+                    margin: 0 0 calc(var(--exp-scale, 1) * 6px) 0;
+                    background: rgba(26, 32, 44, 0.85);
+                    border: 1px solid #4a5568;
+                    border-radius: 4px;
+                    overflow-x: auto;
+                }
+                #stj_export_modal .stj-horizontal-panel-body .stj-special-item,
+                #stj_export_modal .stj-horizontal-panel-body .stj-standalone-cell-item {
+                    flex: 0 0 auto;
+                    width: calc(var(--exp-scale, 1) * 140px);
+                    height: calc(var(--exp-scale, 1) * 160px);
+                    margin: 0;
+                }
+                #stj_export_modal .stj-standalone-empty {
+                    color: #a0aec0;
+                    font-size: 13px;
+                    padding: 4px 2px;
                 }
             `;
             document.head.appendChild(s);
@@ -4413,6 +4385,44 @@
             });
         }
 
+        const specialToggleBtn = document.getElementById('stj_special_toggle');
+        const specialBody = document.getElementById('stj_special_body');
+        if (specialToggleBtn && specialBody) {
+            specialToggleBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const expanded = specialBody.style.display !== 'none';
+                if (!expanded) {
+                    modal.querySelectorAll('.stj-top-section .stj-special-item').forEach((spItem) => {
+                        specialBody.appendChild(spItem);
+                        updateCellPreview(spItem);
+                    });
+                    specialBody.style.display = 'flex';
+                    specialToggleBtn.textContent = 'デフォルト＆サムネイル ▲';
+                } else {
+                    modal.querySelectorAll('#stj_special_body .stj-special-item').forEach((spItem) => {
+                        const topSpecialContainer = modal.querySelector('.stj-top-section .stj-special-container');
+                        if (topSpecialContainer) topSpecialContainer.appendChild(spItem);
+                    });
+                    specialBody.style.display = 'none';
+                    specialToggleBtn.textContent = 'デフォルト＆サムネイル ▼';
+                }
+            });
+        }
+
+        const standaloneToggleBtn = document.getElementById('stj_standalone_toggle');
+        const standaloneBody = document.getElementById('stj_standalone_body');
+        if (standaloneToggleBtn && standaloneBody) {
+            standaloneToggleBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const expanded = standaloneBody.style.display !== 'none';
+                standaloneBody.style.display = expanded ? 'none' : 'flex';
+                standaloneToggleBtn.textContent = expanded ? '独立セル ▼' : '独立セル ▲';
+                if (!expanded) {
+                    _stjScheduleTreeLayout();
+                }
+            });
+        }
+        
         const testInput = document.getElementById('stj_test_input');
         if (testInput) testInput.addEventListener('input', runLiveTest);
 
