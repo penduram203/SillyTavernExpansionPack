@@ -785,6 +785,12 @@
         const itemFontPx = `${(14 * scale).toFixed(2)}px`;
 
         containerEl.querySelectorAll('.stj-keyword-item').forEach((item) => {
+            if (item.dataset.stjIsStandaloneCell === '1' || item.closest('.stj-horizontal-panel-body')) {
+                if (item.dataset.stjIsStandaloneCell === '1') {
+                    item.style.setProperty('display', 'none', 'important');
+                }
+                return;
+            }
             const isOther = item.dataset.stjIsOtherCell === '1' || Boolean(item.closest('.stj-tree-bottom-left-other'));
             const left = parseFloat(item.style.left);
             const top = parseFloat(item.style.top);
@@ -3505,8 +3511,34 @@
  
             const { positions, children } = _stjComputeTreeLayout(graph);
 
+            const connectedSet = new Set();
+            for (const [parentKw, childKws] of (graph?.children || new Map()).entries()) {
+                if (Array.isArray(childKws) && childKws.length > 0) {
+                    connectedSet.add(parentKw);
+                    for (const c of childKws) connectedSet.add(c);
+                }
+            }
+            for (const [childKw, parentKws] of (graph?.parents || new Map()).entries()) {
+                if (Array.isArray(parentKws) && parentKws.length > 0) {
+                    connectedSet.add(childKw);
+                    for (const p of parentKws) connectedSet.add(p);
+                }
+            }
+
+            container.querySelectorAll(':scope > .stj-keyword-item').forEach(cell => {
+                const kw = getCellKeyword(cell).trim();
+                if (!kw || !connectedSet.has(kw)) {
+                    cell.dataset.stjIsStandaloneCell = '1';
+                    cell.style.setProperty('display', 'none', 'important');
+                } else {
+                    delete cell.dataset.stjIsStandaloneCell;
+                    cell.style.removeProperty('display');
+                }
+            });
+
             let maxX = 0, maxY = 0, minX = 0, minY = 0;
-            for (const pos of positions.values()) {
+            for (const [kw, pos] of positions.entries()) {
+                if (!connectedSet.has(kw)) continue;
                 maxX = Math.max(maxX, pos.x + STJ_TREE_CELL_W);
                 maxY = Math.max(maxY, pos.y + STJ_TREE_CELL_H);
                 minX = Math.min(minX, pos.x);
@@ -3542,22 +3574,6 @@
             });
 
             let totalHeight = maxY - minY + STJ_TREE_PADDING * 2;
-            if (unpositioned.length > 0) {
-                let unposY = totalHeight;
-                for (const cell of unpositioned) {
-                    cell.dataset.stjBaseLeft = String(STJ_TREE_PADDING);
-                    cell.dataset.stjBaseTop = String(unposY);
-                    cell.dataset.stjBaseWidth = String(STJ_TREE_CELL_W);
-                    cell.dataset.stjBaseHeight = String(STJ_TREE_CELL_H);
-                    cell.style.position = 'absolute';
-                    cell.style.left = STJ_TREE_PADDING + 'px';
-                    cell.style.top = unposY + 'px';
-                    cell.style.width = STJ_TREE_CELL_W + 'px';
-                    cell.style.height = STJ_TREE_CELL_H + 'px';
-                    unposY += STJ_TREE_CELL_H + STJ_TREE_V_GAP;
-                }
-                totalHeight = unposY;
-            }
 
             container.classList.add('stj-tree-mode');
             container.dataset.stjBaseMinW = String(maxX - minX + STJ_TREE_PADDING * 2);
