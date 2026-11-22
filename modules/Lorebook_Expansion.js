@@ -669,7 +669,11 @@ function setDataFor(worldName, uid, entry, data) {
         }
     } catch (e) { /* ignore */ }
     debugLog(`per-world store に保存: ${worldName}::${charKey}`);
-
+    try {
+        window.dispatchEvent(new CustomEvent('lbe-data-changed', {
+            detail: { worldName, uid, charKey },
+        }));
+    } catch (e) { /* ignore */ }
     // ── 2) character.data にもミラー保存（JSONエクスポート/インポート用）──
     //    プライマリはあくまで per-world store。character.data は
     //    JSON の可搬性のためのコピー。
