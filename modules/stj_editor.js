@@ -4235,7 +4235,9 @@
         modal.style.position = 'fixed';
         modal.style.zIndex = '10001';
         modal.innerHTML = `
-            <button type="button" id="stj_test_toggle" class="stj-test-toggle">${_t('stj.header.title', '🔍 リアルタイムキーワード反応テスト')} ▼<div id="stj_test_body" style="display: none;">
+            <button type="button" id="stj_test_toggle" class="stj-test-toggle">${_t('stj.header.title', '🔍 リアルタイムキーワード反応テスト')} ▼</button>
+            <div id="stj_test_section">
+                <div id="stj_test_body" style="display: none;">
                     <div class="stj-test-header">
                         <strong id="stj_char_name_display"></strong>
                         <button type="button" class="stj-help-btn" id="stj_help_button">${_t('stj.header.help', 'ヘルプ')}</button>
@@ -4243,8 +4245,7 @@
                     <div class="stj-syntax-guide" id="stj_syntax_guide">${buildSyntaxGuideHtml()}</div>
                     <textarea id="stj_test_input" placeholder="${_t('stj.header.test_placeholder', '試しに文章を入力してください（例：笑顔で挨拶する）...')}"></textarea>
                     <div id="stj_test_result">${_t('stj.test.result_prefix', '判定結果')}: <span style="color: #aaa; font-weight: normal;">${_t('stj.test.empty_hint', '文章を入力するとヒットするキーワードが表示されます')}</span></div>
-                </div></button>
-            <div id="stj_test_section">
+                </div>
                 <div id="stj_standalone_body" class="stj-horizontal-panel-body" style="display: flex;"></div>
             </div>
             <button type="button" id="stj_special_toggle" class="stj-test-toggle">デフォルト＆サムネイル ▼</button>
