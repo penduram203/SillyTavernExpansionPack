@@ -3094,10 +3094,12 @@
             return window.LorebookExpansion.extractChoiceNumber(normalized);
         }
         const pats = [
-            /選択肢[「『"']?(\d{1,4})[」』"']?/,
-            /choice[^\d]{0,3}(\d{1,4})/i,
-            /(?:^|\s)(\d{3,4})(?:\s|$|[\u3000。.,])/,
-            /(\d{3})/,
+            // 選択肢○○○形式（全角/半角数字に対応）
+            /\u9078\u629e\u80a2[\u300c\u300e\"']?([\d\uFF10-\uFF19]{1,4})[\u300d\u300f\"']?/,
+            /choice[^\\d\uFF10-\uFF19]{0,3}([\d\uFF10-\uFF19]{1,4})/i,
+            // 単体の数字（全角/半角）
+            /(?:^|\\s)([\d\uFF10-\uFF19]{3,4})(?:\\s|$|[\u3000\u3002.,])/,
+            /([\d\uFF10-\uFF19]{3})/,
         ];
         for (const pat of pats) {
             const m = normalized.match(pat);
@@ -3112,14 +3114,17 @@
         }
         if (!entries || !choiceNum) return null;
         const list = Array.isArray(entries) ? entries : Object.values(entries);
+        // ★ 文字列を半角に正規化して比較
+        const normalizedChoiceNum = _stjToHalfWidth(String(choiceNum).trim());
         for (const entry of list) {
             if (!entry) continue;
             for (const key of getEntryKeys(entry)) {
                 const k = String(key).trim();
-                if (k === choiceNum) return entry;  // ← 完全一致のみ
+                const normalizedK = _stjToHalfWidth(k);
+                if (normalizedK === normalizedChoiceNum) return entry;
             }
         }
-        return null;  // ← 部分一致を返さない
+        return null;
     }
 
     function _stjFindEntryByKeywordLoose(list, choiceStr) {
@@ -3127,17 +3132,17 @@
         const raw = String(choiceStr).trim();
         if (!raw) return null;
 
-        // 選択肢番号を抽出して完全一致で検索
         const num = _stjExtractChoiceNumber(raw);
         if (num) {
+            const normalizedNum = _stjToHalfWidth(num);
             for (const e of list) {
                 const kw = getEntryKeyword(e);
                 if (!kw) continue;
-                if (kw === num) return e;  // ← 完全一致
+                const normalizedKw = _stjToHalfWidth(kw);
+                if (normalizedKw === normalizedNum) return e;
             }
         }
 
-        // 選択肢文字列をクリーンアップ
         const clean = raw.replace(/^\u9078\u629e\u80a2[\u300c\u300e\"']?/, '')
                          .replace(/[\u300d\u300f\"']$/, '')
                          .replace(/^choice[:\\s]*/i, '')
@@ -3145,19 +3150,21 @@
                          .trim();
         if (!clean) return null;
 
-        // 完全一致で検索
+        // ★ 文字列を半角に正規化
+        const normalizedClean = _stjToHalfWidth(clean);
         for (const e of list) {
             const kw = getEntryKeyword(e);
             if (!kw) continue;
-            if (kw === clean) return e;  // ← 完全一致
+            const normalizedKw = _stjToHalfWidth(kw);
+            if (normalizedKw === normalizedClean) return e;
         }
 
-        // 大文字小文字を無視した完全一致
-        const lowerClean = clean.toLowerCase();
+        const lowerClean = normalizedClean.toLowerCase();
         for (const e of list) {
             const kw = getEntryKeyword(e);
             if (!kw) continue;
-            if (kw.toLowerCase() === lowerClean) return e;  // ← 完全一致
+            const normalizedKw = _stjToHalfWidth(kw);
+            if (normalizedKw.toLowerCase() === lowerClean) return e;
         }
         return null;
     }
