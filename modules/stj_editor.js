@@ -3112,18 +3112,14 @@
         }
         if (!entries || !choiceNum) return null;
         const list = Array.isArray(entries) ? entries : Object.values(entries);
-        let partial = null;
         for (const entry of list) {
             if (!entry) continue;
             for (const key of getEntryKeys(entry)) {
                 const k = String(key).trim();
-                if (k === choiceNum) return entry;
-                if (!partial && (k.startsWith(choiceNum) || k.includes(choiceNum))) {
-                    partial = entry;
-                }
+                if (k === choiceNum) return entry;  // ← 完全一致のみ
             }
         }
-        return partial;
+        return null;  // ← 部分一致を返さない
     }
 
     function _stjFindEntryByKeywordLoose(list, choiceStr) {
@@ -3131,31 +3127,37 @@
         const raw = String(choiceStr).trim();
         if (!raw) return null;
 
-        const variants = new Set([raw]);
-        variants.add(_stjToHalfWidth(raw));
-        variants.add(_stjToFullWidth(raw));
-
-        const base = [...variants];
-        for (const v of base) {
-            const s1 = v.replace(/^選択肢[「『"']?/, '').replace(/[」』"']$/, '').trim();
-            if (s1 && s1 !== v) variants.add(s1);
-            const s2 = v.replace(/^choice[:\s]*/i, '').trim();
-            if (s2 && s2 !== v) variants.add(s2);
-            const s3 = v.replace(/^[０-９\d]{1,4}[:：\s]*/, '').trim();
-            if (s3 && s3 !== v) variants.add(s3);
+        // 選択肢番号を抽出して完全一致で検索
+        const num = _stjExtractChoiceNumber(raw);
+        if (num) {
+            for (const e of list) {
+                const kw = getEntryKeyword(e);
+                if (!kw) continue;
+                if (kw === num) return e;  // ← 完全一致
+            }
         }
 
-        const lowerVariants = new Set([...variants].map(v => v.toLowerCase()));
+        // 選択肢文字列をクリーンアップ
+        const clean = raw.replace(/^\u9078\u629e\u80a2[\u300c\u300e\"']?/, '')
+                         .replace(/[\u300d\u300f\"']$/, '')
+                         .replace(/^choice[:\\s]*/i, '')
+                         .replace(/^[\uff10-\uff19\\d]{1,4}[:\\uff1a\\s]*/, '')
+                         .trim();
+        if (!clean) return null;
 
+        // 完全一致で検索
         for (const e of list) {
             const kw = getEntryKeyword(e);
             if (!kw) continue;
-            if (variants.has(kw)) return e;
+            if (kw === clean) return e;  // ← 完全一致
         }
+
+        // 大文字小文字を無視した完全一致
+        const lowerClean = clean.toLowerCase();
         for (const e of list) {
             const kw = getEntryKeyword(e);
             if (!kw) continue;
-            if (lowerVariants.has(kw.toLowerCase())) return e;
+            if (kw.toLowerCase() === lowerClean) return e;  // ← 完全一致
         }
         return null;
     }
@@ -5167,6 +5169,19 @@
         });
 
         window.addEventListener('gic-image-generated-for-keyword', handleImageGeneratedForKeyword);
+        
+        // ★ 自動更新のためのイベントリスナーを追加
+        window.addEventListener('lbe-lex-data-updated', (e) => {
+            const { worldName } = e.detail || {};
+            if (!worldName) return;
+            const currentWorldName = getCharacterWorldInfoName();
+            if (currentWorldName !== worldName) return;
+            const container = document.getElementById('stj_keywords_container');
+            if (!container || !container.classList.contains('stj-tree-mode')) return;
+            setTimeout(() => {
+                _stjScheduleTreeLayout();
+            }, 100);
+        });
 
         syncLater(1500);
     }
