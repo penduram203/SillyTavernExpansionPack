@@ -4453,12 +4453,12 @@
                     flex-direction: row;
                     flex-wrap: wrap;
                     align-items: flex-start;
-                    gap: calc(var(--exp-scale, 1) * 10px);
-                    padding: calc(var(--exp-scale, 1) * 8px);
-                    margin: 0 0 calc(var(--exp-scale, 1) * 6px) 0;
+                    gap: calc(var(--exp-scale, 1) * 0px);
+                    padding: calc(var(--exp-scale, 1) * 0px);
+                    margin: 0 0 calc(var(--exp-scale, 1) * 0px) 0;
                     background: rgba(26, 32, 44, 0.85);
-                    border: 1px solid #4a5568;
-                    border-radius: 4px;
+                    border: 0px solid #4a5568;
+                    border-radius: 0px;
                     overflow-x: auto;
                 }
                 #stj_export_modal .stj-horizontal-panel-body .stj-special-item,
