@@ -3087,12 +3087,6 @@
         );
     }
 
-    // ===== パンニング（自由スクロール）機能 =====
-    let _stjPanningState = null;
-
-
-
-
     function _stjInstallPanningHandlers() {
         if (window.__stjPanningHandlersInstalled) return;
         window.__stjPanningHandlersInstalled = true;
