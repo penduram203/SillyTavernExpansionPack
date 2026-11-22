@@ -3090,54 +3090,8 @@
     // ===== パンニング（自由スクロール）機能 =====
     let _stjPanningState = null;
 
-    function _stjStartPanning(e) {
-        // セル上では無効（セルのドラッグアンドドロップを優先）
-        if (e.target.closest('.stj-keyword-item, .stj-special-item')) return;
-        if (e.button !== 0) return; // 左クリックのみ
 
-        const container = document.getElementById('stj_keywords_container');
-        if (!container || !container.classList.contains('stj-tree-mode')) return;
 
-        _stjPanningState = {
-            startX: e.clientX,
-            startY: e.clientY,
-            startScrollLeft: container.scrollLeft,
-            startScrollTop: container.scrollTop
-        };
-
-        container.style.cursor = 'grabbing';
-        e.preventDefault();
-        e.stopPropagation();
-    }
-
-    function _stjPan(e) {
-        if (!_stjPanningState) return;
-
-        const container = document.getElementById('stj_keywords_container');
-        if (!container) {
-            _stjPanningState = null;
-            return;
-        }
-
-        const dx = e.clientX - _stjPanningState.startX;
-        const dy = e.clientY - _stjPanningState.startY;
-
-        container.scrollLeft = _stjPanningState.startScrollLeft - dx;
-        container.scrollTop = _stjPanningState.startScrollTop - dy;
-
-        e.preventDefault();
-        e.stopPropagation();
-    }
-
-    function _stjEndPanning(e) {
-        if (!_stjPanningState) return;
-
-        const container = document.getElementById('stj_keywords_container');
-        if (container) {
-            container.style.cursor = '';
-        }
-        _stjPanningState = null;
-    }
 
     function _stjInstallPanningHandlers() {
         if (window.__stjPanningHandlersInstalled) return;
