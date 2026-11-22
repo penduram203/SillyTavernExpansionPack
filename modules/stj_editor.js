@@ -4363,6 +4363,17 @@
                     position: static !important;
                     top: auto !important;
                 }
+                #stj_export_modal #stj_test_section {
+                    position: sticky;
+                    top: calc(var(--exp-scale, 1) * -25px);
+                    z-index: 100;
+                    background: #1e1e1e;
+                    border: 0px solid #555;
+                    padding: calc(var(--exp-scale, 1) * 0px) calc(var(--exp-scale, 1) * 0px);
+                    margin-bottom: calc(var(--exp-scale, 1) * 0px);
+                    border-radius: calc(var(--exp-scale, 1) * 0px);
+                    box-shadow: 0 calc(var(--exp-scale, 1) * 0px) calc(var(--exp-scale, 1) * 0px) rgba(0,0,0,0.6);
+                }
                 #stj_export_modal {
                     display: none;
                     position: fixed;
