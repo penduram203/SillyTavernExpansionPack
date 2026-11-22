@@ -3455,6 +3455,7 @@
             if (!container) return;
             if (container.offsetParent === null) return;
 
+            container.classList.add('stj-tree-mode');
             const startCharName = document.getElementById('stj_char_name_display')?.textContent;
             if (!startCharName) return;
 
