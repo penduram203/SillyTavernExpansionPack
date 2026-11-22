@@ -4413,6 +4413,26 @@
                     overflow-x: auto;
                     box-sizing: border-box;
                 }
+                .stj-button-group {
+                    position: fixed;
+                    left: 29.5vw;
+                    right: 0;
+                    bottom: 0;
+                    width: 9.1vw;
+                    min-width: calc(var(--exp-scale, 1) * 50px);
+                    z-index: 100;
+                    display: flex;
+                    justify-content: flex-start;
+                    align-items: center;
+                    gap: calc(var(--exp-scale, 1) * 0px);
+                    margin: 0;
+                    padding: calc(var(--exp-scale, 1) * 15px) calc(var(--exp-scale, 1) * 15px) calc(var(--exp-scale, 1) * 15px) calc(var(--exp-scale, 1) * 15px);
+                    background-color: #2d3748;
+                    border-top: 1px solid #4a5568;
+                    border-bottom-left-radius: calc(var(--exp-scale, 1) * 0px);
+                    border-bottom-right-radius: calc(var(--exp-scale, 1) * 0px);
+                    box-sizing: border-box;
+                }
                 #stj_export_modal #stj_keywords_container.stj-tree-mode {
                     position: relative !important;
                     margin-top: calc(var(--exp-scale, 1) * 8px) !important;
