@@ -4239,7 +4239,6 @@
             <div id="stj_test_body" style="display: none;">
                 <div class="stj-test-header">
                     <strong id="stj_char_name_display"></strong>
-                    <button type="button" class="stj-help-btn" id="stj_help_button">${_t('stj.header.help', 'ヘルプ')}</button>
                 </div>
                 <div class="stj-syntax-guide" id="stj_syntax_guide">${buildSyntaxGuideHtml()}</div>
                 <textarea id="stj_test_input" placeholder="${_t('stj.header.test_placeholder', '試しに文章を入力してください（例：笑顔で挨拶する）...')}"></textarea>
@@ -4333,8 +4332,8 @@
                 #stj_export_modal #stj_test_toggle {
                     display: inline-block;
                     width: 45%;
-                    padding: 8px 12px;
-                    margin: 0 0 6px 0;
+                    padding: 0px 12px;
+                    margin: 0 0 0px 0;
                     background: #2c5282;
                     color: #fff;
                     border: 1px solid #4299e1;
@@ -5107,9 +5106,6 @@
             const expanded = testBody && testBody.style.display !== 'none';
             testToggleBtn.textContent = _t('stj.header.title', '🔍 リアルタイムキーワード反応テスト') + (expanded ? ' ▲' : ' ▼');
         }
-
-        const helpBtn = stjModalEl.querySelector('#stj_help_button');
-        if (helpBtn) helpBtn.textContent = _t('stj.header.help', 'ヘルプ');
 
         const testInput = stjModalEl.querySelector('#stj_test_input');
         if (testInput) testInput.placeholder = _t('stj.header.test_placeholder', '試しに文章を入力してください（例：笑顔で挨拶する）...');
