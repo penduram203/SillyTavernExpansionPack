@@ -702,6 +702,13 @@ function setDataFor(worldName, uid, entry, data) {
     } catch (e) {
         console.warn(LOG, 'character.data へのミラー保存に失敗:', e);
     }
+
+    // ★ イベントを発火
+    try {
+        window.dispatchEvent(new CustomEvent('lbe-lex-data-updated', {
+            detail: { worldName, uid, entry, data: normalized }
+        }));
+    } catch (e) { /* ignore */ }
 }
 
 function getExpansionData(entry) {
