@@ -4235,8 +4235,8 @@
         modal.style.position = 'fixed';
         modal.style.zIndex = '10001';
         modal.innerHTML = `
+            <button type="button" id="stj_test_toggle" class="stj-test-toggle">${_t('stj.header.title', '🔍 リアルタイムキーワード反応テスト')} ▼</button>
             <div id="stj_test_section">
-                <button type="button" id="stj_test_toggle" class="stj-test-toggle">${_t('stj.header.title', '🔍 リアルタイムキーワード反応テスト')} ▼</button>
                 <div id="stj_test_body" style="display: none;">
                     <div class="stj-test-header">
                         <strong id="stj_char_name_display"></strong>
@@ -4313,8 +4313,8 @@
                     top: auto !important;
                 }
                 #stj_export_modal #stj_test_toggle {
-                    display: block;
-                    width: 100%;
+                    display: inline-block;
+                    width: 45%;
                     padding: 8px 12px;
                     margin: 0 0 6px 0;
                     background: #2c5282;
