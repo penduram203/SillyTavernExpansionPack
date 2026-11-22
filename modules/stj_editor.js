@@ -3517,7 +3517,11 @@
 
             const unpositioned = [];
             container.querySelectorAll(':scope > .stj-keyword-item').forEach(cell => {
-                if (cell.dataset.stjIsStandaloneCell === '1') return;
+                if (cell.dataset.stjIsStandaloneCell === '1') {
+                    cell.style.setProperty('display', 'none', 'important');
+                    return;
+                }
+                cell.style.removeProperty('display');
                 const kw = getCellKeyword(cell).trim();
                 const pos = kw ? positions.get(kw) : null;
                 if (pos) {
@@ -4235,10 +4239,15 @@
         modal.style.position = 'fixed';
         modal.style.zIndex = '10001';
         modal.innerHTML = `
-        <button type="button" id="stj_test_toggle" class="stj-test-toggle">${_t('stj.header.title', '🔍 リアルタイムキーワード反応テスト')} ▼</button>
+            <div id="stj_top_header_bar" class="stj-top-header-bar">
+                <button type="button" id="stj_special_toggle" class="stj-test-toggle">デフォルト＆サムネイル ▼</button>
+                <button type="button" id="stj_test_toggle" class="stj-test-toggle">${_t('stj.header.title', '🔍 リアルタイムキーワード反応テスト')} ▼</button>
+            </div>
+            <div id="stj_special_body" class="stj-horizontal-panel-body" style="display: none;"></div>
             <div id="stj_test_body" style="display: none;">
                 <div class="stj-test-header">
                     <strong id="stj_char_name_display"></strong>
+                    <button type="button" class="stj-help-btn" id="stj_help_button">${_t('stj.header.help', 'ヘルプ')}</button>
                 </div>
                 <div class="stj-syntax-guide" id="stj_syntax_guide">${buildSyntaxGuideHtml()}</div>
                 <textarea id="stj_test_input" placeholder="${_t('stj.header.test_placeholder', '試しに文章を入力してください（例：笑顔で挨拶する）...')}"></textarea>
@@ -4247,8 +4256,6 @@
             <div id="stj_test_section">
                 <div id="stj_standalone_body" class="stj-horizontal-panel-body" style="display: flex;"></div>
             </div>
-            <button type="button" id="stj_special_toggle" class="stj-test-toggle">デフォルト＆サムネイル ▼</button>
-            <div id="stj_special_body" class="stj-horizontal-panel-body" style="display: none;"></div>
 
             <div class="stj-top-section">
                 <div class="stj-special-container">
@@ -4353,6 +4360,27 @@
                     margin-bottom: calc(var(--exp-scale, 1) * 25px);
                     align-items: stretch;
                     display: none !important;
+                }
+                #stj_export_modal #stj_top_header_bar {
+                    display: flex !important;
+                    flex-direction: row !important;
+                    align-items: center !important;
+                    gap: calc(var(--exp-scale, 1) * 10px);
+                    width: 100%;
+                    margin: 0 0 calc(var(--exp-scale, 1) * 6px) 0;
+                    box-sizing: border-box;
+                }
+                #stj_export_modal #stj_top_header_bar #stj_special_toggle {
+                    flex: 0 0 auto;
+                    width: auto;
+                    min-width: calc(var(--exp-scale, 1) * 180px);
+                    margin: 0;
+                    color: rgb(0, 0, 0) !important;
+                }
+                #stj_export_modal #stj_top_header_bar #stj_test_toggle {
+                    flex: 1 1 auto;
+                    width: auto;
+                    margin: 0;
                 }
                 #stj_export_modal .stj-horizontal-panel-body {
                     display: flex;
