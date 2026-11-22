@@ -3583,21 +3583,31 @@
                 }
             });
 
-            let totalHeight = maxY - minY + STJ_TREE_PADDING * 2;
-
-            container.classList.add('stj-tree-mode');
-            container.dataset.stjBaseMinW = String(maxX - minX + STJ_TREE_PADDING * 2);
-            container.dataset.stjBaseMinH = String(totalHeight);
-            container.style.minWidth = container.dataset.stjBaseMinW + 'px';
+            const totalWidth = Math.max(300, maxX - minX + STJ_TREE_PADDING * 2);
+            const totalHeight = Math.max(120, maxY - minY + STJ_TREE_PADDING * 2);
+ 
+            delete container.dataset.stjBaseMinW;
+            delete container.dataset.stjBaseMinH;
+            container.style.width = totalWidth + 'px';
+            container.style.height = totalHeight + 'px';
+            container.style.minWidth = totalWidth + 'px';
             container.style.minHeight = totalHeight + 'px';
+            container.dataset.stjTreeBottom = String(Math.ceil(totalHeight - STJ_TREE_PADDING));
 
             const offsetPositions = new Map();
-            for (const [kw, pos] of positions) {
-                offsetPositions.set(kw, { x: pos.x + offsetX, y: pos.y + offsetY });
+            for (const [kw, pos] of positions.entries()) {
+                if (!connectedSet.has(kw)) continue;
+                offsetPositions.set(kw, {
+                    x: pos.x + offsetX,
+                    y: pos.y + offsetY,
+                });
             }
+
             _stjDrawConnections(container, offsetPositions, children);
 
             applyTreeScaleToContainer(container);
+            container.dataset.stjBaseMinW = String(totalWidth);
+            container.dataset.stjBaseMinH = String(totalHeight);
             _stjSyncStandalonePanel(container, graph);
             if (!graphOrCellChanged && prevHeight > 0) {
                 container.style.setProperty('min-height', `${prevHeight}px`);
