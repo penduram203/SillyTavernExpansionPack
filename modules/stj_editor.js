@@ -5359,6 +5359,78 @@
         try { runLiveTest(); } catch (e) { /* ignore */ }
     }
 
+    // ===== Panning functionality =====
+    let _stjPanningState = null;
+
+    function _stjStartPanning(e) {
+        if (e.target.closest('.stj-keyword-item, .stj-special-item')) return;
+        if (e.button !== 0) return;
+
+        const container = document.getElementById('stj_keywords_container');
+        if (!container || !container.classList.contains('stj-tree-mode')) return;
+
+        const scrollContainer = container.parentElement;
+        if (!scrollContainer) return;
+
+        _stjPanningState = {
+            startX: e.clientX,
+            startY: e.clientY,
+            startScrollLeft: scrollContainer.scrollLeft,
+            startScrollTop: scrollContainer.scrollTop,
+            scrollContainer: scrollContainer
+        };
+
+        container.style.cursor = 'grabbing';
+        e.preventDefault();
+        e.stopPropagation();
+    }
+
+    function _stjPan(e) {
+        if (!_stjPanningState) return;
+
+        const dx = e.clientX - _stjPanningState.startX;
+        const dy = e.clientY - _stjPanningState.startY;
+
+        const scrollContainer = _stjPanningState.scrollContainer;
+        if (scrollContainer) {
+            scrollContainer.scrollLeft = _stjPanningState.startScrollLeft - dx;
+            scrollContainer.scrollTop = _stjPanningState.startScrollTop - dy;
+        }
+
+        e.preventDefault();
+        e.stopPropagation();
+    }
+
+    function _stjEndPanning(e) {
+        if (!_stjPanningState) return;
+
+        const container = document.getElementById('stj_keywords_container');
+        if (container) {
+            container.style.cursor = 'grab';
+        }
+        _stjPanningState = null;
+        e.preventDefault();
+        e.stopPropagation();
+    }
+
+    function setupPanningHandlers() {
+        if (window.__stjPanningHandlersInstalled) return;
+        window.__stjPanningHandlersInstalled = true;
+
+        const container = document.getElementById('stj_keywords_container');
+        if (!container) {
+            setTimeout(setupPanningHandlers, 500);
+            return;
+        }
+
+        container.addEventListener('mousedown', _stjStartPanning, { passive: false });
+        document.addEventListener('mousemove', _stjPan, { passive: false });
+        document.addEventListener('mouseup', _stjEndPanning, { passive: false });
+        document.addEventListener('mouseleave', _stjEndPanning, { passive: false });
+
+        container.style.cursor = 'grab';
+    }    
+    
     function initStjEditor() {
         const context = getSTContext();
         if (!context) { setTimeout(initStjEditor, 500); return; }
@@ -5369,6 +5441,7 @@
 
         setupImageDeletedListener();
         setupLorebookEntryWatcher();
+        setupPanningHandlers();
         _stjInstallPanningHandlers();  // ★ パンニング機能を初期化
 
         try {
