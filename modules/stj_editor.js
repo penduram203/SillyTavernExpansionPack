@@ -4247,7 +4247,6 @@
             <div id="stj_test_body" style="display: none;">
                 <div class="stj-test-header">
                     <strong id="stj_char_name_display"></strong>
-                    <button type="button" class="stj-help-btn" id="stj_help_button">${_t('stj.header.help', 'ヘルプ')}</button>
                 </div>
                 <div class="stj-syntax-guide" id="stj_syntax_guide">${buildSyntaxGuideHtml()}</div>
                 <textarea id="stj_test_input" placeholder="${_t('stj.header.test_placeholder', '試しに文章を入力してください（例：笑顔で挨拶する）...')}"></textarea>
