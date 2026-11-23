@@ -4558,8 +4558,8 @@
                     border-radius: calc(var(--exp-scale, 1) * 8px);
                 }
                 #stj_export_modal .stj-image-preview {
-                    width: calc(var(--exp-scale, 1) * 160px);
-                    height: calc(var(--exp-scale, 1) * 160px);
+                    width: calc(var(--exp-scale, 1) * 160px) !important;
+                    height: calc(var(--exp-scale, 1) * 160px) ! important;
                     background-color: #1a202c;
                     border: 2px dashed #0d1117;
                     border-radius: calc(var(--exp-scale, 1) * 8px);
