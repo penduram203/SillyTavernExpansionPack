@@ -2182,6 +2182,12 @@
                     white-space: nowrap;
                     font-size: calc(var(--exp-scale, 1) * 18px) !important;
                 }
+                .lbe-choice-add {
+                    font-size: calc(var(--exp-scale, 1) * 16px) !important;
+                }
+                .lbe-variable-add {
+                    font-size: calc(var(--exp-scale, 1) * 16px) !important;
+                }
             `;
             document.head.appendChild(s);
         }
