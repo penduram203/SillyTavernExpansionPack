@@ -4336,7 +4336,7 @@
         modal.style.zIndex = '10001';
         modal.innerHTML = `
             <div id="stj_top_header_bar" class="stj-top-header-bar">
-                <button type="button" id="stj_special_toggle" class="stj-test-toggle">デフォルト＆サムネイル ▼</button>
+                <button type="button" id="stj_special_toggle" class="stj-test-toggle">${_t('stj.special.toggle_label', 'デフォルト＆サムネイル ▼</button>
                 <button type="button" id="stj_test_toggle" class="stj-test-toggle">${_t('stj.header.title', '🔍 リアルタイムキーワード反応テスト')} ▼</button>
             </div>
             <div id="stj_special_body" class="stj-horizontal-panel-body" style="display: none;"></div>
