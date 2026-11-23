@@ -2176,17 +2176,17 @@
                     font-size: calc(var(--exp-scale, 1) * 22px) !important;
                     padding: 0px 5px 0px !important;
                 }
-                .lbe-template-row > .lbe-template-add, .lbe-template-row > .lbe-template-del {
+                .lbe-template-row > .lbe-template-add {
                     flex: 0 0 auto;
                     box-sizing: border-box;
                     white-space: nowrap;
-                    font-size: calc(var(--exp-scale, 1) * 18px) !important;
+                    font-size: calc(var(--exp-scale, 1) * 16px) !important;
                 }
                 .lbe-choice-add {
-                    font-size: calc(var(--exp-scale, 1) * 16px) !important;
+                    font-size: calc(var(--exp-scale, 1) * 14px) !important;
                 }
                 .lbe-variable-add {
-                    font-size: calc(var(--exp-scale, 1) * 16px) !important;
+                    font-size: calc(var(--exp-scale, 1) * 14px) !important;
                 }
             `;
             document.head.appendChild(s);
