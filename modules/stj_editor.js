@@ -3460,7 +3460,7 @@
         if (standaloneCells.length === 0) {
             const emptyEl = document.createElement('div');
             emptyEl.className = 'stj-standalone-empty';
-            emptyEl.textContent = '独立セルはありません';
+            emptyEl.textContent = _t('stj.standalone.empty', '独立セルはありません');
             panelBody.appendChild(emptyEl);
             return;
         }
@@ -4336,7 +4336,7 @@
         modal.style.zIndex = '10001';
         modal.innerHTML = `
             <div id="stj_top_header_bar" class="stj-top-header-bar">
-                <button type="button" id="stj_special_toggle" class="stj-test-toggle">デフォルト＆サムネイル ▼</button>
+                <button type="button" id="stj_special_toggle" class="stj-test-toggle">${_t('stj.special.toggle_label', 'デフォルト＆サムネイル')} ▼</button>
                 <button type="button" id="stj_test_toggle" class="stj-test-toggle">${_t('stj.header.title', '🔍 リアルタイムキーワード反応テスト')} ▼</button>
             </div>
             <div id="stj_special_body" class="stj-horizontal-panel-body" style="display: none;"></div>
@@ -4621,14 +4621,14 @@
                         updateCellPreview(spItem);
                     });
                     specialBody.style.display = 'flex';
-                    specialToggleBtn.textContent = 'デフォルト＆サムネイル ▲';
+                    specialToggleBtn.textContent = _t('stj.special.toggle_label', 'デフォルト＆サムネイル ▲';
                 } else {
                     modal.querySelectorAll('#stj_special_body .stj-special-item').forEach((spItem) => {
                         const topSpecialContainer = modal.querySelector('.stj-top-section .stj-special-container');
                         if (topSpecialContainer) topSpecialContainer.appendChild(spItem);
                     });
                     specialBody.style.display = 'none';
-                    specialToggleBtn.textContent = 'デフォルト＆サムネイル ▼';
+                    specialToggleBtn.textContent = _t('stj.special.toggle_label', 'デフォルト＆サムネイル ▼';
                 }
             });
         }
