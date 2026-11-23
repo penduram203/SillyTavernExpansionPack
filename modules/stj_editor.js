@@ -5081,49 +5081,37 @@
             // 配列に追加
             entries.push(newEntry);
 
-            // 保存を試行（3つの方法を順次テスト）
-            const ctx = getSTContext();
-            const headers = (ctx && typeof ctx.getRequestHeaders === 'function')
-                ? ctx.getRequestHeaders()
-                : { 'Content-Type': 'application/json' };
-
-            // 方法1: /api/worldinfo/ (SillyTavern 標準エンドポイント)
-            let response = await fetch('/api/worldinfo/', {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({
-                    name: worldName,
-                    entries: entries
-                })
-            }).catch(() => null);
-
-            // 方法2: window.saveWorldInfo() (グローバル関数)
-            if (!response?.ok) {
-                if (typeof window.saveWorldInfo === 'function') {
-                    await window.saveWorldInfo(worldName, entries, true);
-                    response = { ok: true }; // 成功とみなす
-                }
+            // 世界情報全体を保存（SillyTavern 標準方法）
+            // 方法1: mod.world_info.save() (最優先)
+            if (window.mod?.world_info?.save) {
+                await window.mod.world_info.save(worldName, entries);
             }
-
-            // 方法3: ctx.saveWorldInfo() (コンテキスト関数)
-            if (!response?.ok) {
+            // 方法2: window.saveWorldInfo()
+            else if (typeof window.saveWorldInfo === 'function') {
+                await window.saveWorldInfo(worldName, entries, true);
+            }
+            // 方法3: ctx.saveWorldInfo()
+            else {
+                const ctx = getSTContext();
                 if (ctx && typeof ctx.saveWorldInfo === 'function') {
                     await ctx.saveWorldInfo(worldName, entries);
-                    response = { ok: true }; // 成功とみなす
+                } else {
+                    console.warn('[STJ Editor] 保存関数が見つかりません');
+                    if (window.GicApi?.showBottomToast) {
+                        window.GicApi.showBottomToast(_t('stj.toast.new_failed', '新規エントリーの追加に失敗しました'), { type: 'error' });
+                    }
+                    return false;
                 }
             }
 
-            if (!response?.ok) {
-                console.warn('[STJ Editor] 世界情報の保存に失敗: 全ての方法で失敗');
-                if (window.GicApi?.showBottomToast) {
-                    window.GicApi.showBottomToast(_t('stj.toast.new_failed', '新規エントリーの追加に失敗しました'), { type: 'error' });
-                }
-                return false;
-            }
-
+            // 成功通知
             if (window.GicApi?.showBottomToast) {
                 window.GicApi.showBottomToast(_t('stj.toast.new_added', '新しいエントリーを追加しました'));
             }
+
+            // 世界情報を再読み込み（UI 更新）
+            await loadWorldInfoEntries(worldName);
+
             return true;
 
         } catch (e) {
