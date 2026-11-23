@@ -139,6 +139,15 @@
             'stj.info.op_bulk_delete': '<b>Bulk Delete</b>: deletes multiple cells at once',
             'stj.info.op_add_cell': '<b>Add Cell</b>: adds a new cell',
 
+            // ボタン
+            'stj.button.new': 'New',
+            'stj.button.new_title': 'Add new lorebook entry',
+
+            // トーストメッセージ
+            'stj.toast.new_added': 'New entry added',
+            'stj.toast.new_failed': 'Failed to add new entry',
+            'stj.new_entry.default_name': 'New Entry',
+            
             'stj.button.close': 'Close',
             'stj.button.update': 'Update',
             'stj.button.update_title': 'Sync with lorebook entries and auto-create cells (no auto-delete)',
@@ -458,6 +467,15 @@
             'stj.info.op_bulk_delete': '<b>一括削除</b>：複数のセルをまとめて削除',
             'stj.info.op_add_cell': '<b>セル追加</b>：新しいセルを追加',
 
+            // ボタン
+            'stj.button.new': '新規',
+            'stj.button.new_title': 'ロアブックに新しいエントリーを追加',
+
+            // トーストメッセージ
+            'stj.toast.new_added': '新しいエントリーを追加しました',
+            'stj.toast.new_failed': '新しいエントリーの追加に失敗しました',
+            'stj.new_entry.default_name': '新しいエントリー',
+            
             'stj.button.close': '終了',
             'stj.button.update': '更新',
             'stj.button.update_title': 'ロアブックのエントリと同期してセルを自動作成します（自動削除はしません）',
