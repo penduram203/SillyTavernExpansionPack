@@ -4621,14 +4621,14 @@
                         updateCellPreview(spItem);
                     });
                     specialBody.style.display = 'flex';
-                    specialToggleBtn.textContent = 'デフォルト＆サムネイル ▲';
+                    specialToggleBtn.textContent = _t('stj.special.toggle_label', 'デフォルト＆サムネイル') + ' ▲';
                 } else {
                     modal.querySelectorAll('#stj_special_body .stj-special-item').forEach((spItem) => {
                         const topSpecialContainer = modal.querySelector('.stj-top-section .stj-special-container');
                         if (topSpecialContainer) topSpecialContainer.appendChild(spItem);
                     });
                     specialBody.style.display = 'none';
-                    specialToggleBtn.textContent = 'デフォルト＆サムネイル ▼';
+                    specialToggleBtn.textContent = _t('stj.special.toggle_label', 'デフォルト＆サムネイル') + ' ▼';
                 }
             });
         }
