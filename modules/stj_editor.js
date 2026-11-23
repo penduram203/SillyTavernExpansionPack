@@ -1969,15 +1969,15 @@
                     flex-direction: column !important;
                     align-items: flex-start !important;
                     gap: calc(var(--stj-tree-scale, 1) * 2px) !important;
-                    width: calc(var(--stj-tree-scale, 1) * 140px) !important;
+                    width: calc(var(--stj-tree-scale, 1) * 160px) !important;
                 }
                 #stj_keywords_container.stj-tree-mode .stj-tree-top-left-modes .stj-special-preview,
                 #stj_keywords_container.stj-tree-mode .stj-tree-top-left-modes .stj-image-preview {
-                    width: calc(var(--stj-tree-scale, 1) * 140px) !important;
+                    width: calc(var(--stj-tree-scale, 1) * 160px) !important;
                     height: calc(var(--stj-tree-scale, 1) * 160px) !important;
                     min-width: 0 !important;
                     min-height: 0 !important;
-                    max-width: calc(var(--stj-tree-scale, 1) * 140px) !important;
+                    max-width: calc(var(--stj-tree-scale, 1) * 160px) !important;
                     max-height: calc(var(--stj-tree-scale, 1) * 160px) !important;
                 }
                 #stj_keywords_container.stj-tree-mode .stj-tree-top-left-modes .stj-special-label {
@@ -3098,7 +3098,7 @@
         return hasCharData;
     }
 
-    const STJ_TREE_CELL_W = 140;
+    const STJ_TREE_CELL_W = 160;
     const STJ_TREE_CELL_H = 160;
     const STJ_TREE_H_GAP = 100;
     const STJ_TREE_V_GAP = 30;
