@@ -126,6 +126,9 @@
             'stj.special.default_label': 'Default display',
             'stj.special.thumbnail_label': 'Thumbnail display',
 
+            'stj.special.toggle_label': 'Default & Thumbnail',
+            'stj.standalone.empty': 'No standalone cells',
+            
             'stj.info.click_hint': '※ Click a cell to open the edit window.',
             'stj.info.title': '📖 Operations',
             'stj.info.op_click': '<b>Click a cell</b>: opens the edit window',
@@ -442,6 +445,9 @@
             'stj.special.default_label': 'デフォルト表示',
             'stj.special.thumbnail_label': 'サムネイル表示',
 
+            'stj.special.toggle_label': 'デフォルト＆サムネイル',
+            'stj.standalone.empty': '独立セルはありません',         
+            
             'stj.info.click_hint': '※セルをクリックすると編集ウインドウが開きます',
             'stj.info.title': '📖 操作方法',
             'stj.info.op_click': '<b>セルをクリック</b>：編集ウインドウが開きます',
