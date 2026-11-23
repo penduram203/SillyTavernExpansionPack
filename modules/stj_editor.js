@@ -5081,23 +5081,40 @@
             // 配列に追加
             entries.push(newEntry);
 
-            // 世界情報全体を保存（直接 API を呼び出す）
+            // 保存を試行（3つの方法を順次テスト）
             const ctx = getSTContext();
             const headers = (ctx && typeof ctx.getRequestHeaders === 'function')
                 ? ctx.getRequestHeaders()
                 : { 'Content-Type': 'application/json' };
 
-            const response = await fetch('/api/worldinfo/save', {
+            // 方法1: /api/worldinfo/ (SillyTavern 標準エンドポイント)
+            let response = await fetch('/api/worldinfo/', {
                 method: 'POST',
                 headers,
                 body: JSON.stringify({
                     name: worldName,
                     entries: entries
                 })
-            });
+            }).catch(() => null);
 
-            if (!response.ok) {
-                console.warn('[STJ Editor] 世界情報の保存に失敗:', response.status);
+            // 方法2: window.saveWorldInfo() (グローバル関数)
+            if (!response?.ok) {
+                if (typeof window.saveWorldInfo === 'function') {
+                    await window.saveWorldInfo(worldName, entries, true);
+                    response = { ok: true }; // 成功とみなす
+                }
+            }
+
+            // 方法3: ctx.saveWorldInfo() (コンテキスト関数)
+            if (!response?.ok) {
+                if (ctx && typeof ctx.saveWorldInfo === 'function') {
+                    await ctx.saveWorldInfo(worldName, entries);
+                    response = { ok: true }; // 成功とみなす
+                }
+            }
+
+            if (!response?.ok) {
+                console.warn('[STJ Editor] 世界情報の保存に失敗: 全ての方法で失敗');
                 if (window.GicApi?.showBottomToast) {
                     window.GicApi.showBottomToast(_t('stj.toast.new_failed', '新規エントリーの追加に失敗しました'), { type: 'error' });
                 }
