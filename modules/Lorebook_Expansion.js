@@ -1379,7 +1379,7 @@ function buildExpansionSection(uid, worldName, data, onChange) {
     imgTextarea.className = 'lbe-img-prompt text_pole';
     imgTextarea.rows = 3;
     imgTextarea.style.cssText = 'margin:0;padding:3px 6px;min-height:0;line-height:1.25;';
-    imgTextarea.placeholder = '例: 5girls:1.4, schoo sailor uniform, miniskirt, sitting on chair, looking at viewer, school, classroom, smile, femdom';
+    imgTextarea.placeholder = '例: 4girls:1.4, schoo sailor uniform, miniskirt, sitting on chair, looking at viewer, school, classroom, smile';
     section.appendChild(imgTextarea);
 
     // ── Negative_prompt textarea ──
