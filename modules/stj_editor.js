@@ -4397,7 +4397,7 @@
             <div class="stj-button-group">
                 <div class="stj-button-group-main">
                     <button id="stj_cancel_export">${_t('stj.button.close', '終了')}</button>
-                    <button id="stj_add_keyword" title="${_t('stj.button.new_title', 'ロアブックに新しいエントリーを追加')}">${_t('stj.button.new', '新規')}</button>
+                    <button id="stj_add_keyword" title="${_t('stj.button.update_title', 'ロアブックのエントリと同期してセルを自動作成します（自動削除はしません）')}">${_t('stj.button.update', '更新')}</button>
                 </div>
             </div>
         `;
@@ -4665,20 +4665,33 @@
         const addBtn = document.getElementById('stj_add_keyword');
         if (addBtn) addBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
-            if (isDialogActive) return;
+            if (isDialogActive || _syncLorebookInFlight) return;
 
             addBtn.disabled = true;
             try {
-                // 新規エントリーを作成
-                const success = await addNewLorebookEntry();
+                autoSave({ immediate: true });
+                const added = await syncLorebookEntriesToImageMap();
 
-                if (!success) {
-                    // Fallback: 同期のみ実行
-                    await syncLorebookEntriesToImageMap();
+                const showToast = window.GicApi?.showBottomToast;
+                if (added > 0) {
+                    if (typeof showToast === 'function') {
+                        showToast(_t('stj.toast.sync_added', `ロアブックと同期しました（${added} 件追加）`, { count: added }));
+                    }
+                } else {
+                    if (typeof showToast === 'function') {
+                        showToast(_t('stj.toast.sync_no_add', '同期する新規セルはありませんでした'), { type: 'warning' });
+                    }
                 }
-            } catch (error) {
-                console.error('[STJ Editor] ボタンクリックエラー:', error);
-                await syncLorebookEntriesToImageMap(); // 同期を必ず実行
+
+                if (stjModalEl && stjModalEl.style.display === 'block') {
+                    runLiveTest();
+                }
+            } catch (err) {
+                console.warn('[STJ Editor] 同期エラー:', err);
+                const showToast = window.GicApi?.showBottomToast;
+                if (typeof showToast === 'function') {
+                    showToast(_t('stj.toast.sync_failed', '同期に失敗しました'), { type: 'error' });
+                }
             } finally {
                 addBtn.disabled = false;
             }
@@ -5040,84 +5053,6 @@
 
     let _syncLorebookInFlight = null;
 
-    // ============================================================
-    // 新規ロアブックエントリー追加関数
-    // ============================================================
-    async function addNewLorebookEntry() {
-        const worldName = getCharacterWorldInfoName();
-        if (!worldName) {
-            console.error('[STJ Editor] 世界名が取得できません');
-            return false;
-        }
-
-        const newEntryName = _t('stj.new_entry.default_name', 'New Entry');
-        const newEntryId = `stj_new_${Date.now()}`;
-
-        try {
-            // 方法1: WorldbookAutoSelect API (優先)
-            if (window.WorldbookAutoSelect?.addEntry) {
-                await window.WorldbookAutoSelect.addEntry(worldName, {
-                    name: newEntryName,
-                    content: '',
-                    keys: [newEntryName],
-                    comment: newEntryName,
-                    enabled: true,
-                    id: newEntryId
-                });
-                if (window.GicApi?.showBottomToast) {
-                    window.GicApi.showBottomToast(_t('stj.toast.new_added', '新しいエントリーを追加しました'));
-                }
-                // 同期をトリガー
-                await syncLorebookEntriesToImageMap();
-                return true;
-            }
-
-            // 方法2: LorebookExpansion API
-            if (window.LorebookExpansion?.addWorldInfoEntry) {
-                await window.LorebookExpansion.addWorldInfoEntry(worldName, {
-                    name: newEntryName,
-                    content: '',
-                    keys: [newEntryName],
-                    comment: newEntryName,
-                    enabled: true,
-                    id: newEntryId
-                });
-                if (window.GicApi?.showBottomToast) {
-                    window.GicApi.showBottomToast(_t('stj.toast.new_added', '新しいエントリーを追加しました'));
-                }
-                await syncLorebookEntriesToImageMap();
-                return true;
-            }
-
-            // 方法3: SillyTavernネイティブ WorldInfo API
-            if (window.WorldInfo?.addEntry) {
-                window.WorldInfo.addEntry(worldName, {
-                    name: newEntryName,
-                    content: '',
-                    keys: [newEntryName],
-                    comment: newEntryName,
-                    enabled: true,
-                    id: newEntryId
-                });
-                if (window.GicApi?.showBottomToast) {
-                    window.GicApi.showBottomToast(_t('stj.toast.new_added', '新しいエントリーを追加しました'));
-                }
-                await syncLorebookEntriesToImageMap();
-                return true;
-            }
-
-            console.error('[STJ Editor] 利用可能なWorld Info APIが見つかりません');
-            return false;
-
-        } catch (e) {
-            console.error('[STJ Editor] エントリー追加エラー:', e);
-            if (window.GicApi?.showBottomToast) {
-                window.GicApi.showBottomToast(_t('stj.toast.new_failed', '新規エントリーの追加に失敗しました'));
-            }
-            return false;
-        }
-    }
-    
     async function syncLorebookEntriesToImageMap() {
         if (_syncLorebookInFlight) {
             return _syncLorebookInFlight;
@@ -5423,8 +5358,8 @@
         if (cancelBtn) cancelBtn.textContent = _t('stj.button.close', '終了');
         const addBtn = stjModalEl.querySelector('#stj_add_keyword');
         if (addBtn) {
-            addBtn.textContent = _t('stj.button.new', '新規');
-            addBtn.title = _t('stj.button.new_title', 'ロアブックに新しいエントリーを追加');
+            addBtn.textContent = _t('stj.button.update', '更新');
+            addBtn.title = _t('stj.button.update_title', 'ロアブックのエントリと同期してセルを自動作成します（自動削除はしません）');
         }
 
         const firstPreview = stjModalEl.querySelector('.stj-keyword-item .stj-preview-text');
