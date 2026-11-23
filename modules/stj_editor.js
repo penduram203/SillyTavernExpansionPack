@@ -2171,7 +2171,7 @@
                     flex: 0 1 auto;
                     min-width: 0;
                     overflow: hidden;
-                    text-overflow: ellipsis;
+                    text-overflow: inherit;
                     white-space: nowrap;
                     font-size: calc(var(--exp-scale, 1) * 22px) !important;
                     padding: 0px 5px 0px !important;
