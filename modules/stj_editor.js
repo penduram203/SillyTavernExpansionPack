@@ -5052,67 +5052,57 @@
         const newEntryName = _t('stj.new_entry.default_name', 'New Entry');
 
         try {
-            // 世界情報を取得
-            const worldInfo = await loadWorldInfoEntries(worldName);
-            if (!worldInfo) {
-                console.warn('[STJ Editor] 世界情報が取得できません');
+            // 方法1: Worldbook Auto Select の API を使用（最優先）
+            if (window.WorldbookAutoSelect?.addEntry) {
+                await window.WorldbookAutoSelect.addEntry(worldName, {
+                    name: newEntryName,
+                    content: '',
+                    keys: [newEntryName],
+                    comment: newEntryName,
+                    enabled: true
+                });
                 if (window.GicApi?.showBottomToast) {
-                    window.GicApi.showBottomToast(_t('stj.toast.new_failed', '新規エントリーの追加に失敗しました'), { type: 'error' });
+                    window.GicApi.showBottomToast(_t('stj.toast.new_added', '新しいエントリーを追加しました'));
                 }
-                return false;
+                return true;
             }
 
-            // entries 配列を取得
-            let entries = worldInfo.entries || [];
-            if (!Array.isArray(entries)) {
-                entries = [];
-            }
-
-            // 新規エントリーを作成
-            const newEntry = {
-                name: newEntryName,
-                content: '',
-                keys: [newEntryName],
-                comment: newEntryName,
-                enabled: true,
-                id: Date.now().toString()
-            };
-
-            // 配列に追加
-            entries.push(newEntry);
-
-            // 世界情報全体を保存（SillyTavern 標準方法）
-            // 方法1: mod.world_info.save() (最優先)
-            if (window.mod?.world_info?.save) {
-                await window.mod.world_info.save(worldName, entries);
-            }
-            // 方法2: window.saveWorldInfo()
-            else if (typeof window.saveWorldInfo === 'function') {
-                await window.saveWorldInfo(worldName, entries, true);
-            }
-            // 方法3: ctx.saveWorldInfo()
-            else {
-                const ctx = getSTContext();
-                if (ctx && typeof ctx.saveWorldInfo === 'function') {
-                    await ctx.saveWorldInfo(worldName, entries);
-                } else {
-                    console.warn('[STJ Editor] 保存関数が見つかりません');
-                    if (window.GicApi?.showBottomToast) {
-                        window.GicApi.showBottomToast(_t('stj.toast.new_failed', '新規エントリーの追加に失敗しました'), { type: 'error' });
-                    }
-                    return false;
+            // 方法2: Lorebook Expansion の API を使用
+            if (window.LorebookExpansion?.addWorldInfoEntry) {
+                const success = await window.LorebookExpansion.addWorldInfoEntry(worldName, {
+                    name: newEntryName,
+                    content: '',
+                    keys: [newEntryName],
+                    comment: newEntryName,
+                    enabled: true
+                });
+                if (success && window.GicApi?.showBottomToast) {
+                    window.GicApi.showBottomToast(_t('stj.toast.new_added', '新しいエントリーを追加しました'));
                 }
+                return success;
             }
 
-            // 成功通知
+            // 方法3: 直接 DOM 操作（最終手段）
+            const wiPopup = document.querySelector('#world_popup');
+            if (wiPopup && window.WorldInfo?.addEntry) {
+                await window.WorldInfo.addEntry(worldName, {
+                    name: newEntryName,
+                    content: '',
+                    keys: [newEntryName],
+                    comment: newEntryName,
+                    enabled: true
+                });
+                if (window.GicApi?.showBottomToast) {
+                    window.GicApi.showBottomToast(_t('stj.toast.new_added', '新しいエントリーを追加しました'));
+                }
+                return true;
+            }
+
+            console.warn('[STJ Editor] エントリー追加関数が見つかりません');
             if (window.GicApi?.showBottomToast) {
-                window.GicApi.showBottomToast(_t('stj.toast.new_added', '新しいエントリーを追加しました'));
+                window.GicApi.showBottomToast(_t('stj.toast.new_failed', '新規エントリーの追加に失敗しました'), { type: 'error' });
             }
-
-            // 世界情報を再読み込み（UI 更新）
-            await loadWorldInfoEntries(worldName);
-
-            return true;
+            return false;
 
         } catch (e) {
             console.error('[STJ Editor] エントリー追加エラー:', e);
