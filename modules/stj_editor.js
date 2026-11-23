@@ -4447,7 +4447,7 @@
                     left: 29.5vw;
                     right: 0;
                     bottom: 0;
-                    width: 9.1vw;
+                    width: fit-content;
                     min-width: calc(var(--exp-scale, 1) * 50px);
                     z-index: 100;
                     display: flex;
