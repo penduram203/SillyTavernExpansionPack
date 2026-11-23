@@ -8097,7 +8097,7 @@ function setGalleryButtonLoading(loading) {
     if (loading) {
         btn.classList.add('gic-gallery-loading');
         btn.dataset.loading = '1';
-        btn.title = _t('gic.title.gallery_loading_click', 'ギャラリーを読み込み中です…（クリックで即時オープン）');
+        btn.title = _t('gic.title.gallery_loading_click', 'ギャラリーを読み込み中です…');
     } else {
         btn.classList.remove('gic-gallery-loading');
         delete btn.dataset.loading;
