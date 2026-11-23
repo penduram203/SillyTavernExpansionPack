@@ -5052,43 +5052,46 @@
         const newEntryName = _t('stj.new_entry.default_name', 'New Entry');
 
         try {
-            const ctx = getSTContext();
-            const headers = (ctx && typeof ctx.getRequestHeaders === 'function')
-                ? ctx.getRequestHeaders()
-                : { 'Content-Type': 'application/json' };
+            // 世界情報を取得
+            let entries = await loadWorldInfoEntries(worldName);
+            if (!entries) {
+                entries = [];
+            }
 
-            const response = await fetch('/api/worldinfo/add', {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({
-                    name: worldName,
-                    data: {
-                        name: newEntryName,
-                        content: '',
-                        keys: [newEntryName],
-                        comment: newEntryName,
-                        enabled: true,
-                        position: 'before'
-                    }
-                })
-            });
+            // 新規エントリーを作成
+            const newEntry = {
+                name: newEntryName,
+                content: '',
+                keys: [newEntryName],
+                comment: newEntryName,
+                enabled: true,
+                id: Date.now().toString()
+            };
 
-            if (response.ok) {
-                const result = await response.json();
-                if (result.success !== false) {
+            // 世界情報に追加
+            entries.push(newEntry);
+
+            // 保存をトリガー（SillyTavern 既存 API を使用）
+            if (typeof window.saveWorldInfo === 'function') {
+                await window.saveWorldInfo(worldName, null, true);
+            } else {
+                const ctx = getSTContext();
+                if (ctx && typeof ctx.saveWorldInfo === 'function') {
+                    await ctx.saveWorldInfo(worldName);
+                } else {
+                    console.warn('[STJ Editor] 保存関数が見つかりません');
                     if (window.GicApi?.showBottomToast) {
-                        window.GicApi.showBottomToast(_t('stj.toast.new_added', '新しいエントリーを追加しました'));
+                        window.GicApi.showBottomToast(_t('stj.toast.new_failed', '新規エントリーの追加に失敗しました'), { type: 'error' });
                     }
-                    // エントリーリストを再読み込み
-                    await loadWorldInfoEntries(worldName);
-                    return true;
+                    return false;
                 }
             }
-            console.warn('[STJ Editor] エントリーの追加に失敗');
+
             if (window.GicApi?.showBottomToast) {
-                window.GicApi.showBottomToast(_t('stj.toast.new_failed', '新規エントリーの追加に失敗しました'), { type: 'error' });
+                window.GicApi.showBottomToast(_t('stj.toast.new_added', '新しいエントリーを追加しました'));
             }
-            return false;
+            return true;
+
         } catch (e) {
             console.error('[STJ Editor] エントリー追加エラー:', e);
             if (window.GicApi?.showBottomToast) {
