@@ -4500,11 +4500,12 @@
                     border: 0px solid #4a5568;
                     border-radius: 0px;
                     overflow-x: auto;
+                    width: fit-content;
                 }
                 #stj_export_modal .stj-horizontal-panel-body .stj-special-item,
                 #stj_export_modal .stj-horizontal-panel-body .stj-standalone-cell-item {
                     flex: 0 0 auto;
-                    width: calc(var(--exp-scale, 1) * 140px);
+                    width: calc(var(--exp-scale, 1) * 160px);
                     height: calc(var(--exp-scale, 1) * 160px);
                     margin: 0;
                 }
@@ -4517,13 +4518,36 @@
                 }
                 #stj_export_modal .stj-special-label {
                     color: rgb(255, 255, 255) !important;
+                    z-index: 10;
+                    font-size: calc(var(--exp-scale, 1) * 14px);
+                }
+                #stj_export_modal .stj-special-preview {
+                    position: absolute;
+                    width: calc(var(--exp-scale, 1) * 160px);
+                    height: calc(var(--exp-scale, 1) * 160px);
+                    flex-shrink: 0;
+                    border-radius: calc(var(--exp-scale, 1) * 8px);
+                }
+                #stj_export_modal .stj-image-preview {
+                    width: calc(var(--exp-scale, 1) * 160px);
+                    height: calc(var(--exp-scale, 1) * 160px);
+                    background-color: #1a202c;
+                    border: 2px dashed #0d1117;
+                    border-radius: calc(var(--exp-scale, 1) * 8px);
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    overflow: hidden;
+                    position: relative;
+                    flex-shrink: 0;
+                    box-sizing: border-box;
+                    user-select: none;
                 }
                 #stj_export_modal #stj_standalone_toggle {
                     display: none !important;
                 }
                 #stj_export_modal .stj-standalone-empty {
                     color: #a0aec0;
-                    font-size: 13px;
                     padding: 4px 2px;
                 }
             `;
