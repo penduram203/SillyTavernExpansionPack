@@ -4669,12 +4669,16 @@
 
             addBtn.disabled = true;
             try {
+                // 新規エントリーを作成
                 const success = await addNewLorebookEntry();
-                if (success && stjModalEl && stjModalEl.style.display === 'block') {
-                    runLiveTest();
+
+                if (!success) {
+                    // Fallback: 同期のみ実行
+                    await syncLorebookEntriesToImageMap();
                 }
-            } catch (err) {
-                console.warn('[STJ Editor] 新規エントリー追加エラー:', err);
+            } catch (error) {
+                console.error('[STJ Editor] ボタンクリックエラー:', error);
+                await syncLorebookEntriesToImageMap(); // 同期を必ず実行
             } finally {
                 addBtn.disabled = false;
             }
