@@ -5052,10 +5052,21 @@
         const newEntryName = _t('stj.new_entry.default_name', 'New Entry');
 
         try {
-            // 世界情報を取得
-            let entries = await loadWorldInfoEntries(worldName);
-            if (!entries) {
+            // 世界情報を取得（オブジェクト形式：{name, entries: [...]})
+            const worldInfo = await loadWorldInfoEntries(worldName);
+            if (!worldInfo) {
+                console.warn('[STJ Editor] 世界情報が取得できません');
+                if (window.GicApi?.showBottomToast) {
+                    window.GicApi.showBottomToast(_t('stj.toast.new_failed', '新規エントリーの追加に失敗しました'), { type: 'error' });
+                }
+                return false;
+            }
+
+            // entries 配列を取得（存在しない場合は空配列）
+            let entries = worldInfo.entries || [];
+            if (!Array.isArray(entries)) {
                 entries = [];
+                worldInfo.entries = entries;
             }
 
             // 新規エントリーを作成
@@ -5068,10 +5079,10 @@
                 id: Date.now().toString()
             };
 
-            // 世界情報に追加
+            // 配列に追加
             entries.push(newEntry);
 
-            // 保存をトリガー（SillyTavern 既存 API を使用）
+            // 保存をトリガー（SillyTavern 既存 API）
             if (typeof window.saveWorldInfo === 'function') {
                 await window.saveWorldInfo(worldName, null, true);
             } else {
