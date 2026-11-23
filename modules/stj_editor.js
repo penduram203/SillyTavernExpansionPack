@@ -4397,7 +4397,7 @@
             <div class="stj-button-group">
                 <div class="stj-button-group-main">
                     <button id="stj_cancel_export">${_t('stj.button.close', '終了')}</button>
-                    <button id="stj_add_keyword" title="${_t('stj.button.new_title', 'ロアブックに新しいエントリーを追加')}">${_t('stj.button.new', '新規')}</button>
+                    <button id="stj_add_keyword" title="${_t('stj.button.update_title', 'ロアブックのエントリと同期してセルを自動作成します（自動削除はしません）')}">${_t('stj.button.update', '更新')}</button>
                 </div>
             </div>
         `;
@@ -4670,72 +4670,8 @@
             addBtn.disabled = true;
             try {
                 autoSave({ immediate: true });
-                const worldName = getCharacterWorldInfoName();
-                if (!worldName) {
-                    showToast(_t('stj.toast.new_failed', 'Failed to add new entry: no world selected'), { type: 'error' });
-                    return;
-                }
+                const added = await syncLorebookEntriesToImageMap();
 
-                // UIDを生成
-                const newUid = Date.now().toString();
-                const newEntryName = _t('stj.new_entry.default_name', 'New Entry');
-
-                // SillyTavern APIを使用して新規エントリーを追加
-                let success = false;
-                if (typeof window.addWorldInfoEntry === 'function') {
-                    success = await window.addWorldInfoEntry(worldName, {
-                        uid: newUid,
-                        comment: newEntryName,
-                        keys: [newEntryName.toLowerCase().replace(/\s+/g, '_')],
-                        content: ''
-                    });
-                } else if (typeof window.saveWorldInfo === 'function') {
-                    // 代替方法
-                    const ctx = getSTContext();
-                    if (ctx && typeof ctx.addWorldInfoEntry === 'function') {
-                        success = await ctx.addWorldInfoEntry(worldName, {
-                            uid: newUid,
-                            comment: newEntryName,
-                            keys: [newEntryName.toLowerCase().replace(/\s+/g, '_')],
-                            content: ''
-                        });
-                    } else {
-                        // 直接API呼び出し
-                        try {
-                            const resp = await fetch('/api/worldinfo/set', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                    name: worldName,
-                                    entries: [{
-                                        uid: newUid,
-                                        comment: newEntryName,
-                                        keys: [newEntryName.toLowerCase().replace(/\s+/g, '_')],
-                                        content: ''
-                                    }]
-                                })
-                            });
-                            success = resp.ok;
-                        } catch (e) {
-                            console.warn('[STJ Editor] Failed to add entry via API:', e);
-                        }
-                    }
-                }
-
-                // 成功/失敗のトーストを表示
-                if (success) {
-                    showToast(_t('stj.toast.new_added', '新しいエントリーを追加しました'), { type: 'success' });
-                    // UIを更新
-                    setTimeout(() => {
-                        if (stjModalEl && stjModalEl.style.display === 'block') {
-                            runLiveTest();
-                        }
-                        syncLorebookEntriesToImageMap().catch(() => {});
-                    }, 500);
-                } else {
-                    showToast(_t('stj.toast.new_failed', '新しいエントリーの追加に失敗しました'), { type: 'error' });
-                }                
-                
                 const showToast = window.GicApi?.showBottomToast;
                 if (added > 0) {
                     if (typeof showToast === 'function') {
@@ -5422,8 +5358,8 @@
         if (cancelBtn) cancelBtn.textContent = _t('stj.button.close', '終了');
         const addBtn = stjModalEl.querySelector('#stj_add_keyword');
         if (addBtn) {
-            addBtn.textContent = _t('stj.button.new', '新規');
-            addBtn.title = _t('stj.button.new_title', 'ロアブックに新しいエントリーを追加');
+            addBtn.textContent = _t('stj.button.update', '更新');
+            addBtn.title = _t('stj.button.update_title', 'ロアブックのエントリと同期してセルを自動作成します（自動削除はしません）');
         }
 
         const firstPreview = stjModalEl.querySelector('.stj-keyword-item .stj-preview-text');
