@@ -3460,7 +3460,7 @@
         if (standaloneCells.length === 0) {
             const emptyEl = document.createElement('div');
             emptyEl.className = 'stj-standalone-empty';
-            emptyEl.textContent = '独立セルはありません';
+            emptyEl.textContent = _t('stj.standalone.empty', '独立セルはありません');
             panelBody.appendChild(emptyEl);
             return;
         }
