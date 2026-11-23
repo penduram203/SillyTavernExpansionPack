@@ -4397,7 +4397,7 @@
             <div class="stj-button-group">
                 <div class="stj-button-group-main">
                     <button id="stj_cancel_export">${_t('stj.button.close', '終了')}</button>
-                    <button id="stj_add_keyword" title="${_t('stj.button.update_title', 'ロアブックのエントリと同期してセルを自動作成します（自動削除はしません）')}">${_t('stj.button.update', '更新')}</button>
+                    <button id="stj_add_keyword" title="${_t('stj.button.new_entry_title', '新しいエントリを追加します')}">${_t('stj.button.new_entry', '新規')}</button>
                 </div>
             </div>
         `;
@@ -4665,32 +4665,30 @@
         const addBtn = document.getElementById('stj_add_keyword');
         if (addBtn) addBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
-            if (isDialogActive || _syncLorebookInFlight) return;
+            if (isDialogActive) return;
 
             addBtn.disabled = true;
             try {
                 autoSave({ immediate: true });
-                const added = await syncLorebookEntriesToImageMap();
-
-                const showToast = window.GicApi?.showBottomToast;
-                if (added > 0) {
-                    if (typeof showToast === 'function') {
-                        showToast(_t('stj.toast.sync_added', `ロアブックと同期しました（${added} 件追加）`, { count: added }));
-                    }
+    
+                const newEntryBtn = document.getElementById('world_popup_new');
+                if (newEntryBtn) {
+                    newEntryBtn.click();
                 } else {
+                    const showToast = window.GicApi?.showBottomToast;
                     if (typeof showToast === 'function') {
-                        showToast(_t('stj.toast.sync_no_add', '同期する新規セルはありませんでした'), { type: 'warning' });
+                        showToast(_t('stj.toast.new_entry_btn_not_found', 'ロアブックの新規追加ボタンが見つかりません'), { type: 'warning' });
                     }
                 }
-
+ 
                 if (stjModalEl && stjModalEl.style.display === 'block') {
                     runLiveTest();
                 }
             } catch (err) {
-                console.warn('[STJ Editor] 同期エラー:', err);
+                console.warn('[STJ Editor] 新規エントリ追加エラー:', err);
                 const showToast = window.GicApi?.showBottomToast;
                 if (typeof showToast === 'function') {
-                    showToast(_t('stj.toast.sync_failed', '同期に失敗しました'), { type: 'error' });
+                    showToast(_t('stj.toast.new_entry_failed', '新規エントリの追加に失敗しました'), { type: 'error' });
                 }
             } finally {
                 addBtn.disabled = false;
@@ -5051,128 +5049,6 @@
         return '';
     }
 
-    let _syncLorebookInFlight = null;
-
-    async function syncLorebookEntriesToImageMap() {
-        if (_syncLorebookInFlight) {
-            return _syncLorebookInFlight;
-        }
-        _syncLorebookInFlight = _syncLorebookEntriesToImageMapImpl().finally(() => {
-            _syncLorebookInFlight = null;
-        });
-        return _syncLorebookInFlight;
-    }
-
-    async function _syncLorebookEntriesToImageMapImpl() {
-        const charName = detectCharacterNameFromDOM();
-        if (!charName) {
-            return 0;
-        }
-
-        const worldName = getCharacterWorldInfoName();
-        if (!worldName) {
-            return 0;
-        }
-
-        const entries = await loadWorldInfoEntries(worldName);
-        if (!entries || typeof entries !== 'object') return 0;
-
-        const list = Array.isArray(entries) ? entries : Object.values(entries);
-        if (list.length === 0) return 0;
-        let imageMap = getCurrentImageMapFromCharData(charName);
-        if (!imageMap) imageMap = {};
-
-        const activeKeywords = new Set();
-        for (const entry of list) {
-            if (!entry) continue;
-            const kw = getEntryKeyword(entry);
-            if (!kw || isCommonRuleName(kw)) continue;
-            activeKeywords.add(kw);
-        }
-
-        let hasEmptyKeys = Object.entries(imageMap).some(
-            ([k, v]) => !UNREGISTER_EXCLUDED_KEYS.has(k) && _isEmptyImageValue(v)
-        );
-        let restoreData = {};
-        if (hasEmptyKeys) {
-            restoreData = await _restoreImageMapUnified(charName);
-        }
-
-        const existingImageKeys = Object.keys(imageMap).filter(k => !UNREGISTER_EXCLUDED_KEYS.has(k));
-        const missingKeys = existingImageKeys.filter(k => !activeKeywords.has(k));
-        const newKeywords = [...activeKeywords].filter(k => imageMap[k] === undefined);
-
-        if (missingKeys.length > 0 && newKeywords.length > 0) {
-            const count = Math.min(missingKeys.length, newKeywords.length);
-            for (let i = 0; i < count; i++) {
-                const oldKw = missingKeys[i];
-                const newKw = newKeywords[i];
-                if (imageMap[oldKw] !== undefined) {
-                    const oldData = imageMap[oldKw];
-
-                    const newImageMap = {};
-                    for (const [k, v] of Object.entries(imageMap)) {
-                        if (k === oldKw) {
-                            newImageMap[newKw] = !_isEmptyImageValue(oldData) ? oldData : [];
-                        } else if (!Object.prototype.hasOwnProperty.call(newImageMap, k)) {
-                            newImageMap[k] = v;
-                        }
-                    }
-                    imageMap = newImageMap;
-                    console.log(`[STJ Editor] 🔄 位置を維持して改名キーを置換: "${oldKw}" → "${newKw}"`);
-                }
-            }
-        }
-
-        const removedKeys = [];
-        for (const key of Object.keys(imageMap)) {
-            if (UNREGISTER_EXCLUDED_KEYS.has(key)) continue;
-            if (!activeKeywords.has(key)) {
-                delete imageMap[key];
-                removedKeys.push(key);
-            }
-        }
-
-        const addedKeys = [];
-        const restoredKeys = [];
-        for (const keyword of activeKeywords) {
-            if (UNREGISTER_EXCLUDED_KEYS.has(keyword)) continue;
-
-            const exists = Object.prototype.hasOwnProperty.call(imageMap, keyword) && !_isEmptyImageValue(imageMap[keyword]);
-            const rv = restoreData[keyword];
-            const hasRestore = rv && !_isEmptyImageValue(rv);
-
-            if (!exists) {
-                if (hasRestore) {
-                    imageMap[keyword] = rv;
-                    restoredKeys.push(keyword);
-                } else if (imageMap[keyword] === undefined || _isEmptyImageValue(imageMap[keyword])) {
-                    imageMap[keyword] = [];
-                    addedKeys.push(keyword);
-                }
-            }
-        }
-
-        const changed = removedKeys.length > 0 || addedKeys.length > 0 || restoredKeys.length > 0 || missingKeys.length > 0;
-
-        if (changed) {
-            saveImageMapToCharData(charName, imageMap);
-
-            if (stjModalEl && stjModalEl.style.display === 'block' && !_editorLoading) {
-                try {
-                    populateFormFromImageMap(imageMap, true);
-                    runLiveTest();
-                    autoSave({ immediate: true });
-                    console.log('[STJ Editor] 🔄 順序を完全に維持してJSON編集画面を更新しました');
-                } catch (e) {
-                    console.warn('[STJ Editor] UI 再描画エラー:', e);
-                }
-            }
-        }
-
-        return addedKeys.length;
-    }
-
     async function handleImageGeneratedForKeyword(e) {
         const { charName, entryKey, fileName } = e.detail || {};
         if (!charName || !entryKey || !fileName) return;
@@ -5358,8 +5234,8 @@
         if (cancelBtn) cancelBtn.textContent = _t('stj.button.close', '終了');
         const addBtn = stjModalEl.querySelector('#stj_add_keyword');
         if (addBtn) {
-            addBtn.textContent = _t('stj.button.update', '更新');
-            addBtn.title = _t('stj.button.update_title', 'ロアブックのエントリと同期してセルを自動作成します（自動削除はしません）');
+            addBtn.textContent = _t('stj.button.new_entry', '新規');
+            addBtn.title = _t('stj.button.new_entry_title', '新しいエントリを追加します');
         }
 
         const firstPreview = stjModalEl.querySelector('.stj-keyword-item .stj-preview-text');
@@ -5525,7 +5401,6 @@
                     return { ok: false, error: String(e) };
                 }
             },
-            syncLorebookEntries: () => syncLorebookEntriesToImageMap(),
             restoreAllKeys: async function () {
                 const charName = detectCharacterNameFromDOM();
                 if (!charName) return { ok: false, message: 'no charName' };
