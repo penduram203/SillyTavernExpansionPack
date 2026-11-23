@@ -4580,6 +4580,12 @@
                     color: #a0aec0;
                     padding: 4px 2px;
                 }
+                #gic-delete-image-button {
+                    width: calc(var(--exp-scale, 1) * 50px)
+                }
+                #gic-unregister-button {
+                    width: calc(var(--exp-scale, 1) * 50px)
+                }
             `;
             document.head.appendChild(s);
         }
