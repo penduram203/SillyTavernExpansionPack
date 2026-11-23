@@ -4485,6 +4485,7 @@
                     cursor: pointer;
                     text-align: left;
                     box-sizing: border-box;
+                    font-size: calc(var(--exp-scale, 1) * 14px) !important;
                 }
                 #stj_export_modal #stj_test_toggle:hover {
                     background: #4299e1;
