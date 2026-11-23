@@ -2055,7 +2055,7 @@
                     border: 1px solid #aaa;
                     border-radius: calc(var(--exp-scale, 1) * 4px);
                     cursor: pointer;
-                    font-size: calc(var(--exp-scale, 1) * 24px);
+                    font-size: calc(var(--exp-scale, 1) * 18px);
                     font-weight: bold;
                     flex-shrink: 0;
                 }
@@ -2067,7 +2067,7 @@
                     border: 1px solid #718096;
                     border-radius: calc(var(--exp-scale, 1) * 4px);
                     cursor: pointer;
-                    font-size: calc(var(--exp-scale, 1) * 24px);
+                    font-size: calc(var(--exp-scale, 1) * 18px);
                     font-weight: bold;
                     flex-shrink: 0;
                 }
@@ -2158,6 +2158,28 @@
                     font-size: 0.82em;
                     padding: 2px 4px;
                     box-sizing: border-box;
+                }
+                .lbe-label-row {
+                    justify-content: flex-start;
+                    width: 100%;
+                    max-width: 100%;
+                    box-sizing: border-box;
+                    font-size: calc(var(--exp-scale, 1) * 20px);
+                }
+                .lbe-label-row > .lbe-label {
+                    margin: 0;
+                    flex: 0 1 auto;
+                    min-width: 0;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                    font-size: calc(var(--exp-scale, 1) * 22px);
+                }
+                .lbe-template-row > .lbe-template-add, .lbe-template-row > .lbe-template-del {
+                    flex: 0 0 auto;
+                    box-sizing: border-box;
+                    white-space: nowrap;
+                    font-size: calc(var(--exp-scale, 1) * 18px);
                 }
             `;
             document.head.appendChild(s);
