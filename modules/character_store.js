@@ -376,6 +376,113 @@ export async function flushAll() {
 })();
 
 // ============================================================
+// ★ Shift+export_button と同一の JSON を生成する共通関数
+//    手動ダウンロードと自動出力の両方がこれを使う
+// ============================================================
+function _buildJsonExport() {
+    const char = _getCurrentChar();
+    if (!char) return null;
+
+    // ★ per-world store の内容を char.data にマージ
+    _syncLorebookExpansionFromWorldStore(char);
+
+    const backups = _getBackupsForChar(char);
+    for (const [ns, payload] of Object.entries(backups)) {
+        if (!char.data) char.data = {};
+        if (!char.data.extensions) char.data.extensions = {};
+        char.data.extensions[ns] = JSON.parse(JSON.stringify(payload));
+    }
+
+    // ★ null 値除去（バックアップ注入後）
+    const removed = _stripNullsFromExtensions(char);
+    if (removed > 0) {
+        console.log(`${LOG} 🧹 export 前に null 値を ${removed} 件除去`);
+    }
+
+    const exportData = JSON.parse(JSON.stringify(char));
+    exportData.create_date = exportData.create_date || new Date().toISOString();
+    exportData.avatar_url = char.avatar || '';
+    exportData.ch_name = char.name || '';
+
+    // ★ エクスポートに不要なメタデータを削除
+    delete exportData.json_data;
+    delete exportData.chat;
+    delete exportData.chat_size;
+    delete exportData.date_last_chat;
+    delete exportData.data_size;
+    delete exportData.date_added;
+
+    const jsonStr = JSON.stringify(exportData, null, 4);
+    const filename = `${char.name || 'character'}.json`;
+    return { char, exportData, jsonStr, filename };
+}
+
+// ★ 手動ダウンロードと同じく（パッチ済み）window.Blob を通してバイト列を得る
+async function _buildJsonExportBytes() {
+    const built = _buildJsonExport();
+    if (!built) return null;
+    const blob = new Blob([built.jsonStr], { type: 'application/json' });
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    return { ...built, blob, bytes };
+}
+
+function _bytesToBase64(bytes) {
+    let bin = '';
+    const CHUNK = 0x8000;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+    }
+    return btoa(bin);
+}
+
+// /api/files/upload は [A-Za-z0-9_-.] 以外のファイル名を拒否するため ASCII 名に変換
+function _makeSafeExportFileName(charName) {
+    const name = String(charName || 'character');
+    const asciiPart = name.replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
+    const hash = Array.from(name).reduce((acc, ch) => ((acc * 31 + ch.charCodeAt(0)) >>> 0), 0).toString(36);
+    return asciiPart ? `${asciiPart}_${hash}_card.json` : `char_${hash}_card.json`;
+}
+
+let _fileExportInFlight = false;
+
+// ★ Shift+export_button と同一内容を user/files に書き出す
+export async function exportCurrentCharacterJsonToFiles(options = {}) {
+    const { fileName = '', expectedCharName = '' } = options;
+    const char = _getCurrentChar();
+    if (!char) return { ok: false, reason: 'no_char' };
+    if (expectedCharName && char.name !== expectedCharName) {
+        return { ok: false, reason: 'char_switched' };
+    }
+    if (_fileExportInFlight) return { ok: false, reason: 'in_flight' };
+    _fileExportInFlight = true;
+    try {
+        const built = await _buildJsonExportBytes();
+        if (!built) return { ok: false, reason: 'no_char' };
+        if (_getCurrentChar() !== char) return { ok: false, reason: 'char_switched' };
+
+        const name = fileName || _makeSafeExportFileName(char.name);
+        const res = await fetch('/api/files/upload', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify({ name, data: _bytesToBase64(built.bytes) }),
+        });
+        if (!res.ok) {
+            const t = await res.text().catch(() => '');
+            throw new Error(`HTTP ${res.status} ${t}`.trim());
+        }
+        const { path } = await res.json().catch(() => ({}));
+        console.log(`${LOG} ✅ 自動 JSON 出力: ${path || name} (${built.bytes.length} bytes)`);
+        return { ok: true, path: path || name, bytes: built.bytes.length };
+    } catch (e) {
+        console.warn(`${LOG} 自動 JSON 出力エラー:`, e);
+        return { ok: false, error: String(e) };
+    } finally {
+        _fileExportInFlight = false;
+    }
+}
+
+
+// ============================================================
 // ★ export_button 完全乗っ取り
 //    - 全イベント種 (click/pointerdown/pointerup/mousedown/mouseup) を capture で傍受
 //    - MutationObserver で button 再生成を検知
@@ -393,47 +500,16 @@ export async function flushAll() {
 
     function doJsonExport() {
         try {
-            const char = _getCurrentChar();
-            if (!char) return false;
-
-            // ★ per-world store の内容を char.data にマージ
-            _syncLorebookExpansionFromWorldStore(char);
-
-            const backups = _getBackupsForChar(char);
-            for (const [ns, payload] of Object.entries(backups)) {
-                if (!char.data) char.data = {};
-                if (!char.data.extensions) char.data.extensions = {};
-                char.data.extensions[ns] = JSON.parse(JSON.stringify(payload));
-            }
-
-            // ★ null 値除去（バックアップ注入後）
-            const removed = _stripNullsFromExtensions(char);
-            if (removed > 0) {
-                console.log(`${LOG} 🧹 export 前に null 値を ${removed} 件除去`);
-            }
-
-            const exportData = JSON.parse(JSON.stringify(char));
-            exportData.create_date = exportData.create_date || new Date().toISOString();
-            exportData.avatar_url = char.avatar || '';
-            exportData.ch_name = char.name || '';
-
-            // ★ ここに追加（エクスポートに不要なメタデータを削除）
-            delete exportData.json_data;
-            delete exportData.chat;
-            delete exportData.chat_size;
-            delete exportData.date_last_chat;
-            delete exportData.data_size;
-            delete exportData.date_added;
-
-            const jsonStr = JSON.stringify(exportData, null, 4);
-            const filename = `${char.name || 'character'}.json`;
+            const built = _buildJsonExport();
+            if (!built) return false;
+            const { jsonStr, filename } = built;
             const blob = new Blob([jsonStr], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url; a.download = filename; a.style.display = 'none';
             document.body.appendChild(a); a.click(); document.body.removeChild(a);
             setTimeout(() => { try { URL.revokeObjectURL(url); } catch (e) {} }, 2000);
-            console.log(`${LOG} 🎯 自前 JSON export 完了: ${filename} (${jsonStr.length} bytes)`);
+            console.log(`${LOG} 🎯 自前 JSON export 完了: ${filename} (${jsonStr.length} chars)`);
             return true;
         } catch (e) {
             console.error(`${LOG} JSON export エラー:`, e);
@@ -727,6 +803,9 @@ window.CharStore = {
     saveCharacterExtension,
     flushCharacterExtension,
     flushAll,
+    // ★ Shift+export_button と同一 JSON の取得／自動出力
+    buildExportJson: () => _buildJsonExport()?.jsonStr ?? null,
+    exportCurrentCharacterJsonToFiles,
     // ★ 手動クリーンアップ用
     stripNullsFromExtensions: () => {
         const char = _getCurrentChar();
