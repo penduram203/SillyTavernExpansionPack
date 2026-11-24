@@ -1,35 +1,5 @@
 // gic_lorebook.js
 // ロアブック駆動で画像生成プロンプトを切り替えるモジュール。
-//
-// ★ v5 修正:
-//   - 既定トリガーを 'ai_reply' → 'user_send' に変更し、
-//     画像生成を LLM 応答と並行実行する
-//   - 生成コンテキスト (entryKey 等) を保持し、gic.js が生成画像の
-//     ファイル名を「キャラ名_エントリキー_タイムスタンプ.ext」に
-//     リネームできるよう window.GicLorebook に公開
-//   - v3 マイグレーション（triggerOn の自動切替）
-//
-// ★ Phase 5 修正:
-//   - LEX データの参照先を per-world ストア
-//     (extension_settings.lorebook_expansion.data[worldName][charKey])
-//     に変更。キャラとロアブックが別でも正しくプロンプトを取得できる。
-//   - character.data の旧データはフォールバックとして参照
-//
-// ★ 画像生成ステータス通知:
-//   - /sd 実行前後に gic-image-generation-started / gic-image-generation-ended
-//     カスタムイベントを発火し、status_indicator.js が「画像生成中…」を表示する
-//
-// ★ v4 修正（Phase 6）:
-//   - Negative_prompt（ネガティブプロンプト）に対応
-//   - per-world ストアの negative_prompt → /sd の negative_prompt 引数として渡す
-//   - LorebookExpansion.getDataFor 経由での取得を最優先、直接参照をフォールバック
-//
-// ★ v5 修正（解像度）:
-//   - 解像度（resolution）に対応
-//   - エントリ毎に設定された解像度を取得し、/sd 実行前に
-//     extensionSettings.sd.resolution を一時差し替え・生成後に復元
-//   - 'random' が選択されていれば ①〜⑤ からランダムに選択
-//
 // ★ v6 修正（テンプレート）:
 //   - templates / selectedTemplate に対応
 //   - エントリ毎に複数のテンプレート（img_prompt / negative_prompt ペア）を保持
@@ -1180,21 +1150,26 @@ async function processChoice(force = false) {
     try {
         const userText = getLastUserMessageText();
         const choiceNum = extractChoiceNumber(userText);
+        // ★ 文章方式（発言＝キー）にも対応: 発言が空のときだけ /sd last へ
+        const hasUserText = !!(userText && String(userText).trim());
 
-        if (!choiceNum) {
-            if (settings.verbose) console.log('[GIC-Lore] 選択肢番号が検出できませんでした');
-            if (settings.fallbackToLast) {
-                console.log('[GIC-Lore] /sd last にフォールバック');
-                try {
-                    const mod = await import('../../../../../script.js');
-                    if (typeof mod.executeSlashCommandsWithOptions === 'function') {
-                        const cmd = settings.quiet ? '/sd quiet=true' : '/sd';
-                        await mod.executeSlashCommandsWithOptions(cmd);
-                    }
-                } catch (e) {
-                    console.error('[GIC-Lore] fallback /sd エラー:', e);
+        const runSdFallback = async () => {
+            if (!settings.fallbackToLast) return;
+            console.log('[GIC-Lore] /sd last にフォールバック');
+            try {
+                const mod = await import('../../../../../script.js');
+                if (typeof mod.executeSlashCommandsWithOptions === 'function') {
+                    const cmd = settings.quiet ? '/sd quiet=true' : '/sd';
+                    await mod.executeSlashCommandsWithOptions(cmd);
                 }
+            } catch (e) {
+                console.error('[GIC-Lore] fallback /sd エラー:', e);
             }
+        };
+
+        if (!choiceNum && !hasUserText) {
+            if (settings.verbose) console.log('[GIC-Lore] 選択肢番号が検出できませんでした');
+            await runSdFallback();
             return;
         }
         if (settings.verbose) console.log(`[GIC-Lore] 選択肢番号: ${choiceNum}`);
@@ -1213,14 +1188,18 @@ async function processChoice(force = false) {
         }
         if (settings.verbose) console.log(`[GIC-Lore] エントリ数: ${entries.length}`);
 
-        const entry = findEntryByChoice(entries, choiceNum);
+        let entry = null;
+        try { entry = window.LorebookExpansion?.findEntryForUserText?.(entries, userText) || null; } catch (e) { /* ignore */ }
+        if (!entry && choiceNum) entry = findEntryByChoice(entries, choiceNum);
         if (!entry) {
-            console.warn(`[GIC-Lore] 選択肢 ${choiceNum} に対応するエントリが見つかりません`);
+            console.warn(`[GIC-Lore] 発言 ${JSON.stringify(userText)} に対応するエントリが見つかりません`);
             if (settings.verbose) {
                 entries.forEach(e => {
                     console.log(`  uid=${e.uid} comment="${e.comment}" key=${JSON.stringify(e.key)}`);
                 });
             }
+            // ★ 番号も一致エントリも無い自由入力は従来どおり /sd last
+            if (!choiceNum) await runSdFallback();
             return;
         }
         if (settings.verbose) {
