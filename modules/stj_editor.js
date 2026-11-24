@@ -492,54 +492,54 @@ function getCharacterWorldInfoName() {
     return null;
 }
 
-    async function loadWorldInfoEntries(worldName) {
-        if (!worldName) {
-            console.warn('[STJ Editor] ❌ loadWorldInfoEntries: worldName が指定されていません');
-            return null;
-        }
-    
-        // 1. LorebookExpansion のキャッシュ/取得ロジックを最優先で使う
-        if (window.LorebookExpansion?.loadWorldInfoEntriesByName) {
-            try {
-                const entries = await window.LorebookExpansion.loadWorldInfoEntriesByName(worldName);
-                if (entries && typeof entries === 'object' && Object.keys(entries).length > 0) {
-                    console.log(`[STJ Editor] ✅ LorebookExpansion からロアブックエントリを取得: ${Object.keys(entries).length} 件`);
-                    return entries;
-                }
-            } catch (err) {
-                console.debug(`[STJ Editor] LorebookExpansion.loadWorldInfoEntriesByName 例外: ${err.message || err}`);
-            }
-        }
-
-        // 2. 直接 fetch で取得を試みる（LorebookExpansion が失敗した場合の保険）
-        for (let attempt = 1; attempt <= 2; attempt++) {
-            try {
-                const ctx = getSTContext();
-                const headers = (ctx && typeof ctx.getRequestHeaders === 'function')
-                    ? ctx.getRequestHeaders()
-                    : { 'Content-Type': 'application/json' };
-                const resp = await fetch('/api/worldinfo/get', {
-                    method: 'POST',
-                    headers,
-                    body: JSON.stringify({ name: worldName }),
-                    cache: 'no-store',
-                });
-                if (resp.ok) {
-                    const data = await resp.json();
-                    if (data && data.entries && Object.keys(data.entries).length > 0) {
-                        console.log(`[STJ Editor] ✅ fetch からロアブックエントリを取得: ${Object.keys(data.entries).length} 件`);
-                        return data.entries;
-                    }
-                }
-            } catch (err) {
-                console.debug(`[STJ Editor] fetch 試行 ${attempt}/2 例外: ${err.message || err}`);
-            }
-            if (attempt < 2) await new Promise(r => setTimeout(r, 300));
-        }
-
-        console.warn(`[STJ Editor] ❌ ロアブック "${worldName}" のエントリを取得できませんでした`);
+async function loadWorldInfoEntries(worldName) {
+    if (!worldName) {
+        console.warn('[STJ Editor] ❌ loadWorldInfoEntries: worldName が指定されていません');
         return null;
     }
+    
+    // 1. LorebookExpansion のキャッシュ/取得ロジックを最優先で使う
+    if (window.LorebookExpansion?.loadWorldInfoEntriesByName) {
+        try {
+            const entries = await window.LorebookExpansion.loadWorldInfoEntriesByName(worldName);
+            if (entries && typeof entries === 'object' && Object.keys(entries).length > 0) {
+                console.log(`[STJ Editor] ✅ LorebookExpansion からロアブックエントリを取得: ${Object.keys(entries).length} 件`);
+                return entries; // ★ 修正: オブジェクト形式のまま返す（STのインポート形式に合わせる）
+            }
+        } catch (err) {
+            console.debug(`[STJ Editor] LorebookExpansion.loadWorldInfoEntriesByName 例外: ${err.message || err}`);
+        }
+    }
+
+    // 2. 直接 fetch で取得を試みる（LorebookExpansion が失敗した場合の保険）
+    for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+            const ctx = getSTContext();
+            const headers = (ctx && typeof ctx.getRequestHeaders === 'function')
+                ? ctx.getRequestHeaders()
+                : { 'Content-Type': 'application/json' };
+            const resp = await fetch('/api/worldinfo/get', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ name: worldName }),
+                cache: 'no-store',
+            });
+            if (resp.ok) {
+                const data = await resp.json();
+                if (data && data.entries && Object.keys(data.entries).length > 0) {
+                    console.log(`[STJ Editor] ✅ fetch からロアブックエントリを取得: ${Object.keys(data.entries).length} 件`);
+                    return data.entries; // ★ 修正: オブジェクト形式のまま返す
+                }
+            }
+        } catch (err) {
+            console.debug(`[STJ Editor] fetch 試行 ${attempt}/2 例外: ${err.message || err}`);
+        }
+        if (attempt < 2) await new Promise(r => setTimeout(r, 300));
+    }
+
+    console.warn(`[STJ Editor] ❌ ロアブック "${worldName}" のエントリを取得できませんでした`);
+    return null;
+}
 
     function getEntryKeys(entry) {
         if (!entry) return [];
@@ -1966,108 +1966,118 @@ function getCharacterWorldInfoName() {
     let _bundleExportTimer = null;
     let _bundleExportInFlight = false;
 
-    async function exportUnifiedBundleJson(options = {}) {
-        const { silent = true, charName: explicitCharName = '' } = options;
-        const charName = explicitCharName || detectCharacterNameFromDOM();
-        if (!charName) {
-            console.warn('[STJ Editor] ❌ 一括JSON出力スキップ: キャラクター名が取得できません');
-            return { ok: false, reason: 'no_char' };
-        }
-        if (_bundleExportInFlight) return { ok: false, reason: 'in_flight' };
-        _bundleExportInFlight = true;
-        try {
-            console.log(`[STJ Editor] 🚀 一括JSON出力開始: charName="${charName}"`);
-            const worldName = getCharacterWorldInfoName();
-            console.log(`[STJ Editor] 📌 解決された worldName: "${worldName}"`);
+async function exportUnifiedBundleJson(options = {}) {
+    const { silent = true, charName: explicitCharName = '' } = options;
+    const charName = explicitCharName || detectCharacterNameFromDOM();
+    if (!charName) {
+        console.warn('[STJ Editor] ❌ 一括JSON出力スキップ: キャラクター名が取得できません');
+        return { ok: false, reason: 'no_char' };
+    }
+    if (_bundleExportInFlight) return { ok: false, reason: 'in_flight' };
+    _bundleExportInFlight = true;
+    
+    let bundlePayload = null; // catch ブロックで参照するため外で宣言
+
+    try {
+        console.log(`[STJ Editor] 🚀 一括JSON出力開始: charName="${charName}"`);
+        const worldName = getCharacterWorldInfoName() || (window.LorebookExpansion?.getChoicesWorldName ? window.LorebookExpansion.getChoicesWorldName() : null);
+        console.log(`[STJ Editor] 📌 解決された worldName: "${worldName}"`);
         
-            let lorebookEntries = [];
-            if (worldName) {
-                try {
-                    window.LorebookExpansion?.clearWorldInfoEntriesCache?.(worldName);
-                } catch (e) { /* ignore */ }
-                const rawEntries = await loadWorldInfoEntries(worldName);
-                if (rawEntries && typeof rawEntries === 'object') {
-                    lorebookEntries = Array.isArray(rawEntries) ? rawEntries : Object.values(rawEntries);
-                    console.log(`[STJ Editor] 📚 ロアブックエントリ変換完了: ${lorebookEntries.length} 件`);
-                } else {
-                    console.warn(`[STJ Editor] ⚠️ ロアブックエントリが取得できませんでした (rawEntries=${rawEntries})`);
-                }
+        let lorebookEntries = {};
+        if (worldName) {
+            try {
+                window.LorebookExpansion?.clearWorldInfoEntriesCache?.(worldName);
+            } catch (e) { /* ignore */ }
+            const rawEntries = await loadWorldInfoEntries(worldName);
+            if (rawEntries && typeof rawEntries === 'object') {
+                // ★ 修正: STのインポート形式に合わせるため、オブジェクト形式のまま保持する
+                lorebookEntries = rawEntries;
+                console.log(`[STJ Editor] 📚 ロアブックエントリ取得完了: ${Object.keys(lorebookEntries).length} 件 (オブジェクト形式)`);
             } else {
-                console.warn('[STJ Editor] ⚠️ worldName が取得できなかったため、ロアブックエントリは空になります');
+                console.warn(`[STJ Editor] ⚠️ ロアブックエントリが取得できませんでした (rawEntries=${rawEntries})`);
             }
+        } else {
+            console.warn('[STJ Editor] ⚠️ worldName が取得できなかったため、ロアブックエントリは空になります');
+        }
 
-            const ctx = window.SillyTavern?.getContext?.();
-            const charObj = ctx?.characters?.[ctx?.characterId];
-            const charExt = charObj?.data?.extensions || {};
+        const ctx = window.SillyTavern?.getContext?.();
+        const charObj = ctx?.characters?.[ctx?.characterId];
+        const charExt = charObj?.data?.extensions || {};
         
-            // ② Lorebook Expansion データ
-            const lexFromChar = (charExt.lorebook_expansion && typeof charExt.lorebook_expansion === 'object')
-                ? structuredClone(charExt.lorebook_expansion)
-                : {};
-            const lexFromStore = (worldName && ctx?.extensionSettings?.lorebook_expansion?.data?.[worldName])
-                ? structuredClone(ctx.extensionSettings.lorebook_expansion.data[worldName])
-                : {};
-            for (const [k, v] of Object.entries(lexFromStore)) {
-                const compositeKey = `${worldName}\u001f${k}`;
-                if (!lexFromChar[compositeKey]) {
-                    lexFromChar[compositeKey] = v;
-                }
+        // ② Lorebook Expansion データ
+        const lexFromChar = (charExt.lorebook_expansion && typeof charExt.lorebook_expansion === 'object')
+            ? structuredClone(charExt.lorebook_expansion) : {};
+        const lexFromStore = (worldName && ctx?.extensionSettings?.lorebook_expansion?.data?.[worldName])
+            ? structuredClone(ctx.extensionSettings.lorebook_expansion.data[worldName]) : {};
+        for (const [k, v] of Object.entries(lexFromStore)) {
+            const compositeKey = `${worldName}\u001f${k}`;
+            if (!lexFromChar[compositeKey]) lexFromChar[compositeKey] = v;
+        }
+        
+        // ③ JSON編集ツリー（画像マッピング）データ
+        const imageMap = structuredClone(getCurrentImageMapFromCharData(charName) || charExt.image_display_extension || {});
+        const bagState = structuredClone(charExt.image_display_bag_state || {});
+        
+        bundlePayload = {
+            exported_at: new Date().toISOString(),
+            character_name: charName,
+            world_name: worldName || '',
+            character_book: {
+                name: worldName || charName,
+                entries: lorebookEntries
+            },
+            extensions: {
+                lorebook_expansion: lexFromChar,
+                image_display_extension: imageMap,
+                image_display_bag_state: bagState
             }
-        
-            // ③ JSON編集ツリー（画像マッピング）データ
-            const imageMap = structuredClone(getCurrentImageMapFromCharData(charName) || charExt.image_display_extension || {});
-            const bagState = structuredClone(charExt.image_display_bag_state || {});
-        
-            const bundlePayload = {
-                exported_at: new Date().toISOString(),
-                character_name: charName,
-                world_name: worldName || '',
-                character_book: {
-                    name: worldName || charName,
-                    entries: lorebookEntries
-                },
-                extensions: {
-                    lorebook_expansion: lexFromChar,
-                    image_display_extension: imageMap,
-                    image_display_bag_state: bagState
-                }
-            };
+        };
 
-            const asciiPart = String(charName)
-                .replace(/[^A-Za-z0-9_-]+/g, '_')
-                .replace(/^_+|_+$/g, '');
-            const nonAsciiHash = Array.from(String(charName))
-                .reduce((acc, ch) => ((acc * 31 + ch.charCodeAt(0)) >>> 0), 0)
-                .toString(36);
-            const safeFileBase = asciiPart ? `${asciiPart}_${nonAsciiHash}_bundle` : `char_${nonAsciiHash}_bundle`;
-            const targetRelativePath = `${safeFileBase}.json`;
-            const jsonText = JSON.stringify(bundlePayload, null, 2);
-            const base64Data = btoa(unescape(encodeURIComponent(jsonText)));
-            const headers = typeof ctx?.getRequestHeaders === 'function'
-                ? ctx.getRequestHeaders()
-                : { 'Content-Type': 'application/json' };
-            
-            const res = await fetch('/api/files/upload', {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({
-                    name: targetRelativePath,
-                    data: base64Data
-                })
+        // ★ サイズ診断ログ (どのデータが欠けているかを特定するため)
+        const payloadStr = JSON.stringify(bundlePayload, null, 2);
+        const entriesStr = JSON.stringify(lorebookEntries, null, 2);
+        const extStr = JSON.stringify(bundlePayload.extensions, null, 2);
+        console.log(`[STJ Editor] 📊 サイズ診断:`);
+        console.log(`  - 全体: ${(payloadStr.length / 1024).toFixed(1)} KiB`);
+        console.log(`  - ロアブック本体 (entries): ${(entriesStr.length / 1024).toFixed(1)} KiB`);
+        console.log(`  - 拡張機能データ (extensions): ${(extStr.length / 1024).toFixed(1)} KiB`);
+        
+        // エントリの中身サンプルログ (content や extensions が含まれているか確認)
+        const sampleKey = Object.keys(lorebookEntries)[0];
+        if (sampleKey) {
+            const sampleEntry = lorebookEntries[sampleKey];
+            console.log(`[STJ Editor] 📝 エントリサンプル (uid=${sampleKey}):`, {
+                hasContent: !!sampleEntry.content,
+                contentLength: sampleEntry.content?.length || 0,
+                hasExtensions: !!sampleEntry.extensions,
+                extensionsKeys: sampleEntry.extensions ? Object.keys(sampleEntry.extensions) : []
             });
+        }
+
+        const asciiPart = String(charName).replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
+        const nonAsciiHash = Array.from(String(charName)).reduce((acc, ch) => ((acc * 31 + ch.charCodeAt(0)) >>> 0), 0).toString(36);
+        const safeFileBase = asciiPart ? `${asciiPart}_${nonAsciiHash}_bundle` : `char_${nonAsciiHash}_bundle`;
+        const targetRelativePath = `${safeFileBase}.json`;
+        const base64Data = btoa(unescape(encodeURIComponent(payloadStr)));
+        const headers = typeof ctx?.getRequestHeaders === 'function' ? ctx.getRequestHeaders() : { 'Content-Type': 'application/json' };
+            
+        const res = await fetch('/api/files/upload', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ name: targetRelativePath, data: base64Data })
+        });
         
-            if (!res.ok) {
-                const errText = await res.text().catch(() => '');
-                throw new Error(`HTTP ${res.status} ${errText}`.trim());
-            }
+        if (!res.ok) {
+            const errText = await res.text().catch(() => '');
+            throw new Error(`HTTP ${res.status} ${errText}`.trim());
+        }
         
-            console.log(`[STJ Editor] ✅ 一括JSONを出力しました: ${targetRelativePath} (サイズ: ${(jsonText.length / 1024).toFixed(1)} KiB)`);
-            if (!silent) {
-                window.GicApi?.showBottomToast?.(`一括JSONを出力しました: ${targetRelativePath}`);
-            }
-            return { ok: true, path: targetRelativePath };
-        } catch (err) {
-            console.warn('[STJ Editor] ❌ 一括JSON自動出力エラー:', err);
+        console.log(`[STJ Editor] ✅ 一括JSONを出力しました: ${targetRelativePath} (サイズ: ${(payloadStr.length / 1024).toFixed(1)} KiB)`);
+        if (!silent) window.GicApi?.showBottomToast?.(`一括JSONを出力しました: ${targetRelativePath}`);
+        return { ok: true, path: targetRelativePath };
+    } catch (err) {
+        console.warn('[STJ Editor] ❌ 一括JSON自動出力エラー:', err);
+        if (bundlePayload) {
             try {
                 const safeCharName = String(charName).replace(/[\\/:*?"<>|]/g, '_');
                 const blob = new Blob([JSON.stringify(bundlePayload, null, 2)], { type: 'application/json' });
@@ -2083,10 +2093,12 @@ function getCharacterWorldInfoName() {
             } catch (dlErr) {
                 return { ok: false, error: String(err) };
             }
-        } finally {
-            _bundleExportInFlight = false;
         }
+        return { ok: false, error: String(err) };
+    } finally {
+        _bundleExportInFlight = false;
     }
+}
 
     function scheduleUnifiedBundleExport(charName = '', delayMs = 800) {
         if (_bundleExportTimer) clearTimeout(_bundleExportTimer);
