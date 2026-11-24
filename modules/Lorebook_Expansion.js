@@ -999,6 +999,35 @@ function findEntryByChoice(entries, choiceNum) {
 }
 
 // ============================================================
+// ★ ユーザー発言からエントリを特定（文章方式 + 番号方式）
+//   1. 発言全体がキー or コメントと完全一致するエントリ（文章方式）
+//   2. 発言が番号らしい場合のみ番号で検索（旧データ互換）
+//      ※「射程400…」のような文章中の数字で誤マッチしないよう限定
+// ============================================================
+function normalizeChoiceText(s) {
+    return String(s ?? '').normalize('NFKC').replace(/\s+/g, ' ').trim();
+}
+
+function findEntryForUserText(entries, text) {
+    if (!entries || !text) return null;
+    const list = Array.isArray(entries) ? entries : Object.values(entries);
+    const t = normalizeChoiceText(text);
+    if (!t) return null;
+
+    for (const entry of list) {
+        if (!entry) continue;
+        const cands = [...getEntryKeys(entry), normalizeEntryComment(entry.comment || '')];
+        if (cands.some(k => k && normalizeChoiceText(k) === t)) return entry;
+    }
+
+    if (/^(?:選択肢|choice)?\s*[「『"'【\[]?\d{1,4}(?:$|[\s.:、。」』】\]])/i.test(t)) {
+        const n = extractChoiceNumber(t);
+        if (n) return findEntryByChoice(list, n);
+    }
+    return null;
+}
+
+// ============================================================
 // 応答末尾に choices を差し込む
 // ============================================================
 const CHOICE_BLOCK_CLASS = 'lbe-choices-block';
@@ -1065,8 +1094,8 @@ async function appendChoicesToLastAiMessage() {
     }
     if (lastUserIdx < 0) return;
 
-    const choiceNum = extractChoiceNumber(ctx.chat[lastUserIdx].mes || '');
-    if (!choiceNum) return;
+    const userText = ctx.chat[lastUserIdx].mes || '';
+    if (!userText.trim()) return;
 
     // ★ キャラ関連ワールドを最優先（UIの stale 状態を回避）
     const worldName = getChoicesWorldName();
@@ -1085,7 +1114,7 @@ async function appendChoicesToLastAiMessage() {
         return;
     }
 
-    const entry = findEntryByChoice(entries, choiceNum);
+    const entry = findEntryForUserText(entries, userText);
     if (!entry) return;
 
     // ★ エントリが実際に期待するワールドのものか防御的チェック
@@ -1147,11 +1176,11 @@ async function appendChoicesToAllAiMessages() {
         }
         // AI メッセージ
         if (pendingUserText === null) continue;
-        const choiceNum = extractChoiceNumber(pendingUserText);
+        const userText = pendingUserText;
         pendingUserText = null;
-        if (!choiceNum) continue;
+        if (!userText.trim()) continue;
 
-        const entry = findEntryByChoice(entries, choiceNum);
+        const entry = findEntryForUserText(entries, userText);
         if (!entry) continue;
 
         // ★ エントリのワールド不一致チェック（別キャラのロアブック混入防止）
@@ -2508,6 +2537,7 @@ window.LorebookExpansion = {
 
     extractChoiceNumber,
     findEntryByChoice,
+    findEntryForUserText,
     getEntryKeys,
 
     appendChoicesToLastAiMessage,
