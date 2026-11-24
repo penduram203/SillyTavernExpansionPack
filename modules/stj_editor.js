@@ -1920,6 +1920,111 @@
         return changed;
     }
     
+    // ===== ①ロアブック本体・②Lorebook Expansion・③画像マッピングの一括JSON自動出力 =====
+    let _bundleExportTimer = null;
+    let _bundleExportInFlight = false;
+
+    async function exportUnifiedBundleJson(options = {}) {
+        const { silent = true, charName: explicitCharName = '' } = options;
+        const charName = explicitCharName || detectCharacterNameFromDOM();
+        if (!charName) return { ok: false, reason: 'no_char' };
+
+        if (_bundleExportInFlight) return { ok: false, reason: 'in_flight' };
+        _bundleExportInFlight = true;
+
+        try {
+            const worldName = getCharacterWorldInfoName();
+            let lorebookEntries = [];
+            if (worldName) {
+                try {
+                    window.LorebookExpansion?.clearWorldInfoEntriesCache?.(worldName);
+                } catch (e) { /* ignore */ }
+                const rawEntries = await loadWorldInfoEntries(worldName);
+                if (rawEntries && typeof rawEntries === 'object') {
+                    lorebookEntries = Array.isArray(rawEntries) ? rawEntries : Object.values(rawEntries);
+                }
+            }
+
+            const ctx = window.SillyTavern?.getContext?.();
+            const charObj = ctx?.characters?.[ctx?.characterId];
+            const charExt = charObj?.data?.extensions || {};
+
+            // ② Lorebook Expansion データ（キャラ拡張ミラー + per-world ストア統合）
+            const lexFromChar = (charExt.lorebook_expansion && typeof charExt.lorebook_expansion === 'object')
+                ? structuredClone(charExt.lorebook_expansion)
+                : {};
+            const lexFromStore = (worldName && ctx?.extensionSettings?.lorebook_expansion?.data?.[worldName])
+                ? structuredClone(ctx.extensionSettings.lorebook_expansion.data[worldName])
+                : {};
+            for (const [k, v] of Object.entries(lexFromStore)) {
+                const compositeKey = `${worldName}\u001f${k}`;
+                if (!lexFromChar[compositeKey]) {
+                    lexFromChar[compositeKey] = v;
+                }
+            }
+
+            // ③ JSON編集ツリー（画像マッピング）データ
+            const imageMap = structuredClone(getCurrentImageMapFromCharData(charName) || charExt.image_display_extension || {});
+            const bagState = structuredClone(charExt.image_display_bag_state || {});
+
+            const bundlePayload = {
+                exported_at: new Date().toISOString(),
+                character_name: charName,
+                world_name: worldName || '',
+                character_book: {
+                    name: worldName || charName,
+                    entries: lorebookEntries
+                },
+                extensions: {
+                    lorebook_expansion: lexFromChar,
+                    image_display_extension: imageMap,
+                    image_display_bag_state: bagState
+                }
+            };
+
+            const safeCharName = String(charName).replace(/[\\/:*?"<>|]/g, '_');
+            // SillyTavern/data/default-user/user/images/<キャラ名>_bundle.json へ出力
+            const targetRelativePath = `user/images/${safeCharName}_bundle.json`;
+            const jsonText = JSON.stringify(bundlePayload, null, 2);
+            const base64Data = btoa(unescape(encodeURIComponent(jsonText)));
+
+            const headers = typeof ctx?.getRequestHeaders === 'function'
+                ? ctx.getRequestHeaders()
+                : { 'Content-Type': 'application/json' };
+
+            const res = await fetch('/api/files/upload', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({
+                    name: targetRelativePath,
+                    data: base64Data
+                })
+            });
+
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status}`);
+            }
+
+            if (!silent) {
+                window.GicApi?.showBottomToast?.(`一括JSONを出力しました: ${targetRelativePath}`);
+            }
+            return { ok: true, path: targetRelativePath };
+        } catch (err) {
+            console.warn('[STJ Editor] 一括JSON自動出力エラー:', err);
+            return { ok: false, error: String(err) };
+        } finally {
+            _bundleExportInFlight = false;
+        }
+    }
+
+    function scheduleUnifiedBundleExport(charName = '', delayMs = 800) {
+        if (_bundleExportTimer) clearTimeout(_bundleExportTimer);
+        _bundleExportTimer = setTimeout(() => {
+            _bundleExportTimer = null;
+            exportUnifiedBundleJson({ silent: true, charName });
+        }, delayMs);
+    }
+   
     function openExportModal() {
         if (!stjModalEl) return;
         if (stjModalEl.style.display === 'block') return;
@@ -5269,6 +5374,15 @@
             if (nameEl) nameEl.textContent = charName;
             await syncEditorWithLatestLorebook(charName);
         });
+        // ★ LEXデータ更新や画像生成完了時にも一括JSONを自動出力
+        window.addEventListener('lbe-lex-data-updated', () => {
+            scheduleUnifiedBundleExport('', 800);
+        });
+        window.addEventListener('gic-image-generated-for-keyword', (e) => {
+            const targetChar = e?.detail?.charName || '';
+            scheduleUnifiedBundleExport(targetChar, 800);
+        });
+        
         syncLater(1500);
     }
 
