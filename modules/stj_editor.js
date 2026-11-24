@@ -1991,7 +1991,7 @@
                 .toString(36);
             const safeFileBase = asciiPart ? `${asciiPart}_${nonAsciiHash}_bundle` : `char_${nonAsciiHash}_bundle`;
             // SillyTavern/data/default-user/user/images/<キャラ名>_bundle.json へ出力
-            const targetRelativePath = `user/images/${safeFileBase}.json`;
+            const targetRelativePath = `${safeFileBase}.json`;
             const jsonText = JSON.stringify(bundlePayload, null, 2);
             const base64Data = btoa(unescape(encodeURIComponent(jsonText)));
 
@@ -2019,7 +2019,21 @@
             return { ok: true, path: targetRelativePath };
         } catch (err) {
             console.warn('[STJ Editor] 一括JSON自動出力エラー:', err);
-            return { ok: false, error: String(err) };
+            try {
+                const safeCharName = String(charName).replace(/[\\/:*?"<>|]/g, '_');
+                const blob = new Blob([JSON.stringify(bundlePayload, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${safeCharName}_bundle.json`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+                return { ok: true, downloaded: true, fileName: `${safeCharName}_bundle.json` };
+            } catch (dlErr) {
+                return { ok: false, error: String(err) };
+            }
         } finally {
             _bundleExportInFlight = false;
         }
