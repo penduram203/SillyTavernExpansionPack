@@ -436,12 +436,31 @@ function _bytesToBase64(bytes) {
 }
 
 // /api/files/upload は [A-Za-z0-9_-.] 以外のファイル名を拒否するため ASCII 名に変換
-function _makeSafeExportFileName(charName) {
+function _makeSafeExportFileName(charName, ext = 'json') {
     const name = String(charName || 'character');
     const asciiPart = name.replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
     const hash = Array.from(name).reduce((acc, ch) => ((acc * 31 + ch.charCodeAt(0)) >>> 0), 0).toString(36);
-    return asciiPart ? `${asciiPart}_${hash}_card.json` : `char_${hash}_card.json`;
+    return asciiPart ? `${asciiPart}_${hash}_card.${ext}` : `char_${hash}_card.${ext}`;
 }
+
+// ★ user/files へバイト列をそのまま書き出す
+async function _uploadToUserFiles(name, bytes) {
+    const res = await fetch('/api/files/upload', {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        body: JSON.stringify({ name, data: _bytesToBase64(bytes) }),
+    });
+    if (!res.ok) {
+        const t = await res.text().catch(() => '');
+        throw new Error(`HTTP ${res.status} ${t}`.trim());
+    }
+    const { path } = await res.json().catch(() => ({}));
+    return { ok: true, path: path || name, bytes: bytes.length };
+}
+
+// ★ 通常クリック（PNG export）と同一の PNG バイト列を作る関数
+//    installExportButtonHijack 内で fetchAvatarPngBytes + patchPng を登録する
+let _pngExportBuilder = null;
 
 let _fileExportInFlight = false;
 
@@ -460,19 +479,10 @@ export async function exportCurrentCharacterJsonToFiles(options = {}) {
         if (!built) return { ok: false, reason: 'no_char' };
         if (_getCurrentChar() !== char) return { ok: false, reason: 'char_switched' };
 
-        const name = fileName || _makeSafeExportFileName(char.name);
-        const res = await fetch('/api/files/upload', {
-            method: 'POST',
-            headers: getRequestHeaders(),
-            body: JSON.stringify({ name, data: _bytesToBase64(built.bytes) }),
-        });
-        if (!res.ok) {
-            const t = await res.text().catch(() => '');
-            throw new Error(`HTTP ${res.status} ${t}`.trim());
-        }
-        const { path } = await res.json().catch(() => ({}));
-        console.log(`${LOG} ✅ 自動 JSON 出力: ${path || name} (${built.bytes.length} bytes)`);
-        return { ok: true, path: path || name, bytes: built.bytes.length };
+        const name = fileName || _makeSafeExportFileName(char.name, 'json');
+        const r = await _uploadToUserFiles(name, built.bytes);
+        console.log(`${LOG} ✅ 自動 JSON 出力: ${r.path} (${r.bytes} bytes)`);
+        return { ...r, format: 'json' };
     } catch (e) {
         console.warn(`${LOG} 自動 JSON 出力エラー:`, e);
         return { ok: false, error: String(e) };
@@ -481,6 +491,36 @@ export async function exportCurrentCharacterJsonToFiles(options = {}) {
     }
 }
 
+// ★ 通常クリック（PNG export）と同一内容を user/files に書き出す
+//    アバター PNG が取得できない場合は、手動と同じく JSON にフォールバック
+export async function exportCurrentCharacterPngToFiles(options = {}) {
+    const { fileName = '', expectedCharName = '', jsonFallback = true } = options;
+    const char = _getCurrentChar();
+    if (!char) return { ok: false, reason: 'no_char' };
+    if (expectedCharName && char.name !== expectedCharName) {
+        return { ok: false, reason: 'char_switched' };
+    }
+    if (_fileExportInFlight) return { ok: false, reason: 'in_flight' };
+    _fileExportInFlight = true;
+    try {
+        const pngBytes = _pngExportBuilder ? await _pngExportBuilder() : null;
+        if (_getCurrentChar() !== char) return { ok: false, reason: 'char_switched' };
+        if (pngBytes) {
+            const name = fileName || _makeSafeExportFileName(char.name, 'png');
+            const r = await _uploadToUserFiles(name, pngBytes);
+            console.log(`${LOG} ✅ 自動 PNG 出力: ${r.path} (${r.bytes} bytes)`);
+            return { ...r, format: 'png' };
+        }
+    } catch (e) {
+        console.warn(`${LOG} 自動 PNG 出力エラー:`, e);
+        return { ok: false, error: String(e) };
+    } finally {
+        _fileExportInFlight = false;
+    }
+    if (!jsonFallback) return { ok: false, reason: 'no_avatar_png' };
+    console.log(`${LOG} PNG 不可 → JSON にフォールバック`);
+    return exportCurrentCharacterJsonToFiles({ expectedCharName });
+}
 
 // ============================================================
 // ★ export_button 完全乗っ取り
@@ -677,6 +717,12 @@ export async function exportCurrentCharacterJsonToFiles(options = {}) {
         return true;
     }
 
+    // ★ 自動出力用に PNG 生成処理を登録（手動 PNG export と同じ関数を使う）
+    _pngExportBuilder = async () => {
+        const bytes = await fetchAvatarPngBytes();
+        return bytes ? patchPng(bytes) : null;
+    };
+
     // ---- ハンドラ: click のみ実行、他の種は事前阻止 ----
     function handler(e) {
         const target = e.target?.closest?.('#export_button, button, [role="button"]');
@@ -806,6 +852,7 @@ window.CharStore = {
     // ★ Shift+export_button と同一 JSON の取得／自動出力
     buildExportJson: () => _buildJsonExport()?.jsonStr ?? null,
     exportCurrentCharacterJsonToFiles,
+    exportCurrentCharacterPngToFiles,
     // ★ 手動クリーンアップ用
     stripNullsFromExtensions: () => {
         const char = _getCurrentChar();
