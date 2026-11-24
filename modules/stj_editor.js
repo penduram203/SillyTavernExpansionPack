@@ -498,20 +498,41 @@ async function loadWorldInfoEntries(worldName) {
         return null;
     }
     
-    // 1. LorebookExpansion のキャッシュ/取得ロジックを最優先で使う
-    if (window.LorebookExpansion?.loadWorldInfoEntriesByName) {
-        try {
-            const entries = await window.LorebookExpansion.loadWorldInfoEntriesByName(worldName);
-            if (entries && typeof entries === 'object' && Object.keys(entries).length > 0) {
-                console.log(`[STJ Editor] ✅ LorebookExpansion からロアブックエントリを取得: ${Object.keys(entries).length} 件`);
-                return entries; // ★ 修正: オブジェクト形式のまま返す（STのインポート形式に合わせる）
+    // 1. ST内部のメモリキャッシュを最優先で参照する (extensionsを含む完全なデータがここにある)
+    try {
+        // A. window.world_info から取得
+        if (window.world_info && window.world_info[worldName] && window.world_info[worldName].entries) {
+            const e = window.world_info[worldName].entries;
+            if (e && typeof e === 'object' && Object.keys(e).length > 0) {
+                console.log(`[STJ Editor] ✅ window.world_info からロアブックエントリを取得: ${Object.keys(e).length} 件`);
+                return e;
             }
-        } catch (err) {
-            console.debug(`[STJ Editor] LorebookExpansion.loadWorldInfoEntriesByName 例外: ${err.message || err}`);
         }
+    } catch (err) {
+        console.debug(`[STJ Editor] window.world_info 参照例外: ${err.message || err}`);
     }
 
-    // 2. 直接 fetch で取得を試みる（LorebookExpansion が失敗した場合の保険）
+    try {
+        // B. mod.world_info から取得 (Lorebook_Expansion.js と同様のロジック)
+        const mod = await (async () => {
+            try {
+                return await import('../../../../world-info.js');
+            } catch (e) {
+                return null;
+            }
+        })();
+        if (mod && mod.world_info && mod.world_info[worldName] && mod.world_info[worldName].entries) {
+            const e = mod.world_info[worldName].entries;
+            if (e && typeof e === 'object' && Object.keys(e).length > 0) {
+                console.log(`[STJ Editor] ✅ mod.world_info からロアブックエントリを取得: ${Object.keys(e).length} 件`);
+                return e;
+            }
+        }
+    } catch (err) {
+        console.debug(`[STJ Editor] mod.world_info 参照例外: ${err.message || err}`);
+    }
+
+    // 2. 上記メモリキャッシュで取得できない場合のみ、fetch を試みる（保険）
     for (let attempt = 1; attempt <= 2; attempt++) {
         try {
             const ctx = getSTContext();
@@ -528,7 +549,7 @@ async function loadWorldInfoEntries(worldName) {
                 const data = await resp.json();
                 if (data && data.entries && Object.keys(data.entries).length > 0) {
                     console.log(`[STJ Editor] ✅ fetch からロアブックエントリを取得: ${Object.keys(data.entries).length} 件`);
-                    return data.entries; // ★ 修正: オブジェクト形式のまま返す
+                    return data.entries;
                 }
             }
         } catch (err) {
