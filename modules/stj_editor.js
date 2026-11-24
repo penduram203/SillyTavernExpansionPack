@@ -485,7 +485,8 @@ function getCharacterWorldInfoName() {
                 });
                 if (resp.ok) {
                     const data = await resp.json();
-                    if (data && data.entries) {
+                    // ★ 修正: entries が空オブジェクトの場合、LorebookExpansion のフォールバックに任せる
+                    if (data && data.entries && Object.keys(data.entries).length > 0) {
                         return data.entries;
                     }
                 }
