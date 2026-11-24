@@ -1970,6 +1970,7 @@
                 } else {
                     console.log('[STJ Editor] character.data を権威ソースとして使用（extensionSettings フォールバック無効）');
                 }
+                await syncEditorWithLatestLorebook(effectiveCharName);
                 setupPreviewListeners();
                 runLiveTest();
             } catch (err) {
@@ -5258,7 +5259,16 @@
                 _stjScheduleTreeLayout();
             }, 100);
         });
-
+        // ★ ギャラリーが開く度に最新のロアブック状態へ自動アップデート
+        window.addEventListener('gic-gallery-opened', async () => {
+            const charName = detectCharacterNameFromDOM()
+                || document.getElementById('stj_char_name_display')?.textContent
+                || '';
+            if (!charName) return;
+            const nameEl = document.getElementById('stj_char_name_display');
+            if (nameEl) nameEl.textContent = charName;
+            await syncEditorWithLatestLorebook(charName);
+        });
         syncLater(1500);
     }
 
