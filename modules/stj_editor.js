@@ -492,73 +492,119 @@ function getCharacterWorldInfoName() {
     return null;
 }
 
+// 1. 内部形式を SillyTavern エクスポート形式に変換する関数を追加
+function convertToExportFormat(entries) {
+    if (!entries || typeof entries !== 'object') return [];
+    
+    // position の数値から文字列への変換マップ (SillyTavern 仕様)
+    const positionMap = {
+        0: 'before_char',
+        1: 'after_char',
+        2: 'before_example',
+        3: 'after_example',
+        4: 'author_note',
+        5: 'in_depth_prompt'
+    };
+
+    return Object.values(entries).map(entry => {
+        // keys の正規化
+        let keys = [];
+        if (Array.isArray(entry.keys)) keys = entry.keys;
+        else if (Array.isArray(entry.key)) keys = entry.key;
+        else if (typeof entry.keys === 'string') keys = [entry.keys];
+        else if (typeof entry.key === 'string') keys = [entry.key];
+
+        // secondary_keys の正規化
+        let secondaryKeys = [];
+        if (Array.isArray(entry.keysecondary)) secondaryKeys = entry.keysecondary;
+        else if (Array.isArray(entry.secondary_keys)) secondaryKeys = entry.secondary_keys;
+
+        // position の変換
+        let position = 'after_char';
+        if (typeof entry.position === 'number') {
+            position = positionMap[entry.position] || 'after_char';
+        } else if (typeof entry.position === 'string') {
+            position = entry.position;
+        }
+
+        // enabled の変換 (disable の反転)
+        const enabled = entry.disable !== undefined ? !entry.disable : (entry.enabled !== undefined ? entry.enabled : true);
+        
+        // insertion_order の変換 (order から)
+        const insertionOrder = entry.order !== undefined ? entry.order : (entry.insertion_order !== undefined ? entry.insertion_order : 100);
+
+        return {
+            id: entry.uid !== undefined ? entry.uid : (entry.id !== undefined ? entry.id : 0),
+            keys: keys,
+            secondary_keys: secondaryKeys,
+            comment: entry.comment || '',
+            content: entry.content || '',
+            constant: entry.constant !== undefined ? entry.constant : false,
+            selective: entry.selective !== undefined ? entry.selective : false,
+            insertion_order: insertionOrder,
+            enabled: enabled,
+            position: position,
+            use_regex: entry.use_regex !== undefined ? entry.use_regex : (entry.useRegex !== undefined ? entry.useRegex : false),
+            extensions: entry.extensions || {}
+        };
+    }).sort((a, b) => a.id - b.id); // id でソートして安定させる
+}
+
+// 2. ロアブックエントリ取得関数の強化（fetch 優先 + 詳細ログ）
 async function loadWorldInfoEntries(worldName) {
     if (!worldName) {
         console.warn('[STJ Editor] ❌ loadWorldInfoEntries: worldName が指定されていません');
         return null;
     }
     
-    // 1. ST内部のメモリキャッシュを最優先で参照する (extensionsを含む完全なデータがここにある)
-    try {
-        // A. window.world_info から取得
-        if (window.world_info && window.world_info[worldName] && window.world_info[worldName].entries) {
-            const e = window.world_info[worldName].entries;
-            if (e && typeof e === 'object' && Object.keys(e).length > 0) {
-                console.log(`[STJ Editor] ✅ window.world_info からロアブックエントリを取得: ${Object.keys(e).length} 件`);
-                return e;
-            }
-        }
-    } catch (err) {
-        console.debug(`[STJ Editor] window.world_info 参照例外: ${err.message || err}`);
-    }
-
-    try {
-        // B. mod.world_info から取得 (Lorebook_Expansion.js と同様のロジック)
-        const mod = await (async () => {
-            try {
-                return await import('../../../../world-info.js');
-            } catch (e) {
-                return null;
-            }
-        })();
-        if (mod && mod.world_info && mod.world_info[worldName] && mod.world_info[worldName].entries) {
-            const e = mod.world_info[worldName].entries;
-            if (e && typeof e === 'object' && Object.keys(e).length > 0) {
-                console.log(`[STJ Editor] ✅ mod.world_info からロアブックエントリを取得: ${Object.keys(e).length} 件`);
-                return e;
-            }
-        }
-    } catch (err) {
-        console.debug(`[STJ Editor] mod.world_info 参照例外: ${err.message || err}`);
-    }
-
-    // 2. 上記メモリキャッシュで取得できない場合のみ、fetch を試みる（保険）
+    // 1. fetch を最優先で試行（サーバー上の最新ファイルを直接取得）
     for (let attempt = 1; attempt <= 2; attempt++) {
         try {
             const ctx = getSTContext();
             const headers = (ctx && typeof ctx.getRequestHeaders === 'function')
                 ? ctx.getRequestHeaders()
                 : { 'Content-Type': 'application/json' };
+            
+            console.log(`[STJ Editor] 🔍 fetch 試行 ${attempt}/2: /api/worldinfo/get (name="${worldName}")`);
             const resp = await fetch('/api/worldinfo/get', {
                 method: 'POST',
                 headers,
                 body: JSON.stringify({ name: worldName }),
                 cache: 'no-store',
             });
+            
             if (resp.ok) {
                 const data = await resp.json();
                 if (data && data.entries && Object.keys(data.entries).length > 0) {
                     console.log(`[STJ Editor] ✅ fetch からロアブックエントリを取得: ${Object.keys(data.entries).length} 件`);
                     return data.entries;
+                } else {
+                    console.warn(`[STJ Editor] ⚠️ fetch は成功したが entries が空または不正:`, data);
                 }
+            } else {
+                console.warn(`[STJ Editor] ⚠️ fetch 失敗: HTTP ${resp.status}`);
             }
         } catch (err) {
-            console.debug(`[STJ Editor] fetch 試行 ${attempt}/2 例外: ${err.message || err}`);
+            console.warn(`[STJ Editor] ⚠️ fetch 試行 ${attempt}/2 例外:`, err);
         }
-        if (attempt < 2) await new Promise(r => setTimeout(r, 300));
+        if (attempt < 2) await new Promise(r => setTimeout(r, 500));
     }
 
-    console.warn(`[STJ Editor] ❌ ロアブック "${worldName}" のエントリを取得できませんでした`);
+    // 2. fetch が失敗した場合のみ、LorebookExpansion のキャッシュを利用
+    if (window.LorebookExpansion?.loadWorldInfoEntriesByName) {
+        try {
+            console.log(`[STJ Editor] 🔍 LorebookExpansion.loadWorldInfoEntriesByName を試行`);
+            const entries = await window.LorebookExpansion.loadWorldInfoEntriesByName(worldName);
+            if (entries && typeof entries === 'object' && Object.keys(entries).length > 0) {
+                console.log(`[STJ Editor] ✅ LorebookExpansion からロアブックエントリを取得: ${Object.keys(entries).length} 件`);
+                return entries;
+            }
+        } catch (err) {
+            console.warn(`[STJ Editor] ⚠️ LorebookExpansion.loadWorldInfoEntriesByName 例外:`, err);
+        }
+    }
+
+    console.warn(`[STJ Editor] ❌ ロアブック "${worldName}" のエントリを全経路で取得できませんでした`);
     return null;
 }
 
@@ -1987,6 +2033,7 @@ async function loadWorldInfoEntries(worldName) {
     let _bundleExportTimer = null;
     let _bundleExportInFlight = false;
 
+// 3. 一括JSON出力関数の修正（変換処理の組み込み）
 async function exportUnifiedBundleJson(options = {}) {
     const { silent = true, charName: explicitCharName = '' } = options;
     const charName = explicitCharName || detectCharacterNameFromDOM();
@@ -1997,25 +2044,37 @@ async function exportUnifiedBundleJson(options = {}) {
     if (_bundleExportInFlight) return { ok: false, reason: 'in_flight' };
     _bundleExportInFlight = true;
     
-    let bundlePayload = null; // catch ブロックで参照するため外で宣言
+    let bundlePayload = null;
 
     try {
         console.log(`[STJ Editor] 🚀 一括JSON出力開始: charName="${charName}"`);
         const worldName = getCharacterWorldInfoName() || (window.LorebookExpansion?.getChoicesWorldName ? window.LorebookExpansion.getChoicesWorldName() : null);
         console.log(`[STJ Editor] 📌 解決された worldName: "${worldName}"`);
         
-        let lorebookEntries = {};
+        let lorebookEntries = [];
         if (worldName) {
             try {
                 window.LorebookExpansion?.clearWorldInfoEntriesCache?.(worldName);
             } catch (e) { /* ignore */ }
+            
             const rawEntries = await loadWorldInfoEntries(worldName);
             if (rawEntries && typeof rawEntries === 'object') {
-                // ★ 修正: STのインポート形式に合わせるため、オブジェクト形式のまま保持する
-                lorebookEntries = rawEntries;
-                console.log(`[STJ Editor] 📚 ロアブックエントリ取得完了: ${Object.keys(lorebookEntries).length} 件 (オブジェクト形式)`);
+                // ★ 修正: SillyTavern エクスポート形式に変換
+                lorebookEntries = convertToExportFormat(rawEntries);
+                console.log(`[STJ Editor] 📚 ロアブックエントリを変換完了: ${lorebookEntries.length} 件 (エクスポート形式)`);
+                
+                // 診断ログ
+                const sampleEntry = lorebookEntries[0];
+                if (sampleEntry) {
+                    console.log(`[STJ Editor] 📝 エントリサンプル (id=${sampleEntry.id}):`, {
+                        hasContent: !!sampleEntry.content,
+                        contentLength: sampleEntry.content?.length || 0,
+                        hasExtensions: !!sampleEntry.extensions,
+                        extensionsKeys: sampleEntry.extensions ? Object.keys(sampleEntry.extensions) : []
+                    });
+                }
             } else {
-                console.warn(`[STJ Editor] ⚠️ ロアブックエントリが取得できませんでした (rawEntries=${rawEntries})`);
+                console.warn(`[STJ Editor] ⚠️ ロアブックエントリが取得できませんでした`);
             }
         } else {
             console.warn('[STJ Editor] ⚠️ worldName が取得できなかったため、ロアブックエントリは空になります');
@@ -2045,7 +2104,7 @@ async function exportUnifiedBundleJson(options = {}) {
             world_name: worldName || '',
             character_book: {
                 name: worldName || charName,
-                entries: lorebookEntries
+                entries: lorebookEntries // ★ 変換済みの配列を出力
             },
             extensions: {
                 lorebook_expansion: lexFromChar,
@@ -2054,27 +2113,7 @@ async function exportUnifiedBundleJson(options = {}) {
             }
         };
 
-        // ★ サイズ診断ログ (どのデータが欠けているかを特定するため)
         const payloadStr = JSON.stringify(bundlePayload, null, 2);
-        const entriesStr = JSON.stringify(lorebookEntries, null, 2);
-        const extStr = JSON.stringify(bundlePayload.extensions, null, 2);
-        console.log(`[STJ Editor] 📊 サイズ診断:`);
-        console.log(`  - 全体: ${(payloadStr.length / 1024).toFixed(1)} KiB`);
-        console.log(`  - ロアブック本体 (entries): ${(entriesStr.length / 1024).toFixed(1)} KiB`);
-        console.log(`  - 拡張機能データ (extensions): ${(extStr.length / 1024).toFixed(1)} KiB`);
-        
-        // エントリの中身サンプルログ (content や extensions が含まれているか確認)
-        const sampleKey = Object.keys(lorebookEntries)[0];
-        if (sampleKey) {
-            const sampleEntry = lorebookEntries[sampleKey];
-            console.log(`[STJ Editor] 📝 エントリサンプル (uid=${sampleKey}):`, {
-                hasContent: !!sampleEntry.content,
-                contentLength: sampleEntry.content?.length || 0,
-                hasExtensions: !!sampleEntry.extensions,
-                extensionsKeys: sampleEntry.extensions ? Object.keys(sampleEntry.extensions) : []
-            });
-        }
-
         const asciiPart = String(charName).replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
         const nonAsciiHash = Array.from(String(charName)).reduce((acc, ch) => ((acc * 31 + ch.charCodeAt(0)) >>> 0), 0).toString(36);
         const safeFileBase = asciiPart ? `${asciiPart}_${nonAsciiHash}_bundle` : `char_${nonAsciiHash}_bundle`;
@@ -2093,7 +2132,7 @@ async function exportUnifiedBundleJson(options = {}) {
             throw new Error(`HTTP ${res.status} ${errText}`.trim());
         }
         
-        console.log(`[STJ Editor] ✅ 一括JSONを出力しました: ${targetRelativePath} (サイズ: ${(payloadStr.length / 1024).toFixed(1)} KiB)`);
+        console.log(`[STJ Editor] ✅ 一括JSONを出力しました: ${targetRelativePath} (サイズ: ${(payloadStr.length / 1024).toFixed(1)} KiB, エントリ数: ${lorebookEntries.length})`);
         if (!silent) window.GicApi?.showBottomToast?.(`一括JSONを出力しました: ${targetRelativePath}`);
         return { ok: true, path: targetRelativePath };
     } catch (err) {
