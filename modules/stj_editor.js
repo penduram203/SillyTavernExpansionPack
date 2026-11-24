@@ -1838,6 +1838,88 @@
         runLiveTest();
     }
 
+    // ===== 最新のロアブックエントリ名へ同期 =====
+    async function syncEditorWithLatestLorebook(charName) {
+        if (!charName) return false;
+        const worldName = getCharacterWorldInfoName();
+        if (!worldName) return false;
+
+        try {
+            window.LorebookExpansion?.clearWorldInfoEntriesCache?.(worldName);
+        } catch (e) { /* ignore */ }
+
+        const entries = await loadWorldInfoEntries(worldName);
+        if (!entries || typeof entries !== 'object') return false;
+
+        const list = Array.isArray(entries) ? entries : Object.values(entries);
+        if (list.length === 0) return false;
+
+        let imageMap = getCurrentImageMapFromCharData(charName) || {};
+        let changed = false;
+        const updatedMap = {};
+
+        // default / thumbnail は先頭に保持
+        for (const spKey of ['default', 'thumbnail']) {
+            if (Object.prototype.hasOwnProperty.call(imageMap, spKey)) {
+                updatedMap[spKey] = imageMap[spKey];
+            }
+        }
+
+        const usedOldKeys = new Set();
+        const orderedEntries = [...list].sort((a, b) => {
+            const oa = Number(a?.order ?? a?.displayIndex ?? 0);
+            const ob = Number(b?.order ?? b?.displayIndex ?? 0);
+            return oa - ob;
+        });
+
+        for (const entry of orderedEntries) {
+            if (!entry) continue;
+            const latestName = getEntryKeyword(entry);
+            if (!latestName || isCommonRuleName(latestName)) continue;
+
+            const keys = getEntryKeys(entry).map(k => String(k).trim()).filter(Boolean);
+            const candidateKeys = [latestName, ...keys];
+
+            let matchedOldKey = null;
+            for (const cand of candidateKeys) {
+                if (Object.prototype.hasOwnProperty.call(imageMap, cand) && !usedOldKeys.has(cand)) {
+                    matchedOldKey = cand;
+                    break;
+                }
+            }
+
+            if (matchedOldKey) {
+                usedOldKeys.add(matchedOldKey);
+                updatedMap[latestName] = imageMap[matchedOldKey];
+                if (matchedOldKey !== latestName) {
+                    changed = true;
+                }
+            } else if (!Object.prototype.hasOwnProperty.call(updatedMap, latestName)) {
+                updatedMap[latestName] = [];
+                changed = true;
+            }
+        }
+
+        // ロアブック側に存在しない孤立キーの整理
+        for (const [k, v] of Object.entries(imageMap)) {
+            if (k === 'default' || k === 'thumbnail') continue;
+            if (!usedOldKeys.has(k) && !Object.prototype.hasOwnProperty.call(updatedMap, k)) {
+                changed = true;
+            }
+        }
+
+        if (changed) {
+            saveImageMapToCharData(charName, updatedMap);
+        }
+
+        populateFormFromImageMap(updatedMap, false);
+        runLiveTest();
+        if (changed) {
+            saveData({ silent: true });
+        }
+        return changed;
+    }
+    
     function openExportModal() {
         if (!stjModalEl) return;
         if (stjModalEl.style.display === 'block') return;
