@@ -2040,6 +2040,12 @@ async function exportUnifiedBundleJson(options = {}) {
         console.warn('[STJ Editor] ❌ 一括JSON出力スキップ: キャラクター名が取得できません');
         return { ok: false, reason: 'no_char' };
     }
+    // ★ Shift+export_button と同一の JSON を CharStore 経由で書き出す
+    if (window.CharStore?.exportCurrentCharacterJsonToFiles) {
+        const r = await window.CharStore.exportCurrentCharacterJsonToFiles({ expectedCharName: charName });
+        if (r.ok && !silent) window.GicApi?.showBottomToast?.(`キャラクターカード全体を出力しました: ${r.path}`);
+        return r;
+    }
     if (_bundleExportInFlight) return { ok: false, reason: 'in_flight' };
     _bundleExportInFlight = true;
     
