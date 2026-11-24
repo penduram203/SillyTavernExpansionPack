@@ -88,16 +88,40 @@
     // ============================================================
     // 汎用ヘルパー
     // ============================================================
+    // ★ 全角数字 → 半角数字
+    function toHalfWidthDigits(str) {
+        return String(str || '').replace(/[\uFF10-\uFF19]/g,
+            c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+    }
+
+    // ★ 選択肢テキストから番号を取り出す
+    //   - 「001 森へ行く」「００１ 森へ」「【001】森へ」「・001」「選択肢「001」」などに対応
+    //   - 3桁未満は LBE 側 (extractChoiceNumber) に合わせて 0 埋め
     function extractNumFromItem(item) {
         if (!item) return null;
-        const text = (item.textContent || '').trim();
-        const m = text.match(/^(\d+)/);
-        return m ? m[1] : null;
+        const text = toHalfWidthDigits((item.textContent || '').trim());
+        if (!text) return null;
+        let m = text.match(/^[\s\-・*#>【\[「『(（]*(\d{1,4})/);
+        if (m) return m[1].padStart(3, '0');
+        m = text.match(/^選択肢[「『"']?(\d{1,4})/);
+        if (m) return m[1].padStart(3, '0');
+        try {
+            const n = window.LorebookExpansion?.extractChoiceNumber?.(text);
+            if (n) return n;
+        } catch (e) { /* ignore */ }
+        return null;
     }
 
     function setTextareaValue(textarea, value) {
         textarea.value = value;
         textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    function isGenerating() {
+        const stop = document.getElementById('mes_stop');
+        if (!stop) return false;
+        const cs = getComputedStyle(stop);
+        return cs.display !== 'none' && cs.visibility !== 'hidden';
     }
 
     function sendMessage(textarea) {
@@ -128,11 +152,14 @@
     // ============================================================
     function handleChoiceClick(item, event) {
         if (!item) return;
-        const num = item.dataset.choiceNum;
-        if (!num) return;
-
-        event.preventDefault();
-        event.stopPropagation();
+        const num = extractNumFromItem(item) || item.dataset.choiceNum;
+        if (!num) {
+            console.warn(LOG, '選択肢テキストから番号を取得できません:', JSON.stringify(item.textContent));
+            return;
+        }
+ 
+         event.preventDefault();
+         event.stopPropagation();
 
         const textarea = document.getElementById('send_textarea');
         if (!textarea) {
@@ -152,6 +179,11 @@
             console.debug(LOG, '連打防止のためスキップ');
             return;
         }
+        if (isGenerating()) {
+            console.warn(LOG, '応答生成中のため送信できません');
+            try { window.toastr?.warning?.('応答生成中です。完了してから選択してください'); } catch (e) { /* ignore */ }
+            return;
+        }
         _lastClickTime = now;
 
         setTextareaValue(textarea, num);
@@ -159,26 +191,47 @@
         sendMessage(textarea);
     }
 
+    // ★ 属性付与のみ（リスナーは installDelegatedHandlers で document に 1 つだけ）
+    //   - 要素の作り直し・innerHTML 複製でリスナーが失われても動作する
+    //   - テキストが後から変わっても毎回番号を取り直す
+    const _warnedTexts = new Set();    
     function bindChoiceItems() {
         document.querySelectorAll('.lbe-choice-item').forEach(item => {
-            if (item.dataset.choiceClickBound === '1') return;
             const num = extractNumFromItem(item);
-            if (!num) return;
-
+            if (!num) {
+                item.classList.add('choice-click-unparsed');
+                const t = (item.textContent || '').trim();
+                if (t && !_warnedTexts.has(t)) {
+                    _warnedTexts.add(t);
+                    console.warn(LOG, '番号で始まらない選択肢（クリック不可）:', JSON.stringify(t));
+                }
+                return;
+            }
+            item.classList.remove('choice-click-unparsed');
+            if (item.dataset.choiceNum === num && item.dataset.choiceClickBound === '1') return;
             item.dataset.choiceClickBound = '1';
             item.dataset.choiceNum = num;
             item.setAttribute('role', 'button');
             item.setAttribute('tabindex', '0');
             item.setAttribute('title', `クリックで「${num}」を送信（Shift+クリックで入力のみ）`);
-
-            item.addEventListener('click', (e) => handleChoiceClick(item, e));
-            item.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    handleChoiceClick(item, e);
-                }
-            });
         });
+    }
+
+    function installDelegatedHandlers() {
+        if (window.__choiceClickDelegated) return;
+        window.__choiceClickDelegated = true;
+        document.addEventListener('click', (e) => {
+            const item = e.target?.closest?.('.lbe-choice-item');
+            if (!item) return;
+            handleChoiceClick(item, e);
+        }, true);
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            const item = e.target?.closest?.('.lbe-choice-item');
+            if (!item) return;
+            e.preventDefault();
+            handleChoiceClick(item, e);
+        }, true);
     }
 
     // ============================================================
@@ -678,6 +731,7 @@
     }
 
     function init() {
+        installDelegatedHandlers();
         bindChoiceItems();
         setupFirstMessageAsChoice();
         watchQColorInput();
@@ -699,6 +753,7 @@
     // ============================================================
     window.ChoiceClick = {
         bind: bindChoiceItems,
+        extractNum: extractNumFromItem,
         updateColors: updateChoiceColorsFromQ,
         setupGameStart: setupFirstMessageAsChoice,
         getStartState,
