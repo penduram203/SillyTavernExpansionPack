@@ -3548,9 +3548,9 @@ async function exportUnifiedBundleJson(options = {}) {
         const pats = [
             // 選択肢○○○形式（全角/半角数字に対応）
             /\u9078\u629e\u80a2[\u300c\u300e\"']?([\d\uFF10-\uFF19]{1,4})[\u300d\u300f\"']?/,
-            /choice[^\\d\uFF10-\uFF19]{0,3}([\d\uFF10-\uFF19]{1,4})/i,
+            /choice[^\d\uFF10-\uFF19]{0,3}([\d\uFF10-\uFF19]{1,4})/i,
             // 単体の数字（全角/半角）
-            /(?:^|\\s)([\d\uFF10-\uFF19]{3,4})(?:\\s|$|[\u3000\u3002.,])/,
+            /(?:^|\s)([\d\uFF10-\uFF19]{3,4})(?:\s|$|[\u3000\u3002.,])/,
             /([\d\uFF10-\uFF19]{3})/,
         ];
         for (const pat of pats) {
@@ -3595,10 +3595,10 @@ async function exportUnifiedBundleJson(options = {}) {
             }
         }
 
-        const clean = raw.replace(/^\u9078\u629e\u80a2[\u300c\u300e\"']?/, '')
-                         .replace(/[\u300d\u300f\"']$/, '')
-                         .replace(/^choice[:\\s]*/i, '')
-                         .replace(/^[\uff10-\uff19\\d]{1,4}[:\\uff1a\\s]*/, '')
+        const clean = raw.replace(/^\u9078\u629e\u80a2[\u300c\u300e"']?/, '')
+                         .replace(/[\u300d\u300f"']$/, '')
+                         .replace(/^choice[:\s]*/i, '')
+                         .replace(/^[\uff10-\uff19\d]{1,4}[:\uff1a\s]*/, '')
                          .trim();
         if (!clean) return null;
 
@@ -5446,11 +5446,12 @@ async function exportUnifiedBundleJson(options = {}) {
 
     function getEntryKeyword(entry) {
         if (!entry) return '';
-        const comment = (typeof entry.comment === 'string' ? entry.comment.trim() : '');
-        if (comment && !isCommonRuleName(comment)) return comment;
+        const comment = typeof entry.comment === 'string' ? entry.comment.trim() : '';
+        if (comment && !isCommonRuleName(comment)) {
+            return comment.replace(/\s*[（(](?:常時有効|無効|Constant|Disabled)[）)]\s*$/i, '').trim();
+        }
         const keys = getEntryKeys(entry);
-        if (keys.length > 0 && String(keys[0]).trim()) return String(keys[0]).trim();
-        return '';
+        return keys.length > 0 ? String(keys[0]).trim() : '';
     }
 
     async function handleImageGeneratedForKeyword(e) {
