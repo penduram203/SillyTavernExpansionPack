@@ -2040,9 +2040,10 @@ async function exportUnifiedBundleJson(options = {}) {
         console.warn('[STJ Editor] ❌ 一括JSON出力スキップ: キャラクター名が取得できません');
         return { ok: false, reason: 'no_char' };
     }
-    // ★ Shift+export_button と同一の JSON を CharStore 経由で書き出す
-    if (window.CharStore?.exportCurrentCharacterJsonToFiles) {
-        const r = await window.CharStore.exportCurrentCharacterJsonToFiles({ expectedCharName: charName });
+    // ★ 通常クリック（PNG export）と同一の PNG を CharStore 経由で書き出す
+    //    （アバター PNG が取れない場合は Shift+クリックと同じ JSON にフォールバック）
+    if (window.CharStore?.exportCurrentCharacterPngToFiles) {
+        const r = await window.CharStore.exportCurrentCharacterPngToFiles({ expectedCharName: charName });
         if (r.ok && !silent) window.GicApi?.showBottomToast?.(`キャラクターカード全体を出力しました: ${r.path}`);
         return r;
     }
@@ -3554,9 +3555,9 @@ async function exportUnifiedBundleJson(options = {}) {
         const pats = [
             // 選択肢○○○形式（全角/半角数字に対応）
             /\u9078\u629e\u80a2[\u300c\u300e\"']?([\d\uFF10-\uFF19]{1,4})[\u300d\u300f\"']?/,
-            /choice[^\d\uFF10-\uFF19]{0,3}([\d\uFF10-\uFF19]{1,4})/i,
+            /choice[^\\d\uFF10-\uFF19]{0,3}([\d\uFF10-\uFF19]{1,4})/i,
             // 単体の数字（全角/半角）
-            /(?:^|\s)([\d\uFF10-\uFF19]{3,4})(?:\s|$|[\u3000\u3002.,])/,
+            /(?:^|\\s)([\d\uFF10-\uFF19]{3,4})(?:\\s|$|[\u3000\u3002.,])/,
             /([\d\uFF10-\uFF19]{3})/,
         ];
         for (const pat of pats) {
@@ -3601,10 +3602,10 @@ async function exportUnifiedBundleJson(options = {}) {
             }
         }
 
-        const clean = raw.replace(/^\u9078\u629e\u80a2[\u300c\u300e"']?/, '')
-                         .replace(/[\u300d\u300f"']$/, '')
-                         .replace(/^choice[:\s]*/i, '')
-                         .replace(/^[\uff10-\uff19\d]{1,4}[:\uff1a\s]*/, '')
+        const clean = raw.replace(/^\u9078\u629e\u80a2[\u300c\u300e\"']?/, '')
+                         .replace(/[\u300d\u300f\"']$/, '')
+                         .replace(/^choice[:\\s]*/i, '')
+                         .replace(/^[\uff10-\uff19\\d]{1,4}[:\\uff1a\\s]*/, '')
                          .trim();
         if (!clean) return null;
 
@@ -5452,12 +5453,11 @@ async function exportUnifiedBundleJson(options = {}) {
 
     function getEntryKeyword(entry) {
         if (!entry) return '';
-        const comment = typeof entry.comment === 'string' ? entry.comment.trim() : '';
-        if (comment && !isCommonRuleName(comment)) {
-            return comment.replace(/\s*[（(](?:常時有効|無効|Constant|Disabled)[）)]\s*$/i, '').trim();
-        }
+        const comment = (typeof entry.comment === 'string' ? entry.comment.trim() : '');
+        if (comment && !isCommonRuleName(comment)) return comment;
         const keys = getEntryKeys(entry);
-        return keys.length > 0 ? String(keys[0]).trim() : '';
+        if (keys.length > 0 && String(keys[0]).trim()) return String(keys[0]).trim();
+        return '';
     }
 
     async function handleImageGeneratedForKeyword(e) {
