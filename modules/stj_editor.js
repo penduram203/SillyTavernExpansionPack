@@ -4384,6 +4384,7 @@
         const stjSettings = getExtensionSettings();
         stjSettings[charName] = data;
         persistSettings();
+        scheduleUnifiedBundleExport(charName, 800);
 
         if (!silent) {
             showCustomAlert(_t('stj.save_success', 'データを保存しました'));
@@ -5574,6 +5575,7 @@
             isOpen: function () {
                 return !!(stjModalEl && stjModalEl.style.display === 'block');
             },
+            exportUnifiedBundleJson: (opts) => exportUnifiedBundleJson(opts),
             cleanMissingFiles: async function (targetCharName) {
                 const charName = targetCharName
                     || document.getElementById('stj_char_name_display')?.textContent
