@@ -94,22 +94,26 @@
             c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
     }
 
-    // ★ 選択肢テキストから番号を取り出す
-    //   - 「001 森へ行く」「００１ 森へ」「【001】森へ」「・001」「選択肢「001」」などに対応
-    //   - 3桁未満は LBE 側 (extractChoiceNumber) に合わせて 0 埋め
+    // ★ 選択肢テキストから「先頭の番号」を取り出す（番号方式の旧データ互換）
+    //   - 「001 森へ行く」「００１ 森へ」「【001】森へ」「・002」「1. はい」「選択肢「003」」
+    //   - 「3人で行く」「射程400…」のように文章の一部である数字は番号扱いしない
     function extractNumFromItem(item) {
         if (!item) return null;
         const text = toHalfWidthDigits((item.textContent || '').trim());
         if (!text) return null;
-        let m = text.match(/^[\s\-・*#>【\[「『(（]*(\d{1,4})/);
+        let m = text.match(/^[\s\-・*#>【\[「『(（]*(\d{1,4})(?=$|[\s.:：、。)）】\]」』\-])/);
         if (m) return m[1].padStart(3, '0');
         m = text.match(/^選択肢[「『"']?(\d{1,4})/);
         if (m) return m[1].padStart(3, '0');
-        try {
-            const n = window.LorebookExpansion?.extractChoiceNumber?.(text);
-            if (n) return n;
-        } catch (e) { /* ignore */ }
         return null;
+    }
+
+    // ★ 送信する文字列: 番号があれば番号、なければ選択肢の文章そのもの
+    function getSendValue(item) {
+        const num = extractNumFromItem(item);
+        if (num) return num;
+        const text = (item?.textContent || '').replace(/\s+/g, ' ').trim();
+        return text || null;
     }
 
     function setTextareaValue(textarea, value) {
@@ -152,14 +156,14 @@
     // ============================================================
     function handleChoiceClick(item, event) {
         if (!item) return;
-        const num = extractNumFromItem(item) || item.dataset.choiceNum;
+        const num = getSendValue(item);
         if (!num) {
-            console.warn(LOG, '選択肢テキストから番号を取得できません:', JSON.stringify(item.textContent));
+            console.warn(LOG, '選択肢テキストが空です');
             return;
         }
- 
-         event.preventDefault();
-         event.stopPropagation();
+
+        event.preventDefault();
+        event.stopPropagation();
 
         const textarea = document.getElementById('send_textarea');
         if (!textarea) {
@@ -194,26 +198,16 @@
     // ★ 属性付与のみ（リスナーは installDelegatedHandlers で document に 1 つだけ）
     //   - 要素の作り直し・innerHTML 複製でリスナーが失われても動作する
     //   - テキストが後から変わっても毎回番号を取り直す
-    const _warnedTexts = new Set();    
     function bindChoiceItems() {
         document.querySelectorAll('.lbe-choice-item').forEach(item => {
-            const num = extractNumFromItem(item);
-            if (!num) {
-                item.classList.add('choice-click-unparsed');
-                const t = (item.textContent || '').trim();
-                if (t && !_warnedTexts.has(t)) {
-                    _warnedTexts.add(t);
-                    console.warn(LOG, '番号で始まらない選択肢（クリック不可）:', JSON.stringify(t));
-                }
-                return;
-            }
-            item.classList.remove('choice-click-unparsed');
-            if (item.dataset.choiceNum === num && item.dataset.choiceClickBound === '1') return;
+            const val = getSendValue(item);
+            if (!val) return;
+            if (item.dataset.choiceNum === val && item.dataset.choiceClickBound === '1') return;
             item.dataset.choiceClickBound = '1';
-            item.dataset.choiceNum = num;
+            item.dataset.choiceNum = val;
             item.setAttribute('role', 'button');
             item.setAttribute('tabindex', '0');
-            item.setAttribute('title', `クリックで「${num}」を送信（Shift+クリックで入力のみ）`);
+            item.setAttribute('title', `クリックで「${val}」を送信（Shift+クリックで入力のみ）`);
         });
     }
 
@@ -754,6 +748,7 @@
     window.ChoiceClick = {
         bind: bindChoiceItems,
         extractNum: extractNumFromItem,
+        getSendValue,
         updateColors: updateChoiceColorsFromQ,
         setupGameStart: setupFirstMessageAsChoice,
         getStartState,
