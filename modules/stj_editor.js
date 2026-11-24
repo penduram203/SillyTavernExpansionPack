@@ -1982,9 +1982,16 @@
                 }
             };
 
-            const safeCharName = String(charName).replace(/[\\/:*?"<>|]/g, '_');
+            // /api/files/upload は英数字・'_'・'-' のみを許可するため安全なファイル名へ変換
+            const asciiPart = String(charName)
+                .replace(/[^A-Za-z0-9_-]+/g, '_')
+                .replace(/^_+|_+$/g, '');
+            const nonAsciiHash = Array.from(String(charName))
+                .reduce((acc, ch) => ((acc * 31 + ch.charCodeAt(0)) >>> 0), 0)
+                .toString(36);
+            const safeFileBase = asciiPart ? `${asciiPart}_${nonAsciiHash}_bundle` : `char_${nonAsciiHash}_bundle`;
             // SillyTavern/data/default-user/user/images/<キャラ名>_bundle.json へ出力
-            const targetRelativePath = `user/images/${safeCharName}_bundle.json`;
+            const targetRelativePath = `user/images/${safeFileBase}.json`;
             const jsonText = JSON.stringify(bundlePayload, null, 2);
             const base64Data = btoa(unescape(encodeURIComponent(jsonText)));
 
