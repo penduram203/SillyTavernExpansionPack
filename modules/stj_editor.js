@@ -5333,9 +5333,19 @@
         const es = ctx.eventSource;
         const et = ctx.eventTypes;
 
+        async function syncLorebookEntriesToImageMap() {
+            const charName = detectCharacterNameFromDOM()
+                || document.getElementById('stj_char_name_display')?.textContent
+                || '';
+            if (!charName) return false;
+            return await syncEditorWithLatestLorebook(charName);
+        }        
+        
         const syncLater = (delay = 500) => {
             setTimeout(() => {
-                syncLorebookEntriesToImageMap().catch(e => console.warn('[STJ Editor] syncLorebook error:', e));
+                syncLorebookEntriesToImageMap()
+                    .then(() => scheduleUnifiedBundleExport('', 800))
+                    .catch(e => console.warn('[STJ Editor] syncLorebook error:', e));
             }, delay);
         };
 
