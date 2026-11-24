@@ -284,6 +284,18 @@ import('./sound_effects.js').catch(err => {
         return candidates.length > 0 ? candidates[0] : null;
     }
 
+    function getLastUserText() {
+        const ctx = getSTContext();
+        if (!ctx?.chat) return null;
+        for (let i = ctx.chat.length - 1; i >= 0; i--) {
+            const m = ctx.chat[i];
+            if (m.is_system || !m.is_user) continue;
+            const t = String(m.mes || '').trim();
+            return t || null;
+        }
+        return null;
+    }
+
     function getLastChoiceNumber() {
         const ctx = getSTContext();
         if (!ctx?.chat) return null;
@@ -499,8 +511,9 @@ import('./sound_effects.js').catch(err => {
         const worldName = getWorldName();
         if (!worldName) return { ok: false, reason: 'no-world' };
 
+        const lastUserText = getLastUserText();
         const choiceNum = getLastChoiceNumber();
-        if (!choiceNum) return { ok: false, reason: 'no-choice' };
+        if (!choiceNum && !lastUserText) return { ok: false, reason: 'no-choice' };
 
         let entries = null;
         try {
@@ -509,7 +522,11 @@ import('./sound_effects.js').catch(err => {
         if (!entries) return { ok: false, reason: 'no-entries' };
 
         let entry = null;
-        try { entry = window.LorebookExpansion.findEntryByChoice?.(entries, choiceNum); } catch (e) { /* ignore */ }
+        try {
+            // ★ 文章方式（発言＝キー）を優先し、見つからなければ番号方式
+            if (lastUserText) entry = window.LorebookExpansion.findEntryForUserText?.(entries, lastUserText) || null;
+            if (!entry && choiceNum) entry = window.LorebookExpansion.findEntryByChoice?.(entries, choiceNum);
+        } catch (e) { /* ignore */ }
         if (!entry) return { ok: false, reason: 'no-entry', choiceNum, worldName };
 
         const uid = entry.uid ?? null;
