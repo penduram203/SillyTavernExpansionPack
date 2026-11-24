@@ -2002,7 +2002,8 @@
             });
 
             if (!res.ok) {
-                throw new Error(`HTTP ${res.status}`);
+                const errText = await res.text().catch(() => '');
+                throw new Error(`HTTP ${res.status} ${errText}`.trim());
             }
 
             if (!silent) {
