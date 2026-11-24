@@ -446,21 +446,27 @@
         return null;
     }
 
-    function getCharacterWorldInfoName() {
-        const ctx = getSTContext();
-        if (!ctx) return null;
-        let char = null;
-        if (ctx.characters && ctx.characterId !== undefined && ctx.characterId !== null) {
-            char = ctx.characters[ctx.characterId];
-        }
-        if (!char && ctx.character) char = ctx.character;
-        if (!char) return null;
-        const fromExt = char.data?.extensions?.world;
-        if (fromExt && typeof fromExt === 'string') return fromExt;
-        const fromData = char.data?.world;
-        if (fromData && typeof fromData === 'string') return fromData;
-        return null;
+function getCharacterWorldInfoName() {
+    // ★ 修正: LorebookExpansion の getChoicesWorldName を優先して使用する
+    // これにより、キャラに紐付いていない場合でも現在選択中のワールド名を取得できる
+    if (window.LorebookExpansion?.getChoicesWorldName) {
+        const wiName = window.LorebookExpansion.getChoicesWorldName();
+        if (wiName) return wiName;
     }
+    const ctx = getSTContext();
+    if (!ctx) return null;
+    let char = null;
+    if (ctx.characters && ctx.characterId !== undefined && ctx.characterId !== null) {
+        char = ctx.characters[ctx.characterId];
+    }
+    if (!char && ctx.character) char = ctx.character;
+    if (!char) return null;
+    const fromExt = char.data?.extensions?.world;
+    if (fromExt && typeof fromExt === 'string') return fromExt;
+    const fromData = char.data?.world;
+    if (fromData && typeof fromData === 'string') return fromData;
+    return null;
+}
 
     async function loadWorldInfoEntries(worldName) {
         if (!worldName) return null;
