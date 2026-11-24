@@ -2033,7 +2033,6 @@ async function loadWorldInfoEntries(worldName) {
     let _bundleExportTimer = null;
     let _bundleExportInFlight = false;
 
-// 3. 一括JSON出力関数の修正（変換処理の組み込み）
 async function exportUnifiedBundleJson(options = {}) {
     const { silent = true, charName: explicitCharName = '' } = options;
     const charName = explicitCharName || detectCharacterNameFromDOM();
@@ -2047,76 +2046,149 @@ async function exportUnifiedBundleJson(options = {}) {
     let bundlePayload = null;
 
     try {
-        console.log(`[STJ Editor] 🚀 一括JSON出力開始: charName="${charName}"`);
+        console.log(`[STJ Editor] 🚀 キャラクターカード全体形式での一括JSON出力開始: charName="${charName}"`);
+        
+        const ctx = window.SillyTavern?.getContext?.();
+        const charObj = ctx?.characters?.[ctx?.characterId];
+        if (!charObj) {
+            throw new Error('キャラクターオブジェクトが見つかりません');
+        }
+
+        // 1. キャラクター基本データの複製 (V3形式に準拠)
+        const charData = charObj.data || {};
+        const charExt = charData.extensions || {};
+        
+        bundlePayload = {
+            name: charObj.name || charName,
+            description: charData.description || '',
+            personality: charData.personality || '',
+            scenario: charData.scenario || '',
+            first_mes: charData.first_mes || '',
+            mes_example: charData.mes_example || '',
+            creator_notes: charData.creator_notes || '',
+            system_prompt: charData.system_prompt || '',
+            post_history_instructions: charData.post_history_instructions || '',
+            tags: Array.isArray(charData.tags) ? [...charData.tags] : [],
+            creator: charData.creator || '',
+            character_version: charData.character_version || '',
+            alternate_greetings: Array.isArray(charData.alternate_greetings) ? [...charData.alternate_greetings] : [],
+            extensions: structuredClone(charExt),
+            character_book: {
+                name: '',
+                entries: []
+            },
+            avatar_url: charObj.avatar || '',
+            ch_name: charObj.name || charName,
+            create_date: new Date().toISOString()
+        };
+
+        // 2. ロアブック本体の取得と変換
         const worldName = getCharacterWorldInfoName() || (window.LorebookExpansion?.getChoicesWorldName ? window.LorebookExpansion.getChoicesWorldName() : null);
         console.log(`[STJ Editor] 📌 解決された worldName: "${worldName}"`);
         
-        let lorebookEntries = [];
         if (worldName) {
+            bundlePayload.character_book.name = worldName;
             try {
                 window.LorebookExpansion?.clearWorldInfoEntriesCache?.(worldName);
             } catch (e) { /* ignore */ }
             
             const rawEntries = await loadWorldInfoEntries(worldName);
             if (rawEntries && typeof rawEntries === 'object') {
-                // ★ 修正: SillyTavern エクスポート形式に変換
-                lorebookEntries = convertToExportFormat(rawEntries);
-                console.log(`[STJ Editor] 📚 ロアブックエントリを変換完了: ${lorebookEntries.length} 件 (エクスポート形式)`);
+                // SillyTavern エクスポート形式に変換
+                const positionMap = {
+                    0: 'before_char',
+                    1: 'after_char',
+                    2: 'before_example',
+                    3: 'after_example',
+                    4: 'author_note',
+                    5: 'in_depth_prompt'
+                };
+
+                bundlePayload.character_book.entries = Object.values(rawEntries).map(entry => {
+                    const uid = entry.uid !== undefined ? entry.uid : (entry.id !== undefined ? entry.id : 0);
+                    
+                    // extensions の補完 (window.world_info から最新データを取得)
+                    let ext = entry.extensions || {};
+                    const wiEntries = window.world_info?.[worldName]?.entries || {};
+                    if (Object.keys(ext).length === 0 && wiEntries[uid] && wiEntries[uid].extensions) {
+                        ext = wiEntries[uid].extensions;
+                    }
+
+                    // keys の正規化
+                    let keys = [];
+                    if (Array.isArray(entry.keys) && entry.keys.length) keys = entry.keys;
+                    else if (Array.isArray(entry.key) && entry.key.length) keys = entry.key;
+                    else if (typeof entry.keys === 'string' && entry.keys.trim()) keys = [entry.keys];
+                    else if (typeof entry.key === 'string' && entry.key.trim()) keys = [entry.key];
+
+                    // secondary_keys の正規化
+                    let secondaryKeys = [];
+                    if (Array.isArray(entry.keysecondary)) secondaryKeys = entry.keysecondary;
+                    else if (Array.isArray(entry.secondary_keys)) secondaryKeys = entry.secondary_keys;
+
+                    // position の変換
+                    let position = 'after_char';
+                    if (typeof entry.position === 'number') {
+                        position = positionMap[entry.position] || 'after_char';
+                    } else if (typeof entry.position === 'string') {
+                        position = entry.position;
+                    }
+
+                    // enabled の変換 (disable の反転)
+                    const enabled = entry.disable !== undefined ? !entry.disable : (entry.enabled !== undefined ? entry.enabled : true);
+                    
+                    // insertion_order の変換 (order から)
+                    const insertionOrder = entry.order !== undefined ? entry.order : (entry.insertion_order !== undefined ? entry.insertion_order : 100);
+
+                    return {
+                        id: uid,
+                        keys: keys,
+                        secondary_keys: secondaryKeys,
+                        comment: entry.comment || '',
+                        content: entry.content || '',
+                        constant: entry.constant !== undefined ? entry.constant : false,
+                        selective: entry.selective !== undefined ? entry.selective : false,
+                        insertion_order: insertionOrder,
+                        enabled: enabled,
+                        position: position,
+                        use_regex: entry.use_regex !== undefined ? entry.use_regex : (entry.useRegex !== undefined ? entry.useRegex : false),
+                        extensions: ext
+                    };
+                }).sort((a, b) => a.id - b.id);
                 
-                // 診断ログ
-                const sampleEntry = lorebookEntries[0];
-                if (sampleEntry) {
-                    console.log(`[STJ Editor] 📝 エントリサンプル (id=${sampleEntry.id}):`, {
-                        hasContent: !!sampleEntry.content,
-                        contentLength: sampleEntry.content?.length || 0,
-                        hasExtensions: !!sampleEntry.extensions,
-                        extensionsKeys: sampleEntry.extensions ? Object.keys(sampleEntry.extensions) : []
-                    });
-                }
-            } else {
-                console.warn(`[STJ Editor] ⚠️ ロアブックエントリが取得できませんでした`);
+                console.log(`[STJ Editor] 📚 ロアブックエントリを変換完了: ${bundlePayload.character_book.entries.length} 件`);
             }
-        } else {
-            console.warn('[STJ Editor] ⚠️ worldName が取得できなかったため、ロアブックエントリは空になります');
         }
 
-        const ctx = window.SillyTavern?.getContext?.();
-        const charObj = ctx?.characters?.[ctx?.characterId];
-        const charExt = charObj?.data?.extensions || {};
-        
-        // ② Lorebook Expansion データ
-        const lexFromChar = (charExt.lorebook_expansion && typeof charExt.lorebook_expansion === 'object')
-            ? structuredClone(charExt.lorebook_expansion) : {};
+        // 3. 拡張機能データの最新状態を統合
+        // ② Lorebook Expansion データ (per-world store から取得)
         const lexFromStore = (worldName && ctx?.extensionSettings?.lorebook_expansion?.data?.[worldName])
             ? structuredClone(ctx.extensionSettings.lorebook_expansion.data[worldName]) : {};
-        for (const [k, v] of Object.entries(lexFromStore)) {
-            const compositeKey = `${worldName}\u001f${k}`;
-            if (!lexFromChar[compositeKey]) lexFromChar[compositeKey] = v;
-        }
         
         // ③ JSON編集ツリー（画像マッピング）データ
         const imageMap = structuredClone(getCurrentImageMapFromCharData(charName) || charExt.image_display_extension || {});
         const bagState = structuredClone(charExt.image_display_bag_state || {});
-        
-        bundlePayload = {
-            exported_at: new Date().toISOString(),
-            character_name: charName,
-            world_name: worldName || '',
-            character_book: {
-                name: worldName || charName,
-                entries: lorebookEntries // ★ 変換済みの配列を出力
-            },
-            extensions: {
-                lorebook_expansion: lexFromChar,
-                image_display_extension: imageMap,
-                image_display_bag_state: bagState
-            }
-        };
+        const meta = structuredClone(charExt.image_display_extension_meta || {});
 
+        // extensions オブジェクトに統合
+        if (!bundlePayload.extensions) bundlePayload.extensions = {};
+        bundlePayload.extensions.lorebook_expansion = lexFromStore;
+        bundlePayload.extensions.image_display_extension = imageMap;
+        bundlePayload.extensions.image_display_bag_state = bagState;
+        if (Object.keys(meta).length > 0) {
+            bundlePayload.extensions.image_display_extension_meta = meta;
+        }
+        
+        // world 紐付けも確実に含める
+        if (worldName) {
+            bundlePayload.extensions.world = worldName;
+        }
+
+        // 4. ファイル出力
         const payloadStr = JSON.stringify(bundlePayload, null, 2);
         const asciiPart = String(charName).replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
         const nonAsciiHash = Array.from(String(charName)).reduce((acc, ch) => ((acc * 31 + ch.charCodeAt(0)) >>> 0), 0).toString(36);
-        const safeFileBase = asciiPart ? `${asciiPart}_${nonAsciiHash}_bundle` : `char_${nonAsciiHash}_bundle`;
+        const safeFileBase = asciiPart ? `${asciiPart}_${nonAsciiHash}_card` : `char_${nonAsciiHash}_card`;
         const targetRelativePath = `${safeFileBase}.json`;
         const base64Data = btoa(unescape(encodeURIComponent(payloadStr)));
         const headers = typeof ctx?.getRequestHeaders === 'function' ? ctx.getRequestHeaders() : { 'Content-Type': 'application/json' };
@@ -2132,8 +2204,8 @@ async function exportUnifiedBundleJson(options = {}) {
             throw new Error(`HTTP ${res.status} ${errText}`.trim());
         }
         
-        console.log(`[STJ Editor] ✅ 一括JSONを出力しました: ${targetRelativePath} (サイズ: ${(payloadStr.length / 1024).toFixed(1)} KiB, エントリ数: ${lorebookEntries.length})`);
-        if (!silent) window.GicApi?.showBottomToast?.(`一括JSONを出力しました: ${targetRelativePath}`);
+        console.log(`[STJ Editor] ✅ キャラクターカード全体形式のJSONを出力しました: ${targetRelativePath} (サイズ: ${(payloadStr.length / 1024).toFixed(1)} KiB, エントリ数: ${bundlePayload.character_book.entries.length})`);
+        if (!silent) window.GicApi?.showBottomToast?.(`キャラクターカード全体を出力しました: ${targetRelativePath}`);
         return { ok: true, path: targetRelativePath };
     } catch (err) {
         console.warn('[STJ Editor] ❌ 一括JSON自動出力エラー:', err);
@@ -2144,12 +2216,12 @@ async function exportUnifiedBundleJson(options = {}) {
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `${safeCharName}_bundle.json`;
+                a.download = `${safeCharName}_card.json`;
                 document.body.appendChild(a);
                 a.click();
                 a.remove();
                 setTimeout(() => URL.revokeObjectURL(url), 1000);
-                return { ok: true, downloaded: true, fileName: `${safeCharName}_bundle.json` };
+                return { ok: true, downloaded: true, fileName: `${safeCharName}_card.json` };
             } catch (dlErr) {
                 return { ok: false, error: String(err) };
             }
