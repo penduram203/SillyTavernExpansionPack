@@ -3772,7 +3772,7 @@ async function exportUnifiedBundleJson(options = {}) {
         return { positions, children };
     }
 
-    function _stjDrawConnections(container, positions, children) {
+function _stjDrawConnections(container, positions, children) {
         const old = container.querySelector(':scope > .stj-tree-svg');
         if (old) old.remove();
 
@@ -3798,22 +3798,23 @@ async function exportUnifiedBundleJson(options = {}) {
                 const childPos = positions.get(childKw);
                 if (!childPos) continue;
 
+                const sz = 14;
                 const x1 = parentPos.x + STJ_TREE_CELL_W;
                 const y1 = parentPos.y + STJ_TREE_CELL_H / 2;
                 const x2 = childPos.x;
                 const y2 = childPos.y + STJ_TREE_CELL_H / 2;
-                const midX = x1 + (x2 - x1) / 2;
+                const lineEndX = x2 - sz / 2;
+                const midX = x1 + (lineEndX - x1) / 2;
 
                 const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
                 path.setAttribute('d',
-                    `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`);
+                    `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${lineEndX} ${y2}`);
                 path.setAttribute('stroke', '#ffffff');
-                path.setAttribute('stroke-width', '2');
+                path.setAttribute('stroke-width', '4');
                 path.setAttribute('fill', 'none');
                 path.setAttribute('stroke-linejoin', 'round');
                 svg.appendChild(path);
 
-                const sz = 14;
                 const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
                 arrow.setAttribute('points',
                     `${x2},${y2} ${x2 - sz},${y2 - sz / 1.5} ${x2 - sz},${y2 + sz / 1.5}`);
