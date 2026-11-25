@@ -3808,7 +3808,7 @@ async function exportUnifiedBundleJson(options = {}) {
                 path.setAttribute('d',
                     `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`);
                 path.setAttribute('stroke', '#ffffff');
-                path.setAttribute('stroke-width', '3');
+                path.setAttribute('stroke-width', '13');
                 path.setAttribute('fill', 'none');
                 path.setAttribute('stroke-linejoin', 'round');
                 svg.appendChild(path);
@@ -3817,7 +3817,7 @@ async function exportUnifiedBundleJson(options = {}) {
                 const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
                 arrow.setAttribute('points',
                     `${x2},${y2} ${x2 - sz},${y2 - sz / 1.5} ${x2 - sz},${y2 + sz / 1.5}`);
-                arrow.setAttribute('fill', '#4a90e2');
+                arrow.setAttribute('fill', '#ffffff');
                 svg.appendChild(arrow);
             }
         }
