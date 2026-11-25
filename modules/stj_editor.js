@@ -4711,25 +4711,6 @@ function _stjDrawConnections(container, positions, children) {
         return kw ? `kw:${kw}` : '';
     }
 
-    function findEntryByNodeKey(entries, nodeKey) {
-        if (!entries || !nodeKey) return null;
-        const keyStr = String(nodeKey);
-        const list = Array.isArray(entries) ? entries : Object.values(entries);
-
-        if (keyStr.startsWith('uid:')) {
-            const uid = keyStr.slice(4);
-            if (!Array.isArray(entries) && entries[uid]) return entries[uid];
-            return list.find(e => getEntryUid(e) === uid) || null;
-        }
-
-        if (keyStr.startsWith('kw:')) {
-            const kw = keyStr.slice(3);
-            return findEntryByKeyword(entries, kw);
-        }
-
-        return list.find(e => getNodeKeyForEntry(e) === keyStr) || findEntryByKeyword(entries, keyStr);
-    }
-
     function addKeywordRowWithData(container, index, data) {
         const newItem = document.createElement('div');
         newItem.className = 'stj-keyword-item';
