@@ -658,11 +658,11 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
     // ============================================================
     let _newEntryWatch = null;
     let _newEntryObserver = null;
-    const _appliedNewEntryUids = new Set();
+
     const _pendingNewEntryUids = new Set();
 
     function _getEntryElements() {
-        return Array.from(document.querySelectorAll('.world_entry'));
+        return Array.from(document.querySelectorAll('#world_popup_entries_list .world_entry[uid], .world_entry[uid]'));
     }
 
     function _snapshotEntryUids() {
@@ -677,7 +677,6 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
                 max = Math.max(max, Number(uid));
             }
         }
-        console.debug(`${LOG} [DBG][snapshot] worldEntryEls=${els.length}, uidCount=${set.size}, maxNumericUid=${max}, uids=[${Array.from(set).join(',')}]`);
         return { set, max };
     }
 
@@ -847,20 +846,34 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
     function _applyNewEntryDefaults(entryEl) {
         if (!entryEl || !(entryEl instanceof Element)) return false;
         const uid = entryEl.getAttribute('uid');
-        console.log(`${LOG} [DBG][applyStart] uid=${uid}`);
+        if (!uid) return false;
         
         const posRoleOk = _applyPositionAndRole(entryEl);
         const depthOk = _applyDepthDefault(entryEl);
         const textOk = _applyCommentAndKeyDefault(entryEl);
         const statusOk = _applyStatusNormalDefault(entryEl);
 
+        // ST内部データにも初期値を直接同期（DOM再描画や保存時の巻き戻し防止）
+        const worldName = _getCurrentEditorWorldName();
+        if (worldName) {
+            const stEntry = _getSTEntry(worldName, uid);
+            if (stEntry) {
+                stEntry.position = 4;
+                stEntry.role = 0;
+                stEntry.depth = NEW_ENTRY_DEPTH;
+                stEntry.comment = NEW_ENTRY_NAME;
+                stEntry.key = [NEW_ENTRY_NAME];
+                stEntry.constant = false;
+                stEntry.vectorized = false;
+                stEntry.disable = false;
+            }
+        }
+
         const commentEl = entryEl.querySelector('textarea[name="comment"], input[name="comment"]');
         const keyEl = entryEl.querySelector('textarea[name="key"], input[name="key"]');
         const hasComment = commentEl ? String(commentEl.value ?? '').trim().length > 0 : true;
         const hasKey = keyEl ? String(keyEl.value ?? '').trim().length > 0 : true;
-        const ok = (posRoleOk || depthOk || textOk || statusOk) && hasComment && hasKey;
-        console.log(`${LOG} [DBG][applyResult] uid=${uid} ok=${ok} (posRole=${posRoleOk}, depth=${depthOk}, text=${textOk}, status=${statusOk}, hasComment=${hasComment}, hasKey=${hasKey})`);
-        return ok;
+        return (posRoleOk || depthOk || textOk || statusOk) && hasComment && hasKey;
     }
 
     async function _applyNewEntryDefaultsWithRetry(uid) {
@@ -872,9 +885,7 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
         try {
             for (let i = 0; i < NEW_ENTRY_APPLY_RETRY_MAX; i++) {
                 const el = document.querySelector(`.world_entry[uid="${CSS.escape(cleanUid)}"]`);
-                console.debug(`${LOG} [DBG][retry] uid=${cleanUid} attempt=${i + 1}/${NEW_ENTRY_APPLY_RETRY_MAX} elFound=${!!el}`);
                 if (el && _applyNewEntryDefaults(el)) {
-                    _appliedNewEntryUids.add(cleanUid);
                     console.log(`${LOG} 🆕 new entry defaults applied: uid=${cleanUid}`);
                     return true;
                 }
@@ -901,33 +912,22 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
     function _inspectWatchCandidates(watch) {
         if (!watch) return;
         if (Date.now() - watch.startedAt > NEW_ENTRY_WATCH_MS) {
-            const nowEls = _getEntryElements();
-            console.log(`${LOG} [DBG][watch] timeout after ${NEW_ENTRY_WATCH_MS}ms (worldEntryEls=${nowEls.length}, lastAttrs=${nowEls.length ? Array.from(nowEls[nowEls.length - 1].attributes).map(a => `${a.name}=${a.value}`).join(' ') : 'none'})`);
             _stopNewEntryWatch();
             return;
         }
         if (watch.busy) return;
 
         const candidates = [];
-        const allEls = _getEntryElements();
-        for (let idx = 0; idx < allEls.length; idx++) {
-            const el = allEls[idx];
+        for (const el of _getEntryElements()) {
             const uid = String(el.getAttribute('uid') || el.getAttribute('data-uid') || '').trim();
-            if (uid) {
-                if (watch.knownUids.has(uid) || _appliedNewEntryUids.has(uid) || _pendingNewEntryUids.has(uid)) {
-                    continue;
-                }
-                const n = /^\d+$/.test(uid) ? Number(uid) : -1;
-                candidates.push({ uid, n, el });
-            } else if (!el.getAttribute('data-wbas-uidless-handled')) {
-                el.setAttribute('data-wbas-uidless-handled', '1');
-                candidates.push({ uid: `__dom_${idx}`, n: Number.MAX_SAFE_INTEGER, el });
+            if (!uid) continue;
+            if (watch.knownUids.has(uid) || _pendingNewEntryUids.has(uid)) {
+                continue;
             }
+            const n = /^\d+$/.test(uid) ? Number(uid) : -1;
+            candidates.push({ uid, n });
         }
 
-        if (candidates.length > 0) {
-            console.log(`${LOG} [DBG][candidates] found=${candidates.map(c => c.uid).join(',')}`);
-        }
         if (candidates.length === 0) return;
 
         candidates.sort((a, b) => a.n - b.n);
@@ -935,27 +935,12 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
         (async () => {
             try {
                 for (const c of candidates) {
-                    if (c.uid.startsWith('__dom_')) {
-                        for (let i = 0; i < NEW_ENTRY_APPLY_RETRY_MAX; i++) {
-                            const latestUid = String(c.el.getAttribute('uid') || c.el.getAttribute('data-uid') || '').trim();
-                            if (latestUid) {
-                                watch.knownUids.add(latestUid);
-                                await _applyNewEntryDefaultsWithRetry(latestUid);
-                                break;
-                            }
-                            if (_applyNewEntryDefaults(c.el)) {
-                                console.log(`${LOG} 🆕 new entry defaults applied (uidless element)`);
-                                break;
-                            }
-                            await wait(NEW_ENTRY_APPLY_RETRY_MS);
-                        }
-                    } else {
-                        watch.knownUids.add(c.uid);
-                        await _applyNewEntryDefaultsWithRetry(c.uid);
-                    }
+                    watch.knownUids.add(c.uid);
+                    await _applyNewEntryDefaultsWithRetry(c.uid);
                 }
             } finally {
                 watch.busy = false;
+                _stopNewEntryWatch();
             }
         })();
     }
