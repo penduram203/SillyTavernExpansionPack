@@ -180,9 +180,11 @@
         event.preventDefault();
         event.stopPropagation();
     
-        // ★ 追加: クリックされた選択肢をグレーアウト
-        item.classList.add('choice-click-selected');
-        item.setAttribute('aria-disabled', 'true');
+        // ★ 修正: クリックされた選択肢だけでなく、全ての選択肢をグレーアウト
+        document.querySelectorAll('.lbe-choice-item').forEach(el => {
+            el.classList.add('choice-click-selected');
+            el.setAttribute('aria-disabled', 'true');
+        });
     
         const textarea = document.getElementById('send_textarea');
         if (!textarea) {
