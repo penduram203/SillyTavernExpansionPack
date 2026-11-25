@@ -1213,37 +1213,48 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
     function installCommentToKeySync() {
         if (_commentToKeyInstalled) return;
         _commentToKeyInstalled = true;
+ 
+        document.addEventListener('focusin', (e) => {
+            const el = e.target;
+            if (!(el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement)) return;
+            if (el.name !== 'comment') return;
+            const entryEl = el.closest('.world_entry');
+            const uid = String(entryEl?.getAttribute('uid') || entryEl?.getAttribute('data-uid') || '').trim();
+            if (uid && !_entryLastValidNames.has(uid)) {
+                _entryLastValidNames.set(uid, String(el.value ?? ''));
+            }
+        }, true);
 
         document.addEventListener('input', (e) => {
             if (_getSettings().commentToKeySync === false) return;
             if (_creating.size > 0) return;
 
             const el = e.target;
-            if (!el || el.tagName !== 'TEXTAREA') return;
+            if (!(el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement)) return;
             if (el.name !== 'comment') return;
 
             const entryEl = el.closest('.world_entry');
             if (!entryEl) return;
-            const uid = entryEl.getAttribute('uid');
+            const uid = String(entryEl.getAttribute('uid') || entryEl.getAttribute('data-uid') || '').trim();
             if (!uid) return;
 
+            const prevValid = _entryLastValidNames.has(uid)
+                ? _entryLastValidNames.get(uid)
+                : String(el.defaultValue ?? '');
+
+            if (!_autoNamingUids.has(uid) && String(el.value ?? '').trim() !== '' && _hasDuplicateEntryName(el.value, uid)) {
+                _showDuplicateNameWarning(String(el.value ?? '').trim());
+                el.value = prevValid;
+                _updateCommentAndKeyInSTData(uid, prevValid);
+                const keyEl = entryEl.querySelector('textarea[name="key"], input[name="key"]');
+                if (keyEl) {
+                    keyEl.value = prevValid;
+                }
+                return;
+            }
+
+            _entryLastValidNames.set(uid, String(el.value ?? ''));
             _syncCommentToKey(entryEl, uid, el.value);
-        }, true);
-
-        document.addEventListener('click', (e) => {
-            if (_getSettings().commentToKeySync === false) return;
-            if (_creating.size > 0) return;
-
-            const toggle = e.target?.closest?.('.inline-drawer-toggle');
-            if (!toggle) return;
-            const entryEl = toggle.closest('.world_entry');
-            if (!entryEl) return;
-            const uid = entryEl.getAttribute('uid');
-            if (!uid) return;
-
-            setTimeout(() => {
-                _resyncKeyUIToComment(entryEl, uid);
-            }, PANEL_SYNC_DELAY_MS);
         }, true);
 
         console.log(`${LOG} 📝 comment→key sync installed (payload auto-sync)`);
