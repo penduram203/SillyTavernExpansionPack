@@ -1103,6 +1103,35 @@ function checkPreRegisteredImages(worldName, entry) {
     }
 }
 
+async function showPreRegisteredOrFallback(worldName, entry, entryKey, forceRedraw = false) {
+    const resolvedKey = entryKey || extractEntryKey(entry);
+    const candidateKeys = getEntryKeys(entry);
+
+    if (checkPreRegisteredImages(worldName, entry)) {
+        try {
+            const shown = await window.ImageDisplayExtension?.showImageByEntryKey?.(
+                resolvedKey,
+                { candidateKeys, forceRedraw }
+            );
+            if (shown) {
+                console.log(`[GIC-Lore] 🖼️ 事前登録画像を表示しました (entryKey=${resolvedKey})`);
+                return true;
+            }
+        } catch (e) {
+            console.warn('[GIC-Lore] showImageByEntryKey 失敗:', e);
+        }
+    }
+
+    try {
+        const shownKw = await window.ImageDisplayExtension?.pickAndShowCurrentKeyword?.();
+        if (shownKw) return true;
+    } catch (e) {
+        console.warn('[GIC-Lore] pickAndShowCurrentKeyword 失敗:', e);
+    }
+
+    return false;
+}
+
 // ============================================================
 // ★ 指定エントリに登録されているファイル一覧を取得
 // ============================================================
