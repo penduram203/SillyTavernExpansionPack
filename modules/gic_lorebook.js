@@ -1206,17 +1206,17 @@ async function processChoiceCombined(worldName, entry, prompt, negativePrompt, r
         try { window.GicApi?.lockUserInput?.('combined-wait'); } catch (e) { /* ignore */ }
         
         // 事前登録画像を表示
-        //   ★ 修正: pickAndShowCurrentKeyword が失敗した場合、
-        //     showImageByEntryKey で entryKey から直接画像を表示する
         try {
-            let shown = await window.ImageDisplayExtension?.pickAndShowCurrentKeyword?.();
+            // まず showImageByEntryKey を試す
+            let shown = await window.ImageDisplayExtension?.showImageByEntryKey?.(entryKey);
+            // もしダメなら pickAndShowCurrentKeyword を試す
             if (!shown) {
-                shown = await window.ImageDisplayExtension?.showImageByEntryKey?.(entryKey);
+                shown = await window.ImageDisplayExtension?.pickAndShowCurrentKeyword?.();
             }
             if (shown) {
                 console.log(`[GIC-Lore] 🖼️ 事前登録画像を表示 (entryKey=${entryKey})`);
             } else {
-                console.warn('[GIC-Lore] 事前登録画像の表示に失敗（キーワード一致なし・entryKey一致なし）');
+                console.warn('[GIC-Lore] 事前登録画像の表示に失敗');
             }
         } catch (e) {
             console.warn('[GIC-Lore] 事前登録画像の表示に失敗:', e);
@@ -1463,7 +1463,7 @@ async function processChoice(force = false) {
             return;
         }
 
-        // ★ 画像生成サーバーの接続確認（つながらなければ生成もロックもしない）
+        // ★ 画像生成サーバーの接続確認
         const sdState = await checkSdAvailable();
         if (!sdState.ok) {
             console.warn(`[GIC-Lore] 画像生成をスキップ: ${sdState.reason}`);
@@ -1472,14 +1472,16 @@ async function processChoice(force = false) {
             // 事前登録画像があれば待たずに表示
             if (checkPreRegisteredImages(worldName, entry)) {
                 try {
-                    let shown = await window.ImageDisplayExtension?.pickAndShowCurrentKeyword?.();
+                    const entryKey = _pendingGenerationContext?.entryKey || extractEntryKey(entry);
+                    let shown = await window.ImageDisplayExtension?.showImageByEntryKey?.(entryKey);
                     if (!shown) {
-                        shown = await window.ImageDisplayExtension?.showImageByEntryKey?.(_pendingGenerationContext.entryKey);
+                        shown = await window.ImageDisplayExtension?.pickAndShowCurrentKeyword?.();
                     }
                 } catch (e) { /* ignore */ }
             }
             return;
         }
+
         if (settings.verbose) console.log(`[GIC-Lore] 画像生成サーバー: ${sdState.reason}`);
 
         // ★ 生成コンテキストを保存（ファイル名リネーム用）
