@@ -1444,10 +1444,51 @@
         }
     }
 
+    async function showImageByEntryKey(entryKey) {
+        if (!entryKey || !currentImageMap) return false;
+    
+        let targetUrl = null;
+    
+        // 1. 完全一致
+        if (currentImageMap[entryKey]) {
+            targetUrl = getRandomImageSource(currentImageMap[entryKey], `ek::${entryKey}`);
+        }
+    
+        // 2. 部分一致（entryKey がキーに含まれる、またはキーが entryKey に含まれる）
+        if (!targetUrl) {
+            for (const [key, urls] of Object.entries(currentImageMap)) {
+                if (key === 'default' || key === 'thumbnail') continue;
+                if (key.includes(entryKey) || entryKey.includes(key)) {
+                    targetUrl = getRandomImageSource(urls, `ek::${key}`);
+                    if (targetUrl) break;
+                }
+            }
+        }
+    
+        if (targetUrl) {
+            _lastSentKeywordImage = targetUrl;
+            await updateImageWithUrl(targetUrl);
+            return true;
+        }
+        return false;
+    }    
+    
+    let _isGicPreparing = false;
+    window.addEventListener('gic-image-generation-started', (e) => {
+        if (e.detail?.preparing) {
+            _isGicPreparing = true;
+            // 念のため6秒後に自動解除
+            setTimeout(() => { _isGicPreparing = false; }, 6000);
+        }
+    });
+    window.addEventListener('gic-image-generation-ended', () => {
+        _isGicPreparing = false;
+    });
+
     async function updateImage() {
-        // ★ 合体モード準備中（5秒間）は画像更新をスキップ
-        if (window.GicApi?.isCombinedPreparing?.() === true) {
-            console.debug('[ImageDisplay] 合体モード準備中のため image 更新をスキップ');
+        // ★ 追加: GIC準備中はスキップ
+        if (_isGicPreparing) {
+            console.debug('[ImageDisplay] GIC準備中のため image 更新をスキップ');
             return;
         }
         // ★ バトルモード中の背景画像ロック
@@ -2613,6 +2654,7 @@
         isBattleImageLocked: () => !!_battleImageLock,
         markGeneratedButNotShown,       // ★
         pickAndShowCurrentKeyword,      // ★
+        showImageByEntryKey,
     };
     console.log("✅ Image Display Extension API を window.ImageDisplayExtension に公開しました");
 })();
