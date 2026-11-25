@@ -1444,33 +1444,56 @@
         }
     }
 
-async function showImageByEntryKey(entryKey) {
-    if (!entryKey || !currentImageMap) return false;
-    
-    let targetUrl = null;
-    
-    // 1. 完全一致
-    if (currentImageMap[entryKey]) {
-        targetUrl = getRandomImageSource(currentImageMap[entryKey], `ek::${entryKey}`);
+async function showImageByEntryKey(entryKey, options = {}) {
+    const { candidateKeys = [], forceRedraw = false } = options;
+    if (!currentImageMap) return false;
+
+    const searchKeys = [];
+    if (entryKey && String(entryKey).trim()) searchKeys.push(String(entryKey).trim());
+    if (Array.isArray(candidateKeys)) {
+        for (const k of candidateKeys) {
+            if (k && String(k).trim() && !searchKeys.includes(String(k).trim())) {
+                searchKeys.push(String(k).trim());
+            }
+        }
     }
-    
-    // 2. 部分一致（entryKey がキーに含まれる、またはキーが entryKey に含まれる）
-    if (!targetUrl) {
+
+    let targetUrl = null;
+    let matchedKey = null;
+
+    // 1. 完全一致
+    for (const sk of searchKeys) {
+        if (currentImageMap[sk]) {
+            matchedKey = sk;
+            targetUrl = getRandomImageSource(currentImageMap[sk], `ek::${sk}`);
+            if (targetUrl) break;
+        }
+    }
+
+    // 2. 部分一致
+    if (!targetUrl && searchKeys.length > 0) {
         for (const [key, urls] of Object.entries(currentImageMap)) {
             if (key === 'default' || key === 'thumbnail') continue;
-            if (key.includes(entryKey) || entryKey.includes(key)) {
+            if (searchKeys.some(sk => key.includes(sk) || sk.includes(key))) {
+                matchedKey = key;
                 targetUrl = getRandomImageSource(urls, `ek::${key}`);
                 if (targetUrl) break;
             }
         }
     }
-    
-    if (targetUrl) {
-        _lastSentKeywordImage = targetUrl;
-        await updateImageWithUrl(targetUrl);
-        return true;
+
+    // 3. 見つからない場合は現在のキーワード / デフォルトへフォールバック
+    if (!targetUrl) {
+        return await pickAndShowCurrentKeyword();
     }
-    return false;
+
+    if (forceRedraw) {
+        currentImageUrl = null;
+    }
+    _lastSentKeywordImage = targetUrl;
+    await updateImageWithUrl(targetUrl);
+    console.log(`[ImageDisplay] showImageByEntryKey 表示完了 (key=${matchedKey}): ${targetUrl}`);
+    return true;
 }
     
     let _isGicPreparing = false;
@@ -1573,6 +1596,29 @@ async function showImageByEntryKey(entryKey) {
         }
     }
 
+    function isCombinedModeActive() {
+        try {
+            if (typeof window.GicApi?.isCombinedMode === 'function') {
+                return window.GicApi.isCombinedMode() === true;
+            }
+            return window.GicLorebook?.getSettings?.()?.enabled === true;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function handleImmediateSendKeyword(text) {
+        if (!text || !text.trim()) return;
+        // 合体モード時は送信瞬間の即時切替を行わない（5秒後に gic_lorebook.js 側で表示）
+        if (isCombinedModeActive()) return;
+
+        const matchedUrl = findMatchingImageUrl(text);
+        if (matchedUrl) {
+            _lastSentKeywordImage = matchedUrl;
+            updateImageWithUrl(matchedUrl);
+        }
+    }
+ 
     function setupSendInterception() {
         if (isSendInterceptionInstalled) return;
         isSendInterceptionInstalled = true;
