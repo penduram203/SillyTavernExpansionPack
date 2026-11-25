@@ -488,10 +488,6 @@ async function loadWorldInfoEntries(worldName) {
     if (!worldName) return [];
 
     // ★ ① fetch を最優先（cache: no-store で常に最新を取得）
-    //   新規エントリを追加した直後は LBE キャッシュ / mod.world_info が
-    //   古いデータを持っていることがあるため、fetch を最優先する。
-    //   processChoice は画像生成1回につき1度しか呼ばれないので、
-    //   fetch のオーバーヘッドは無視できる。
     for (let attempt = 1; attempt <= 2; attempt++) {
         try {
             const resp = await fetch('/api/worldinfo/get', {
@@ -742,7 +738,6 @@ async function loadSlashModules() {
     return { parser: _slashParserModule, command: _slashCommandModule };
 }
 
-// ===== /sd 実行 =====
 // ============================================================
 // ★ 画像生成サーバーの接続確認（ST の SD 拡張と同じ ping API を使用）
 //   - 成功は 60 秒、失敗は 30 秒キャッシュ（毎回の確認待ちを避ける）
@@ -813,7 +808,7 @@ function notifySdUnavailable(reason) {
     const now = Date.now();
     if (now - _lastSdUnavailableToastAt < 10000) return; // 10秒間は抑制
     _lastSdUnavailableToastAt = now;
-    
+
     const msg = `画像生成スキップ (${reason})`;
     try {
         let toast = document.getElementById('gic-sd-unavailable-toast');
@@ -936,9 +931,6 @@ async function executeSd(prompt, negativePrompt = null, resolution = null) {
                     console.log(`[GIC-Lore] 🔧 SD解像度を一時設定: "${effectiveResolution}" (元: "${originalResolution}")`);
 
                     // ② #sd_resolution の DOM 要素も変更（DOM 経由）
-                    //    ★ SD 拡張の option value は "sd_res_XXXX" 形式。
-                    //      プレフィックスなしで設定すると getResolution() が解釈できず、
-                    //      デフォルト解像度にフォールバックしてしまう。
                     try {
                         jq = window.$ || window.jQuery || null;
                         if (jq) {
@@ -948,7 +940,6 @@ async function executeSd(prompt, negativePrompt = null, resolution = null) {
                                 originalDomResolution = $sel.val();
                                 console.log(`[GIC-Lore] 🔧 #sd_resolution の現在値: "${originalDomResolution}"`);
 
-                                // ★ SD 拡張の option は "sd_res_XXXX" 形式
                                 const prefixedValue = `sd_res_${effectiveResolution}`;
                                 const hasOption = $sel.find(`option[value="${prefixedValue}"]`).length > 0;
                                 if (!hasOption) {
@@ -960,7 +951,6 @@ async function executeSd(prompt, negativePrompt = null, resolution = null) {
                                     console.log(`[GIC-Lore] 🔧 #sd_resolution に option "${prefixedValue}" を追加`);
                                 }
 
-                                // 値を変更して change イベントを発火
                                 $sel.val(prefixedValue).trigger('change');
                                 console.log(`[GIC-Lore] 🔧 #sd_resolution を "${prefixedValue}" に変更`);
                             } else {
@@ -979,7 +969,6 @@ async function executeSd(prompt, negativePrompt = null, resolution = null) {
         }
     }
 
-    // ★ コマンドは quiet のみ（negative_prompt / resolution は設定経由で渡る）
     const cmd = settings.quiet
         ? `/sd quiet=true "${escaped}"`
         : `/sd "${escaped}"`;
@@ -987,9 +976,6 @@ async function executeSd(prompt, negativePrompt = null, resolution = null) {
     console.log(`[GIC-Lore] /sd 実行試行: ${cmd.slice(0, 120)}${cmd.length > 120 ? '...' : ''}`);
 
     try {
-        // 方式1: script.js 経由
-        //   ★ 関数が存在して実行が失敗した場合は、他方式で /sd を再実行しない
-        //     （生成サーバー不調時に同じ生成を何度も試みて待ち時間が伸びるのを防ぐ）
         let mod = null;
         try { mod = await import('../../../../../script.js'); } catch (e) { /* ignore */ }
         if (typeof mod?.executeSlashCommandsWithOptions === 'function') {
@@ -1007,7 +993,6 @@ async function executeSd(prompt, negativePrompt = null, resolution = null) {
             }
         }
 
-        // 方式2: window 経由
         if (typeof window.executeSlashCommandsWithOptions === 'function') {
             try {
                 const r = await window.executeSlashCommandsWithOptions(cmd);
@@ -1020,7 +1005,6 @@ async function executeSd(prompt, negativePrompt = null, resolution = null) {
             }
         }
 
-        // 方式3: SlashCommandParser 直叩き
         try {
             const { parser } = await loadSlashModules();
             const sdCmd = parser?.commands?.['sd'];
@@ -1046,7 +1030,6 @@ async function executeSd(prompt, negativePrompt = null, resolution = null) {
         console.error('[GIC-Lore] ❌ /sd を実行する全ての方式が失敗しました');
         return false;
     } finally {
-        // ── ① #sd_resolution の DOM 復元 ──
         if (jq && $resolutionSelect && originalDomResolution !== null) {
             try {
                 $resolutionSelect.val(originalDomResolution).trigger('change');
@@ -1064,7 +1047,6 @@ async function executeSd(prompt, negativePrompt = null, resolution = null) {
             }
         }
 
-        // ── ② extensionSettings の復元 ──
         if (ctx?.extensionSettings?.sd) {
             if (settingsModified) {
                 ctx.extensionSettings.sd.negative_prompt = originalNegPrompt;
@@ -1103,35 +1085,6 @@ function checkPreRegisteredImages(worldName, entry) {
     }
 }
 
-async function showPreRegisteredOrFallback(worldName, entry, entryKey, forceRedraw = false) {
-    const resolvedKey = entryKey || extractEntryKey(entry);
-    const candidateKeys = getEntryKeys(entry);
-
-    if (checkPreRegisteredImages(worldName, entry)) {
-        try {
-            const shown = await window.ImageDisplayExtension?.showImageByEntryKey?.(
-                resolvedKey,
-                { candidateKeys, forceRedraw }
-            );
-            if (shown) {
-                console.log(`[GIC-Lore] 🖼️ 事前登録画像を表示しました (entryKey=${resolvedKey})`);
-                return true;
-            }
-        } catch (e) {
-            console.warn('[GIC-Lore] showImageByEntryKey 失敗:', e);
-        }
-    }
-
-    try {
-        const shownKw = await window.ImageDisplayExtension?.pickAndShowCurrentKeyword?.();
-        if (shownKw) return true;
-    } catch (e) {
-        console.warn('[GIC-Lore] pickAndShowCurrentKeyword 失敗:', e);
-    }
-
-    return false;
-}
-
 // ============================================================
 // ★ 指定エントリに登録されているファイル一覧を取得
 // ============================================================
@@ -1151,13 +1104,9 @@ function getRegisteredFilesForEntry(entryKey) {
 
 // ============================================================
 // ★ 画像登録完了を待つ（イベント + ポーリング併用）
-//   - initialCount より多く登録されたら解決
-//   - イベント取りこぼし対策として 500ms ポーリングを併走
-//   - 呼び出し側で Promise.race([..., timeout]) を併用する想定
 // ============================================================
 function waitForImageRegistration(entryKey, initialCount, timeoutMs = 60000) {
     return new Promise((resolve) => {
-        // ★ 事前チェック: 既に新しい画像が登録済みなら即解決
         if (getRegisteredFilesForEntry(entryKey).length > initialCount) {
             console.log(`[GIC-Lore] 画像登録待ち: 事前チェックで解決済み (${entryKey})`);
             resolve(true);
@@ -1183,7 +1132,6 @@ function waitForImageRegistration(entryKey, initialCount, timeoutMs = 60000) {
         }
         window.addEventListener('gic-image-registration-completed', handler);
 
-        // ★ 500ms ポーリングで取りこぼし対策
         pollTimer = setInterval(() => {
             if (getRegisteredFilesForEntry(entryKey).length > initialCount) {
                 finish(true, 'poll');
@@ -1198,40 +1146,52 @@ function waitForImageRegistration(entryKey, initialCount, timeoutMs = 60000) {
 }
 
 // ============================================================
+// ★ 事前登録画像の表示ヘルパー（失敗・キャンセル・プロンプト未設定時共通）
+// ============================================================
+async function displayPreRegisteredOrFallback(entryKey, logLabel = '事前登録画像') {
+    if (!entryKey) return false;
+    try {
+        let shown = await window.ImageDisplayExtension?.showImageByEntryKey?.(entryKey);
+        if (!shown) {
+            shown = await window.ImageDisplayExtension?.pickAndShowCurrentKeyword?.();
+        }
+        if (shown) {
+            console.log(`[GIC-Lore] 🖼️ ${logLabel}を表示 (entryKey=${entryKey})`);
+            return true;
+        } else {
+            console.warn(`[GIC-Lore] ${logLabel}の表示に失敗 (entryKey=${entryKey})`);
+        }
+    } catch (e) {
+        console.warn(`[GIC-Lore] ${logLabel}の表示エラー:`, e);
+    }
+    return false;
+}
+
+// ============================================================
 // ★ 合体モード: 5秒後に事前登録画像を表示しつつ、裏で生成
 // ============================================================
 async function processChoiceCombined(worldName, entry, prompt, negativePrompt, resolution, hasPreRegistered, entryKey) {
-    // ★ 事前登録画像の数を記録（新画像検出の基準）
     const initialRegisteredCount = getRegisteredFilesForEntry(entryKey).length;
-    
+
     if (hasPreRegistered) {
         console.log(`[GIC-Lore] 🎨 合体モード（事前登録あり）: 5秒後に表示、裏で生成`);
-        
-        // 画像表示をロック（5秒間は前の画像を維持）
+
         try { window.GicApi?.setCombinedPrepActive?.(true); } catch (e) { /* ignore */ }
-        
-        // ★ SD 生成をバックグラウンド開始
+
         const sdStartedAt = Date.now();
         const sdPromise = executeSd(prompt, negativePrompt, resolution);
-        
-        // ★ 未処理の rejection を握りつぶす（下で明示的に await するため）
         sdPromise.catch((e) => console.warn('[GIC-Lore] SD 生成エラー:', e));
-        
-        // ★ 登録完了待ちを sdPromise より先に開始
-        //   → /sd 内部で登録イベントが先に発火しても取りこぼさない
+
         const registrationPromise = waitForImageRegistration(
             entryKey,
             initialRegisteredCount,
             60000
         );
-        
-        // 5秒待機
+
         await new Promise(r => setTimeout(r, 5000));
-        
-        // 準備中フラグ解除（画像表示ロックを解除）
+
         try { window.GicApi?.setCombinedPrepActive?.(false); } catch (e) { /* ignore */ }
-        
-        // ★ 状態表示を「画像準備中…」→「画像生成中…」に更新
+
         try {
             window.dispatchEvent(new CustomEvent('gic-image-generation-started', {
                 detail: {
@@ -1245,77 +1205,49 @@ async function processChoiceCombined(worldName, entry, prompt, negativePrompt, r
                 },
             }));
         } catch (e) { /* ignore */ }
-        
-        // ★ ユーザー操作ロック
+
         try { window.GicApi?.lockUserInput?.('combined-wait'); } catch (e) { /* ignore */ }
-        
-        // 事前登録画像を表示
-        try {
-            // まず showImageByEntryKey を試す
-            let shown = await window.ImageDisplayExtension?.showImageByEntryKey?.(entryKey);
-            // もしダメなら pickAndShowCurrentKeyword を試す
-            if (!shown) {
-                shown = await window.ImageDisplayExtension?.pickAndShowCurrentKeyword?.();
-            }
-            if (shown) {
-                console.log(`[GIC-Lore] 🖼️ 事前登録画像を表示 (entryKey=${entryKey})`);
-            } else {
-                console.warn('[GIC-Lore] 事前登録画像の表示に失敗');
-            }
-        } catch (e) {
-            console.warn('[GIC-Lore] 事前登録画像の表示に失敗:', e);
-        }
-        
-        // 生成完了待ち（上限付き）
+
+        await displayPreRegisteredOrFallback(entryKey, '事前登録画像');
+
         const sdOutcome = await awaitSdWithLimit(sdPromise);
         const sdOk = sdOutcome === 'done' && (await sdPromise.catch(() => false)) !== false
             && !sdFailedSince(sdStartedAt);
-        
-        // ★ 登録待ちは生成成功時のみ最大 5 秒（失敗時は待たない）
+
         if (sdOk) {
             const gracePromise = new Promise(r => setTimeout(() => r(false), 5000));
             await Promise.race([registrationPromise, gracePromise]);
         } else {
-            console.warn('[GIC-Lore] 画像生成に失敗したため登録待ちをスキップ');
+            console.warn('[GIC-Lore] 画像生成に失敗またはキャンセルされたため登録待ちをスキップ');
             markSdUnavailable('生成失敗');
-            
-            // ★ 修正: 生成失敗時も entryKey から事前登録画像を再表示
-            try {
-                const shown = await window.ImageDisplayExtension?.showImageByEntryKey?.(entryKey);
-                if (shown) {
-                    console.log(`[GIC-Lore] 🖼️ 生成失敗 → entryKey から事前登録画像を再表示`);
-                }
-            } catch (e) { /* ignore */ }
+            await displayPreRegisteredOrFallback(entryKey, '生成失敗 → 事前登録画像を再表示');
         }
-        
-        // ★ ユーザー操作ロック解除
+
         try { window.GicApi?.unlockUserInput?.('combined-done'); } catch (e) { /* ignore */ }
-        
+
         console.log(`[GIC-Lore] ✅ 合体モード完了`);
-        
+
     } else {
         console.log(`[GIC-Lore] 🎨 合体モード（事前登録なし）: 生成を待機`);
-        
-        // 入力ロック（生成完了まで）
+
         try { window.GicApi?.lockUserInput?.('combined-fallback-wait'); } catch (e) { /* ignore */ }
-        
+
         const sdStartedAt = Date.now();
         const sdPromise = executeSd(prompt, negativePrompt, resolution);
         let sdResult = 'pending';
         sdPromise.then((v) => { sdResult = v; }, (e) => { sdResult = false; console.warn('[GIC-Lore] SD 生成エラー:', e); });
-        
+
         const registrationPromise = waitForImageRegistration(
             entryKey,
             initialRegisteredCount,
             60000
         );
-        
+
         try {
             await awaitSdWithLimit(sdPromise);
         } finally {
             const sdOk = sdResult === true && !sdFailedSince(sdStartedAt);
-            
-            // ★ 登録待ちは生成成功時のみ最大 5 秒（失敗時は待たない）
+
             if (sdOk) {
                 const gracePromise = new Promise(r => setTimeout(() => r(false), 5000));
                 await Promise.race([registrationPromise, gracePromise]);
@@ -1323,21 +1255,19 @@ async function processChoiceCombined(worldName, entry, prompt, negativePrompt, r
                 console.warn('[GIC-Lore] 画像生成に失敗またはタイムアウトしたため登録待ちをスキップ');
                 markSdUnavailable('生成失敗');
             }
-            
-            // ★ 修正: pickAndShowCurrentKeyword が失敗した場合、
-            //     showImageByEntryKey で entryKey から直接画像を表示する
+
             try {
                 let shown = await window.ImageDisplayExtension?.pickAndShowCurrentKeyword?.();
                 if (!shown) {
                     shown = await window.ImageDisplayExtension?.showImageByEntryKey?.(entryKey);
                 }
                 if (shown) {
-                    console.log(`[GIC-Lore] 🖼️ 生成画像を表示 (entryKey=${entryKey})`);
+                    console.log(`[GIC-Lore] 🖼️ 画像を表示 (entryKey=${entryKey})`);
                 } else {
-                    console.warn('[GIC-Lore] 生成画像の表示に失敗');
+                    console.warn('[GIC-Lore] 画像の表示に失敗');
                 }
             } catch (e) { /* ignore */ }
-            
+
             try { window.GicApi?.unlockUserInput?.('combined-fallback-done'); } catch (e) { /* ignore */ }
         }
     }
@@ -1371,7 +1301,6 @@ async function processChoice(force = false) {
     try {
         const userText = getLastUserMessageText();
         const choiceNum = extractChoiceNumber(userText);
-        // ★ 文章方式（発言＝キー）にも対応: 発言が空のときだけ /sd last へ
         const hasUserText = !!(userText && String(userText).trim());
 
         const runSdFallback = async () => {
@@ -1419,7 +1348,6 @@ async function processChoice(force = false) {
                     console.log(`  uid=${e.uid} comment="${e.comment}" key=${JSON.stringify(e.key)}`);
                 });
             }
-            // ★ 番号も一致エントリも無い自由入力は従来どおり /sd last
             if (!choiceNum) await runSdFallback();
             return;
         }
@@ -1427,9 +1355,6 @@ async function processChoice(force = false) {
             console.log(`[GIC-Lore] エントリ採用: uid=${entry.uid}, comment="${entry.comment || ''}"`);
         }
 
-        // ★ テンプレートから生成用プロンプトを選択（v6 追加）
-        //   'random' の場合はここで一度だけランダム選択し、
-        //   img_prompt と negative_prompt が同じテンプレートから取られることを保証する
         const pickedTemplate = pickTemplateForGeneration(worldName, entry);
 
         let prompt = null;
@@ -1454,11 +1379,6 @@ async function processChoice(force = false) {
             negativePrompt = extractNegativePromptFromEntry(entry, worldName);
         }
 
-        // ★ ワイルドカード適用（v8 追加）
-        //   RandomPromptWildcard が利用可能なら、プロンプト中の wildcard を
-        //   ランダムに選ばれた値に置換する。
-        //   ★ applyToPrompt は 1 回の呼び出し内で同じキーは同じ値になるため、
-        //     "color1? hair, color1? eyes" は同じ色になる。
         try {
             if (window.RandomPromptWildcard?.applyToPrompt) {
                 if (prompt) {
@@ -1480,7 +1400,6 @@ async function processChoice(force = false) {
             console.warn('[GIC-Lore] wildcard 適用エラー:', e);
         }
 
-        // ★ 解像度を取得（v5 追加 / v7: テンプレート優先）
         let resolution = pickedTemplate?.resolution || null;
         if (!resolution) {
             resolution = extractResolutionFromEntry(entry, worldName);
@@ -1489,6 +1408,10 @@ async function processChoice(force = false) {
             console.log(`[GIC-Lore] 解像度: ${resolution}${pickedTemplate ? ` (template ${pickedTemplate.index})` : ''}`);
         }
 
+        const entryKey = extractEntryKey(entry);
+        const hasPreRegistered = checkPreRegisteredImages(worldName, entry);
+
+        // ★ プロンプトが空欄（未設定）でも、早期 return せずに事前登録画像を表示する
         if (!prompt) {
             console.warn('[GIC-Lore] プロンプトが抽出できませんでした');
             if (settings.verbose) {
@@ -1504,6 +1427,13 @@ async function processChoice(force = false) {
                     }
                 } catch (e) { /* ignore */ }
             }
+
+            if (hasPreRegistered && entryKey) {
+                try { window.GicApi?.setCombinedPrepActive?.(true); } catch (e) { /* ignore */ }
+                await new Promise(r => setTimeout(r, 5000));
+                try { window.GicApi?.setCombinedPrepActive?.(false); } catch (e) { /* ignore */ }
+                await displayPreRegisteredOrFallback(entryKey, 'プロンプト未設定 → 事前登録画像');
+            }
             return;
         }
 
@@ -1512,16 +1442,9 @@ async function processChoice(force = false) {
         if (!sdState.ok) {
             console.warn(`[GIC-Lore] 画像生成をスキップ: ${sdState.reason}`);
             notifySdUnavailable(sdState.reason);
-        
-            // 事前登録画像があれば待たずに表示
-            if (checkPreRegisteredImages(worldName, entry)) {
-                try {
-                    const entryKey = _pendingGenerationContext?.entryKey || extractEntryKey(entry);
-                    let shown = await window.ImageDisplayExtension?.showImageByEntryKey?.(entryKey);
-                    if (!shown) {
-                        shown = await window.ImageDisplayExtension?.pickAndShowCurrentKeyword?.();
-                    }
-                } catch (e) { /* ignore */ }
+
+            if (hasPreRegistered && entryKey) {
+                await displayPreRegisteredOrFallback(entryKey, '事前登録画像');
             }
             return;
         }
@@ -1530,7 +1453,7 @@ async function processChoice(force = false) {
 
         // ★ 生成コンテキストを保存（ファイル名リネーム用）
         _pendingGenerationContext = {
-            entryKey: extractEntryKey(entry),
+            entryKey,
             uid: entry.uid,
             worldName,
             prompt,
@@ -1543,24 +1466,6 @@ async function processChoice(force = false) {
             console.log(`[GIC-Lore] 生成コンテキスト設定: entryKey="${_pendingGenerationContext.entryKey}", resolution=${resolution || '(未設定)'}, templateIndex=${pickedTemplate?.index ?? '(旧データ)'}`);
         }
 
-        // ★ 事前登録画像の有無を先に判定
-        const hasPreRegistered = checkPreRegisteredImages(worldName, entry);
-
-        if (!prompt) {
-            console.warn('[GIC-Lore] プロンプトが抽出できませんでした');
-            // プロンプトが空でも、事前登録画像があれば表示して処理を終了する
-            if (hasPreRegistered && _pendingGenerationContext?.entryKey) {
-                try {
-                    await window.ImageDisplayExtension?.showImageByEntryKey?.(_pendingGenerationContext.entryKey);
-                    console.log(`[GIC-Lore] 🖼️ プロンプトなしだが事前登録画像を表示`);
-                } catch (e) {
-                    console.warn('[GIC-Lore] 事前登録画像の表示に失敗:', e);
-                }
-            }
-            return;
-        }
-
-        // 生成開始通知（preparing フラグで 画像準備中/画像生成中 を切替）
         try {
             window.dispatchEvent(new CustomEvent('gic-image-generation-started', {
                 detail: {
@@ -1575,8 +1480,6 @@ async function processChoice(force = false) {
             }));
         } catch (e) { /* ignore */ }
 
-        // ★ 全フェーズを通してユーザー操作をロックする
-        //   （📃 応答生成中 → 📷 画像準備中 → 📷 画像生成中 → 完了 まで解除しない）
         try { window.GicApi?.lockUserInput?.('image-generation-phase-start'); } catch (e) { /* ignore */ }
 
         try {
@@ -1590,7 +1493,6 @@ async function processChoice(force = false) {
                     detail: { entryKey: _pendingGenerationContext?.entryKey },
                 }));
             } catch (e) { /* ignore */ }
-            // ★ ロック解除（プロセス全体の最後）
             try { window.GicApi?.unlockUserInput?.('image-generation-phase-end'); } catch (e) { /* ignore */ }
         }
     } catch (e) {
@@ -1718,7 +1620,6 @@ function setupListeners() {
     });
 
     if (settings.triggerOn === 'user_send') {
-        // ★ 画像生成と LLM 応答を並行実行するため、ユーザー送信直後に開始する
         safeOn(event_types.USER_MESSAGE_RENDERED, () => {
             setTimeout(() => {
                 processChoice(false).catch(e => console.error('[GIC-Lore] 処理エラー:', e));
@@ -1726,7 +1627,6 @@ function setupListeners() {
         });
         console.log('[GIC-Lore] トリガー: user_send（画像生成と LLM 応答を並行実行）');
     } else {
-        // 従来の ai_reply モード（フォールバック / 明示的に選択した場合）
         safeOn(event_types.CHARACTER_MESSAGE_RENDERED, () => {
             setTimeout(() => {
                 try { stripGicImgFromDom(); } catch (e) { /* ignore */ }
