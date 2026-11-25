@@ -3808,12 +3808,12 @@ async function exportUnifiedBundleJson(options = {}) {
                 path.setAttribute('d',
                     `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`);
                 path.setAttribute('stroke', '#ffffff');
-                path.setAttribute('stroke-width', '13');
+                path.setAttribute('stroke-width', '2');
                 path.setAttribute('fill', 'none');
                 path.setAttribute('stroke-linejoin', 'round');
                 svg.appendChild(path);
 
-                const sz = 7;
+                const sz = 14;
                 const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
                 arrow.setAttribute('points',
                     `${x2},${y2} ${x2 - sz},${y2 - sz / 1.5} ${x2 - sz},${y2 + sz / 1.5}`);
