@@ -909,10 +909,55 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
         if (watch.busy) return;
 
         const candidates = [];
-        for (const el of _getEntryElements()) {
+        const allEls = _getEntryElements();
+        for (let idx = 0; idx < allEls.length; idx++) {
+            const el = allEls[idx];
             const uid = String(el.getAttribute('uid') || el.getAttribute('data-uid') || '').trim();
-            if (!uid) continue;
-            if (watch.knownUids.has(uid) || _appliedNewEntryUids.has(uid) || _pendingNewEntryUids.has(uid)) {
+            if (uid) {
+                if (watch.knownUids.has(uid) || _appliedNewEntryUids.has(uid) || _pendingNewEntryUids.has(uid)) {
+                    continue;
+                }
+                const n = /^\d+$/.test(uid) ? Number(uid) : -1;
+                candidates.push({ uid, n, el });
+            } else if (!el.getAttribute('data-wbas-uidless-handled')) {
+                el.setAttribute('data-wbas-uidless-handled', '1');
+                candidates.push({ uid: `__dom_${idx}`, n: Number.MAX_SAFE_INTEGER, el });
+            }
+        }
+
+        if (candidates.length > 0) {
+            console.log(`${LOG} [DBG][candidates] found=${candidates.map(c => c.uid).join(',')}`);
+        }
+        if (candidates.length === 0) return;
+
+        watch.busy = true;
+        (async () => {
+            try {
+                for (const c of candidates) {
+                    if (c.uid.startsWith('__dom_')) {
+                        for (let i = 0; i < NEW_ENTRY_APPLY_RETRY_MAX; i++) {
+                            const latestUid = String(c.el.getAttribute('uid') || c.el.getAttribute('data-uid') || '').trim();
+                            if (latestUid) {
+                                watch.knownUids.add(latestUid);
+                                await _applyNewEntryDefaultsWithRetry(latestUid);
+                                break;
+                            }
+                            if (_applyNewEntryDefaults(c.el)) {
+                                console.log(`${LOG} 🆕 new entry defaults applied (uidless element)`);
+                                break;
+                            }
+                            await wait(NEW_ENTRY_APPLY_RETRY_MS);
+                        }
+                    } else {
+                        watch.knownUids.add(c.uid);
+                        await _applyNewEntryDefaultsWithRetry(c.uid);
+                    }
+                }
+            } finally {
+                watch.busy = false;
+            }
+        })();
+    }
                 continue;
             }
             if (/^\d+$/.test(uid)) {
