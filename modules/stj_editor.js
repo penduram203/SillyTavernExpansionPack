@@ -1108,7 +1108,7 @@ async function loadWorldInfoEntries(worldName) {
         delete hostEl._syncEntry;
     }
 
-    async function mountWorldEntryInCellModal(cell) {
+async function mountWorldEntryInCellModal(cell) {
         const modal = currentCellModal;
         if (!modal || !cell) return;
         const hostEl = modal.querySelector('#stj_cell_modal_entry_host');
@@ -1117,8 +1117,9 @@ async function loadWorldInfoEntries(worldName) {
         restoreMountedWorldEntry(hostEl);
 
         if (cell.classList.contains('stj-special-item')) return;
+        const cellUid = getCellUid(cell);
         const kw = getCellKeyword(cell).trim();
-        if (!kw) return;
+        if (!cellUid && !kw) return;
 
         const worldName = getCharacterWorldInfoName();
         if (!worldName) return;
@@ -1131,7 +1132,10 @@ async function loadWorldInfoEntries(worldName) {
         if (currentCellModal !== modal || currentModalCell !== cell) return;
         if (!entries) return;
 
-        const targetEntry = findEntryByKeyword(entries, kw);
+        const list = Array.isArray(entries) ? entries : Object.values(entries);
+        const targetEntry = (cellUid
+            ? (entries[cellUid] || list.find(e => getEntryUid(e) === cellUid))
+            : null) || findEntryByKeyword(entries, kw);
         if (!targetEntry) return;
 
         const sourceEl = findSourceWorldEntryEl(entries, targetEntry, kw);
