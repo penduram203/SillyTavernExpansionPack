@@ -1108,7 +1108,7 @@ async function loadWorldInfoEntries(worldName) {
         delete hostEl._syncEntry;
     }
 
-    async function mountWorldEntryInCellModal(cell) {
+async function mountWorldEntryInCellModal(cell) {
         const modal = currentCellModal;
         if (!modal || !cell) return;
         const hostEl = modal.querySelector('#stj_cell_modal_entry_host');
@@ -1117,8 +1117,9 @@ async function loadWorldInfoEntries(worldName) {
         restoreMountedWorldEntry(hostEl);
 
         if (cell.classList.contains('stj-special-item')) return;
+        const cellUid = getCellUid(cell);
         const kw = getCellKeyword(cell).trim();
-        if (!kw) return;
+        if (!cellUid && !kw) return;
 
         const worldName = getCharacterWorldInfoName();
         if (!worldName) return;
@@ -1131,7 +1132,10 @@ async function loadWorldInfoEntries(worldName) {
         if (currentCellModal !== modal || currentModalCell !== cell) return;
         if (!entries) return;
 
-        const targetEntry = findEntryByKeyword(entries, kw);
+        const list = Array.isArray(entries) ? entries : Object.values(entries);
+        const targetEntry = (cellUid
+            ? (entries[cellUid] || list.find(e => getEntryUid(e) === cellUid))
+            : null) || findEntryByKeyword(entries, kw);
         if (!targetEntry) return;
 
         const sourceEl = findSourceWorldEntryEl(entries, targetEntry, kw);
@@ -1948,7 +1952,7 @@ async function loadWorldInfoEntries(worldName) {
     }
 
     // ===== 最新のロアブックエントリ名へ同期 =====
-    async function syncEditorWithLatestLorebook(charName) {
+async function syncEditorWithLatestLorebook(charName) {
         if (!charName) return false;
         const worldName = getCharacterWorldInfoName();
         if (!worldName) return false;
@@ -1963,70 +1967,91 @@ async function loadWorldInfoEntries(worldName) {
         const list = Array.isArray(entries) ? entries : Object.values(entries);
         if (list.length === 0) return false;
 
-        let imageMap = getCurrentImageMapFromCharData(charName) || {};
-        let changed = false;
-        const updatedMap = {};
-
-        // default / thumbnail は先頭に保持
-        for (const spKey of ['default', 'thumbnail']) {
-            if (Object.prototype.hasOwnProperty.call(imageMap, spKey)) {
-                updatedMap[spKey] = imageMap[spKey];
-            }
-        }
-
-        const usedOldKeys = new Set();
+        const imageMap = getCurrentImageMapFromCharData(charName) || {};
         const orderedEntries = [...list].sort((a, b) => {
             const oa = Number(a?.order ?? a?.displayIndex ?? 0);
             const ob = Number(b?.order ?? b?.displayIndex ?? 0);
             return oa - ob;
         });
 
+        const container = document.getElementById('stj_keywords_container');
+        if (!container) return false;
+
+        const existingCells = Array.from(container.querySelectorAll('.stj-keyword-item'));
+        const cellByUid = new Map();
+        const unusedCellsByKw = new Map();
+
+        for (const cell of existingCells) {
+            const u = getCellUid(cell);
+            const k = getCellKeyword(cell).trim();
+            if (u) {
+                cellByUid.set(u, cell);
+            } else if (k) {
+                if (!unusedCellsByKw.has(k)) unusedCellsByKw.set(k, []);
+                unusedCellsByKw.get(k).push(cell);
+            }
+        }
+
+        const usedCells = new Set();
+        const usedMapKeys = new Set();
+        let idx = 0;
+
         for (const entry of orderedEntries) {
             if (!entry) continue;
             const latestName = getEntryKeyword(entry);
+            const uid = getEntryUid(entry);
             if (!latestName || isCommonRuleName(latestName)) continue;
 
             const keys = getEntryKeys(entry).map(k => String(k).trim()).filter(Boolean);
-            const candidateKeys = [latestName, ...keys];
+            const candidates = [latestName, ...keys];
 
-            let matchedOldKey = null;
-            for (const cand of candidateKeys) {
-                if (Object.prototype.hasOwnProperty.call(imageMap, cand) && !usedOldKeys.has(cand)) {
-                    matchedOldKey = cand;
+            let matchedKey = null;
+            for (const cand of candidates) {
+                if (Object.prototype.hasOwnProperty.call(imageMap, cand) && !usedMapKeys.has(cand)) {
+                    matchedKey = cand;
                     break;
                 }
             }
+            if (matchedKey) usedMapKeys.add(matchedKey);
 
-            if (matchedOldKey) {
-                usedOldKeys.add(matchedOldKey);
-                updatedMap[latestName] = imageMap[matchedOldKey];
-                if (matchedOldKey !== latestName) {
-                    changed = true;
+            const files = matchedKey
+                ? (Array.isArray(imageMap[matchedKey]) ? imageMap[matchedKey] : [imageMap[matchedKey]])
+                    .map(p => extractFileNameFromPath(p))
+                    .filter(Boolean)
+                : [];
+
+            let cell = uid ? cellByUid.get(uid) : null;
+            if (!cell) {
+                const pool = unusedCellsByKw.get(latestName) || [];
+                while (pool.length > 0 && !cell) {
+                    const candCell = pool.shift();
+                    if (!usedCells.has(candCell)) cell = candCell;
                 }
-            } else if (!Object.prototype.hasOwnProperty.call(updatedMap, latestName)) {
-                updatedMap[latestName] = [];
-                changed = true;
             }
-        }
 
-        // ロアブック側に存在しない孤立キーの整理
-        for (const [k, v] of Object.entries(imageMap)) {
-            if (k === 'default' || k === 'thumbnail') continue;
-            if (!usedOldKeys.has(k) && !Object.prototype.hasOwnProperty.call(updatedMap, k)) {
-                changed = true;
+            if (cell) {
+                usedCells.add(cell);
+                setCellUid(cell, uid);
+                setCellKeyword(cell, latestName);
+                setCellImages(cell, files);
+                updateCellPreview(cell);
+                container.appendChild(cell);
+            } else {
+                addKeywordRowWithData(container, idx, { uid, keyword: latestName, images: files });
             }
+            idx++;
         }
 
-        if (changed) {
-            saveImageMapToCharData(charName, updatedMap);
+        for (const cell of existingCells) {
+            if (!usedCells.has(cell)) cell.remove();
+        }
+        if (container.querySelectorAll('.stj-keyword-item').length === 0) {
+            addKeywordRowWithData(container, 0, { uid: '', keyword: '', images: [] });
         }
 
-        populateFormFromImageMap(updatedMap, false);
         runLiveTest();
-        if (changed) {
-            saveData({ silent: true });
-        }
-        return changed;
+        _stjScheduleTreeLayout();
+        return true;
     }
     
     // ===== ①ロアブック本体・②Lorebook Expansion・③画像マッピングの一括JSON自動出力 =====
@@ -3628,151 +3653,220 @@ async function exportUnifiedBundleJson(options = {}) {
         return null;
     }
 
-    async function _stjBuildChoiceGraph(imageMap) {
-        const empty = { children: new Map(), parents: new Map(), allNodes: new Set() };
-        const worldName = getCharacterWorldInfoName();
-        if (!worldName) return empty;
+    function _stjBuildChoiceGraph(entries, cells) {
+        const list = Array.isArray(entries) ? entries : Object.values(entries || {});
+        const nodes = new Map();
+        const edges = [];
+        const edgeSet = new Set();
 
-        let entries;
-        try {
-            entries = await loadWorldInfoEntries(worldName);
-        } catch (e) {
-            return empty;
-        }
-        if (!entries) return empty;
+        const labelToNodeKeys = new Map();
+        const registerLabel = (label, nodeKey) => {
+            const clean = String(label || '').trim();
+            if (!clean || !nodeKey) return;
+            if (!labelToNodeKeys.has(clean)) labelToNodeKeys.set(clean, []);
+            const arr = labelToNodeKeys.get(clean);
+            if (!arr.includes(nodeKey)) arr.push(nodeKey);
+        };
 
-        const list = Array.isArray(entries) ? entries : Object.values(entries);
-        const entryMap = new Map();
-        for (const entry of list) {
-            const kw = getEntryKeyword(entry);
-            if (kw) entryMap.set(kw, entry);
-        }
-
-        const allNodes = new Set();
-        for (const kw of Object.keys(imageMap)) {
-            if (kw === 'default' || kw === 'thumbnail') continue;
-            if (!kw || !kw.trim()) continue;
-            allNodes.add(kw);
-        }
-
-        const children = new Map();
-        const parents = new Map();
-
-        for (const kw of allNodes) {
-            const entry = entryMap.get(kw);
-            if (!entry) { children.set(kw, []); continue; }
-
-            const lex = getLexDataFor(worldName, entry.uid, entry);
-            const choices = Array.isArray(lex.choices) ? lex.choices : [];
-            const childKws = [];
-
-            for (const choiceStr of choices) {
-                let target = null;
-                const num = _stjExtractChoiceNumber(choiceStr);
-                if (num) {
-                    target = _stjFindEntryByChoice(list, num);
-                }
-                if (!target) {
-                    target = _stjFindEntryByKeywordLoose(list, choiceStr);
-                }
-                if (!target) continue;
-
-                const targetKw = getEntryKeyword(target);
-                if (!targetKw || !allNodes.has(targetKw)) continue;
-                if (childKws.includes(targetKw)) continue;
-                childKws.push(targetKw);
-                if (!parents.has(targetKw)) parents.set(targetKw, []);
-                parents.get(targetKw).push(kw);
+        const ensureNode = (nodeKey, label, uid = '', entry = null) => {
+            if (!nodeKey) return null;
+            if (!nodes.has(nodeKey)) {
+                nodes.set(nodeKey, {
+                    id: nodeKey,
+                    uid: uid || (nodeKey.startsWith('uid:') ? nodeKey.slice(4) : ''),
+                    label: String(label || nodeKey).trim(),
+                    entry: entry || null,
+                    cell: null,
+                    children: [],
+                    parents: []
+                });
+            } else {
+                const existing = nodes.get(nodeKey);
+                if (label && String(label).trim()) existing.label = String(label).trim();
+                if (uid && !existing.uid) existing.uid = uid;
+                if (entry && !existing.entry) existing.entry = entry;
             }
-            children.set(kw, childKws);
+            registerLabel(nodes.get(nodeKey).label, nodeKey);
+            return nodes.get(nodeKey);
+        };
+
+        for (const entry of list) {
+            if (!entry) continue;
+            const label = getEntryKeyword(entry);
+            const uid = getEntryUid(entry);
+            const nodeKey = getNodeKeyForEntry(entry, label);
+            if (!nodeKey) continue;
+            ensureNode(nodeKey, label || uid || nodeKey, uid, entry);
+            for (const k of getEntryKeys(entry)) {
+                registerLabel(k, nodeKey);
+            }
         }
 
-        return { children, parents, allNodes };
+        const cellArray = Array.from(cells || []);
+        for (const cell of cellArray) {
+            const nodeKey = getNodeKeyForCell(cell);
+            const label = getCellKeyword(cell).trim();
+            const uid = getCellUid(cell);
+            if (!nodeKey) continue;
+            const n = ensureNode(nodeKey, label || uid || nodeKey, uid, null);
+            if (n && !n.cell) n.cell = cell;
+        }
+
+        const resolveTargetNodeKeys = (rawTarget, sourceEntry) => {
+            const t = String(rawTarget || '').trim();
+            if (!t) return [];
+            if (nodes.has(t)) return [t];
+            if (nodes.has(`uid:${t}`)) return [`uid:${t}`];
+            if (labelToNodeKeys.has(t)) return labelToNodeKeys.get(t);
+            if (sourceEntry && typeof sourceEntry === 'object') {
+                const sibling = list.find(e =>
+                    e !== sourceEntry &&
+                    (getEntryUid(e) === t || getEntryKeyword(e).trim() === t || getEntryKeys(e).includes(t))
+                );
+                if (sibling) {
+                    const sk = getNodeKeyForEntry(sibling);
+                    if (sk) return [sk];
+                }
+            }
+            return [];
+        };
+
+        for (const [nodeKey, node] of nodes.entries()) {
+            const entry = node.entry || findEntryByNodeKey(entries, nodeKey);
+            if (!entry) continue;
+            node.entry = entry;
+            const choices = extractChoicesFromEntry(entry);
+            for (const ch of choices) {
+                const targetRaw = extractChoiceTarget(ch);
+                const targets = resolveTargetNodeKeys(targetRaw, entry);
+                for (const targetKey of targets) {
+                    if (!targetKey || targetKey === nodeKey) continue;
+                    const edgeId = `${nodeKey}->${targetKey}`;
+                    if (edgeSet.has(edgeId)) continue;
+                    edgeSet.add(edgeId);
+                    edges.push({ from: nodeKey, to: targetKey, choice: ch });
+                    const fromNode = nodes.get(nodeKey);
+                    const toNode = nodes.get(targetKey);
+                    if (fromNode && toNode) {
+                        if (!fromNode.children.includes(targetKey)) fromNode.children.push(targetKey);
+                        if (!toNode.parents.includes(nodeKey)) toNode.parents.push(nodeKey);
+                    }
+                }
+            }
+        }
+
+        return { nodes, edges, cellArray };
     }
 
     function _stjComputeTreeLayout(graph) {
-        const { children, parents, allNodes } = graph;
+        const { nodes, edges, cellArray } = graph;
         const positions = new Map();
-        const visited = new Set();
-        let cursorY = 0;
-
-        function layoutSubtree(node, depth) {
-            if (visited.has(node)) return null;
-            visited.add(node);
-
-            const kids = (children.get(node) || []).filter(k => !visited.has(k));
-            if (kids.length === 0) {
-                const y = cursorY;
-                positions.set(node, {
-                    x: depth * (STJ_TREE_CELL_W + STJ_TREE_H_GAP),
-                    y,
-                });
-                cursorY += STJ_TREE_CELL_H + STJ_TREE_V_GAP;
-                return { top: y, bottom: y + STJ_TREE_CELL_H };
-            }
-
-            const kidBounds = [];
-            for (const kid of kids) {
-                const b = layoutSubtree(kid, depth + 1);
-                if (b) kidBounds.push(b);
-            }
-
-            if (kidBounds.length === 0) {
-                const y = cursorY;
-                positions.set(node, {
-                    x: depth * (STJ_TREE_CELL_W + STJ_TREE_H_GAP),
-                    y,
-                });
-                cursorY += STJ_TREE_CELL_H + STJ_TREE_V_GAP;
-                return { top: y, bottom: y + STJ_TREE_CELL_H };
-            }
-
-            const top = kidBounds[0].top;
-            const bottom = kidBounds[kidBounds.length - 1].bottom;
-            const centerY = (top + bottom - STJ_TREE_CELL_H) / 2;
-            positions.set(node, {
-                x: depth * (STJ_TREE_CELL_W + STJ_TREE_H_GAP),
-                y: centerY,
-            });
-            return {
-                top: Math.min(top, centerY),
-                bottom: Math.max(bottom, centerY + STJ_TREE_CELL_H),
-            };
-        }
+        const depthMap = new Map();
 
         const roots = [];
-        const isolated = [];
-        for (const kw of allNodes) {
-            const hasParent = parents.has(kw) && parents.get(kw).length > 0;
-            const hasChild = (children.get(kw) || []).length > 0;
-            if (!hasParent) {
-                if (hasChild) roots.push(kw);
-                else isolated.push(kw);
+        for (const [id, node] of nodes.entries()) {
+            if (!node.parents || node.parents.length === 0) {
+                roots.push(id);
             }
         }
-        roots.sort();
-        isolated.sort();
-
-        for (const root of roots) {
-            layoutSubtree(root, 0);
-            cursorY += STJ_TREE_V_GAP * 2;
+        if (roots.length === 0 && nodes.size > 0) {
+            roots.push(nodes.keys().next().value);
         }
 
-        for (const node of isolated) {
-            positions.set(node, { x: 0, y: cursorY });
-            cursorY += STJ_TREE_CELL_H + STJ_TREE_V_GAP;
+        const queue = [];
+        for (const r of roots) {
+            depthMap.set(r, 0);
+            queue.push(r);
         }
 
-        const unvisited = [...allNodes].filter(k => !visited.has(k));
-        for (const node of unvisited) {
-            positions.set(node, { x: 0, y: cursorY });
-            cursorY += STJ_TREE_CELL_H + STJ_TREE_V_GAP;
+        while (queue.length > 0) {
+            const currId = queue.shift();
+            const currDepth = depthMap.get(currId) ?? 0;
+            const currNode = nodes.get(currId);
+            if (!currNode) continue;
+            for (const childId of currNode.children || []) {
+                const nextDepth = currDepth + 1;
+                if (!depthMap.has(childId) || depthMap.get(childId) < nextDepth) {
+                    depthMap.set(childId, nextDepth);
+                    queue.push(childId);
+                }
+            }
         }
 
-        return { positions, children };
+        let fallbackIdx = 0;
+        for (const id of nodes.keys()) {
+            if (!depthMap.has(id)) {
+                depthMap.set(id, 0);
+            }
+        }
+
+        const columns = new Map();
+        for (const cell of cellArray) {
+            const id = getNodeKeyForCell(cell) || `cell_idx:${fallbackIdx++}`;
+            const d = depthMap.get(id) ?? 0;
+            if (!columns.has(d)) columns.set(d, []);
+            columns.get(d).push({ id, cell });
+        }
+
+        const sortedDepths = Array.from(columns.keys()).sort((a, b) => a - b);
+        const colGap = 240;
+        const rowGap = 110;
+        const startX = 24;
+        const startY = 24;
+
+        for (const d of sortedDepths) {
+            const items = columns.get(d) || [];
+            items.forEach((item, rowIdx) => {
+                positions.set(item.id, {
+                    x: startX + d * colGap,
+                    y: startY + rowIdx * rowGap,
+                    depth: d,
+                    row: rowIdx,
+                    cell: item.cell
+                });
+            });
+        }
+
+        return { positions, edges, depthMap };
     }
 
-function _stjDrawConnections(container, positions, children) {
+    function _stjApplyTreeLayout(layout, container, svgEl) {
+        if (!layout || !container) return;
+        const { positions, edges } = layout;
+
+        for (const [id, pos] of positions.entries()) {
+            if (!pos.cell) continue;
+            pos.cell.setAttribute('data-tree-node-id', id);
+            pos.cell.style.transform = `translate(${pos.x}px, ${pos.y}px)`;
+        }
+
+        if (!svgEl) return;
+        while (svgEl.firstChild) {
+            svgEl.removeChild(svgEl.firstChild);
+        }
+
+        const svgNS = 'http://www.w3.org/2000/svg';
+        for (const edge of edges || []) {
+            const fromPos = positions.get(edge.from);
+            const toPos = positions.get(edge.to);
+            if (!fromPos || !toPos) continue;
+
+            const x1 = fromPos.x + 170;
+            const y1 = fromPos.y + 36;
+            const x2 = toPos.x;
+            const y2 = toPos.y + 36;
+            const midX = (x1 + x2) / 2;
+
+            const path = document.createElementNS(svgNS, 'path');
+            path.setAttribute('d', `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`);
+            path.setAttribute('fill', 'none');
+            path.setAttribute('stroke', 'currentColor');
+            path.setAttribute('stroke-width', '1.5');
+            svgEl.appendChild(path);
+        }
+    }
+    
+    function _stjDrawConnections(container, positions, children) {
         const old = container.querySelector(':scope > .stj-tree-svg');
         if (old) old.remove();
 
@@ -3843,73 +3937,33 @@ function _stjDrawConnections(container, positions, children) {
         return `${nodes.join('|')}#${edges.join(',')}`;
     }
 
-    function _stjSyncStandalonePanel(containerEl, graph) {
-        const panelBody = document.getElementById('stj_standalone_body');
-        if (!panelBody || !containerEl) return;
+    function _stjSyncStandalonePanel(entries, cells) {
+        const panel = document.getElementById('stj_standalone_panel');
+        if (!panel) return;
 
-        const connectedSet = new Set();
-        for (const [parentKw, childKws] of (graph?.children || new Map()).entries()) {
-            if (Array.isArray(childKws) && childKws.length > 0) {
-                connectedSet.add(parentKw);
-                for (const c of childKws) connectedSet.add(c);
-            }
-        }
-        for (const [childKw, parentKws] of (graph?.parents || new Map()).entries()) {
-            if (Array.isArray(parentKws) && parentKws.length > 0) {
-                connectedSet.add(childKw);
-                for (const p of parentKws) connectedSet.add(p);
+        const graph = _stjBuildChoiceGraph(entries, cells);
+        const standaloneNodes = [];
+
+        for (const [id, node] of graph.nodes.entries()) {
+            const hasParent = Array.isArray(node.parents) && node.parents.length > 0;
+            const hasChild = Array.isArray(node.children) && node.children.length > 0;
+            if (!hasParent && !hasChild) {
+                standaloneNodes.push(node);
             }
         }
 
-        panelBody.innerHTML = '';
-        const sourceCells = Array.from(containerEl.querySelectorAll(':scope > .stj-keyword-item'));
-        const standaloneCells = sourceCells.filter(cell => {
-            const kw = getCellKeyword(cell).trim();
-            return !kw || !connectedSet.has(kw);
-        });
-
-        if (standaloneCells.length === 0) {
-            const emptyEl = document.createElement('div');
-            emptyEl.className = 'stj-standalone-empty';
-            emptyEl.textContent = _t('stj.standalone.empty', '独立セルはありません');
-            panelBody.appendChild(emptyEl);
-            return;
+        panel.innerHTML = '';
+        for (const node of standaloneNodes) {
+            const item = document.createElement('div');
+            item.className = 'stj-standalone-item';
+            item.setAttribute('data-node-id', node.id);
+            if (node.uid) {
+                item.setAttribute('data-entry-uid', node.uid);
+            }
+            const displayName = node.entry ? getEntryKeyword(node.entry) : node.label;
+            item.textContent = displayName || node.uid || node.id;
+            panel.appendChild(item);
         }
-
-        standaloneCells.forEach((cell, idx) => {
-            cell.dataset.stjIsStandaloneCell = '1';
-            const card = document.createElement('div');
-            card.className = 'stj-keyword-item stj-standalone-cell-item';
-            card.setAttribute('data-keyword', getCellKeyword(cell));
-            card.setAttribute('data-image-list', cell.getAttribute('data-image-list') || '[]');
-
-            const previewDiv = document.createElement('div');
-            previewDiv.className = 'stj-image-preview';
-            previewDiv.id = `stj_standalone_preview_${idx}`;
-            previewDiv.style.position = 'relative';
-
-            const ph = document.createElement('div');
-            ph.className = 'stj-preview-text';
-            ph.textContent = _t('stj.preview.placeholder', 'プレビュー');
-            previewDiv.appendChild(ph);
-
-            const kwDisplay = document.createElement('div');
-            kwDisplay.className = 'stj-keyword-display';
-            kwDisplay.textContent = getCellKeyword(cell);
-
-            card.appendChild(previewDiv);
-            card.appendChild(kwDisplay);
-            panelBody.appendChild(card);
-
-            card.addEventListener('click', (e) => {
-                if (e.target.closest('button')) return;
-                if (isDialogActive) return;
-                openCellModal(cell);
-            });
-
-            const charName = document.getElementById('stj_char_name_display')?.textContent || '';
-            updateImagePreview(previewDiv.id, charName, getCellImages(cell).join(','));
-        });
     }
 
     async function _stjApplyTreeLayout() {
@@ -4651,12 +4705,69 @@ function _stjDrawConnections(container, positions, children) {
         } catch (e) { console.error('保存データの読み込みに失敗しました', e); }
     }
 
-    function addKeywordRowWithData(container, index, data) {
+function getCellUid(cell) {
+        if (!cell) return '';
+        const v = cell.getAttribute('data-entry-uid');
+        return v !== null && v !== undefined ? String(v).trim() : '';
+    }
+
+    function setCellUid(cell, uid) {
+        if (!cell) return;
+        if (uid !== null && uid !== undefined && String(uid).trim() !== '') {
+            cell.setAttribute('data-entry-uid', String(uid).trim());
+        } else {
+            cell.removeAttribute('data-entry-uid');
+        }
+    }
+
+    function getEntryUid(entry) {
+        if (!entry || typeof entry !== 'object') return '';
+        const raw = entry.uid !== undefined && entry.uid !== null ? entry.uid : entry.id;
+        return raw !== undefined && raw !== null ? String(raw).trim() : '';
+    }
+
+    function getNodeKeyForEntry(entry, fallbackKw = '') {
+        const uid = getEntryUid(entry);
+        if (uid) return `uid:${uid}`;
+        const kw = String(fallbackKw || getEntryKeyword(entry) || '').trim();
+        return kw ? `kw:${kw}` : '';
+    }
+
+    function getNodeKeyForCell(cell) {
+        const uid = getCellUid(cell);
+        if (uid) return `uid:${uid}`;
+        const kw = getCellKeyword(cell).trim();
+        return kw ? `kw:${kw}` : '';
+    }
+
+    function findEntryByNodeKey(entries, nodeKey) {
+        if (!entries || !nodeKey) return null;
+        const keyStr = String(nodeKey);
+        const list = Array.isArray(entries) ? entries : Object.values(entries);
+
+        if (keyStr.startsWith('uid:')) {
+            const uid = keyStr.slice(4);
+            if (!Array.isArray(entries) && entries[uid]) return entries[uid];
+            return list.find(e => getEntryUid(e) === uid) || null;
+        }
+
+        if (keyStr.startsWith('kw:')) {
+            const kw = keyStr.slice(3);
+            return findEntryByKeyword(entries, kw);
+        }
+
+        return list.find(e => getNodeKeyForEntry(e) === keyStr) || findEntryByKeyword(entries, keyStr);
+    }
+    
+function addKeywordRowWithData(container, index, data) {
         const newItem = document.createElement('div');
         newItem.className = 'stj-keyword-item';
         const images = data.images || [];
         newItem.setAttribute('data-image-list', JSON.stringify(images));
         newItem.setAttribute('data-keyword', data.keyword || '');
+        if (data.uid !== undefined && data.uid !== null && String(data.uid).trim() !== '') {
+            newItem.setAttribute('data-entry-uid', String(data.uid).trim());
+        }
         newItem.innerHTML = `
             <div class="stj-image-preview" id="stj_preview_${index}" style="position: relative;">
                 <div class="stj-preview-text">${_t('stj.preview.placeholder', 'プレビュー')}</div>
