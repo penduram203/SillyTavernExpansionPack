@@ -1,5 +1,6 @@
 // gic_lorebook.js
 // ロアブック駆動で画像生成プロンプトを切り替えるモジュール。
+
 // ★ v6 修正（テンプレート）:
 //   - templates / selectedTemplate に対応
 //   - エントリ毎に複数のテンプレート（img_prompt / negative_prompt ペア）を保持
@@ -20,6 +21,10 @@ const DEFAULT_SETTINGS = {
     quiet: false,
     fallbackToLast: false,
     verbose: true,
+    // ★ 生成前に画像生成サーバーへの接続を確認する
+    checkSdBeforeGenerate: true,
+    sdPingTimeoutMs: 4000,      // 接続確認の制限時間
+    sdMaxWaitMs: 120000,        // /sd 完了待ちの上限（超えたら処理を打ち切ってロック解除）
 };
 
 let settings = { ...DEFAULT_SETTINGS };
@@ -738,6 +743,124 @@ async function loadSlashModules() {
 }
 
 // ===== /sd 実行 =====
+// ============================================================
+// ★ 画像生成サーバーの接続確認（ST の SD 拡張と同じ ping API を使用）
+//   - 成功は 60 秒、失敗は 30 秒キャッシュ（毎回の確認待ちを避ける）
+//   - クラウド系ソース（ping API が無いもの）は確認せず生成を許可
+// ============================================================
+const SD_PING_OK_TTL_MS = 60000;
+const SD_PING_NG_TTL_MS = 30000;
+let _sdPingCache = { key: '', ok: null, at: 0, reason: '' };
+let _lastSdUnavailableToastAt = 0;
+
+function getSdPingTarget() {
+    const sd = getContext()?.extensionSettings?.sd || {};
+    const source = String(sd.source || '');
+    switch (source) {
+        case 'auto':       return { source, endpoint: '/api/sd/ping',            body: { url: sd.auto_url, auth: sd.auto_auth } };
+        case 'vlad':       return { source, endpoint: '/api/sd/ping',            body: { url: sd.vlad_url, auth: sd.vlad_auth } };
+        case 'drawthings': return { source, endpoint: '/api/sd/drawthings/ping', body: { url: sd.drawthings_url, auth: sd.drawthings_auth } };
+        case 'comfy':      return { source, endpoint: '/api/sd/comfy/ping',      body: { url: sd.comfy_url } };
+        case 'sdcpp':      return { source, endpoint: '/api/sd/sdcpp/ping',      body: { url: sd.sdcpp_url } };
+        case '': case 'none': return { source, endpoint: null, noSource: true };
+        default:           return { source, endpoint: null };
+    }
+}
+
+function markSdUnavailable(reason) {
+    const t = getSdPingTarget();
+    _sdPingCache = { key: `${t.source}|${t.body?.url || ''}`, ok: false, at: Date.now(), reason };
+}
+
+async function checkSdAvailable() {
+    if (settings.checkSdBeforeGenerate === false) return { ok: true, reason: 'check-disabled' };
+    const t = getSdPingTarget();
+    if (t.noSource) return { ok: false, reason: '画像生成ソースが未設定' };
+    if (!t.endpoint) return { ok: true, reason: `unchecked(${t.source})` };
+    if (!t.body?.url) return { ok: false, reason: `${t.source} の URL が未設定` };
+
+    const key = `${t.source}|${t.body.url}`;
+    const age = Date.now() - _sdPingCache.at;
+    if (_sdPingCache.key === key && _sdPingCache.ok !== null &&
+        age < (_sdPingCache.ok ? SD_PING_OK_TTL_MS : SD_PING_NG_TTL_MS)) {
+        return { ok: _sdPingCache.ok, reason: `${_sdPingCache.reason}（キャッシュ）` };
+    }
+
+    // comfy_boot.js の偽レスポンスを避けるため元の fetch を使う
+    const rawFetch = window.__gicOriginalFetch || window.fetch;
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), settings.sdPingTimeoutMs || 4000);
+    let ok = false, reason = '';
+    try {
+        const res = await rawFetch(t.endpoint, {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify(t.body),
+            signal: ac.signal,
+        });
+        ok = res.ok;
+        reason = ok ? '接続OK' : `HTTP ${res.status}`;
+    } catch (e) {
+        reason = e?.name === 'AbortError' ? `応答なし（${settings.sdPingTimeoutMs || 4000}ms）` : String(e?.message || e);
+    } finally {
+        clearTimeout(timer);
+    }
+    _sdPingCache = { key, ok, at: Date.now(), reason };
+    return { ok, reason };
+}
+
+function notifySdUnavailable(reason) {
+    const now = Date.now();
+    if (now - _lastSdUnavailableToastAt < 60000) return;
+    _lastSdUnavailableToastAt = now;
+    const msg = `画像生成サーバーに接続できないため画像生成をスキップしました（${reason}）`;
+    try {
+        if (window.GicApi?.showBottomToast) window.GicApi.showBottomToast(msg);
+        else window.toastr?.warning?.(msg);
+    } catch (e) { /* ignore */ }
+}
+
+// ★ /api/sd/* の生成リクエスト結果を記録（失敗時に無駄な待機をしないため）
+let _lastSdGenResult = { at: 0, ok: true, status: 0 };
+(function installSdResultMonitor() {
+    if (window.__gicSdResultMonitorInstalled) return;
+    window.__gicSdResultMonitorInstalled = true;
+    const prevFetch = window.fetch;
+    window.fetch = async function (input, init) {
+        const url = typeof input === 'string' ? input : (input?.url || '');
+        const isSdGen = url.includes('/api/sd/') && !/\/ping\b|\/models|\/samplers|\/schedulers|\/vaes|\/workflows?|\/upscalers|\/options/.test(url);
+        try {
+            const res = await prevFetch.apply(this, arguments);
+            if (isSdGen) _lastSdGenResult = { at: Date.now(), ok: res.ok, status: res.status };
+            return res;
+        } catch (e) {
+            if (isSdGen) _lastSdGenResult = { at: Date.now(), ok: false, status: 0 };
+            throw e;
+        }
+    };
+})();
+
+function sdFailedSince(startedAt) {
+    return _lastSdGenResult.at >= startedAt && !_lastSdGenResult.ok;
+}
+
+// ★ /sd の完了を上限時間付きで待つ（サーバーが固まっても処理を解放する）
+async function awaitSdWithLimit(sdPromise) {
+    const limit = settings.sdMaxWaitMs || 120000;
+    let timer = null;
+    const timeout = new Promise(r => { timer = setTimeout(() => r('timeout'), limit); });
+    try {
+        const r = await Promise.race([sdPromise.then(() => 'done', () => 'error'), timeout]);
+        if (r === 'timeout') {
+            console.warn(`[GIC-Lore] /sd が ${limit}ms 以内に完了しないため待機を打ち切りました`);
+            markSdUnavailable('生成タイムアウト');
+        }
+        return r;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 async function executeSd(prompt, negativePrompt = null, resolution = null) {
     const rawPrompt = cleanPrompt(prompt).replace(/[\r\n]+/g, ' ');
     const escaped = rawPrompt.replace(/"/g, '\\"');
@@ -850,26 +973,36 @@ async function executeSd(prompt, negativePrompt = null, resolution = null) {
 
     try {
         // 方式1: script.js 経由
-        try {
-            const mod = await import('../../../../../script.js');
-            if (typeof mod.executeSlashCommandsWithOptions === 'function') {
-                await mod.executeSlashCommandsWithOptions(cmd);
-                console.log('[GIC-Lore] ✅ 方式1 成功');
+        //   ★ 関数が存在して実行が失敗した場合は、他方式で /sd を再実行しない
+        //     （生成サーバー不調時に同じ生成を何度も試みて待ち時間が伸びるのを防ぐ）
+        let mod = null;
+        try { mod = await import('../../../../../script.js'); } catch (e) { /* ignore */ }
+        if (typeof mod?.executeSlashCommandsWithOptions === 'function') {
+            try {
+                const r = await mod.executeSlashCommandsWithOptions(cmd);
+                if (r?.isError) {
+                    console.warn('[GIC-Lore] 方式1 /sd エラー:', r.errorMessage || '');
+                    return false;
+                }
+                console.log('[GIC-Lore] ✅ 方式1 完了');
                 return true;
+            } catch (e) {
+                console.warn('[GIC-Lore] 方式1 失敗:', e?.message || e);
+                return false;
             }
-        } catch (e) {
-            console.warn('[GIC-Lore] 方式1 失敗:', e?.message || e);
         }
 
         // 方式2: window 経由
-        try {
-            if (typeof window.executeSlashCommandsWithOptions === 'function') {
-                await window.executeSlashCommandsWithOptions(cmd);
-                console.log('[GIC-Lore] ✅ 方式2 成功');
+        if (typeof window.executeSlashCommandsWithOptions === 'function') {
+            try {
+                const r = await window.executeSlashCommandsWithOptions(cmd);
+                if (r?.isError) return false;
+                console.log('[GIC-Lore] ✅ 方式2 完了');
                 return true;
+            } catch (e) {
+                console.warn('[GIC-Lore] 方式2 失敗:', e?.message || e);
+                return false;
             }
-        } catch (e) {
-            console.warn('[GIC-Lore] 方式2 失敗:', e?.message || e);
         }
 
         // 方式3: SlashCommandParser 直叩き
@@ -1034,6 +1167,7 @@ async function processChoiceCombined(worldName, entry, prompt, negativePrompt, r
         try { window.GicApi?.setCombinedPrepActive?.(true); } catch (e) { /* ignore */ }
 
         // ★ SD 生成をバックグラウンド開始
+        const sdStartedAt = Date.now();
         const sdPromise = executeSd(prompt, negativePrompt, resolution);
         // ★ 未処理の rejection を握りつぶす（下で明示的に await するため）
         sdPromise.catch((e) => console.warn('[GIC-Lore] SD 生成エラー:', e));
@@ -1078,14 +1212,19 @@ async function processChoiceCombined(worldName, entry, prompt, negativePrompt, r
             console.warn('[GIC-Lore] 事前登録画像の表示に失敗:', e);
         }
 
-        // 生成完了待ち（/sd の promise 解決 = 画像ファイルがチャットに反映済み）
-        try { await sdPromise; } catch (e) { /* ignore */ }
+        // 生成完了待ち（上限付き）
+        const sdOutcome = await awaitSdWithLimit(sdPromise);
+        const sdOk = sdOutcome === 'done' && (await sdPromise.catch(() => false)) !== false
+            && !sdFailedSince(sdStartedAt);
 
-        // ★ 登録待ちは最大 5 秒だけ猶予
-        //   sdPromise が解決した時点で大抵は登録も完了しているため、
-        //   ここで長く待たない（ユーザーロックの不要な延長を防ぐ）
-        const gracePromise = new Promise(r => setTimeout(() => r(false), 5000));
-        await Promise.race([registrationPromise, gracePromise]);
+        // ★ 登録待ちは生成成功時のみ最大 5 秒（失敗時は待たない）
+        if (sdOk) {
+            const gracePromise = new Promise(r => setTimeout(() => r(false), 5000));
+            await Promise.race([registrationPromise, gracePromise]);
+        } else {
+            console.warn('[GIC-Lore] 画像生成に失敗したため登録待ちをスキップ');
+            markSdUnavailable('生成失敗');
+        }
 
         // ★ ユーザー操作ロック解除
         try { window.GicApi?.unlockUserInput?.('combined-done'); } catch (e) { /* ignore */ }
@@ -1097,8 +1236,10 @@ async function processChoiceCombined(worldName, entry, prompt, negativePrompt, r
         // 入力ロック（生成完了まで）
         try { window.GicApi?.lockUserInput?.('combined-fallback-wait'); } catch (e) { /* ignore */ }
 
+        const sdStartedAt = Date.now();
         const sdPromise = executeSd(prompt, negativePrompt, resolution);
-        sdPromise.catch((e) => console.warn('[GIC-Lore] SD 生成エラー:', e));
+        let sdResult = 'pending';
+        sdPromise.then((v) => { sdResult = v; }, (e) => { sdResult = false; console.warn('[GIC-Lore] SD 生成エラー:', e); });
 
         const registrationPromise = waitForImageRegistration(
             entryKey,
@@ -1107,10 +1248,17 @@ async function processChoiceCombined(worldName, entry, prompt, negativePrompt, r
         );
 
         try {
-            await sdPromise;
+            await awaitSdWithLimit(sdPromise);
         } finally {
-            const gracePromise = new Promise(r => setTimeout(() => r(false), 5000));
-            await Promise.race([registrationPromise, gracePromise]);
+            const sdOk = sdResult === true && !sdFailedSince(sdStartedAt);
+            // ★ 登録待ちは生成成功時のみ最大 5 秒（失敗時は待たない）
+            if (sdOk) {
+                const gracePromise = new Promise(r => setTimeout(() => r(false), 5000));
+                await Promise.race([registrationPromise, gracePromise]);
+            } else {
+                console.warn('[GIC-Lore] 画像生成に失敗またはタイムアウトしたため登録待ちをスキップ');
+                markSdUnavailable('生成失敗');
+            }
 
             try {
                 await window.ImageDisplayExtension?.pickAndShowCurrentKeyword?.();
@@ -1285,6 +1433,19 @@ async function processChoice(force = false) {
             }
             return;
         }
+
+        // ★ 画像生成サーバーの接続確認（つながらなければ生成もロックもしない）
+        const sdState = await checkSdAvailable();
+        if (!sdState.ok) {
+            console.warn(`[GIC-Lore] 画像生成をスキップ: ${sdState.reason}`);
+            notifySdUnavailable(sdState.reason);
+            // 事前登録画像があれば待たずに表示
+            if (checkPreRegisteredImages(worldName, entry)) {
+                try { await window.ImageDisplayExtension?.pickAndShowCurrentKeyword?.(); } catch (e) { /* ignore */ }
+            }
+            return;
+        }
+        if (settings.verbose) console.log(`[GIC-Lore] 画像生成サーバー: ${sdState.reason}`);
 
         // ★ 生成コンテキストを保存（ファイル名リネーム用）
         _pendingGenerationContext = {
