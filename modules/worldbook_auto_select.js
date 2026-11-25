@@ -676,6 +676,7 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
                 max = Math.max(max, Number(uid));
             }
         }
+        console.debug(`${LOG} [DBG][snapshot] count=${set.size}, maxNumericUid=${max}, uids=[${Array.from(set).join(',')}]`);
         return { set, max };
     }
 
@@ -713,6 +714,7 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
         let appliedAny = false;
 
         const posSel = entryEl.querySelector('select[name="position"]');
+        console.debug(`${LOG} [DBG][posSel] found=${!!posSel}, options=${posSel ? Array.from(posSel.options).map(o => `${o.value}:${o.textContent?.trim()}(role=${o.getAttribute('data-role')})`).join(' | ') : 'none'}`);
         if (posSel && posSel.options && posSel.options.length > 0) {
             const opts = Array.from(posSel.options);
             const depthOpts = opts
@@ -729,6 +731,7 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
                 posIdx = (sys || depthOpts[0]).i;
             }
 
+            console.debug(`${LOG} [DBG][posSel] selectedIndex=${posSel.selectedIndex} -> targetIdx=${posIdx}`);
             if (posIdx >= 0 && posSel.selectedIndex !== posIdx) {
                 posSel.selectedIndex = posIdx;
                 _triggerInputAndChange(posSel);
@@ -739,6 +742,7 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
         }
 
         const roleSel = entryEl.querySelector('select[name="role"], select[name="entryRole"]');
+        console.debug(`${LOG} [DBG][roleSel] found=${!!roleSel}, currentIdx=${roleSel?.selectedIndex ?? -1}`);
         if (roleSel && roleSel.options && roleSel.options.length > 0) {
             const sysIdx = Array.from(roleSel.options).findIndex(o => {
                 const val = String(o.value ?? '').trim().toLowerCase();
@@ -759,6 +763,7 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
 
     function _applyDepthDefault(entryEl) {
         const depthInput = entryEl.querySelector('input[name="depth"]');
+        console.debug(`${LOG} [DBG][depth] found=${!!depthInput}, currentValue=${depthInput?.value ?? 'N/A'}`);
         if (!depthInput) return false;
 
         const targetDepth = String(NEW_ENTRY_DEPTH);
@@ -773,6 +778,7 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
         let appliedAny = false;
 
         const commentEl = entryEl.querySelector('textarea[name="comment"], input[name="comment"]');
+        console.debug(`${LOG} [DBG][comment] found=${!!commentEl}, value=${JSON.stringify(commentEl?.value ?? null)}`);
         if (commentEl) {
             const cur = String(commentEl.value ?? '');
             if (cur.trim() === '' || cur.trim() === NEW_ENTRY_NAME) {
@@ -787,6 +793,7 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
         }
 
         const keyEl = entryEl.querySelector('textarea[name="key"], input[name="key"]');
+        console.debug(`${LOG} [DBG][key] found=${!!keyEl}, value=${JSON.stringify(keyEl?.value ?? null)}`);
         if (keyEl) {
             const cur = String(keyEl.value ?? '');
             if (cur.trim() === '' || cur.trim() === NEW_ENTRY_NAME) {
@@ -805,6 +812,7 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
 
     function _applyStatusNormalDefault(entryEl) {
         const stateSel = entryEl.querySelector('select[name="entryStateSelector"], select[name="status"]');
+        console.debug(`${LOG} [DBG][status] found=${!!stateSel}, options=${stateSel ? Array.from(stateSel.options).map(o => `${o.value}:${o.textContent?.trim()}`).join(' | ') : 'none'}`);
         if (stateSel && stateSel.options && stateSel.options.length > 0) {
             let idx = Array.from(stateSel.options).findIndex(o =>
                 String(o.value ?? '').trim().toLowerCase() === 'normal'
@@ -837,7 +845,9 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
 
     function _applyNewEntryDefaults(entryEl) {
         if (!entryEl || !(entryEl instanceof Element)) return false;
-
+        const uid = entryEl.getAttribute('uid');
+        console.log(`${LOG} [DBG][applyStart] uid=${uid}`);
+        
         const posRoleOk = _applyPositionAndRole(entryEl);
         const depthOk = _applyDepthDefault(entryEl);
         const textOk = _applyCommentAndKeyDefault(entryEl);
@@ -847,8 +857,9 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
         const keyEl = entryEl.querySelector('textarea[name="key"], input[name="key"]');
         const hasComment = commentEl ? String(commentEl.value ?? '').trim().length > 0 : true;
         const hasKey = keyEl ? String(keyEl.value ?? '').trim().length > 0 : true;
-
-        return (posRoleOk || depthOk || textOk || statusOk) && hasComment && hasKey;
+        const ok = (posRoleOk || depthOk || textOk || statusOk) && hasComment && hasKey;
+        console.log(`${LOG} [DBG][applyResult] uid=${uid} ok=${ok} (posRole=${posRoleOk}, depth=${depthOk}, text=${textOk}, status=${statusOk}, hasComment=${hasComment}, hasKey=${hasKey})`);
+        return ok;
     }
 
     async function _applyNewEntryDefaultsWithRetry(uid) {
@@ -860,6 +871,7 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
         try {
             for (let i = 0; i < NEW_ENTRY_APPLY_RETRY_MAX; i++) {
                 const el = document.querySelector(`.world_entry[uid="${CSS.escape(cleanUid)}"]`);
+                console.debug(`${LOG} [DBG][retry] uid=${cleanUid} attempt=${i + 1}/${NEW_ENTRY_APPLY_RETRY_MAX} elFound=${!!el}`);
                 if (el && _applyNewEntryDefaults(el)) {
                     _appliedNewEntryUids.add(cleanUid);
                     console.log(`${LOG} 🆕 new entry defaults applied: uid=${cleanUid}`);
@@ -888,6 +900,7 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
     function _inspectWatchCandidates(watch) {
         if (!watch) return;
         if (Date.now() - watch.startedAt > NEW_ENTRY_WATCH_MS) {
+            console.log(`${LOG} [DBG][watch] timeout after ${NEW_ENTRY_WATCH_MS}ms`);
             _stopNewEntryWatch();
             return;
         }
@@ -909,6 +922,10 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
             }
         }
 
+        if (candidates.length > 0) {
+            console.log(`${LOG} [DBG][candidates] found=${candidates.map(c => c.uid).join(',')}`);
+        }
+
         if (candidates.length === 0) return;
 
         candidates.sort((a, b) => a.n - b.n);
@@ -926,7 +943,9 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
     }
 
     function _startNewEntryWatch() {
-        if (_getSettings().newEntryDefaults === false) return;
+        const enabled = _getSettings().newEntryDefaults !== false;
+        console.log(`${LOG} [DBG][watchStart] enabled=${enabled}, creatingSize=${_creating.size}`);
+        if (!enabled) return;
         if (_creating.size > 0) return;
 
         _stopNewEntryWatch();
@@ -965,7 +984,11 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
 
         document.addEventListener('click', (e) => {
             const btn = e.target?.closest?.('#world_popup_new, [id*="world_popup_new"], [class*="world_new_entry"]');
+            if (e.target instanceof Element && /new|add|create/i.test(`${e.target.id} ${e.target.className} ${e.target.textContent}`)) {
+                console.debug(`${LOG} [DBG][click] targetId=${e.target.id} class=${e.target.className} matchedBtn=${!!btn}`);
+            }
             if (!btn) return;
+            console.log(`${LOG} [DBG][click] matched new entry button: id=${btn.id} class=${btn.className}`);
             _startNewEntryWatch();
         }, true);
 
