@@ -4651,12 +4651,69 @@ function _stjDrawConnections(container, positions, children) {
         } catch (e) { console.error('保存データの読み込みに失敗しました', e); }
     }
 
+    function getCellUid(cell) {
+        if (!cell) return '';
+        const v = cell.getAttribute('data-entry-uid');
+        return v !== null && v !== undefined ? String(v).trim() : '';
+    }
+
+    function setCellUid(cell, uid) {
+        if (!cell) return;
+        if (uid !== null && uid !== undefined && String(uid).trim() !== '') {
+            cell.setAttribute('data-entry-uid', String(uid).trim());
+        } else {
+            cell.removeAttribute('data-entry-uid');
+        }
+    }
+
+    function getEntryUid(entry) {
+        if (!entry || typeof entry !== 'object') return '';
+        const raw = entry.uid !== undefined && entry.uid !== null ? entry.uid : entry.id;
+        return raw !== undefined && raw !== null ? String(raw).trim() : '';
+    }
+
+    function getNodeKeyForEntry(entry, fallbackKw = '') {
+        const uid = getEntryUid(entry);
+        if (uid) return `uid:${uid}`;
+        const kw = String(fallbackKw || getEntryKeyword(entry) || '').trim();
+        return kw ? `kw:${kw}` : '';
+    }
+
+    function getNodeKeyForCell(cell) {
+        const uid = getCellUid(cell);
+        if (uid) return `uid:${uid}`;
+        const kw = getCellKeyword(cell).trim();
+        return kw ? `kw:${kw}` : '';
+    }
+
+    function findEntryByNodeKey(entries, nodeKey) {
+        if (!entries || !nodeKey) return null;
+        const keyStr = String(nodeKey);
+        const list = Array.isArray(entries) ? entries : Object.values(entries);
+
+        if (keyStr.startsWith('uid:')) {
+            const uid = keyStr.slice(4);
+            if (!Array.isArray(entries) && entries[uid]) return entries[uid];
+            return list.find(e => getEntryUid(e) === uid) || null;
+        }
+
+        if (keyStr.startsWith('kw:')) {
+            const kw = keyStr.slice(3);
+            return findEntryByKeyword(entries, kw);
+        }
+
+        return list.find(e => getNodeKeyForEntry(e) === keyStr) || findEntryByKeyword(entries, keyStr);
+    }
+
     function addKeywordRowWithData(container, index, data) {
         const newItem = document.createElement('div');
         newItem.className = 'stj-keyword-item';
         const images = data.images || [];
         newItem.setAttribute('data-image-list', JSON.stringify(images));
         newItem.setAttribute('data-keyword', data.keyword || '');
+        if (data.uid !== undefined && data.uid !== null && String(data.uid).trim() !== '') {
+            newItem.setAttribute('data-entry-uid', String(data.uid).trim());
+        }
         newItem.innerHTML = `
             <div class="stj-image-preview" id="stj_preview_${index}" style="position: relative;">
                 <div class="stj-preview-text">${_t('stj.preview.placeholder', 'プレビュー')}</div>
