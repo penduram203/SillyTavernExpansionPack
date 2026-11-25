@@ -1159,19 +1159,20 @@ function waitForImageRegistration(entryKey, initialCount, timeoutMs = 60000) {
 async function processChoiceCombined(worldName, entry, prompt, negativePrompt, resolution, hasPreRegistered, entryKey) {
     // ★ 事前登録画像の数を記録（新画像検出の基準）
     const initialRegisteredCount = getRegisteredFilesForEntry(entryKey).length;
-
+    
     if (hasPreRegistered) {
         console.log(`[GIC-Lore] 🎨 合体モード（事前登録あり）: 5秒後に表示、裏で生成`);
-
+        
         // 画像表示をロック（5秒間は前の画像を維持）
         try { window.GicApi?.setCombinedPrepActive?.(true); } catch (e) { /* ignore */ }
-
+        
         // ★ SD 生成をバックグラウンド開始
         const sdStartedAt = Date.now();
         const sdPromise = executeSd(prompt, negativePrompt, resolution);
+        
         // ★ 未処理の rejection を握りつぶす（下で明示的に await するため）
         sdPromise.catch((e) => console.warn('[GIC-Lore] SD 生成エラー:', e));
-
+        
         // ★ 登録完了待ちを sdPromise より先に開始
         //   → /sd 内部で登録イベントが先に発火しても取りこぼさない
         const registrationPromise = waitForImageRegistration(
@@ -1179,13 +1180,13 @@ async function processChoiceCombined(worldName, entry, prompt, negativePrompt, r
             initialRegisteredCount,
             60000
         );
-
+        
         // 5秒待機
         await new Promise(r => setTimeout(r, 5000));
-
+        
         // 準備中フラグ解除（画像表示ロックを解除）
         try { window.GicApi?.setCombinedPrepActive?.(false); } catch (e) { /* ignore */ }
-
+        
         // ★ 状態表示を「画像準備中…」→「画像生成中…」に更新
         try {
             window.dispatchEvent(new CustomEvent('gic-image-generation-started', {
@@ -1200,23 +1201,32 @@ async function processChoiceCombined(worldName, entry, prompt, negativePrompt, r
                 },
             }));
         } catch (e) { /* ignore */ }
-
+        
         // ★ ユーザー操作ロック
         try { window.GicApi?.lockUserInput?.('combined-wait'); } catch (e) { /* ignore */ }
-
+        
         // 事前登録画像を表示
+        //   ★ 修正: pickAndShowCurrentKeyword が失敗した場合、
+        //     showImageByEntryKey で entryKey から直接画像を表示する
         try {
-            await window.ImageDisplayExtension?.pickAndShowCurrentKeyword?.();
-            console.log(`[GIC-Lore] 🖼️ 事前登録画像を表示`);
+            let shown = await window.ImageDisplayExtension?.pickAndShowCurrentKeyword?.();
+            if (!shown) {
+                shown = await window.ImageDisplayExtension?.showImageByEntryKey?.(entryKey);
+            }
+            if (shown) {
+                console.log(`[GIC-Lore] 🖼️ 事前登録画像を表示 (entryKey=${entryKey})`);
+            } else {
+                console.warn('[GIC-Lore] 事前登録画像の表示に失敗（キーワード一致なし・entryKey一致なし）');
+            }
         } catch (e) {
             console.warn('[GIC-Lore] 事前登録画像の表示に失敗:', e);
         }
-
+        
         // 生成完了待ち（上限付き）
         const sdOutcome = await awaitSdWithLimit(sdPromise);
         const sdOk = sdOutcome === 'done' && (await sdPromise.catch(() => false)) !== false
             && !sdFailedSince(sdStartedAt);
-
+        
         // ★ 登録待ちは生成成功時のみ最大 5 秒（失敗時は待たない）
         if (sdOk) {
             const gracePromise = new Promise(r => setTimeout(() => r(false), 5000));
@@ -1224,33 +1234,43 @@ async function processChoiceCombined(worldName, entry, prompt, negativePrompt, r
         } else {
             console.warn('[GIC-Lore] 画像生成に失敗したため登録待ちをスキップ');
             markSdUnavailable('生成失敗');
+            
+            // ★ 修正: 生成失敗時も entryKey から事前登録画像を再表示
+            try {
+                const shown = await window.ImageDisplayExtension?.showImageByEntryKey?.(entryKey);
+                if (shown) {
+                    console.log(`[GIC-Lore] 🖼️ 生成失敗 → entryKey から事前登録画像を再表示`);
+                }
+            } catch (e) { /* ignore */ }
         }
-
+        
         // ★ ユーザー操作ロック解除
         try { window.GicApi?.unlockUserInput?.('combined-done'); } catch (e) { /* ignore */ }
-
+        
         console.log(`[GIC-Lore] ✅ 合体モード完了`);
+        
     } else {
         console.log(`[GIC-Lore] 🎨 合体モード（事前登録なし）: 生成を待機`);
-
+        
         // 入力ロック（生成完了まで）
         try { window.GicApi?.lockUserInput?.('combined-fallback-wait'); } catch (e) { /* ignore */ }
-
+        
         const sdStartedAt = Date.now();
         const sdPromise = executeSd(prompt, negativePrompt, resolution);
         let sdResult = 'pending';
         sdPromise.then((v) => { sdResult = v; }, (e) => { sdResult = false; console.warn('[GIC-Lore] SD 生成エラー:', e); });
-
+        
         const registrationPromise = waitForImageRegistration(
             entryKey,
             initialRegisteredCount,
             60000
         );
-
+        
         try {
             await awaitSdWithLimit(sdPromise);
         } finally {
             const sdOk = sdResult === true && !sdFailedSince(sdStartedAt);
+            
             // ★ 登録待ちは生成成功時のみ最大 5 秒（失敗時は待たない）
             if (sdOk) {
                 const gracePromise = new Promise(r => setTimeout(() => r(false), 5000));
@@ -1259,12 +1279,21 @@ async function processChoiceCombined(worldName, entry, prompt, negativePrompt, r
                 console.warn('[GIC-Lore] 画像生成に失敗またはタイムアウトしたため登録待ちをスキップ');
                 markSdUnavailable('生成失敗');
             }
-
+            
+            // ★ 修正: pickAndShowCurrentKeyword が失敗した場合、
+            //     showImageByEntryKey で entryKey から直接画像を表示する
             try {
-                await window.ImageDisplayExtension?.pickAndShowCurrentKeyword?.();
-                console.log(`[GIC-Lore] 🖼️ 生成画像を表示`);
+                let shown = await window.ImageDisplayExtension?.pickAndShowCurrentKeyword?.();
+                if (!shown) {
+                    shown = await window.ImageDisplayExtension?.showImageByEntryKey?.(entryKey);
+                }
+                if (shown) {
+                    console.log(`[GIC-Lore] 🖼️ 生成画像を表示 (entryKey=${entryKey})`);
+                } else {
+                    console.warn('[GIC-Lore] 生成画像の表示に失敗');
+                }
             } catch (e) { /* ignore */ }
-
+            
             try { window.GicApi?.unlockUserInput?.('combined-fallback-done'); } catch (e) { /* ignore */ }
         }
     }
@@ -1439,9 +1468,15 @@ async function processChoice(force = false) {
         if (!sdState.ok) {
             console.warn(`[GIC-Lore] 画像生成をスキップ: ${sdState.reason}`);
             notifySdUnavailable(sdState.reason);
+        
             // 事前登録画像があれば待たずに表示
             if (checkPreRegisteredImages(worldName, entry)) {
-                try { await window.ImageDisplayExtension?.pickAndShowCurrentKeyword?.(); } catch (e) { /* ignore */ }
+                try {
+                    let shown = await window.ImageDisplayExtension?.pickAndShowCurrentKeyword?.();
+                    if (!shown) {
+                        shown = await window.ImageDisplayExtension?.showImageByEntryKey?.(_pendingGenerationContext.entryKey);
+                    }
+                } catch (e) { /* ignore */ }
             }
             return;
         }
