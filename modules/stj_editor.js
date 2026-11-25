@@ -3807,8 +3807,8 @@ async function exportUnifiedBundleJson(options = {}) {
                 const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
                 path.setAttribute('d',
                     `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`);
-                path.setAttribute('stroke', '#4a90e2');
-                path.setAttribute('stroke-width', '2');
+                path.setAttribute('stroke', '#ffffff');
+                path.setAttribute('stroke-width', '3');
                 path.setAttribute('fill', 'none');
                 path.setAttribute('stroke-linejoin', 'round');
                 svg.appendChild(path);
