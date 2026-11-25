@@ -662,21 +662,22 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
     const _pendingNewEntryUids = new Set();
 
     function _getEntryElements() {
-        return Array.from(document.querySelectorAll('.world_entry[uid]'));
+        return Array.from(document.querySelectorAll('.world_entry'));
     }
 
     function _snapshotEntryUids() {
         const set = new Set();
         let max = -1;
-        for (const el of _getEntryElements()) {
-            const uid = String(el.getAttribute('uid') || '').trim();
+        const els = _getEntryElements();
+        for (const el of els) {
+            const uid = String(el.getAttribute('uid') || el.getAttribute('data-uid') || '').trim();
             if (!uid) continue;
             set.add(uid);
             if (/^\d+$/.test(uid)) {
                 max = Math.max(max, Number(uid));
             }
         }
-        console.debug(`${LOG} [DBG][snapshot] count=${set.size}, maxNumericUid=${max}, uids=[${Array.from(set).join(',')}]`);
+        console.debug(`${LOG} [DBG][snapshot] worldEntryEls=${els.length}, uidCount=${set.size}, maxNumericUid=${max}, uids=[${Array.from(set).join(',')}]`);
         return { set, max };
     }
 
@@ -900,7 +901,8 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
     function _inspectWatchCandidates(watch) {
         if (!watch) return;
         if (Date.now() - watch.startedAt > NEW_ENTRY_WATCH_MS) {
-            console.log(`${LOG} [DBG][watch] timeout after ${NEW_ENTRY_WATCH_MS}ms`);
+            const nowEls = _getEntryElements();
+            console.log(`${LOG} [DBG][watch] timeout after ${NEW_ENTRY_WATCH_MS}ms (worldEntryEls=${nowEls.length}, lastAttrs=${nowEls.length ? Array.from(nowEls[nowEls.length - 1].attributes).map(a => `${a.name}=${a.value}`).join(' ') : 'none'})`);
             _stopNewEntryWatch();
             return;
         }
@@ -908,7 +910,7 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
 
         const candidates = [];
         for (const el of _getEntryElements()) {
-            const uid = String(el.getAttribute('uid') || '').trim();
+            const uid = String(el.getAttribute('uid') || el.getAttribute('data-uid') || '').trim();
             if (!uid) continue;
             if (watch.knownUids.has(uid) || _appliedNewEntryUids.has(uid) || _pendingNewEntryUids.has(uid)) {
                 continue;
@@ -960,8 +962,16 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
         _newEntryWatch = watch;
 
         const listContainer = document.querySelector('#world_popup_entries_list') || document.body;
+        console.debug(`${LOG} [DBG][watchStart] observing container id=${listContainer.id || 'body'} class=${listContainer.className || ''}`);
         try {
-            _newEntryObserver = new MutationObserver(() => {
+            _newEntryObserver = new MutationObserver((mutations) => {
+                for (const m of mutations) {
+                    for (const n of m.addedNodes) {
+                        if (n instanceof Element && (n.matches?.('.world_entry') || n.querySelector?.('.world_entry'))) {
+                            console.debug(`${LOG} [DBG][mutation] added entry-related node: tag=${n.tagName} class=${n.className} uid=${n.getAttribute?.('uid') || ''}`);
+                        }
+                    }
+                }
                 _inspectWatchCandidates(watch);
             });
             _newEntryObserver.observe(listContainer, { childList: true, subtree: true });
