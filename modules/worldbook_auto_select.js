@@ -36,6 +36,7 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
     const NEW_ENTRY_APPLY_RETRY_MAX = 12;
     const NEW_ENTRY_APPLY_RETRY_MS = 150;
     const NEW_ENTRY_DEPTH = 0;
+    const NEW_ENTRY_NAME = 'new';
 
     const RELOAD_DELAY_MS = 1000;
     const RELOAD_LOOP_WINDOW_MS = 60000;
@@ -693,7 +694,7 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
         }
     }
 
-    function _applyNewEntryDefaults(entryEl) {
+function _applyNewEntryDefaults(entryEl) {
         if (!entryEl) return false;
 
         const posSel = entryEl.querySelector('select[name="position"]');
@@ -732,6 +733,18 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
         if (depthInput) {
             depthInput.value = String(NEW_ENTRY_DEPTH);
             _triggerInput(depthInput);
+        }
+
+        const commentEl = entryEl.querySelector('textarea[name="comment"]');
+        if (commentEl) {
+            commentEl.value = NEW_ENTRY_NAME;
+            _triggerInputAndChange(commentEl);
+        }
+
+        const keyEl = entryEl.querySelector('textarea[name="key"]');
+        if (keyEl) {
+            keyEl.value = NEW_ENTRY_NAME;
+            _triggerInputAndChange(keyEl);
         }
 
         const stateSel = entryEl.querySelector('select[name="entryStateSelector"]');
