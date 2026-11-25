@@ -2320,16 +2320,16 @@ async function showImageByEntryKey(entryKey) {
                 const safeOn = (eventType, handler) => {
                     if (eventType && typeof eventSource.on === 'function') eventSource.on(eventType, handler);
                 };
-
+            
                 const immediateUpdate = () => {
-                    // ★ gic_lorebook.js が有効な場合は、USER_MESSAGE_RENDERED での updateImage をスキップ
-                    //   gic_lorebook.js が pickAndShowCurrentKeyword() を呼ぶ時に画像を更新する
+                    // ★ gic_lorebook.js が有効な場合は、message rendered での updateImage を完全にスキップ
                     if (window.GicLorebook?.getSettings?.()?.enabled === true) {
-                        console.debug('[ImageDisplay] gic_lorebook.js が有効なため USER_MESSAGE_RENDERED での updateImage をスキップ');
+                        console.debug('[ImageDisplay] gic_lorebook.js が有効なため message rendered での updateImage をスキップ');
                         return;
                     }
                     updateImage();
                 };
+            
                 safeOn(eventTypes.CHARACTER_MESSAGE_RENDERED, immediateUpdate);
                 safeOn(eventTypes.USER_MESSAGE_RENDERED, immediateUpdate);
 
