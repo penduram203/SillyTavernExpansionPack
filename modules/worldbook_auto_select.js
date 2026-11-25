@@ -3,15 +3,11 @@
 // ロアブックが存在しない場合はキャラ名と同じロアブックを自動作成し、
 // キャラクターとバインド（char.data.extensions.world）する。
 //
-// ★ v8.6:
-//   comment→key 自動同期の最終解。
-//   これまでの `_recentlyEditedUids` 依存を撤去し、
-//   payload の内容そのものから「comment 非空 && key 空」を検出して
-//   自動補正する方式に変更。これにより、どの保存経路（ST本体 / 他拡張）
-//   から /api/worldinfo/edit が呼ばれても確実に補正される。
-//   さらに worldinfo_updated 発火後に server を再検証する self-heal を追加。
-//   新規エントリ初期値（status=Normal, position=at Depth System, depth=0,
-//   comment/key="new"）を各項目独立適用＋MutationObserver＆リトライで確実化。
+// ★ v8.6+:
+//   comment→key 自動同期、新規エントリの初期値（status=Normal, position=at Depth System,
+//   depth=0, comment/key="new_N" 最小空き番号採番）、既存エントリ名変更時の同名ブロック＆復元、
+//   および削除済みエントリの残骸（content / template / 解像度 / ネガティブプロンプト /
+//   選択肢 / 変数 / LEXストア）完全クリーンアップを統合。
 
 console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no tracking)...');
 
@@ -73,6 +69,10 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
 
     // ★ v8.6: 二重補正防止用のセッションID
     let _lastHealAt = 0;
+
+    // 既存エントリの直前確定名（同名チェック・復元用）と自動採番中UID
+    const _entryLastValidNames = new Map();
+    const _autoNamingUids = new Set();
 
     // ============================================================
     // 基本ヘルパー
@@ -654,11 +654,10 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
     }
 
     // ============================================================
-    // 新規エントリ初期値（確実反映版）
+    // 新規エントリ初期値（確実反映・採番・同名禁止・残骸消去版）
     // ============================================================
     let _newEntryWatch = null;
     let _newEntryObserver = null;
-
     const _pendingNewEntryUids = new Set();
 
     function _getEntryElements() {
@@ -668,8 +667,7 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
     function _snapshotEntryUids() {
         const set = new Set();
         let max = -1;
-        const els = _getEntryElements();
-        for (const el of els) {
+        for (const el of _getEntryElements()) {
             const uid = String(el.getAttribute('uid') || el.getAttribute('data-uid') || '').trim();
             if (!uid) continue;
             set.add(uid);
@@ -679,40 +677,6 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
         }
         return { set, max };
     }
-
-    function _triggerInput(el) {
-        if (!el) return;
-        const $ = getJQuery();
-        try {
-            if ($) $(el).trigger('input');
-            else el.dispatchEvent(new Event('input', { bubbles: true }));
-        } catch (e) {
-            try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch (e2) { /* ignore */ }
-        }
-    }
-
-    function _triggerInputAndChange(el) {
-        if (!el) return;
-        const $ = getJQuery();
-        try {
-            if ($) {
-                $(el).trigger('input');
-                $(el).trigger('change');
-            } else {
-                el.dispatchEvent(new Event('input', { bubbles: true }));
-                el.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-        } catch (e) {
-            try {
-                el.dispatchEvent(new Event('input', { bubbles: true }));
-                el.dispatchEvent(new Event('change', { bubbles: true }));
-            } catch (e2) { /* ignore */ }
-        }
-    }
-
-    // 既存エントリの直前確定名（同名チェック・復元用）と自動採番中UID
-    const _entryLastValidNames = new Map();
-    const _autoNamingUids = new Set();
 
     function _normalizeEntryName(name) {
         return String(name ?? '').trim().toLowerCase();
@@ -815,12 +779,151 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
         } catch (e) { /* ignore */ }
         try { alert(msg); } catch (e) { console.warn(LOG, msg); }
     }
-                                                      
+
+    function _purgeLexEntryResidue(worldName, uid, entryComment, entryEl = null) {
+        const keysToPurge = new Set();
+        if (entryComment && String(entryComment).trim()) {
+            keysToPurge.add(String(entryComment).trim());
+        }
+        if (uid !== undefined && uid !== null && String(uid).trim() !== '') {
+            keysToPurge.add(String(uid).trim());
+            keysToPurge.add(`uid_${String(uid).trim()}`);
+        }
+
+        // 1. キャラクター拡張データ内の Lorebook_Expansion ストアから残骸を削除
+        try {
+            const char = getCurrentChar();
+            const root = char?.data?.extensions?.lorebook_expansion;
+            if (root && typeof root === 'object') {
+                const targetWorlds = worldName ? [worldName] : Object.keys(root);
+                for (const w of targetWorlds) {
+                    const bucket = root[w];
+                    if (!bucket || typeof bucket !== 'object') continue;
+                    for (const k of keysToPurge) {
+                        if (Object.prototype.hasOwnProperty.call(bucket, k)) {
+                            delete bucket[k];
+                        }
+                    }
+                }
+            }
+        } catch (e) { /* ignore */ }
+
+        // 2. LorebookExpansion 公開 API があればキャッシュ・ストアもクリア
+        try {
+            const lex = window.LorebookExpansion;
+            if (lex) {
+                if (typeof lex.deleteEntryData === 'function') {
+                    for (const k of keysToPurge) {
+                        lex.deleteEntryData(worldName, k);
+                    }
+                }
+                if (typeof lex.clearCache === 'function') {
+                    lex.clearCache(worldName);
+                }
+            }
+        } catch (e) { /* ignore */ }
+
+        // 3. ST 内部エントリの extensions / 独自プロパティ残骸をリセット
+        if (worldName && uid !== undefined && uid !== null) {
+            const stEntry = _getSTEntry(worldName, uid);
+            if (stEntry && typeof stEntry === 'object') {
+                stEntry.content = '';
+                if (stEntry.extensions && typeof stEntry.extensions === 'object') {
+                    delete stEntry.extensions.lorebook_expansion;
+                    delete stEntry.extensions.template;
+                    delete stEntry.extensions.resolution;
+                    delete stEntry.extensions.img_prompt;
+                    delete stEntry.extensions.Negative_prompt;
+                    delete stEntry.extensions.negative_prompt;
+                    delete stEntry.extensions.choices;
+                    delete stEntry.extensions.variables;
+                }
+                for (const prop of [
+                    'template', 'resolution', 'width', 'height',
+                    'img_prompt', 'Negative_prompt', 'negative_prompt',
+                    'choices', 'variables', 'lbe_data'
+                ]) {
+                    if (Object.prototype.hasOwnProperty.call(stEntry, prop)) {
+                        delete stEntry[prop];
+                    }
+                }
+            }
+        }
+
+        // 4. DOM 上の LEX 拡張フィールド（template / 解像度 / ネガティブプロンプト / 選択肢 / 変数）をリセット
+        if (entryEl && entryEl instanceof Element) {
+            const contentEl = entryEl.querySelector('textarea[name="content"], input[name="content"]');
+            if (contentEl && contentEl.value !== '') {
+                contentEl.value = '';
+                _triggerInputAndChange(contentEl);
+            }
+
+            const lexFields = entryEl.querySelectorAll(
+                '.lbe-panel input, .lbe-panel textarea, .lbe-panel select, ' +
+                '[class*="lbe-"] input, [class*="lbe-"] textarea, [class*="lbe-"] select, ' +
+                '[name*="template"], [name*="resolution"], [name*="negative"], [name*="Negative"], ' +
+                '[name*="img_prompt"], [name*="choice"], [name*="variable"]'
+            );
+            for (const field of lexFields) {
+                if (field instanceof HTMLSelectElement) {
+                    if (field.selectedIndex !== 0) {
+                        field.selectedIndex = 0;
+                        _triggerInputAndChange(field);
+                    }
+                } else if (field instanceof HTMLInputElement && (field.type === 'checkbox' || field.type === 'radio')) {
+                    if (field.checked) {
+                        field.checked = false;
+                        _triggerInputAndChange(field);
+                    }
+                } else if ('value' in field && field.value !== '') {
+                    field.value = '';
+                    _triggerInputAndChange(field);
+                }
+            }
+
+            const dynamicRows = entryEl.querySelectorAll(
+                '.lbe-choice-row, .lbe-choice-item, .lbe-var-row, .lbe-variable-row, .lbe-variable-item'
+            );
+            for (const row of dynamicRows) {
+                row.remove();
+            }
+        }
+    }
+
+    function _triggerInput(el) {
+        if (!el) return;
+        const $ = getJQuery();
+        try {
+            if ($) $(el).trigger('input');
+            else el.dispatchEvent(new Event('input', { bubbles: true }));
+        } catch (e) {
+            try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch (e2) { /* ignore */ }
+        }
+    }
+
+    function _triggerInputAndChange(el) {
+        if (!el) return;
+        const $ = getJQuery();
+        try {
+            if ($) {
+                $(el).trigger('input');
+                $(el).trigger('change');
+            } else {
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        } catch (e) {
+            try {
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            } catch (e2) { /* ignore */ }
+        }
+    }
+
     function _applyPositionAndRole(entryEl) {
         let appliedAny = false;
 
         const posSel = entryEl.querySelector('select[name="position"]');
-        console.debug(`${LOG} [DBG][posSel] found=${!!posSel}, options=${posSel ? Array.from(posSel.options).map(o => `${o.value}:${o.textContent?.trim()}(role=${o.getAttribute('data-role')})`).join(' | ') : 'none'}`);
         if (posSel && posSel.options && posSel.options.length > 0) {
             const opts = Array.from(posSel.options);
             const depthOpts = opts
@@ -837,7 +940,6 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
                 posIdx = (sys || depthOpts[0]).i;
             }
 
-            console.debug(`${LOG} [DBG][posSel] selectedIndex=${posSel.selectedIndex} -> targetIdx=${posIdx}`);
             if (posIdx >= 0 && posSel.selectedIndex !== posIdx) {
                 posSel.selectedIndex = posIdx;
                 _triggerInputAndChange(posSel);
@@ -848,7 +950,6 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
         }
 
         const roleSel = entryEl.querySelector('select[name="role"], select[name="entryRole"]');
-        console.debug(`${LOG} [DBG][roleSel] found=${!!roleSel}, currentIdx=${roleSel?.selectedIndex ?? -1}`);
         if (roleSel && roleSel.options && roleSel.options.length > 0) {
             const sysIdx = Array.from(roleSel.options).findIndex(o => {
                 const val = String(o.value ?? '').trim().toLowerCase();
@@ -869,7 +970,6 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
 
     function _applyDepthDefault(entryEl) {
         const depthInput = entryEl.querySelector('input[name="depth"]');
-        console.debug(`${LOG} [DBG][depth] found=${!!depthInput}, currentValue=${depthInput?.value ?? 'N/A'}`);
         if (!depthInput) return false;
 
         const targetDepth = String(NEW_ENTRY_DEPTH);
@@ -885,7 +985,7 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
         const uid = String(entryEl.getAttribute('uid') || entryEl.getAttribute('data-uid') || '').trim();
         const targetName = assignedName || _allocateNextNewEntryName(uid);
         if (uid) _autoNamingUids.add(uid);
- 
+
         const commentEl = entryEl.querySelector('textarea[name="comment"], input[name="comment"]');
         if (commentEl) {
             const cur = String(commentEl.value ?? '');
@@ -923,7 +1023,6 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
 
     function _applyStatusNormalDefault(entryEl) {
         const stateSel = entryEl.querySelector('select[name="entryStateSelector"], select[name="status"]');
-        console.debug(`${LOG} [DBG][status] found=${!!stateSel}, options=${stateSel ? Array.from(stateSel.options).map(o => `${o.value}:${o.textContent?.trim()}`).join(' | ') : 'none'}`);
         if (stateSel && stateSel.options && stateSel.options.length > 0) {
             let idx = Array.from(stateSel.options).findIndex(o =>
                 String(o.value ?? '').trim().toLowerCase() === 'normal'
@@ -960,13 +1059,17 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
         if (!uid) return false;
 
         const assignedName = _allocateNextNewEntryName(uid);
+        const worldName = _getCurrentEditorWorldName();
+
+        // 新規エントリ適用前に、同名(new_N)および同UIDに紐づく全残骸を消去
+        _purgeLexEntryResidue(worldName, uid, assignedName, entryEl);
+
         const posRoleOk = _applyPositionAndRole(entryEl);
         const depthOk = _applyDepthDefault(entryEl);
         const textOk = _applyCommentAndKeyDefault(entryEl, assignedName);
         const statusOk = _applyStatusNormalDefault(entryEl);
 
         // ST内部データにも初期値を直接同期（DOM再描画や保存時の巻き戻し防止）
-        const worldName = _getCurrentEditorWorldName();
         if (worldName) {
             const stEntry = _getSTEntry(worldName, uid);
             if (stEntry) {
@@ -975,16 +1078,30 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
                 stEntry.depth = NEW_ENTRY_DEPTH;
                 stEntry.comment = assignedName;
                 stEntry.key = [assignedName];
+                stEntry.content = '';
                 stEntry.constant = false;
                 stEntry.vectorized = false;
                 stEntry.disable = false;
             }
+            const guard = _emptySaveGuards.get(worldName);
+            if (guard?.entries?.[uid]) {
+                guard.entries[uid].content = '';
+                guard.entries[uid].comment = assignedName;
+                guard.entries[uid].key = [assignedName];
+            }
         }
+
+        // LEX が遅延マウントした直後にも残骸が再注入されないよう再クリーンアップ
+        setTimeout(() => {
+            const latestEl = document.querySelector(`.world_entry[uid="${CSS.escape(String(uid))}"]`);
+            _purgeLexEntryResidue(worldName, uid, assignedName, latestEl);
+        }, 250);
 
         const commentEl = entryEl.querySelector('textarea[name="comment"], input[name="comment"]');
         const keyEl = entryEl.querySelector('textarea[name="key"], input[name="key"]');
         const hasComment = commentEl ? String(commentEl.value ?? '').trim().length > 0 : true;
         const hasKey = keyEl ? String(keyEl.value ?? '').trim().length > 0 : true;
+
         return (posRoleOk || depthOk || textOk || statusOk) && hasComment && hasKey;
     }
 
@@ -1058,9 +1175,7 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
     }
 
     function _startNewEntryWatch() {
-        const enabled = _getSettings().newEntryDefaults !== false;
-        console.log(`${LOG} [DBG][watchStart] enabled=${enabled}, creatingSize=${_creating.size}`);
-        if (!enabled) return;
+        if (_getSettings().newEntryDefaults === false) return;
         if (_creating.size > 0) return;
 
         _stopNewEntryWatch();
@@ -1075,16 +1190,8 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
         _newEntryWatch = watch;
 
         const listContainer = document.querySelector('#world_popup_entries_list') || document.body;
-        console.debug(`${LOG} [DBG][watchStart] observing container id=${listContainer.id || 'body'} class=${listContainer.className || ''}`);
         try {
-            _newEntryObserver = new MutationObserver((mutations) => {
-                for (const m of mutations) {
-                    for (const n of m.addedNodes) {
-                        if (n instanceof Element && (n.matches?.('.world_entry') || n.querySelector?.('.world_entry'))) {
-                            console.debug(`${LOG} [DBG][mutation] added entry-related node: tag=${n.tagName} class=${n.className} uid=${n.getAttribute?.('uid') || ''}`);
-                        }
-                    }
-                }
+            _newEntryObserver = new MutationObserver(() => {
                 _inspectWatchCandidates(watch);
             });
             _newEntryObserver.observe(listContainer, { childList: true, subtree: true });
@@ -1107,19 +1214,36 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
 
         document.addEventListener('click', (e) => {
             const btn = e.target?.closest?.('#world_popup_new, [id*="world_popup_new"], [class*="world_new_entry"]');
-            if (e.target instanceof Element && /new|add|create/i.test(`${e.target.id} ${e.target.className} ${e.target.textContent}`)) {
-                console.debug(`${LOG} [DBG][click] targetId=${e.target.id} class=${e.target.className} matchedBtn=${!!btn}`);
-            }
             if (!btn) return;
-            console.log(`${LOG} [DBG][click] matched new entry button: id=${btn.id} class=${btn.className}`);
             _startNewEntryWatch();
+        }, true);
+
+        // エントリ削除ボタン押下時も、削除対象UID・名前の残骸情報をクリア
+        document.addEventListener('click', (e) => {
+            const delBtn = e.target?.closest?.('.world_entry .delete_entry, .world_entry [class*="delete"]');
+            if (!delBtn) return;
+            const entryEl = delBtn.closest('.world_entry');
+            const uid = String(entryEl?.getAttribute('uid') || entryEl?.getAttribute('data-uid') || '').trim();
+            const commentVal = String(
+                entryEl?.querySelector('textarea[name="comment"], input[name="comment"]')?.value ?? ''
+            ).trim();
+            const worldName = _getCurrentEditorWorldName();
+            if (uid) {
+                _entryLastValidNames.delete(uid);
+                _autoNamingUids.delete(uid);
+                _purgeLexEntryResidue(worldName, uid, commentVal, entryEl);
+                const guard = worldName ? _emptySaveGuards.get(worldName) : null;
+                if (guard?.entries && Object.prototype.hasOwnProperty.call(guard.entries, uid)) {
+                    delete guard.entries[uid];
+                }
+            }
         }, true);
 
         console.log(`${LOG} 🆕 new-entry defaults installed`);
     }
 
     // ============================================================
-    // comment→key 自動同期（v8.6）
+    // comment→key 自動同期（v8.6） + 同名エントリ変更ブロック
     // ============================================================
     let _commentToKeyInstalled = false;
 
@@ -1191,7 +1315,7 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
         _updateCommentAndKeyInSTData(uid, newValue);
 
         if (entryEl) {
-            const keyEl = entryEl.querySelector('textarea[name="key"]');
+            const keyEl = entryEl.querySelector('textarea[name="key"], input[name="key"]');
             if (keyEl && keyEl.value !== newValue) {
                 keyEl.value = newValue;
                 _triggerInputAndChange(keyEl);
@@ -1213,7 +1337,7 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
     function installCommentToKeySync() {
         if (_commentToKeyInstalled) return;
         _commentToKeyInstalled = true;
- 
+
         document.addEventListener('focusin', (e) => {
             const el = e.target;
             if (!(el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement)) return;
@@ -1255,6 +1379,22 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
 
             _entryLastValidNames.set(uid, String(el.value ?? ''));
             _syncCommentToKey(entryEl, uid, el.value);
+        }, true);
+
+        document.addEventListener('click', (e) => {
+            if (_getSettings().commentToKeySync === false) return;
+            if (_creating.size > 0) return;
+
+            const toggle = e.target?.closest?.('.inline-drawer-toggle');
+            if (!toggle) return;
+            const entryEl = toggle.closest('.world_entry');
+            if (!entryEl) return;
+            const uid = entryEl.getAttribute('uid');
+            if (!uid) return;
+
+            setTimeout(() => {
+                _resyncKeyUIToComment(entryEl, uid);
+            }, PANEL_SYNC_DELAY_MS);
         }, true);
 
         console.log(`${LOG} 📝 comment→key sync installed (payload auto-sync)`);
