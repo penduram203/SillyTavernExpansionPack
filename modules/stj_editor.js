@@ -3813,7 +3813,7 @@ async function exportUnifiedBundleJson(options = {}) {
                 path.setAttribute('stroke-linejoin', 'round');
                 svg.appendChild(path);
 
-                const sz = 14;
+                const sz = 21;
                 const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
                 arrow.setAttribute('points',
                     `${x2},${y2} ${x2 - sz},${y2 - sz / 1.5} ${x2 - sz},${y2 + sz / 1.5}`);
