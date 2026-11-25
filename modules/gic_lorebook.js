@@ -811,12 +811,27 @@ async function checkSdAvailable() {
 
 function notifySdUnavailable(reason) {
     const now = Date.now();
-    if (now - _lastSdUnavailableToastAt < 60000) return;
+    if (now - _lastSdUnavailableToastAt < 10000) return; // 10秒間は抑制
     _lastSdUnavailableToastAt = now;
-    const msg = `画像生成サーバーに接続できないため画像生成をスキップしました（${reason}）`;
+    
+    const msg = `画像生成スキップ (${reason})`;
     try {
-        if (window.GicApi?.showBottomToast) window.GicApi.showBottomToast(msg);
-        else window.toastr?.warning?.(msg);
+        let toast = document.getElementById('gic-sd-unavailable-toast');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'gic-sd-unavailable-toast';
+            toast.style.cssText = `
+                position: fixed; bottom: 20px; right: 20px;
+                background: rgba(0, 0, 0, 0.7); color: #fff;
+                padding: 4px 8px; border-radius: 4px; font-size: 12px;
+                z-index: 100000; pointer-events: none; opacity: 0;
+                transition: opacity 0.3s ease;
+            `;
+            document.body.appendChild(toast);
+        }
+        toast.textContent = msg;
+        toast.style.opacity = '1';
+        setTimeout(() => { toast.style.opacity = '0'; }, 3000);
     } catch (e) { /* ignore */ }
 }
 
@@ -1499,8 +1514,22 @@ async function processChoice(force = false) {
             console.log(`[GIC-Lore] 生成コンテキスト設定: entryKey="${_pendingGenerationContext.entryKey}", resolution=${resolution || '(未設定)'}, templateIndex=${pickedTemplate?.index ?? '(旧データ)'}`);
         }
 
-        // ★ 合体モード固定
+        // ★ 事前登録画像の有無を先に判定
         const hasPreRegistered = checkPreRegisteredImages(worldName, entry);
+
+        if (!prompt) {
+            console.warn('[GIC-Lore] プロンプトが抽出できませんでした');
+            // プロンプトが空でも、事前登録画像があれば表示して処理を終了する
+            if (hasPreRegistered && _pendingGenerationContext?.entryKey) {
+                try {
+                    await window.ImageDisplayExtension?.showImageByEntryKey?.(_pendingGenerationContext.entryKey);
+                    console.log(`[GIC-Lore] 🖼️ プロンプトなしだが事前登録画像を表示`);
+                } catch (e) {
+                    console.warn('[GIC-Lore] 事前登録画像の表示に失敗:', e);
+                }
+            }
+            return;
+        }
 
         // 生成開始通知（preparing フラグで 画像準備中/画像生成中 を切替）
         try {
