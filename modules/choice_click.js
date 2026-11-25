@@ -151,6 +151,22 @@
         }, 600);
     }
 
+    (function injectSelectedStyle() {
+        if (document.getElementById('choice-click-selected-style')) return;
+        const style = document.createElement('style');
+        style.id = 'choice-click-selected-style';
+        style.textContent = `
+            .lbe-choice-item.choice-click-selected {
+                opacity: 0.5 !important;
+                pointer-events: none !important;
+                cursor: not-allowed !important;
+                text-decoration: line-through !important;
+                filter: grayscale(80%) !important;
+            }
+        `;
+        document.head.appendChild(style);
+    })();
+    
     // ============================================================
     // 選択肢クリック処理
     // ============================================================
@@ -161,23 +177,26 @@
             console.warn(LOG, '選択肢テキストが空です');
             return;
         }
-
         event.preventDefault();
         event.stopPropagation();
-
+    
+        // ★ 追加: クリックされた選択肢をグレーアウト
+        item.classList.add('choice-click-selected');
+        item.setAttribute('aria-disabled', 'true');
+    
         const textarea = document.getElementById('send_textarea');
         if (!textarea) {
             console.warn(LOG, '#send_textarea が見つかりません');
             return;
         }
-
+    
         if (event.shiftKey) {
             setTextareaValue(textarea, num);
             textarea.focus();
             flashItem(item, 'input-only');
             return;
         }
-
+    
         const now = Date.now();
         if (now - _lastClickTime < CLICK_DEBOUNCE_MS) {
             console.debug(LOG, '連打防止のためスキップ');
@@ -189,7 +208,6 @@
             return;
         }
         _lastClickTime = now;
-
         setTextareaValue(textarea, num);
         flashItem(item, 'sending');
         sendMessage(textarea);
