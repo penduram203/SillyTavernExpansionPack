@@ -930,6 +930,7 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
         }
         if (candidates.length === 0) return;
 
+        candidates.sort((a, b) => a.n - b.n);
         watch.busy = true;
         (async () => {
             try {
@@ -952,36 +953,6 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
                         watch.knownUids.add(c.uid);
                         await _applyNewEntryDefaultsWithRetry(c.uid);
                     }
-                }
-            } finally {
-                watch.busy = false;
-            }
-        })();
-    }
-                continue;
-            }
-            if (/^\d+$/.test(uid)) {
-                const n = Number(uid);
-                if (n <= watch.maxKnown) continue;
-                candidates.push({ uid, n });
-            } else {
-                candidates.push({ uid, n: -1 });
-            }
-        }
-
-        if (candidates.length > 0) {
-            console.log(`${LOG} [DBG][candidates] found=${candidates.map(c => c.uid).join(',')}`);
-        }
-
-        if (candidates.length === 0) return;
-
-        candidates.sort((a, b) => a.n - b.n);
-        watch.busy = true;
-        (async () => {
-            try {
-                for (const c of candidates) {
-                    watch.knownUids.add(c.uid);
-                    await _applyNewEntryDefaultsWithRetry(c.uid);
                 }
             } finally {
                 watch.busy = false;
