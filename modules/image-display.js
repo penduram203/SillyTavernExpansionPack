@@ -1627,8 +1627,8 @@ async function showImageByEntryKey(entryKey, options = {}) {
             if (e.key !== 'Enter' || e.shiftKey) return;
             const target = e.target;
             if (!target || target.id !== 'send_textarea') return;
-            // ★ 合体モード時は gic_lorebook.js が制御するため介入しない
-            if (window.GicApi?.isCombinedMode?.() === true) return;
+            // ★ 合体モード（GicLorebook有効時）は gic_lorebook.js が制御するため介入しない
+            if (window.GicApi?.isCombinedMode?.() === true || window.GicLorebook?.getSettings?.()?.enabled === true) return;
             const text = target.value;
             if (!text || !text.trim()) return;
             const matchedUrl = findMatchingImageUrl(text);
@@ -1641,8 +1641,8 @@ async function showImageByEntryKey(entryKey, options = {}) {
         document.addEventListener('click', (e) => {
             const btn = e.target && e.target.closest ? e.target.closest('#send_but') : null;
             if (!btn) return;
-            // ★ 合体モード時は gic_lorebook.js が制御するため介入しない
-            if (window.GicApi?.isCombinedMode?.() === true) return;
+            // ★ 合体モード（GicLorebook有効時）は gic_lorebook.js が制御するため介入しない
+            if (window.GicApi?.isCombinedMode?.() === true || window.GicLorebook?.getSettings?.()?.enabled === true) return;
             const textarea = document.querySelector('#send_textarea');
             if (!textarea) return;
             const text = textarea.value;
@@ -1659,7 +1659,10 @@ async function showImageByEntryKey(entryKey, options = {}) {
         const chatContainer = document.querySelector('#chat');
         if (!chatContainer) return;
         if (chatDomObserver) chatDomObserver.disconnect();
-        const debouncedUpdate = debounce(() => { safeUpdateImage(); }, 150);
+        const debouncedUpdate = debounce(() => {
+            if (window.GicLorebook?.getSettings?.()?.enabled === true) return;
+            safeUpdateImage();
+        }, 150);
         chatDomObserver = new MutationObserver(() => debouncedUpdate());
         chatDomObserver.observe(chatContainer, { childList: true, subtree: true, characterData: true });
     }
