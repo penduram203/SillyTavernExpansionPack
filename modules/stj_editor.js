@@ -3653,181 +3653,148 @@ async function exportUnifiedBundleJson(options = {}) {
         return null;
     }
 
-function _stjBuildChoiceGraph(entries, cells) {
-        const list = Array.isArray(entries) ? entries : Object.values(entries || {});
-        const nodes = new Map();
-        const edges = [];
-        const edgeSet = new Set();
+    async function _stjBuildChoiceGraph(imageMap) {
+        const empty = { children: new Map(), parents: new Map(), allNodes: new Set() };
+        const worldName = getCharacterWorldInfoName();
+        if (!worldName) return empty;
 
-        const labelToNodeKeys = new Map();
-        const registerLabel = (label, nodeKey) => {
-            const clean = String(label || '').trim();
-            if (!clean || !nodeKey) return;
-            if (!labelToNodeKeys.has(clean)) labelToNodeKeys.set(clean, []);
-            const arr = labelToNodeKeys.get(clean);
-            if (!arr.includes(nodeKey)) arr.push(nodeKey);
-        };
+        let entries;
+        try {
+            entries = await loadWorldInfoEntries(worldName);
+        } catch (e) {
+            return empty;
+        }
+        if (!entries) return empty;
 
-        const ensureNode = (nodeKey, label, uid = '', entry = null) => {
-            if (!nodeKey) return null;
-            if (!nodes.has(nodeKey)) {
-                nodes.set(nodeKey, {
-                    id: nodeKey,
-                    uid: uid || (nodeKey.startsWith('uid:') ? nodeKey.slice(4) : ''),
-                    label: String(label || nodeKey).trim(),
-                    entry: entry || null,
-                    cell: null,
-                    children: [],
-                    parents: []
-                });
-            } else {
-                const existing = nodes.get(nodeKey);
-                if (label && String(label).trim()) existing.label = String(label).trim();
-                if (uid && !existing.uid) existing.uid = uid;
-                if (entry && !existing.entry) existing.entry = entry;
-            }
-            registerLabel(nodes.get(nodeKey).label, nodeKey);
-            return nodes.get(nodeKey);
-        };
-
+        const list = Array.isArray(entries) ? entries : Object.values(entries);
+        const entryMap = new Map();
         for (const entry of list) {
-            if (!entry) continue;
-            const label = getEntryKeyword(entry);
-            const uid = getEntryUid(entry);
-            const nodeKey = getNodeKeyForEntry(entry, label);
-            if (!nodeKey) continue;
-            ensureNode(nodeKey, label || uid || nodeKey, uid, entry);
-            for (const k of getEntryKeys(entry)) {
-                registerLabel(k, nodeKey);
-            }
+            const kw = getEntryKeyword(entry);
+            if (kw) entryMap.set(kw, entry);
         }
 
-        const cellArray = Array.from(cells || []);
-        for (const cell of cellArray) {
-            const nodeKey = getNodeKeyForCell(cell);
-            const label = getCellKeyword(cell).trim();
-            const uid = getCellUid(cell);
-            if (!nodeKey) continue;
-            const n = ensureNode(nodeKey, label || uid || nodeKey, uid, null);
-            if (n && !n.cell) n.cell = cell;
+        const allNodes = new Set();
+        for (const kw of Object.keys(imageMap)) {
+            if (kw === 'default' || kw === 'thumbnail') continue;
+            if (!kw || !kw.trim()) continue;
+            allNodes.add(kw);
         }
 
-        const resolveTargetNodeKeys = (rawTarget, sourceEntry) => {
-            const t = String(rawTarget || '').trim();
-            if (!t) return [];
-            if (nodes.has(t)) return [t];
-            if (nodes.has(`uid:${t}`)) return [`uid:${t}`];
-            if (labelToNodeKeys.has(t)) return labelToNodeKeys.get(t);
-            if (sourceEntry && typeof sourceEntry === 'object') {
-                const sibling = list.find(e =>
-                    e !== sourceEntry &&
-                    (getEntryUid(e) === t || getEntryKeyword(e).trim() === t || getEntryKeys(e).includes(t))
-                );
-                if (sibling) {
-                    const sk = getNodeKeyForEntry(sibling);
-                    if (sk) return [sk];
+        const children = new Map();
+        const parents = new Map();
+
+        for (const kw of allNodes) {
+            const entry = entryMap.get(kw);
+            if (!entry) { children.set(kw, []); continue; }
+
+            const lex = getLexDataFor(worldName, entry.uid, entry);
+            const choices = Array.isArray(lex.choices) ? lex.choices : [];
+            const childKws = [];
+
+            for (const choiceStr of choices) {
+                let target = null;
+                const num = _stjExtractChoiceNumber(choiceStr);
+                if (num) {
+                    target = _stjFindEntryByChoice(list, num);
                 }
-            }
-            return [];
-        };
-
-        for (const [nodeKey, node] of nodes.entries()) {
-            const entry = node.entry || findEntryByNodeKey(entries, nodeKey);
-            if (!entry) continue;
-            node.entry = entry;
-            const choices = extractChoicesFromEntry(entry);
-            for (const ch of choices) {
-                const targetRaw = extractChoiceTarget(ch);
-                const targets = resolveTargetNodeKeys(targetRaw, entry);
-                for (const targetKey of targets) {
-                    if (!targetKey || targetKey === nodeKey) continue;
-                    const edgeId = `${nodeKey}->${targetKey}`;
-                    if (edgeSet.has(edgeId)) continue;
-                    edgeSet.add(edgeId);
-                    edges.push({ from: nodeKey, to: targetKey, choice: ch });
-                    const fromNode = nodes.get(nodeKey);
-                    const toNode = nodes.get(targetKey);
-                    if (fromNode && toNode) {
-                        if (!fromNode.children.includes(targetKey)) fromNode.children.push(targetKey);
-                        if (!toNode.parents.includes(nodeKey)) toNode.parents.push(nodeKey);
-                    }
+                if (!target) {
+                    target = _stjFindEntryByKeywordLoose(list, choiceStr);
                 }
+                if (!target) continue;
+
+                const targetKw = getEntryKeyword(target);
+                if (!targetKw || !allNodes.has(targetKw)) continue;
+                if (childKws.includes(targetKw)) continue;
+                childKws.push(targetKw);
+                if (!parents.has(targetKw)) parents.set(targetKw, []);
+                parents.get(targetKw).push(kw);
             }
+            children.set(kw, childKws);
         }
 
-        return { nodes, edges, cellArray };
+        return { children, parents, allNodes };
     }
 
-function _stjComputeTreeLayout(graph) {
-        const { nodes, edges, cellArray } = graph;
+    function _stjComputeTreeLayout(graph) {
+        const { children, parents, allNodes } = graph;
         const positions = new Map();
-        const depthMap = new Map();
+        const visited = new Set();
+        let cursorY = 0;
+
+        function layoutSubtree(node, depth) {
+            if (visited.has(node)) return null;
+            visited.add(node);
+
+            const kids = (children.get(node) || []).filter(k => !visited.has(k));
+            if (kids.length === 0) {
+                const y = cursorY;
+                positions.set(node, {
+                    x: depth * (STJ_TREE_CELL_W + STJ_TREE_H_GAP),
+                    y,
+                });
+                cursorY += STJ_TREE_CELL_H + STJ_TREE_V_GAP;
+                return { top: y, bottom: y + STJ_TREE_CELL_H };
+            }
+
+            const kidBounds = [];
+            for (const kid of kids) {
+                const b = layoutSubtree(kid, depth + 1);
+                if (b) kidBounds.push(b);
+            }
+
+            if (kidBounds.length === 0) {
+                const y = cursorY;
+                positions.set(node, {
+                    x: depth * (STJ_TREE_CELL_W + STJ_TREE_H_GAP),
+                    y,
+                });
+                cursorY += STJ_TREE_CELL_H + STJ_TREE_V_GAP;
+                return { top: y, bottom: y + STJ_TREE_CELL_H };
+            }
+
+            const top = kidBounds[0].top;
+            const bottom = kidBounds[kidBounds.length - 1].bottom;
+            const centerY = (top + bottom - STJ_TREE_CELL_H) / 2;
+            positions.set(node, {
+                x: depth * (STJ_TREE_CELL_W + STJ_TREE_H_GAP),
+                y: centerY,
+            });
+            return {
+                top: Math.min(top, centerY),
+                bottom: Math.max(bottom, centerY + STJ_TREE_CELL_H),
+            };
+        }
 
         const roots = [];
-        for (const [id, node] of nodes.entries()) {
-            if (!node.parents || node.parents.length === 0) {
-                roots.push(id);
+        const isolated = [];
+        for (const kw of allNodes) {
+            const hasParent = parents.has(kw) && parents.get(kw).length > 0;
+            const hasChild = (children.get(kw) || []).length > 0;
+            if (!hasParent) {
+                if (hasChild) roots.push(kw);
+                else isolated.push(kw);
             }
         }
-        if (roots.length === 0 && nodes.size > 0) {
-            roots.push(nodes.keys().next().value);
+        roots.sort();
+        isolated.sort();
+
+        for (const root of roots) {
+            layoutSubtree(root, 0);
+            cursorY += STJ_TREE_V_GAP * 2;
         }
 
-        const queue = [];
-        for (const r of roots) {
-            depthMap.set(r, 0);
-            queue.push(r);
+        for (const node of isolated) {
+            positions.set(node, { x: 0, y: cursorY });
+            cursorY += STJ_TREE_CELL_H + STJ_TREE_V_GAP;
         }
 
-        while (queue.length > 0) {
-            const currId = queue.shift();
-            const currDepth = depthMap.get(currId) ?? 0;
-            const currNode = nodes.get(currId);
-            if (!currNode) continue;
-            for (const childId of currNode.children || []) {
-                const nextDepth = currDepth + 1;
-                if (!depthMap.has(childId) || depthMap.get(childId) < nextDepth) {
-                    depthMap.set(childId, nextDepth);
-                    queue.push(childId);
-                }
-            }
+        const unvisited = [...allNodes].filter(k => !visited.has(k));
+        for (const node of unvisited) {
+            positions.set(node, { x: 0, y: cursorY });
+            cursorY += STJ_TREE_CELL_H + STJ_TREE_V_GAP;
         }
 
-        let fallbackIdx = 0;
-        for (const id of nodes.keys()) {
-            if (!depthMap.has(id)) {
-                depthMap.set(id, 0);
-            }
-        }
-
-        const columns = new Map();
-        for (const cell of cellArray) {
-            const id = getNodeKeyForCell(cell) || `cell_idx:${fallbackIdx++}`;
-            const d = depthMap.get(id) ?? 0;
-            if (!columns.has(d)) columns.set(d, []);
-            columns.get(d).push({ id, cell });
-        }
-
-        const sortedDepths = Array.from(columns.keys()).sort((a, b) => a - b);
-        const colGap = 240;
-        const rowGap = 110;
-        const startX = 24;
-        const startY = 24;
-
-        for (const d of sortedDepths) {
-            const items = columns.get(d) || [];
-            items.forEach((item, rowIdx) => {
-                positions.set(item.id, {
-                    x: startX + d * colGap,
-                    y: startY + rowIdx * rowGap,
-                    depth: d,
-                    row: rowIdx,
-                    cell: item.cell
-                });
-            });
-        }
-
-        return { positions, edges, depthMap };
+        return { positions, children };
     }
 
 function _stjDrawConnections(container, positions, children) {
@@ -3901,68 +3868,255 @@ function _stjDrawConnections(container, positions, children) {
         return `${nodes.join('|')}#${edges.join(',')}`;
     }
 
-    function _stjSyncStandalonePanel(entries, cells) {
-        const panel = document.getElementById('stj_standalone_panel');
-        if (!panel) return;
+    function _stjSyncStandalonePanel(containerEl, graph) {
+        const panelBody = document.getElementById('stj_standalone_body');
+        if (!panelBody || !containerEl) return;
 
-        const graph = _stjBuildChoiceGraph(entries, cells);
-        const standaloneNodes = [];
-
-        for (const [id, node] of graph.nodes.entries()) {
-            const hasParent = Array.isArray(node.parents) && node.parents.length > 0;
-            const hasChild = Array.isArray(node.children) && node.children.length > 0;
-            if (!hasParent && !hasChild) {
-                standaloneNodes.push(node);
+        const connectedSet = new Set();
+        for (const [parentKw, childKws] of (graph?.children || new Map()).entries()) {
+            if (Array.isArray(childKws) && childKws.length > 0) {
+                connectedSet.add(parentKw);
+                for (const c of childKws) connectedSet.add(c);
+            }
+        }
+        for (const [childKw, parentKws] of (graph?.parents || new Map()).entries()) {
+            if (Array.isArray(parentKws) && parentKws.length > 0) {
+                connectedSet.add(childKw);
+                for (const p of parentKws) connectedSet.add(p);
             }
         }
 
-        panel.innerHTML = '';
-        for (const node of standaloneNodes) {
-            const item = document.createElement('div');
-            item.className = 'stj-standalone-item';
-            item.setAttribute('data-node-id', node.id);
-            if (node.uid) {
-                item.setAttribute('data-entry-uid', node.uid);
-            }
-            const displayName = node.entry ? getEntryKeyword(node.entry) : node.label;
-            item.textContent = displayName || node.uid || node.id;
-            panel.appendChild(item);
+        panelBody.innerHTML = '';
+        const sourceCells = Array.from(containerEl.querySelectorAll(':scope > .stj-keyword-item'));
+        const standaloneCells = sourceCells.filter(cell => {
+            const kw = getCellKeyword(cell).trim();
+            return !kw || !connectedSet.has(kw);
+        });
+
+        if (standaloneCells.length === 0) {
+            const emptyEl = document.createElement('div');
+            emptyEl.className = 'stj-standalone-empty';
+            emptyEl.textContent = _t('stj.standalone.empty', '独立セルはありません');
+            panelBody.appendChild(emptyEl);
+            return;
         }
+
+        standaloneCells.forEach((cell, idx) => {
+            cell.dataset.stjIsStandaloneCell = '1';
+            const card = document.createElement('div');
+            card.className = 'stj-keyword-item stj-standalone-cell-item';
+            card.setAttribute('data-keyword', getCellKeyword(cell));
+            card.setAttribute('data-image-list', cell.getAttribute('data-image-list') || '[]');
+
+            const previewDiv = document.createElement('div');
+            previewDiv.className = 'stj-image-preview';
+            previewDiv.id = `stj_standalone_preview_${idx}`;
+            previewDiv.style.position = 'relative';
+
+            const ph = document.createElement('div');
+            ph.className = 'stj-preview-text';
+            ph.textContent = _t('stj.preview.placeholder', 'プレビュー');
+            previewDiv.appendChild(ph);
+
+            const kwDisplay = document.createElement('div');
+            kwDisplay.className = 'stj-keyword-display';
+            kwDisplay.textContent = getCellKeyword(cell);
+
+            card.appendChild(previewDiv);
+            card.appendChild(kwDisplay);
+            panelBody.appendChild(card);
+
+            card.addEventListener('click', (e) => {
+                if (e.target.closest('button')) return;
+                if (isDialogActive) return;
+                openCellModal(cell);
+            });
+
+            const charName = document.getElementById('stj_char_name_display')?.textContent || '';
+            updateImagePreview(previewDiv.id, charName, getCellImages(cell).join(','));
+        });
     }
 
-function _stjApplyTreeLayout(layout, container, svgEl) {
-        if (!layout || !container) return;
-        const { positions, edges } = layout;
-
-        for (const [id, pos] of positions.entries()) {
-            if (!pos.cell) continue;
-            pos.cell.setAttribute('data-tree-node-id', id);
-            pos.cell.style.transform = `translate(${pos.x}px, ${pos.y}px)`;
+    async function _stjApplyTreeLayout() {
+        if (_stjTreeLayoutInFlight) {
+            _stjTreeLayoutPending = true;
+            return;
         }
+        _stjTreeLayoutInFlight = true;
 
-        if (!svgEl) return;
-        while (svgEl.firstChild) {
-            svgEl.removeChild(svgEl.firstChild);
-        }
+        try {
+            const container = document.getElementById('stj_keywords_container');
+            if (!container) return;
+            if (container.offsetParent === null) return;
 
-        const svgNS = 'http://www.w3.org/2000/svg';
-        for (const edge of edges || []) {
-            const fromPos = positions.get(edge.from);
-            const toPos = positions.get(edge.to);
-            if (!fromPos || !toPos) continue;
+            container.classList.add('stj-tree-mode');
+            const startCharName = document.getElementById('stj_char_name_display')?.textContent;
+            if (!startCharName) return;
 
-            const x1 = fromPos.x + 170;
-            const y1 = fromPos.y + 36;
-            const x2 = toPos.x;
-            const y2 = toPos.y + 36;
-            const midX = (x1 + x2) / 2;
+            // 前回の独立セル・特殊要素の配置を一旦リセットしてから再計算
+            container.querySelectorAll('.stj-tree-bottom-left-other .stj-keyword-item, .stj-standalone-cell-item').forEach((cell) => {
+                delete cell.dataset.stjIsOtherCell;
+                delete cell.dataset.stjIsStandaloneCell;
+                if (cell.classList.contains('stj-standalone-cell-item')) {
+                    cell.remove();
+                    return;
+                }
+                container.appendChild(cell);
+            });
 
-            const path = document.createElementNS(svgNS, 'path');
-            path.setAttribute('d', `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`);
-            path.setAttribute('fill', 'none');
-            path.setAttribute('stroke', 'currentColor');
-            path.setAttribute('stroke-width', '1.5');
-            svgEl.appendChild(path);
+            const imageMap = {};
+            let cellCount = 0;
+            container.querySelectorAll(':scope > .stj-keyword-item').forEach(cell => {
+                cellCount++;
+                const kw = getCellKeyword(cell).trim();
+                if (kw) imageMap[kw] = getCellImages(cell);
+            });
+ 
+            if (Object.keys(imageMap).length === 0) {
+                container.classList.add('stj-tree-mode');
+                container.querySelectorAll(':scope > .stj-keyword-item').forEach(cell => {
+                    cell.style.position = 'absolute';
+                    cell.style.left = '0px';
+                    cell.style.top = '0px';
+                    cell.style.width = STJ_TREE_CELL_W + 'px';
+                    cell.style.height = STJ_TREE_CELL_H + 'px';
+                });
+                const emptySig = `cells:${cellCount}#`;
+                const prevHeight = parseFloat(container.style.height) || 0;
+                const graphChanged = _stjLastGraphSignature !== emptySig;
+                _stjLastGraphSignature = emptySig;
+                applyTreeScaleToContainer(container);
+                if (!graphChanged && prevHeight > 0) {
+                    container.style.setProperty('min-height', `${prevHeight}px`);
+                    container.style.setProperty('height', `${prevHeight}px`);
+                }
+                return;
+            }
+
+            const graph = await _stjBuildChoiceGraph(imageMap);
+ 
+            const endCharName = document.getElementById('stj_char_name_display')?.textContent;
+            if (endCharName !== startCharName) return;
+            if (!document.body.contains(container)) return;
+
+            const nextSignature = `cells:${cellCount}#${_stjBuildGraphSignature(graph)}`;
+            const graphOrCellChanged = _stjLastGraphSignature !== nextSignature;
+            const prevHeight = parseFloat(container.style.height) || 0;
+            _stjLastGraphSignature = nextSignature;
+ 
+            const { positions, children } = _stjComputeTreeLayout(graph);
+
+            const connectedSet = new Set();
+            for (const [parentKw, childKws] of (graph?.children || new Map()).entries()) {
+                if (Array.isArray(childKws) && childKws.length > 0) {
+                    connectedSet.add(parentKw);
+                    for (const c of childKws) connectedSet.add(c);
+                }
+            }
+            for (const [childKw, parentKws] of (graph?.parents || new Map()).entries()) {
+                if (Array.isArray(parentKws) && parentKws.length > 0) {
+                    connectedSet.add(childKw);
+                    for (const p of parentKws) connectedSet.add(p);
+                }
+            }
+
+            container.querySelectorAll(':scope > .stj-keyword-item').forEach(cell => {
+                const kw = getCellKeyword(cell).trim();
+                if (!kw || !connectedSet.has(kw)) {
+                    cell.dataset.stjIsStandaloneCell = '1';
+                    cell.style.setProperty('display', 'none', 'important');
+                } else {
+                    delete cell.dataset.stjIsStandaloneCell;
+                    cell.style.removeProperty('display');
+                }
+            });
+
+            let hasConnectedPos = false;
+            let maxX = 0, maxY = STJ_TREE_CELL_H, minX = 0, minY = 0;
+            for (const [kw, pos] of positions.entries()) {
+                if (!connectedSet.has(kw)) continue;
+
+                if (!hasConnectedPos) {
+                    minX = pos.x;
+                    minY = pos.y;
+                    maxX = pos.x + STJ_TREE_CELL_W;
+                    maxY = pos.y + STJ_TREE_CELL_H;
+                    hasConnectedPos = true;
+                } else {
+                    maxX = Math.max(maxX, pos.x + STJ_TREE_CELL_W);
+                    maxY = Math.max(maxY, pos.y + STJ_TREE_CELL_H);
+                    minX = Math.min(minX, pos.x);
+                    minY = Math.min(minY, pos.y);
+                }
+            }
+            const offsetX = STJ_TREE_PADDING - minX;
+            const offsetY = STJ_TREE_PADDING - minY;
+
+            const unpositioned = [];
+            container.querySelectorAll(':scope > .stj-keyword-item').forEach(cell => {
+                if (cell.dataset.stjIsStandaloneCell === '1') {
+                    cell.style.setProperty('display', 'none', 'important');
+                    return;
+                }
+                cell.style.removeProperty('display');
+                const kw = getCellKeyword(cell).trim();
+                const pos = kw ? positions.get(kw) : null;
+                if (pos) {
+                    const baseL = pos.x + offsetX;
+                    const baseT = pos.y + offsetY;
+                    cell.dataset.stjBaseLeft = String(baseL);
+                    cell.dataset.stjBaseTop = String(baseT);
+                    cell.dataset.stjBaseWidth = String(STJ_TREE_CELL_W);
+                    cell.dataset.stjBaseHeight = String(STJ_TREE_CELL_H);
+                    cell.style.position = 'absolute';
+                    cell.style.left = baseL + 'px';
+                    cell.style.top = baseT + 'px';
+                    cell.style.width = STJ_TREE_CELL_W + 'px';
+                    cell.style.height = STJ_TREE_CELL_H + 'px';
+                } else {
+                    unpositioned.push(cell);
+                }
+            });
+
+            const totalWidth = Math.max(300, maxX - minX + STJ_TREE_PADDING * 2);
+            const totalHeight = Math.max(120, maxY - minY + STJ_TREE_PADDING * 2);
+ 
+            delete container.dataset.stjBaseMinW;
+            delete container.dataset.stjBaseMinH;
+            container.style.width = totalWidth + 'px';
+            container.style.height = totalHeight + 'px';
+            container.style.minWidth = totalWidth + 'px';
+            container.style.minHeight = totalHeight + 'px';
+            container.dataset.stjTreeBottom = String(Math.ceil(totalHeight - STJ_TREE_PADDING));
+
+            const offsetPositions = new Map();
+            for (const [kw, pos] of positions.entries()) {
+                if (!connectedSet.has(kw)) continue;
+                offsetPositions.set(kw, {
+                    x: pos.x + offsetX,
+                    y: pos.y + offsetY,
+                });
+            }
+
+            _stjDrawConnections(container, offsetPositions, children);
+
+            applyTreeScaleToContainer(container);
+            container.dataset.stjBaseMinW = String(totalWidth);
+            container.dataset.stjBaseMinH = String(totalHeight);
+            _stjSyncStandalonePanel(container, graph);
+            const currentH = parseFloat(container.style.height) || 0;
+            if (!graphOrCellChanged && prevHeight > 0 && prevHeight <= currentH) {
+                container.style.setProperty('min-height', `${prevHeight}px`);
+                container.style.setProperty('height', `${prevHeight}px`);
+            }
+        } catch (e) {
+            console.warn('[STJ Editor] ツリーレイアウト適用エラー:', e);
+        } finally {
+            _stjTreeLayoutInFlight = false;
+            if (_stjTreeLayoutPending) {
+                _stjTreeLayoutPending = false;
+                _stjScheduleTreeLayout();
+            }
         }
     }
 
@@ -4557,25 +4711,6 @@ function _stjApplyTreeLayout(layout, container, svgEl) {
         return kw ? `kw:${kw}` : '';
     }
 
-    function findEntryByNodeKey(entries, nodeKey) {
-        if (!entries || !nodeKey) return null;
-        const keyStr = String(nodeKey);
-        const list = Array.isArray(entries) ? entries : Object.values(entries);
-
-        if (keyStr.startsWith('uid:')) {
-            const uid = keyStr.slice(4);
-            if (!Array.isArray(entries) && entries[uid]) return entries[uid];
-            return list.find(e => getEntryUid(e) === uid) || null;
-        }
-
-        if (keyStr.startsWith('kw:')) {
-            const kw = keyStr.slice(3);
-            return findEntryByKeyword(entries, kw);
-        }
-
-        return list.find(e => getNodeKeyForEntry(e) === keyStr) || findEntryByKeyword(entries, keyStr);
-    }
-    
     function addKeywordRowWithData(container, index, data) {
         const newItem = document.createElement('div');
         newItem.className = 'stj-keyword-item';
