@@ -1444,34 +1444,34 @@
         }
     }
 
-    async function showImageByEntryKey(entryKey) {
-        if (!entryKey || !currentImageMap) return false;
+async function showImageByEntryKey(entryKey) {
+    if (!entryKey || !currentImageMap) return false;
     
-        let targetUrl = null;
+    let targetUrl = null;
     
-        // 1. 完全一致
-        if (currentImageMap[entryKey]) {
-            targetUrl = getRandomImageSource(currentImageMap[entryKey], `ek::${entryKey}`);
-        }
+    // 1. 完全一致
+    if (currentImageMap[entryKey]) {
+        targetUrl = getRandomImageSource(currentImageMap[entryKey], `ek::${entryKey}`);
+    }
     
-        // 2. 部分一致（entryKey がキーに含まれる、またはキーが entryKey に含まれる）
-        if (!targetUrl) {
-            for (const [key, urls] of Object.entries(currentImageMap)) {
-                if (key === 'default' || key === 'thumbnail') continue;
-                if (key.includes(entryKey) || entryKey.includes(key)) {
-                    targetUrl = getRandomImageSource(urls, `ek::${key}`);
-                    if (targetUrl) break;
-                }
+    // 2. 部分一致（entryKey がキーに含まれる、またはキーが entryKey に含まれる）
+    if (!targetUrl) {
+        for (const [key, urls] of Object.entries(currentImageMap)) {
+            if (key === 'default' || key === 'thumbnail') continue;
+            if (key.includes(entryKey) || entryKey.includes(key)) {
+                targetUrl = getRandomImageSource(urls, `ek::${key}`);
+                if (targetUrl) break;
             }
         }
+    }
     
-        if (targetUrl) {
-            _lastSentKeywordImage = targetUrl;
-            await updateImageWithUrl(targetUrl);
-            return true;
-        }
-        return false;
-    }    
+    if (targetUrl) {
+        _lastSentKeywordImage = targetUrl;
+        await updateImageWithUrl(targetUrl);
+        return true;
+    }
+    return false;
+}
     
     let _isGicPreparing = false;
     window.addEventListener('gic-image-generation-started', (e) => {
@@ -2311,7 +2311,7 @@
         syncChatHeaderPosition();
         syncChatResizeHandlePosition();
     }, 500);
-    
+
     function setupEventSourceListeners() {
         if (typeof SillyTavern !== 'undefined' && SillyTavern.getContext) {
             const context = SillyTavern.getContext();
@@ -2320,9 +2320,18 @@
                 const safeOn = (eventType, handler) => {
                     if (eventType && typeof eventSource.on === 'function') eventSource.on(eventType, handler);
                 };
-            const immediateUpdate = () => updateImage();
-            safeOn(eventTypes.CHARACTER_MESSAGE_RENDERED, immediateUpdate);
-            safeOn(eventTypes.USER_MESSAGE_RENDERED, immediateUpdate);
+
+                const immediateUpdate = () => {
+                    // ★ gic_lorebook.js が有効な場合は、USER_MESSAGE_RENDERED での updateImage をスキップ
+                    //   gic_lorebook.js が pickAndShowCurrentKeyword() を呼ぶ時に画像を更新する
+                    if (window.GicLorebook?.getSettings?.()?.enabled === true) {
+                        console.debug('[ImageDisplay] gic_lorebook.js が有効なため USER_MESSAGE_RENDERED での updateImage をスキップ');
+                        return;
+                    }
+                    updateImage();
+                };
+                safeOn(eventTypes.CHARACTER_MESSAGE_RENDERED, immediateUpdate);
+                safeOn(eventTypes.USER_MESSAGE_RENDERED, immediateUpdate);
 
             // ★ メッセージの削除・編集時はキーワード画像ロックを解除して再スキャン
             //    （削除されたメッセージのキーワード画像が居座り続けるバグを修正）
