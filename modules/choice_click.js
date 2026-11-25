@@ -744,18 +744,43 @@
         console.log(LOG, 'MutationObserver を設置');
     }
 
-    function init() {
-        installDelegatedHandlers();
-        bindChoiceItems();
-        setupFirstMessageAsChoice();
-        watchQColorInput();
-        window.addEventListener('variable-manager-start-changed', () => {
-            setTimeout(setupFirstMessageAsChoice, 50);
-        });
-        setupObserver();
-        console.log(LOG, '初期化完了');
-    }
+function unlockChoices() {
+    document.querySelectorAll('.lbe-choice-item').forEach(el => {
+        el.classList.remove('choice-click-selected');
+        el.removeAttribute('aria-disabled');
+    });
+}
 
+function setupGenerationEndListeners() {
+    // GIC の画像生成完了イベント
+    window.addEventListener('gic-image-generation-ended', () => {
+        unlockChoices();
+    });
+    
+    // ST のテキスト生成完了イベント
+    try {
+        const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+        if (ctx?.eventSource && ctx?.eventTypes?.GENERATION_ENDED) {
+            ctx.eventSource.on(ctx.eventTypes.GENERATION_ENDED, () => {
+                setTimeout(unlockChoices, 500); // 少し遅らせて解除
+            });
+        }
+    } catch (e) { /* ignore */ }
+}
+
+function init() {
+    installDelegatedHandlers();
+    bindChoiceItems();
+    setupFirstMessageAsChoice();
+    watchQColorInput();
+    setupGenerationEndListeners(); // ★ 追加
+    window.addEventListener('variable-manager-start-changed', () => {
+        setTimeout(setupFirstMessageAsChoice, 50);
+    });
+    setupObserver();
+    console.log(LOG, '初期化完了');
+}
+    
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);
     } else {
