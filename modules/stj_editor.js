@@ -3715,79 +3715,89 @@ async function exportUnifiedBundleJson(options = {}) {
         return { children, parents, allNodes };
     }
 
-function _stjComputeTreeLayout(graph) {
-        const { nodes, edges, cellArray } = graph;
+    function _stjComputeTreeLayout(graph) {
+        const { children, parents, allNodes } = graph;
         const positions = new Map();
-        const depthMap = new Map();
+        const visited = new Set();
+        let cursorY = 0;
+
+        function layoutSubtree(node, depth) {
+            if (visited.has(node)) return null;
+            visited.add(node);
+
+            const kids = (children.get(node) || []).filter(k => !visited.has(k));
+            if (kids.length === 0) {
+                const y = cursorY;
+                positions.set(node, {
+                    x: depth * (STJ_TREE_CELL_W + STJ_TREE_H_GAP),
+                    y,
+                });
+                cursorY += STJ_TREE_CELL_H + STJ_TREE_V_GAP;
+                return { top: y, bottom: y + STJ_TREE_CELL_H };
+            }
+
+            const kidBounds = [];
+            for (const kid of kids) {
+                const b = layoutSubtree(kid, depth + 1);
+                if (b) kidBounds.push(b);
+            }
+
+            if (kidBounds.length === 0) {
+                const y = cursorY;
+                positions.set(node, {
+                    x: depth * (STJ_TREE_CELL_W + STJ_TREE_H_GAP),
+                    y,
+                });
+                cursorY += STJ_TREE_CELL_H + STJ_TREE_V_GAP;
+                return { top: y, bottom: y + STJ_TREE_CELL_H };
+            }
+
+            const top = kidBounds[0].top;
+            const bottom = kidBounds[kidBounds.length - 1].bottom;
+            const centerY = (top + bottom - STJ_TREE_CELL_H) / 2;
+            positions.set(node, {
+                x: depth * (STJ_TREE_CELL_W + STJ_TREE_H_GAP),
+                y: centerY,
+            });
+            return {
+                top: Math.min(top, centerY),
+                bottom: Math.max(bottom, centerY + STJ_TREE_CELL_H),
+            };
+        }
 
         const roots = [];
-        for (const [id, node] of nodes.entries()) {
-            if (!node.parents || node.parents.length === 0) {
-                roots.push(id);
+        const isolated = [];
+        for (const kw of allNodes) {
+            const hasParent = parents.has(kw) && parents.get(kw).length > 0;
+            const hasChild = (children.get(kw) || []).length > 0;
+            if (!hasParent) {
+                if (hasChild) roots.push(kw);
+                else isolated.push(kw);
             }
         }
-        if (roots.length === 0 && nodes.size > 0) {
-            roots.push(nodes.keys().next().value);
+        roots.sort();
+        isolated.sort();
+
+        for (const root of roots) {
+            layoutSubtree(root, 0);
+            cursorY += STJ_TREE_V_GAP * 2;
         }
 
-        const queue = [];
-        for (const r of roots) {
-            depthMap.set(r, 0);
-            queue.push(r);
+        for (const node of isolated) {
+            positions.set(node, { x: 0, y: cursorY });
+            cursorY += STJ_TREE_CELL_H + STJ_TREE_V_GAP;
         }
 
-        while (queue.length > 0) {
-            const currId = queue.shift();
-            const currDepth = depthMap.get(currId) ?? 0;
-            const currNode = nodes.get(currId);
-            if (!currNode) continue;
-            for (const childId of currNode.children || []) {
-                const nextDepth = currDepth + 1;
-                if (!depthMap.has(childId) || depthMap.get(childId) < nextDepth) {
-                    depthMap.set(childId, nextDepth);
-                    queue.push(childId);
-                }
-            }
+        const unvisited = [...allNodes].filter(k => !visited.has(k));
+        for (const node of unvisited) {
+            positions.set(node, { x: 0, y: cursorY });
+            cursorY += STJ_TREE_CELL_H + STJ_TREE_V_GAP;
         }
 
-        let fallbackIdx = 0;
-        for (const id of nodes.keys()) {
-            if (!depthMap.has(id)) {
-                depthMap.set(id, 0);
-            }
-        }
-
-        const columns = new Map();
-        for (const cell of cellArray) {
-            const id = getNodeKeyForCell(cell) || `cell_idx:${fallbackIdx++}`;
-            const d = depthMap.get(id) ?? 0;
-            if (!columns.has(d)) columns.set(d, []);
-            columns.get(d).push({ id, cell });
-        }
-
-        const sortedDepths = Array.from(columns.keys()).sort((a, b) => a - b);
-        const colGap = 240;
-        const rowGap = 110;
-        const startX = 24;
-        const startY = 24;
-
-        for (const d of sortedDepths) {
-            const items = columns.get(d) || [];
-            items.forEach((item, rowIdx) => {
-                positions.set(item.id, {
-                    x: startX + d * colGap,
-                    y: startY + rowIdx * rowGap,
-                    depth: d,
-                    row: rowIdx,
-                    cell: item.cell
-                });
-            });
-        }
-
-        return { positions, edges, depthMap };
+        return { positions, children };
     }
 
-    function _stjDrawConnections(container, positions, children) {
+function _stjDrawConnections(container, positions, children) {
         const old = container.querySelector(':scope > .stj-tree-svg');
         if (old) old.remove();
 
