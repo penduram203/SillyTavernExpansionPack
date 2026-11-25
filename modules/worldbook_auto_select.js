@@ -10,6 +10,8 @@
 //   自動補正する方式に変更。これにより、どの保存経路（ST本体 / 他拡張）
 //   から /api/worldinfo/edit が呼ばれても確実に補正される。
 //   さらに worldinfo_updated 発火後に server を再検証する self-heal を追加。
+//   新規エントリ初期値（status=Normal, position=at Depth System, depth=0,
+//   comment/key="new"）を各項目独立適用＋MutationObserver＆リトライで確実化。
 
 console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no tracking)...');
 
@@ -233,10 +235,6 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
         console.log(`${LOG} 🗑 world deleted detected → state cleared: "${name}"`);
     }
 
-    // ★ v8.6: payload 内容ベースの自動補正
-    //   「comment 非空 && key 空」のエントリは無条件で key=comment に補正する。
-    //   _recentlyEditedUids に依存しないため、どの保存経路でも確実に動作。
-    //   ただし 00_共通ルール は対象外（key=[] が正常）。
     function _applyPayloadAutoSync(entries) {
         if (!entries || typeof entries !== 'object') return 0;
         if (_getSettings().commentToKeySync === false) return 0;
@@ -249,10 +247,8 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
             const comment = String(e.comment || '').trim();
             if (!comment) continue;
 
-            // 00_共通ルールは対象外（key=[] が正当）
             if (comment === COMMON_RULE_NAME) continue;
 
-            // 既存の key を正規化
             let oldKeyArr = [];
             if (Array.isArray(e.key)) {
                 oldKeyArr = e.key.map(x => String(x).trim()).filter(Boolean);
@@ -260,10 +256,8 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
                 oldKeyArr = e.key.split(',').map(s => s.trim()).filter(Boolean);
             }
 
-            // key が既に何か入っているなら尊重（ユーザーが別途編集した可能性）
             if (oldKeyArr.length > 0) continue;
 
-            // key が空で comment が存在 → comment から生成
             const newKeyArr = comment.split(',').map(s => s.trim()).filter(Boolean);
             e.key = newKeyArr;
             modified++;
@@ -302,13 +296,11 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
                 return p;
             }
 
-            // ★ v8.6: payload auto-sync（無条件）
             let payloadModified = 0;
             if (body?.data?.entries) {
                 payloadModified = _applyPayloadAutoSync(body.data.entries);
             }
 
-            // 空保存ガード
             const guard = _emptySaveGuards.get(name);
             let blockedByGuard = false;
             if (guard && Date.now() <= guard.until) {
@@ -345,9 +337,6 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
 
     // ============================================================
     // ★ v8.6: worldinfo_updated 発火後の自己修復
-    //   ST が worldinfo_updated を発火した直後に、サーバーの各エントリを
-    //   チェックし「comment 非空 && key 空」のエントリがあれば
-    //   直接 /api/worldinfo/edit で修正する。
     // ============================================================
     async function _selfHealAfterUpdate() {
         if (_getSettings().commentToKeySync === false) return;
@@ -665,26 +654,33 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
     }
 
     // ============================================================
-    // 新規エントリ初期値
+    // 新規エントリ初期値（確実反映版）
     // ============================================================
     let _newEntryWatch = null;
+    let _newEntryObserver = null;
     const _appliedNewEntryUids = new Set();
+    const _pendingNewEntryUids = new Set();
 
     function _getEntryElements() {
         return Array.from(document.querySelectorAll('.world_entry[uid]'));
     }
+
     function _snapshotEntryUids() {
         const set = new Set();
         let max = -1;
         for (const el of _getEntryElements()) {
-            const uid = String(el.getAttribute('uid'));
+            const uid = String(el.getAttribute('uid') || '').trim();
+            if (!uid) continue;
             set.add(uid);
-            if (/^\d+$/.test(uid)) max = Math.max(max, Number(uid));
+            if (/^\d+$/.test(uid)) {
+                max = Math.max(max, Number(uid));
+            }
         }
         return { set, max };
     }
 
     function _triggerInput(el) {
+        if (!el) return;
         const $ = getJQuery();
         try {
             if ($) $(el).trigger('input');
@@ -694,99 +690,239 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
         }
     }
 
-function _applyNewEntryDefaults(entryEl) {
-        if (!entryEl) return false;
+    function _triggerInputAndChange(el) {
+        if (!el) return;
+        const $ = getJQuery();
+        try {
+            if ($) {
+                $(el).trigger('input');
+                $(el).trigger('change');
+            } else {
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        } catch (e) {
+            try {
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            } catch (e2) { /* ignore */ }
+        }
+    }
+
+    function _applyPositionAndRole(entryEl) {
+        let appliedAny = false;
 
         const posSel = entryEl.querySelector('select[name="position"]');
-        if (!posSel) return false;
+        if (posSel && posSel.options && posSel.options.length > 0) {
+            const opts = Array.from(posSel.options);
+            const depthOpts = opts
+                .map((o, i) => ({ o, i }))
+                .filter(x => String(x.o.value).trim() === '4' || /at\s*depth|@d/i.test(x.o.textContent || ''));
 
-        let posIdx = -1;
-        const opts = Array.from(posSel.options);
-        const depthOpts = opts
-            .map((o, i) => ({ o, i }))
-            .filter(x => String(x.o.value) === '4');
-        if (depthOpts.length > 0) {
-            const sys = depthOpts.find(x => {
-                const r = x.o.getAttribute('data-role');
-                return r === '0' || r === 'system';
-            });
-            posIdx = (sys || depthOpts[0]).i;
-        } else {
-            const byText = opts.findIndex(o => /@D|depth/i.test(o.textContent || ''));
-            if (byText >= 0) posIdx = byText;
+            let posIdx = -1;
+            if (depthOpts.length > 0) {
+                const sys = depthOpts.find(x => {
+                    const r = String(x.o.getAttribute('data-role') || '').toLowerCase();
+                    const txt = String(x.o.textContent || '').toLowerCase();
+                    return r === '0' || r === 'system' || txt.includes('system');
+                });
+                posIdx = (sys || depthOpts[0]).i;
+            }
+
+            if (posIdx >= 0 && posSel.selectedIndex !== posIdx) {
+                posSel.selectedIndex = posIdx;
+                _triggerInputAndChange(posSel);
+                appliedAny = true;
+            } else if (posIdx >= 0) {
+                appliedAny = true;
+            }
         }
-        if (posIdx < 0) return false;
-
-        posSel.selectedIndex = posIdx;
-        _triggerInput(posSel);
 
         const roleSel = entryEl.querySelector('select[name="role"], select[name="entryRole"]');
-        if (roleSel) {
-            const sysIdx = Array.from(roleSel.options).findIndex(o => String(o.value) === '0');
-            if (sysIdx >= 0) {
+        if (roleSel && roleSel.options && roleSel.options.length > 0) {
+            const sysIdx = Array.from(roleSel.options).findIndex(o => {
+                const val = String(o.value ?? '').trim().toLowerCase();
+                const txt = String(o.textContent ?? '').trim().toLowerCase();
+                return val === '0' || val === 'system' || txt === 'system';
+            });
+            if (sysIdx >= 0 && roleSel.selectedIndex !== sysIdx) {
                 roleSel.selectedIndex = sysIdx;
-                _triggerInput(roleSel);
+                _triggerInputAndChange(roleSel);
+                appliedAny = true;
+            } else if (sysIdx >= 0) {
+                appliedAny = true;
             }
         }
 
+        return appliedAny;
+    }
+
+    function _applyDepthDefault(entryEl) {
         const depthInput = entryEl.querySelector('input[name="depth"]');
-        if (depthInput) {
-            depthInput.value = String(NEW_ENTRY_DEPTH);
-            _triggerInput(depthInput);
-        }
+        if (!depthInput) return false;
 
-        const commentEl = entryEl.querySelector('textarea[name="comment"]');
-        if (commentEl) {
-            commentEl.value = NEW_ENTRY_NAME;
-            _triggerInputAndChange(commentEl);
+        const targetDepth = String(NEW_ENTRY_DEPTH);
+        if (String(depthInput.value ?? '').trim() === '' || depthInput.value !== targetDepth) {
+            depthInput.value = targetDepth;
+            _triggerInputAndChange(depthInput);
         }
-
-        const keyEl = entryEl.querySelector('textarea[name="key"]');
-        if (keyEl) {
-            keyEl.value = NEW_ENTRY_NAME;
-            _triggerInputAndChange(keyEl);
-        }
-
-        const stateSel = entryEl.querySelector('select[name="entryStateSelector"]');
-        if (stateSel) {
-            let idx = Array.from(stateSel.options).findIndex(o => String(o.value) === 'normal');
-            if (idx < 0) {
-                idx = Array.from(stateSel.options).findIndex(o => /normal/i.test(o.textContent || ''));
-            }
-            if (idx >= 0) {
-                stateSel.selectedIndex = idx;
-                _triggerInput(stateSel);
-            }
-        } else {
-            for (const nm of ['constant', 'vectorized']) {
-                const cb = entryEl.querySelector(`input[name="${nm}"]`);
-                if (cb && cb.checked) {
-                    cb.checked = false;
-                    _triggerInput(cb);
-                    try { cb.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) { /* ignore */ }
-                }
-            }
-        }
-
         return true;
     }
 
-    async function _applyNewEntryDefaultsWithRetry(uid) {
-        for (let i = 0; i < NEW_ENTRY_APPLY_RETRY_MAX; i++) {
-            const el = document.querySelector(`.world_entry[uid="${CSS.escape(String(uid))}"]`);
-            if (el && _applyNewEntryDefaults(el)) {
-                console.log(`${LOG} 🆕 new entry defaults applied: uid=${uid}`);
+    function _applyCommentAndKeyDefault(entryEl) {
+        let appliedAny = false;
+
+        const commentEl = entryEl.querySelector('textarea[name="comment"], input[name="comment"]');
+        if (commentEl) {
+            const cur = String(commentEl.value ?? '');
+            if (cur.trim() === '' || cur.trim() === NEW_ENTRY_NAME) {
+                if (commentEl.value !== NEW_ENTRY_NAME) {
+                    commentEl.value = NEW_ENTRY_NAME;
+                    _triggerInputAndChange(commentEl);
+                }
+                appliedAny = true;
+            } else {
+                appliedAny = true;
+            }
+        }
+
+        const keyEl = entryEl.querySelector('textarea[name="key"], input[name="key"]');
+        if (keyEl) {
+            const cur = String(keyEl.value ?? '');
+            if (cur.trim() === '' || cur.trim() === NEW_ENTRY_NAME) {
+                if (keyEl.value !== NEW_ENTRY_NAME) {
+                    keyEl.value = NEW_ENTRY_NAME;
+                    _triggerInputAndChange(keyEl);
+                }
+                appliedAny = true;
+            } else {
+                appliedAny = true;
+            }
+        }
+
+        return appliedAny;
+    }
+
+    function _applyStatusNormalDefault(entryEl) {
+        const stateSel = entryEl.querySelector('select[name="entryStateSelector"], select[name="status"]');
+        if (stateSel && stateSel.options && stateSel.options.length > 0) {
+            let idx = Array.from(stateSel.options).findIndex(o =>
+                String(o.value ?? '').trim().toLowerCase() === 'normal'
+            );
+            if (idx < 0) {
+                idx = Array.from(stateSel.options).findIndex(o =>
+                    /normal/i.test(String(o.textContent ?? ''))
+                );
+            }
+            if (idx >= 0) {
+                if (stateSel.selectedIndex !== idx) {
+                    stateSel.selectedIndex = idx;
+                    _triggerInputAndChange(stateSel);
+                }
                 return true;
             }
-            await wait(NEW_ENTRY_APPLY_RETRY_MS);
         }
-        console.warn(`${LOG} new entry defaults: could not apply to uid=${uid}`);
-        return false;
+
+        let changed = false;
+        for (const nm of ['constant', 'vectorized', 'disable']) {
+            const cb = entryEl.querySelector(`input[name="${nm}"]`);
+            if (cb && cb.checked) {
+                cb.checked = false;
+                _triggerInputAndChange(cb);
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    function _applyNewEntryDefaults(entryEl) {
+        if (!entryEl || !(entryEl instanceof Element)) return false;
+
+        const posRoleOk = _applyPositionAndRole(entryEl);
+        const depthOk = _applyDepthDefault(entryEl);
+        const textOk = _applyCommentAndKeyDefault(entryEl);
+        const statusOk = _applyStatusNormalDefault(entryEl);
+
+        const commentEl = entryEl.querySelector('textarea[name="comment"], input[name="comment"]');
+        const keyEl = entryEl.querySelector('textarea[name="key"], input[name="key"]');
+        const hasComment = commentEl ? String(commentEl.value ?? '').trim().length > 0 : true;
+        const hasKey = keyEl ? String(keyEl.value ?? '').trim().length > 0 : true;
+
+        return (posRoleOk || depthOk || textOk || statusOk) && hasComment && hasKey;
+    }
+
+    async function _applyNewEntryDefaultsWithRetry(uid) {
+        const cleanUid = String(uid ?? '').trim();
+        if (!cleanUid) return false;
+        if (_pendingNewEntryUids.has(cleanUid)) return false;
+
+        _pendingNewEntryUids.add(cleanUid);
+        try {
+            for (let i = 0; i < NEW_ENTRY_APPLY_RETRY_MAX; i++) {
+                const el = document.querySelector(`.world_entry[uid="${CSS.escape(cleanUid)}"]`);
+                if (el && _applyNewEntryDefaults(el)) {
+                    _appliedNewEntryUids.add(cleanUid);
+                    console.log(`${LOG} 🆕 new entry defaults applied: uid=${cleanUid}`);
+                    return true;
+                }
+                await wait(NEW_ENTRY_APPLY_RETRY_MS);
+            }
+            console.warn(`${LOG} new entry defaults: could not apply to uid=${cleanUid}`);
+            return false;
+        } finally {
+            _pendingNewEntryUids.delete(cleanUid);
+        }
     }
 
     function _stopNewEntryWatch() {
-        if (_newEntryWatch?.timer) clearInterval(_newEntryWatch.timer);
+        if (_newEntryWatch?.timer) {
+            clearInterval(_newEntryWatch.timer);
+        }
         _newEntryWatch = null;
+        if (_newEntryObserver) {
+            try { _newEntryObserver.disconnect(); } catch (e) { /* ignore */ }
+            _newEntryObserver = null;
+        }
+    }
+
+    function _inspectWatchCandidates(watch) {
+        if (!watch) return;
+        if (Date.now() - watch.startedAt > NEW_ENTRY_WATCH_MS) {
+            _stopNewEntryWatch();
+            return;
+        }
+        if (watch.busy) return;
+
+        const candidates = [];
+        for (const el of _getEntryElements()) {
+            const uid = String(el.getAttribute('uid') || '').trim();
+            if (!uid) continue;
+            if (watch.knownUids.has(uid) || _appliedNewEntryUids.has(uid) || _pendingNewEntryUids.has(uid)) {
+                continue;
+            }
+            if (/^\d+$/.test(uid)) {
+                const n = Number(uid);
+                if (n <= watch.maxKnown) continue;
+                candidates.push({ uid, n });
+            } else {
+                candidates.push({ uid, n: -1 });
+            }
+        }
+
+        if (candidates.length === 0) return;
+
+        candidates.sort((a, b) => a.n - b.n);
+        watch.busy = true;
+        (async () => {
+            try {
+                for (const c of candidates) {
+                    watch.knownUids.add(c.uid);
+                    await _applyNewEntryDefaultsWithRetry(c.uid);
+                }
+            } finally {
+                watch.busy = false;
+            }
+        })();
     }
 
     function _startNewEntryWatch() {
@@ -804,33 +940,23 @@ function _applyNewEntryDefaults(entryEl) {
         };
         _newEntryWatch = watch;
 
-        watch.timer = setInterval(async () => {
-            if (_newEntryWatch !== watch) { clearInterval(watch.timer); return; }
-            if (Date.now() - watch.startedAt > NEW_ENTRY_WATCH_MS) { _stopNewEntryWatch(); return; }
-            if (watch.busy) return;
+        const listContainer = document.querySelector('#world_popup_entries_list') || document.body;
+        try {
+            _newEntryObserver = new MutationObserver(() => {
+                _inspectWatchCandidates(watch);
+            });
+            _newEntryObserver.observe(listContainer, { childList: true, subtree: true });
+        } catch (e) { /* ignore */ }
 
-            let candidate = null;
-            for (const el of _getEntryElements()) {
-                const uid = String(el.getAttribute('uid'));
-                if (watch.knownUids.has(uid) || _appliedNewEntryUids.has(uid)) continue;
-                if (/^\d+$/.test(uid)) {
-                    const n = Number(uid);
-                    if (n <= watch.maxKnown) continue;
-                    if (!candidate || n > candidate.n) candidate = { uid, n };
-                } else if (!candidate) {
-                    candidate = { uid, n: -1 };
-                }
+        watch.timer = setInterval(() => {
+            if (_newEntryWatch !== watch) {
+                clearInterval(watch.timer);
+                return;
             }
-            if (!candidate) return;
-
-            watch.busy = true;
-            _appliedNewEntryUids.add(candidate.uid);
-            try {
-                await _applyNewEntryDefaultsWithRetry(candidate.uid);
-            } finally {
-                _stopNewEntryWatch();
-            }
+            _inspectWatchCandidates(watch);
         }, NEW_ENTRY_POLL_MS);
+
+        _inspectWatchCandidates(watch);
     }
 
     function installNewEntryDefaults() {
@@ -838,7 +964,7 @@ function _applyNewEntryDefaults(entryEl) {
         window.__wbAutoSelectNewEntryInstalled = true;
 
         document.addEventListener('click', (e) => {
-            const btn = e.target?.closest?.('#world_popup_new');
+            const btn = e.target?.closest?.('#world_popup_new, [id*="world_popup_new"], [class*="world_new_entry"]');
             if (!btn) return;
             _startNewEntryWatch();
         }, true);
@@ -848,9 +974,6 @@ function _applyNewEntryDefaults(entryEl) {
 
     // ============================================================
     // comment→key 自動同期（v8.6）
-    //   - 内部データ更新（DOM 有無に関係なく）
-    //   - DOM 更新（あれば）
-    //   - 明示 save はせず、payload auto-sync に任せる
     // ============================================================
     let _commentToKeyInstalled = false;
 
@@ -918,29 +1041,9 @@ function _applyNewEntryDefaults(entryEl) {
         return true;
     }
 
-    function _triggerInputAndChange(el) {
-        const $ = getJQuery();
-        try {
-            if ($) {
-                $(el).trigger('input');
-                $(el).trigger('change');
-            } else {
-                el.dispatchEvent(new Event('input', { bubbles: true }));
-                el.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-        } catch (e) {
-            try {
-                el.dispatchEvent(new Event('input', { bubbles: true }));
-                el.dispatchEvent(new Event('change', { bubbles: true }));
-            } catch (e2) { /* ignore */ }
-        }
-    }
-
     function _syncCommentToKey(entryEl, uid, newValue) {
-        // ① 内部データ更新（必須）
         _updateCommentAndKeyInSTData(uid, newValue);
 
-        // ② DOM の key textarea があれば視覚反映
         if (entryEl) {
             const keyEl = entryEl.querySelector('textarea[name="key"]');
             if (keyEl && keyEl.value !== newValue) {
@@ -948,9 +1051,6 @@ function _applyNewEntryDefaults(entryEl) {
                 _triggerInputAndChange(keyEl);
             }
         }
-
-        // ③ 保存は payload auto-sync に任せる
-        //    （ST の debounce save が走った時点で自動補正される）
     }
 
     function _resyncKeyUIToComment(entryEl, uid) {
@@ -1359,7 +1459,6 @@ function _applyNewEntryDefaults(entryEl) {
             console.log(`${LOG} commentToKeySync = ${settings.commentToKeySync}`);
             return settings.commentToKeySync;
         },
-        // ★ v8.6: 手動 self-heal
         selfHealNow: async () => {
             _lastHealAt = 0;
             await _selfHealAfterUpdate();
