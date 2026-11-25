@@ -258,6 +258,116 @@ function saveLexStore() {
 }
 
 // ============================================================
+// ★ 削除されたロアブックエントリの LEX データ残骸を完全削除
+//   - per-world store の該当 charKey を削除
+//   - character.data のミラー (worldName␟charKey / 旧形式 charKey) を削除
+//   - template / 解像度 / ネガティブ / 選択肢 / 変数もまとめて消える
+// ============================================================
+const _lexEntrySnapshots = new Map(); // worldName -> Map(uid -> charKey)
+
+function buildLexEntrySnapshot(entries) {
+    const snapshot = new Map();
+    if (!entries || typeof entries !== 'object') return snapshot;
+
+    for (const [uid, entry] of Object.entries(entries)) {
+        if (!entry || typeof entry !== 'object') continue;
+        const charKey = getCharKey(entry, uid);
+        if (!charKey) continue;
+        snapshot.set(String(uid), charKey);
+    }
+    return snapshot;
+}
+
+function removeLexDataEverywhere(worldName, charKey) {
+    if (!worldName || !charKey) return false;
+
+    let removed = false;
+
+    // 1) per-world store から削除
+    const store = getWorldLexStore(worldName);
+    if (Object.prototype.hasOwnProperty.call(store, charKey)) {
+        delete store[charKey];
+        removed = true;
+    }
+
+    // 2) character.data のミラーから削除
+    try {
+        const ctx = getContext();
+        const char = ctx?.characters?.[ctx?.characterId];
+        const charLex = char?.data?.extensions?.lorebook_expansion;
+
+        if (charLex && typeof charLex === 'object') {
+            const storageKey = getStorageKey(worldName, charKey);
+
+            if (storageKey && Object.prototype.hasOwnProperty.call(charLex, storageKey)) {
+                delete charLex[storageKey];
+                removed = true;
+            }
+
+            // 旧形式: world 接頭辞なしの charKey
+            if (Object.prototype.hasOwnProperty.call(charLex, charKey)) {
+                delete charLex[charKey];
+                removed = true;
+            }
+
+            if (removed && window.CharStore?.saveCharacterExtension) {
+                window.CharStore.saveCharacterExtension(
+                    MODULE_NAME,
+                    charLex,
+                    { immediate: true }
+                );
+            }
+        }
+    } catch (e) {
+        console.warn(LOG, 'character.data の LEX 残骸削除に失敗:', e);
+    }
+
+    if (removed) {
+        saveLexStore();
+        debugLog(`削除済みエントリの LEX データを削除: ${worldName}::${charKey}`);
+    }
+
+    return removed;
+}
+
+function pruneDeletedLexEntries(worldName, entries) {
+    if (!worldName) return;
+
+    const current = buildLexEntrySnapshot(entries);
+    const previous = _lexEntrySnapshots.get(worldName);
+
+    // 初回は削除判定を行わず、現在の状態を記録するだけ
+    if (!previous) {
+        _lexEntrySnapshots.set(worldName, current);
+        return;
+    }
+
+    let removedCount = 0;
+
+    for (const [uid, charKey] of previous.entries()) {
+        if (current.has(uid)) continue;
+
+        // 同一 charKey を持つ別 uid が再作成されている可能性があるため、
+        // 現在のエントリ群に同じ charKey が存在する場合は削除しない
+        const stillUsed = Array.from(current.values()).some(k => k === charKey);
+        if (stillUsed) continue;
+
+        if (removeLexDataEverywhere(worldName, charKey)) {
+            removedCount++;
+        }
+    }
+
+    _lexEntrySnapshots.set(worldName, current);
+
+    if (removedCount > 0) {
+        console.log(
+            `${LOG} 削除されたロアブックエントリの LEX データを ${removedCount} 件削除しました ` +
+            `(world="${worldName}")`
+        );
+    }
+}
+
+// ============================================================
 // ★ ST が表示用に comment へ付加する注釈を除去して正規化する
 //   - "00_共通ルール（常時有効）" → "00_共通ルール"
 //   - "001（無効）"               → "001"
@@ -1936,6 +2046,9 @@ async function injectExpansionSections() {
         entries = {};
         debugLog(`inject: world "${worldName}" のエントリ取得失敗 → DOM フォールバックで続行`);
     }
+    
+    // ★ 削除済みエントリの LEX データ残骸を掃除
+    pruneDeletedLexEntries(worldName, entries);
 
     const domUids = Array.from(entryEls)
         .map(el => String(el.getAttribute('uid')))
@@ -2065,6 +2178,14 @@ async function injectExpansionSections() {
         debugLog(`uid=${uid}: LEXセクション注入完了`);
     }
 
+    // ★ DOM 上に存在しないエントリの残骸も掃除
+    try {
+        const liveEntries = await loadWorldInfoEntriesByName(worldName);
+        pruneDeletedLexEntries(worldName, liveEntries || {});
+    } catch (e) {
+        debugLog('削除済み LEX エントリの掃除に失敗:', e);
+    }
+                
     if (injected > 0 || settings.debug) {
         debugLog(
             `inject完了: world="${worldName}", 注入=${injected}, ` +
@@ -2313,9 +2434,19 @@ function registerEventListeners() {
     ];
     for (const evtName of worldInfoCacheClearEvents) {
         if (event_types[evtName] && typeof eventSource.on === 'function') {
-            eventSource.on(event_types[evtName], () => {
+            eventSource.on(event_types[evtName], async () => {
                 clearWorldInfoEntriesCache();
                 console.log(`[LBE] ${evtName} を受信 → エントリキャッシュをクリア`);
+
+                try {
+                    const worldName = getCurrentWorldName();
+                    if (worldName) {
+                        const entries = await loadWorldInfoEntriesByName(worldName);
+                        pruneDeletedLexEntries(worldName, entries);
+                    }
+                } catch (e) {
+                    console.warn(LOG, '削除済み LEX エントリの掃除に失敗:', e);
+                }
             });
         }
     }
