@@ -991,7 +991,7 @@ async function loadWorldInfoEntries(worldName) {
                 }
                 const scaledD = pathEl.dataset.stjBaseD.replace(/-?\d+(?:\.\d+)?/g, (num) => String(parseFloat(num) * scale));
                 pathEl.setAttribute('d', scaledD);
-                pathEl.setAttribute('stroke-width', String(2 * scale));
+                pathEl.setAttribute('stroke-width', String(4 * scale));
             });
             svg.querySelectorAll('polygon').forEach((polyEl) => {
                 const pts = polyEl.getAttribute('points');
