@@ -38,7 +38,7 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
     const NEW_ENTRY_APPLY_RETRY_MAX = 12;
     const NEW_ENTRY_APPLY_RETRY_MS = 150;
     const NEW_ENTRY_DEPTH = 0;
-    const NEW_ENTRY_NAME = 'new';
+    const NEW_ENTRY_PREFIX = 'new_';
 
     const RELOAD_DELAY_MS = 1000;
     const RELOAD_LOOP_WINDOW_MS = 60000;
@@ -710,6 +710,112 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
         }
     }
 
+    // 既存エントリの直前確定名（同名チェック・復元用）と自動採番中UID
+    const _entryLastValidNames = new Map();
+    const _autoNamingUids = new Set();
+
+    function _normalizeEntryName(name) {
+        return String(name ?? '').trim().toLowerCase();
+    }
+
+    function _collectUsedNewIndices(excludeUid = null) {
+        const used = new Set();
+        const regex = /^new_(\d+)$/i;
+
+        for (const el of _getEntryElements()) {
+            const uid = String(el.getAttribute('uid') || el.getAttribute('data-uid') || '').trim();
+            if (excludeUid && uid === String(excludeUid)) continue;
+            const cEl = el.querySelector('textarea[name="comment"], input[name="comment"]');
+            const val = String(cEl?.value ?? '').trim();
+            const m = val.match(regex);
+            if (m) used.add(Number(m[1]));
+        }
+
+        const worldName = _getCurrentEditorWorldName();
+        const wiCandidates = [];
+        try {
+            const ctx = getSTContext();
+            if (ctx?.world_info?.[worldName]?.entries) wiCandidates.push(ctx.world_info[worldName].entries);
+        } catch (e) { /* ignore */ }
+        try {
+            if (window.world_info?.[worldName]?.entries) wiCandidates.push(window.world_info[worldName].entries);
+        } catch (e) { /* ignore */ }
+
+        for (const entries of wiCandidates) {
+            for (const k of Object.keys(entries)) {
+                const e = entries[k];
+                if (!e || typeof e !== 'object') continue;
+                const eUid = String(e.uid ?? k).trim();
+                if (excludeUid && eUid === String(excludeUid)) continue;
+                const val = String(e.comment ?? '').trim();
+                const m = val.match(regex);
+                if (m) used.add(Number(m[1]));
+            }
+        }
+
+        return used;
+    }
+
+    function _allocateNextNewEntryName(excludeUid = null) {
+        const used = _collectUsedNewIndices(excludeUid);
+        let idx = 0;
+        while (used.has(idx)) {
+            idx++;
+        }
+        return `${NEW_ENTRY_PREFIX}${idx}`;
+    }
+
+    function _hasDuplicateEntryName(candidateName, currentUid) {
+        const normTarget = _normalizeEntryName(candidateName);
+        if (!normTarget) return false;
+
+        for (const el of _getEntryElements()) {
+            const uid = String(el.getAttribute('uid') || el.getAttribute('data-uid') || '').trim();
+            if (currentUid && uid === String(currentUid)) continue;
+            const cEl = el.querySelector('textarea[name="comment"], input[name="comment"]');
+            const otherName = String(cEl?.value ?? '').trim();
+            if (otherName && _normalizeEntryName(otherName) === normTarget) {
+                return true;
+            }
+        }
+
+        const worldName = _getCurrentEditorWorldName();
+        const wiCandidates = [];
+        try {
+            const ctx = getSTContext();
+            if (ctx?.world_info?.[worldName]?.entries) wiCandidates.push(ctx.world_info[worldName].entries);
+        } catch (e) { /* ignore */ }
+        try {
+            if (window.world_info?.[worldName]?.entries) wiCandidates.push(window.world_info[worldName].entries);
+        } catch (e) { /* ignore */ }
+
+        for (const entries of wiCandidates) {
+            for (const k of Object.keys(entries)) {
+                const e = entries[k];
+                if (!e || typeof e !== 'object') continue;
+                const eUid = String(e.uid ?? k).trim();
+                if (currentUid && eUid === String(currentUid)) continue;
+                const otherName = String(e.comment ?? '').trim();
+                if (otherName && _normalizeEntryName(otherName) === normTarget) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    function _showDuplicateNameWarning(dupName) {
+        const msg = `既に同名エントリが存在します（「${dupName}」）`;
+        try {
+            if (window.toastr?.warning) {
+                window.toastr.warning(msg, 'エントリ名重複', { timeOut: 3500 });
+                return;
+            }
+        } catch (e) { /* ignore */ }
+        try { alert(msg); } catch (e) { console.warn(LOG, msg); }
+    }
+                                                      
     function _applyPositionAndRole(entryEl) {
         let appliedAny = false;
 
@@ -774,18 +880,21 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
         return true;
     }
 
-    function _applyCommentAndKeyDefault(entryEl) {
+    function _applyCommentAndKeyDefault(entryEl, assignedName) {
         let appliedAny = false;
-
+        const uid = String(entryEl.getAttribute('uid') || entryEl.getAttribute('data-uid') || '').trim();
+        const targetName = assignedName || _allocateNextNewEntryName(uid);
+        if (uid) _autoNamingUids.add(uid);
+ 
         const commentEl = entryEl.querySelector('textarea[name="comment"], input[name="comment"]');
-        console.debug(`${LOG} [DBG][comment] found=${!!commentEl}, value=${JSON.stringify(commentEl?.value ?? null)}`);
         if (commentEl) {
             const cur = String(commentEl.value ?? '');
-            if (cur.trim() === '' || cur.trim() === NEW_ENTRY_NAME) {
-                if (commentEl.value !== NEW_ENTRY_NAME) {
-                    commentEl.value = NEW_ENTRY_NAME;
+            if (cur.trim() === '' || /^new_\d+$/i.test(cur.trim()) || cur.trim() === 'new') {
+                if (commentEl.value !== targetName) {
+                    commentEl.value = targetName;
                     _triggerInputAndChange(commentEl);
                 }
+                if (uid) _entryLastValidNames.set(uid, targetName);
                 appliedAny = true;
             } else {
                 appliedAny = true;
@@ -793,12 +902,11 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
         }
 
         const keyEl = entryEl.querySelector('textarea[name="key"], input[name="key"]');
-        console.debug(`${LOG} [DBG][key] found=${!!keyEl}, value=${JSON.stringify(keyEl?.value ?? null)}`);
         if (keyEl) {
             const cur = String(keyEl.value ?? '');
-            if (cur.trim() === '' || cur.trim() === NEW_ENTRY_NAME) {
-                if (keyEl.value !== NEW_ENTRY_NAME) {
-                    keyEl.value = NEW_ENTRY_NAME;
+            if (cur.trim() === '' || /^new_\d+$/i.test(cur.trim()) || cur.trim() === 'new') {
+                if (keyEl.value !== targetName) {
+                    keyEl.value = targetName;
                     _triggerInputAndChange(keyEl);
                 }
                 appliedAny = true;
@@ -807,6 +915,9 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
             }
         }
 
+        if (uid) {
+            setTimeout(() => _autoNamingUids.delete(uid), 500);
+        }
         return appliedAny;
     }
 
@@ -847,10 +958,11 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
         if (!entryEl || !(entryEl instanceof Element)) return false;
         const uid = entryEl.getAttribute('uid');
         if (!uid) return false;
-        
+
+        const assignedName = _allocateNextNewEntryName(uid);
         const posRoleOk = _applyPositionAndRole(entryEl);
         const depthOk = _applyDepthDefault(entryEl);
-        const textOk = _applyCommentAndKeyDefault(entryEl);
+        const textOk = _applyCommentAndKeyDefault(entryEl, assignedName);
         const statusOk = _applyStatusNormalDefault(entryEl);
 
         // ST内部データにも初期値を直接同期（DOM再描画や保存時の巻き戻し防止）
@@ -861,8 +973,8 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
                 stEntry.position = 4;
                 stEntry.role = 0;
                 stEntry.depth = NEW_ENTRY_DEPTH;
-                stEntry.comment = NEW_ENTRY_NAME;
-                stEntry.key = [NEW_ENTRY_NAME];
+                stEntry.comment = assignedName;
+                stEntry.key = [assignedName];
                 stEntry.constant = false;
                 stEntry.vectorized = false;
                 stEntry.disable = false;
