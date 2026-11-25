@@ -1952,7 +1952,7 @@ async function mountWorldEntryInCellModal(cell) {
     }
 
     // ===== 最新のロアブックエントリ名へ同期 =====
-    async function syncEditorWithLatestLorebook(charName) {
+async function syncEditorWithLatestLorebook(charName) {
         if (!charName) return false;
         const worldName = getCharacterWorldInfoName();
         if (!worldName) return false;
@@ -1967,70 +1967,91 @@ async function mountWorldEntryInCellModal(cell) {
         const list = Array.isArray(entries) ? entries : Object.values(entries);
         if (list.length === 0) return false;
 
-        let imageMap = getCurrentImageMapFromCharData(charName) || {};
-        let changed = false;
-        const updatedMap = {};
-
-        // default / thumbnail は先頭に保持
-        for (const spKey of ['default', 'thumbnail']) {
-            if (Object.prototype.hasOwnProperty.call(imageMap, spKey)) {
-                updatedMap[spKey] = imageMap[spKey];
-            }
-        }
-
-        const usedOldKeys = new Set();
+        const imageMap = getCurrentImageMapFromCharData(charName) || {};
         const orderedEntries = [...list].sort((a, b) => {
             const oa = Number(a?.order ?? a?.displayIndex ?? 0);
             const ob = Number(b?.order ?? b?.displayIndex ?? 0);
             return oa - ob;
         });
 
+        const container = document.getElementById('stj_keywords_container');
+        if (!container) return false;
+
+        const existingCells = Array.from(container.querySelectorAll('.stj-keyword-item'));
+        const cellByUid = new Map();
+        const unusedCellsByKw = new Map();
+
+        for (const cell of existingCells) {
+            const u = getCellUid(cell);
+            const k = getCellKeyword(cell).trim();
+            if (u) {
+                cellByUid.set(u, cell);
+            } else if (k) {
+                if (!unusedCellsByKw.has(k)) unusedCellsByKw.set(k, []);
+                unusedCellsByKw.get(k).push(cell);
+            }
+        }
+
+        const usedCells = new Set();
+        const usedMapKeys = new Set();
+        let idx = 0;
+
         for (const entry of orderedEntries) {
             if (!entry) continue;
             const latestName = getEntryKeyword(entry);
+            const uid = getEntryUid(entry);
             if (!latestName || isCommonRuleName(latestName)) continue;
 
             const keys = getEntryKeys(entry).map(k => String(k).trim()).filter(Boolean);
-            const candidateKeys = [latestName, ...keys];
+            const candidates = [latestName, ...keys];
 
-            let matchedOldKey = null;
-            for (const cand of candidateKeys) {
-                if (Object.prototype.hasOwnProperty.call(imageMap, cand) && !usedOldKeys.has(cand)) {
-                    matchedOldKey = cand;
+            let matchedKey = null;
+            for (const cand of candidates) {
+                if (Object.prototype.hasOwnProperty.call(imageMap, cand) && !usedMapKeys.has(cand)) {
+                    matchedKey = cand;
                     break;
                 }
             }
+            if (matchedKey) usedMapKeys.add(matchedKey);
 
-            if (matchedOldKey) {
-                usedOldKeys.add(matchedOldKey);
-                updatedMap[latestName] = imageMap[matchedOldKey];
-                if (matchedOldKey !== latestName) {
-                    changed = true;
+            const files = matchedKey
+                ? (Array.isArray(imageMap[matchedKey]) ? imageMap[matchedKey] : [imageMap[matchedKey]])
+                    .map(p => extractFileNameFromPath(p))
+                    .filter(Boolean)
+                : [];
+
+            let cell = uid ? cellByUid.get(uid) : null;
+            if (!cell) {
+                const pool = unusedCellsByKw.get(latestName) || [];
+                while (pool.length > 0 && !cell) {
+                    const candCell = pool.shift();
+                    if (!usedCells.has(candCell)) cell = candCell;
                 }
-            } else if (!Object.prototype.hasOwnProperty.call(updatedMap, latestName)) {
-                updatedMap[latestName] = [];
-                changed = true;
             }
-        }
 
-        // ロアブック側に存在しない孤立キーの整理
-        for (const [k, v] of Object.entries(imageMap)) {
-            if (k === 'default' || k === 'thumbnail') continue;
-            if (!usedOldKeys.has(k) && !Object.prototype.hasOwnProperty.call(updatedMap, k)) {
-                changed = true;
+            if (cell) {
+                usedCells.add(cell);
+                setCellUid(cell, uid);
+                setCellKeyword(cell, latestName);
+                setCellImages(cell, files);
+                updateCellPreview(cell);
+                container.appendChild(cell);
+            } else {
+                addKeywordRowWithData(container, idx, { uid, keyword: latestName, images: files });
             }
+            idx++;
         }
 
-        if (changed) {
-            saveImageMapToCharData(charName, updatedMap);
+        for (const cell of existingCells) {
+            if (!usedCells.has(cell)) cell.remove();
+        }
+        if (container.querySelectorAll('.stj-keyword-item').length === 0) {
+            addKeywordRowWithData(container, 0, { uid: '', keyword: '', images: [] });
         }
 
-        populateFormFromImageMap(updatedMap, false);
         runLiveTest();
-        if (changed) {
-            saveData({ silent: true });
-        }
-        return changed;
+        _stjScheduleTreeLayout();
+        return true;
     }
     
     // ===== ①ロアブック本体・②Lorebook Expansion・③画像マッピングの一括JSON自動出力 =====
