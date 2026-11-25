@@ -4119,42 +4119,7 @@ function _stjDrawConnections(container, positions, children) {
             }
         }
     }
-    
-    function _stjApplyTreeLayout(layout, container, svgEl) {
-        if (!layout || !container) return;
-        const { positions, edges } = layout;
 
-        for (const [id, pos] of positions.entries()) {
-            if (!pos.cell) continue;
-            pos.cell.setAttribute('data-tree-node-id', id);
-            pos.cell.style.transform = `translate(${pos.x}px, ${pos.y}px)`;
-        }
-
-        if (!svgEl) return;
-        while (svgEl.firstChild) {
-            svgEl.removeChild(svgEl.firstChild);
-        }
-
-        const svgNS = 'http://www.w3.org/2000/svg';
-        for (const edge of edges || []) {
-            const fromPos = positions.get(edge.from);
-            const toPos = positions.get(edge.to);
-            if (!fromPos || !toPos) continue;
-
-            const x1 = fromPos.x + 170;
-            const y1 = fromPos.y + 36;
-            const x2 = toPos.x;
-            const y2 = toPos.y + 36;
-            const midX = (x1 + x2) / 2;
-
-            const path = document.createElementNS(svgNS, 'path');
-            path.setAttribute('d', `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`);
-            path.setAttribute('fill', 'none');
-            path.setAttribute('stroke', 'currentColor');
-            path.setAttribute('stroke-width', '1.5');
-            svgEl.appendChild(path);
-        }
-    }
     let _stjTreeLayoutTimer = null;
     function _stjScheduleTreeLayout() {
         if (_stjTreeLayoutTimer) clearTimeout(_stjTreeLayoutTimer);
