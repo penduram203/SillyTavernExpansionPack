@@ -2655,6 +2655,8 @@ async function exportUnifiedBundleJson(options = {}) {
             e.stopPropagation();
             closeCellModal(true);
         });
+
+        // stj_editor.js (createCellModal 関数内の .stj-cell-modal-delete イベントリスナーを置き換え)
         modal.querySelector('.stj-cell-modal-delete').addEventListener('click', (e) => {
             e.stopPropagation();
             e.preventDefault();
@@ -2666,63 +2668,94 @@ async function exportUnifiedBundleJson(options = {}) {
                 return;
             }
     
-            const message = `画像データを残してエントリを削除しますか？\nエントリ:\n${entryName}\nこの操作は取り消せません！`;
-    
-            showDeleteConfirmDialog(message, () => {
-                const worldPopup = document.getElementById('world_popup');
-                if (!worldPopup) return;
-        
-                // 現在のセルに対応するロアブックエントリ要素を特定
-                const cellUid = getCellUid(currentModalCell);
-                let targetEntryEl = null;
-                if (cellUid) {
-                    targetEntryEl = worldPopup.querySelector(`.world_entry[uid="${CSS.escape(cellUid)}"]`);
-                }
-                if (!targetEntryEl) {
-                    const entries = worldPopup.querySelectorAll('.world_entry[uid]');
-                    for (const el of entries) {
-                        const commentEl = el.querySelector('textarea[name="comment"], input[name="comment"]');
-                        if (commentEl && commentEl.value.trim() === entryName) {
-                            targetEntryEl = el;
-                            break;
+            // ★ STJ Editor独自の確認ダイアログを表示（\nで改行）
+            showDeleteConfirmDialog(
+                `画像データを残してエントリを削除しますか？\nエントリ: ${entryName}\nこの操作は取り消せません！`,
+                () => {
+                    // ★ 修正: エントリ要素をセルモーダル内（#stj_cell_modal_entry_host）から探す
+                    const hostEl = currentCellModal.querySelector('#stj_cell_modal_entry_host');
+                    let targetEntryEl = hostEl?.querySelector('.world_entry[uid]');
+            
+                    // フォールバック: #world_popup 内にも探す
+                    if (!targetEntryEl) {
+                        const worldPopup = document.getElementById('world_popup');
+                        const cellUid = getCellUid(currentModalCell);
+                        if (cellUid && worldPopup) {
+                            targetEntryEl = worldPopup.querySelector(`.world_entry[uid="${CSS.escape(cellUid)}"]`);
                         }
                     }
-                }
-        
-                if (!targetEntryEl) {
-                    showCustomAlert('対象のロアブックエントリが見つかりません');
-                    return;
-                }
-        
-                const deleteBtn = targetEntryEl.querySelector('.delete_entry_button, .delete_entry, [class*="delete"]');
-                if (!deleteBtn) {
-                    showCustomAlert('削除ボタンが見つかりません');
-                    return;
-                }
-        
-                // ★ ST本体の確認ダイアログ(#dialogue_popup)をインターセプトして文言を書き換え
-                const observer = new MutationObserver((mutations, obs) => {
-                    const popup = document.querySelector('#dialogue_popup, .dialogue_popup');
-                    if (popup) {
-                        const textEl = popup.querySelector('#dialogue_popup_text, .dialogue_popup_text');
-                        if (textEl && !textEl.dataset.stjRewritten) {
-                            textEl.innerHTML = `画像データを残してエントリを削除しますか？<br>エントリ:<br><b>${entryName}</b><br>この操作は取り消せません！`;
-                            textEl.dataset.stjRewritten = '1';
-                        }
-                        const okBtn = popup.querySelector('#dialogue_popup_ok, .dialogue_popup_ok');
-                        const cancelBtn = popup.querySelector('#dialogue_popup_cancel, .dialogue_popup_cancel');
-                        if (okBtn && okBtn.textContent.trim() !== 'はい') okBtn.textContent = 'はい';
-                        if (cancelBtn && cancelBtn.textContent.trim() !== 'いいえ') cancelBtn.textContent = 'いいえ';
+            
+                    if (!targetEntryEl) {
+                        showCustomAlert('対象のロアブックエントリが見つかりません');
+                        return;
                     }
-                });
-                observer.observe(document.body, { childList: true, subtree: true, characterData: true });
-        
-                // ゴミ箱アイコンをクリックしてST本体の削除処理を発火
-                deleteBtn.click();
-        
-                // 念のため3秒後にObserverを切断
-                setTimeout(() => observer.disconnect(), 3000);
-            });
+            
+                    const deleteBtn = targetEntryEl.querySelector('.delete_entry_button');
+                    if (!deleteBtn) {
+                        showCustomAlert('削除ボタンが見つかりません');
+                        return;
+                    }
+            
+                    // ★ ST本体の確認ダイアログ(#dialogue_popup)をインターセプト
+                    const observer = new MutationObserver((mutations, obs) => {
+                        const popup = document.querySelector('#dialogue_popup');
+                        if (popup && popup.style.display !== 'none' && !popup.classList.contains('stj-rewritten')) {
+                            popup.classList.add('stj-rewritten');
+                    
+                            // ★ 修正: textContent と \n で正しく改行して書き換え
+                            const textEl = popup.querySelector('#dialogue_popup_text');
+                            if (textEl) {
+                                textEl.textContent = `画像データを残してエントリを削除しますか？\nエントリ: ${entryName}\nこの操作は取り消せません！`;
+                            }
+                    
+                            const okBtn = popup.querySelector('#dialogue_popup_ok');
+                            const cancelBtn = popup.querySelector('#dialogue_popup_cancel');
+                            if (okBtn && okBtn.textContent.trim() !== 'はい') okBtn.textContent = 'はい';
+                            if (cancelBtn && cancelBtn.textContent.trim() !== 'いいえ') cancelBtn.textContent = 'いいえ';
+                    
+                            // ★ ST本体の「はい」ボタンが押されたら、セルモーダルを閉じてセルを削除
+                            if (okBtn) {
+                                const okHandler = () => {
+                                    setTimeout(() => {
+                                        // セルモーダルを閉じる（revert=falseで元に戻さない）
+                                        closeCellModal(false);
+                                
+                                        // JSON編集ツリーからセルを削除
+                                        if (currentModalCell && currentModalCell.parentNode) {
+                                            currentModalCell.remove();
+                                        }
+                                
+                                        // ツリーレイアウトを再計算して保存
+                                        autoSave({ immediate: true });
+                                        runLiveTest();
+                                        _stjScheduleTreeLayout();
+                                
+                                        console.log(`[STJ Editor] 🗑️ エントリ削除完了: ${entryName}`);
+                                    }, 150);
+                                };
+                                okBtn.addEventListener('click', okHandler, { once: true });
+                            }
+                    
+                            // 3秒後にObserverを切断
+                            setTimeout(() => obs.disconnect(), 3000);
+                        }
+                    });
+                    observer.observe(document.body, { 
+                        childList: true, 
+                        subtree: true, 
+                        attributes: true,
+                        attributeFilter: ['style', 'class']
+                    });
+            
+                    // ★ 修正: MouseEvent で確実にゴミ箱ボタンのクリックを発火
+                    const clickEvent = new MouseEvent('click', {
+                        bubbles: true,
+                        cancelable: true,
+                        view: window
+                    });
+                    deleteBtn.dispatchEvent(clickEvent);
+                }
+            );
         });
         
         modal.addEventListener('click', (e) => {
