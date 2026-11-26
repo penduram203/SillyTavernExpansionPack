@@ -6101,195 +6101,184 @@ if (addBtn) {
             },
         };
     }
-
     $(document).ready(() => { initStjEditor(); });
-    // ============================================================
-    // ★ 新規エントリボタン: 委譲型クリック処理（最終安全版）
-    // ============================================================
-    (function installStjNewEntryButtonHandler() {
-        if (window.__stjNewEntryButtonHandlerInstalled) return;
-        window.__stjNewEntryButtonHandlerInstalled = true;
-    
-        function stjShowCreatingOverlay() {
-            stjHideCreatingOverlay();
-
-            const overlay = document.createElement('div');
-            overlay.id = 'stj-new-entry-creating-overlay';
-            overlay.textContent = _t('stj.toast.newentrycreating', '新規エントリ作成中…');
-
-            Object.assign(overlay.style, {
-                position: 'fixed',
-                left: '50%',
-                bottom: '96px',
-                transform: 'translateX(-50%)',
-                zIndex: '30000',
-                padding: '10px 18px',
-                borderRadius: '8px',
-                background: 'rgba(20, 20, 20, 0.92)',
-                color: '#fff',
-                fontSize: '14px',
-                fontWeight: '600',
-                boxShadow: '0 4px 16px rgba(0, 0, 0, 0.45)',
-                pointerEvents: 'none',
-                whiteSpace: 'nowrap',
-            });
-
-            document.body.appendChild(overlay);
-        }
-
-        function stjHideCreatingOverlay() {
-            document.getElementById('stj-new-entry-creating-overlay')?.remove();
-        }
-
-        function stjGetCells() {
-            return Array.from(
-                document.querySelectorAll('#stjkeywordscontainer .stj-keyword-item')
-            );
-        }
-
-        function stjShowError(message) {
-            console.error('[STJ Editor]', message);
-
-            try {
-                if (window.GicApi?.showBottomToast) {
-                    window.GicApi.showBottomToast(message, '', 'error');
-                } else if (window.toastr?.error) {
-                    window.toastr.error(message);
-                }
-            } catch (err) {
-                console.warn('[STJ Editor] エラートースト表示に失敗:', err);
-            }
-        }
-
-        async function stjWaitForNewCell(beforeUids, beforeCount, timeoutMs = 5000) {
-            const charName =
-                detectCharacterNameFromDOM(
-                    document.getElementById('stjcharnamedisplay')?.textContent
-                ) ||
-                detectCharacterNameFromDOM();
-
-            const startedAt = Date.now();
-
-            while (Date.now() - startedAt < timeoutMs) {
-                try {
-                    if (charName) {
-                        await syncEditorWithLatestLorebook(charName);
-                    }
-                } catch (err) {
-                    console.warn('[STJ Editor] 新規セル待ち中の同期エラー:', err);
-                }
-
-                const cells = stjGetCells();
-                const hasNewUid = cells.some(cell => {
-                    const uid = getCellUid(cell);
-                    return uid && !beforeUids.has(uid);
-                });
-
-                if (hasNewUid || cells.length > beforeCount) {
-                    return true;
-                }
-
-                await new Promise(resolve => setTimeout(resolve, 80));
-            }
-
-            return false;
-        }
-
-        async function stjHandleNewEntryClick(button) {
-            console.log('[STJ Editor] 新規ボタン クリック検出', {
-                isDialogActive,
-                buttonDisabled: button.disabled,
-                worldPopupNew: !!document.getElementById('world_popup_new'),
-            });
-
-            if (isDialogActive) {
-                console.warn('[STJ Editor] isDialogActive=true のため新規エントリ作成を中止しました');
-                stjShowCreatingOverlay();
-                setTimeout(stjHideCreatingOverlay, 1500);
-                return;
-            }
-
-            const beforeCells = stjGetCells();
-            const beforeUids = new Set(
-                beforeCells
-                    .map(cell => getCellUid(cell))
-                    .filter(uid => uid)
-            );
-            const beforeCount = beforeCells.length;
-
-            button.disabled = true;
-            stjShowCreatingOverlay();
-
-            try {
-                autoSave({ immediate: true });
-
-                const newEntryBtn = document.getElementById('world_popup_new');
-                console.log('[STJ Editor] world_popup_new:', newEntryBtn);
-
-                if (!newEntryBtn) {
-                    throw new Error('world_popup_new ボタンが見つかりません');
-                }
-
-                newEntryBtn.click();
-                console.log('[STJ Editor] world_popup_new をクリックしました');
-    
-                const appeared = await stjWaitForNewCell(
-                    beforeUids,
-                    beforeCount,
-                    5000
-                );
-
-                console.log('[STJ Editor] 新規セル出現判定:', appeared);
-
-                if (stjModalEl) {
-                    stjModalEl.style.display = 'block';
-                }
-
-                runLiveTest();
-
-                if (!appeared) {
-                    const charName =
-                        detectCharacterNameFromDOM(
-                            document.getElementById('stjcharnamedisplay')?.textContent
-                        ) ||
-                        detectCharacterNameFromDOM();
-
-                    if (charName) {
-                        await syncEditorWithLatestLorebook(charName);
-                    }
-                }
-            } catch (err) {
-                stjShowError(
-                    _t('stj.toast.newentryfailed', '新規エントリの作成に失敗しました')
-                );
-                console.error('[STJ Editor] 新規エントリ作成エラー:', err);
-            } finally {
-                stjHideCreatingOverlay();
-                button.disabled = false;
-            }
-        }
-
-        document.addEventListener('click', (event) => {
-            const button = event.target?.closest?.('#stjaddkeyword');
-            if (!button) return;
-
-            event.preventDefault();
-            event.stopImmediatePropagation();
-
-            stjHandleNewEntryClick(button);
-        }, true);
-
-        console.log('[STJ Editor] 新規エントリボタンの委譲型クリック処理を登録しました');
-    })();
 })();
 
-console.log('[STJ Editor] 末尾コード読み込み完了');
+// ============================================================
+// ★ 新規エントリボタン: 委譲型クリック処理
+// ============================================================
+(function installStjNewEntryButtonHandler() {
+    if (window.__stjNewEntryButtonHandlerInstalled) return;
+    window.__stjNewEntryButtonHandlerInstalled = true;
 
-document.addEventListener('click', (event) => {
-    const button = event.target?.closest?.('#stj_add_keyword');
-    if (!button) return;
+    function showCreatingOverlay() {
+        hideCreatingOverlay();
 
-    console.log('[STJ Editor] 新規ボタン クリック検出', button);
-    event.preventDefault();
-    event.stopImmediatePropagation();
-}, true);
+        const overlay = document.createElement('div');
+        overlay.id = 'stj-new-entry-creating-overlay';
+        overlay.textContent = _t('stj.toast.newentrycreating', '新規エントリ作成中…');
+
+        Object.assign(overlay.style, {
+            position: 'fixed',
+            left: '50%',
+            bottom: '96px',
+            transform: 'translateX(-50%)',
+            zIndex: '30000',
+            padding: '10px 18px',
+            borderRadius: '8px',
+            background: 'rgba(20, 20, 20, 0.92)',
+            color: '#fff',
+            fontSize: '14px',
+            fontWeight: '600',
+            boxShadow: '0 4px 16px rgba(0, 0, 0, 0.45)',
+            pointerEvents: 'none',
+            whiteSpace: 'nowrap',
+        });
+
+        document.body.appendChild(overlay);
+    }
+
+    function hideCreatingOverlay() {
+        document.getElementById('stj-new-entry-creating-overlay')?.remove();
+    }
+
+    function getCells() {
+        return Array.from(
+            document.querySelectorAll('#stjkeywordscontainer .stj-keyword-item')
+        );
+    }
+
+    function showError(message) {
+        console.error('[STJ Editor]', message);
+
+        try {
+            if (window.GicApi?.showBottomToast) {
+                window.GicApi.showBottomToast(message, '', 'error');
+            } else if (window.toastr?.error) {
+                window.toastr.error(message);
+            }
+        } catch (err) {
+            console.warn('[STJ Editor] エラートースト表示に失敗:', err);
+        }
+    }
+
+    async function waitForNewCell(beforeUids, beforeCount, timeoutMs = 5000) {
+        const charName =
+            detectCharacterNameFromDOM(
+                document.getElementById('stjcharnamedisplay')?.textContent
+            ) ||
+            detectCharacterNameFromDOM();
+
+        const startedAt = Date.now();
+
+        while (Date.now() - startedAt < timeoutMs) {
+            try {
+                if (charName) {
+                    await syncEditorWithLatestLorebook(charName);
+                }
+            } catch (err) {
+                console.warn('[STJ Editor] 新規セル待ち中の同期エラー:', err);
+            }
+
+            const cells = getCells();
+            const hasNewUid = cells.some(cell => {
+                const uid = getCellUid(cell);
+                return uid && !beforeUids.has(uid);
+            });
+
+            if (hasNewUid || cells.length > beforeCount) {
+                return true;
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 80));
+        }
+
+        return false;
+    }
+
+    async function handleNewEntryClick(button) {
+        console.log('[STJ Editor] 新規ボタン クリック検出', {
+            isDialogActive,
+            buttonDisabled: button.disabled,
+            worldPopupNew: !!document.getElementById('world_popup_new'),
+        });
+
+        if (isDialogActive) {
+            console.warn('[STJ Editor] isDialogActive=true のため新規エントリ作成を中止しました');
+            showCreatingOverlay();
+            setTimeout(hideCreatingOverlay, 1500);
+            return;
+        }
+
+        const beforeCells = getCells();
+        const beforeUids = new Set(
+            beforeCells
+                .map(cell => getCellUid(cell))
+                .filter(uid => uid)
+        );
+        const beforeCount = beforeCells.length;
+
+        button.disabled = true;
+        showCreatingOverlay();
+
+        try {
+            autoSave({ immediate: true });
+
+            const newEntryBtn = document.getElementById('world_popup_new');
+            console.log('[STJ Editor] world_popup_new:', newEntryBtn);
+
+            if (!newEntryBtn) {
+                throw new Error('world_popup_new ボタンが見つかりません');
+            }
+
+            newEntryBtn.click();
+            console.log('[STJ Editor] world_popup_new をクリックしました');
+
+            const appeared = await waitForNewCell(
+                beforeUids,
+                beforeCount,
+                5000
+            );
+
+            console.log('[STJ Editor] 新規セル出現判定:', appeared);
+
+            if (stjModalEl) {
+                stjModalEl.style.display = 'block';
+            }
+
+            runLiveTest();
+
+            if (!appeared) {
+                const charName =
+                    detectCharacterNameFromDOM(
+                        document.getElementById('stjcharnamedisplay')?.textContent
+                    ) ||
+                    detectCharacterNameFromDOM();
+
+                if (charName) {
+                    await syncEditorWithLatestLorebook(charName);
+                }
+            }
+        } catch (err) {
+            showError(
+                _t('stj.toast.newentryfailed', '新規エントリの作成に失敗しました')
+            );
+            console.error('[STJ Editor] 新規エントリ作成エラー:', err);
+        } finally {
+            hideCreatingOverlay();
+            button.disabled = false;
+        }
+    }
+
+    document.addEventListener('click', (event) => {
+        const button = event.target?.closest?.('#stj_add_keyword');
+        if (!button) return;
+
+        event.preventDefault();
+        event.stopImmediatePropagation();
+
+        handleNewEntryClick(button);
+    }, true);
+
+    console.log('[STJ Editor] 新規エントリボタンの委譲型クリック処理を登録しました');
+})();
