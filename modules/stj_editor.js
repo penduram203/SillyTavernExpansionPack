@@ -1531,18 +1531,123 @@ async function mountWorldEntryInCellModal(cell) {
         );
     }
 
-    function showDeleteConfirmDialog(message, onConfirm, onCancel) {
-        if (!confirmDialogEl) return;
-        const msgEl = confirmDialogEl.querySelector('.stj-confirm-message');
-        if (msgEl) {
-            // ★ 修正: innerHTML で <br> を使って改行
-            msgEl.innerHTML = message || '本当に削除しますか？';
+function showDeleteConfirmDialog(message, onConfirm, onCancel) {
+    if (!confirmDialogEl) return;
+    const msgEl = confirmDialogEl.querySelector('.stj-confirm-message');
+    if (msgEl) {
+        // ★ CSS 依存せず確実に改行させる
+        msgEl.style.whiteSpace = 'pre-line';
+        msgEl.textContent = String(message || '本当に削除しますか？');
+    }
+    pendingDeleteCallback = onConfirm;
+    pendingCancelCallback = onCancel || null;
+    confirmDialogEl.style.display = 'flex';
+}
+
+// ============================================================
+// ★ ロアブックエントリの直接削除（ST公式確認ダイアログを一切出さない）
+//   ゴミ箱ボタンをクリックすると callGenericPopup が必ず走るため、
+//   サーバー編集 + キャッシュ/DOM 同期をここで行う。
+//   画像マッピング(image_display_extension)は残す。
+// ============================================================
+async function stjDeleteWorldEntryDirect(uid, entryName) {
+    const worldName = getCharacterWorldInfoName();
+    if (!worldName) return { ok: false, reason: 'no_world' };
+
+    const ctx = getSTContext();
+    const headers = (typeof ctx?.getRequestHeaders === 'function')
+        ? ctx.getRequestHeaders()
+        : { 'Content-Type': 'application/json' };
+
+    // 1. サーバーから最新の entries を取得
+    let entries = null;
+    try {
+        const r = await fetch('/api/worldinfo/get', {
+            method: 'POST', headers,
+            body: JSON.stringify({ name: worldName }),
+            cache: 'no-store',
+        });
+        if (r.ok) {
+            const d = await r.json();
+            entries = (d && d.entries) ? d.entries : {};
         }
-        pendingDeleteCallback = onConfirm;
-        pendingCancelCallback = onCancel || null;
-        confirmDialogEl.style.display = 'flex';
+    } catch (e) { /* ignore */ }
+
+    if (!entries) {
+        const mem = window.world_info?.[worldName]?.entries || ctx?.world_info?.[worldName]?.entries;
+        if (mem) entries = JSON.parse(JSON.stringify(mem));
+    }
+    if (!entries) return { ok: false, reason: 'no_entries' };
+
+    // 2. 対象キーを uid → comment の順で特定
+    let targetKey = null;
+    for (const k of Object.keys(entries)) {
+        if (String(entries[k]?.uid ?? k) === String(uid)) { targetKey = k; break; }
+    }
+    if (targetKey === null && entryName) {
+        const t = String(entryName).trim();
+        for (const k of Object.keys(entries)) {
+            if (String(entries[k]?.comment ?? '').trim() === t) { targetKey = k; break; }
+        }
+    }
+    if (targetKey === null) return { ok: true, already: true };
+
+    delete entries[targetKey];
+
+    // 3. 最後の1件を消す場合に空保存ガードが復元してしまうため解除
+    try { window.WorldbookAutoSelect?.clearEmptySaveGuard?.(worldName); } catch (e) { /* ignore */ }
+
+    // 4. サーバーへ保存
+    let saveOk = false;
+    try {
+        const resp = await fetch('/api/worldinfo/edit', {
+            method: 'POST', headers,
+            body: JSON.stringify({ name: worldName, data: { entries } }),
+        });
+        saveOk = resp.ok;
+    } catch (e) { /* ignore */ }
+    if (!saveOk) return { ok: false, reason: 'save_failed' };
+
+    // 5. ST 内部メモリキャッシュからも削除
+    for (const wi of [window.world_info, ctx?.world_info]) {
+        try {
+            const es = wi?.[worldName]?.entries;
+            if (!es) continue;
+            if (Object.prototype.hasOwnProperty.call(es, targetKey)) delete es[targetKey];
+            for (const k of Object.keys(es)) {
+                if (String(es[k]?.uid) === String(uid)) delete es[k];
+            }
+        } catch (e) { /* ignore */ }
     }
 
+    // 6. LEX 残骸（プロンプト/テンプレ/解像度/ネガ/選択肢/変数）を削除
+    try {
+        window.LorebookExpansion?.clearWorldInfoEntriesCache?.(worldName);
+        if (entryName) window.LorebookExpansion?.removeEntryData?.(worldName, String(entryName).trim());
+        if (uid !== undefined && uid !== null) window.LorebookExpansion?.removeEntryData?.(worldName, String(uid));
+    } catch (e) { /* ignore */ }
+
+    // 7. ロアブック編集画面の DOM から削除
+    try {
+        document.querySelectorAll(
+            `#world_popup .world_entry[uid="${escapeCssAttrValue(uid)}"]`
+        ).forEach(el => el.remove());
+    } catch (e) { /* ignore */ }
+
+    // 8. エディタをサーバー最新状態で再構築（textarea 高さ問題も同時に解消）
+    try { document.getElementById('world_refresh')?.click(); } catch (e) { /* ignore */ }
+
+    // 9. 更新通知
+    try {
+        if (ctx?.eventSource && ctx?.eventTypes?.WORLDINFO_UPDATED) {
+            ctx.eventSource.emit(ctx.eventTypes.WORLDINFO_UPDATED, worldName, uid);
+        }
+    } catch (e) { /* ignore */ }
+
+    console.log(`[STJ Editor] 🗑️ エントリ直接削除完了: world="${worldName}", uid=${uid}, name="${entryName}"`);
+    return { ok: true };
+}
+    
     function hideDeleteConfirmDialog() {
         if (!confirmDialogEl) return;
         confirmDialogEl.style.display = 'none';
@@ -2659,126 +2764,55 @@ async function exportUnifiedBundleJson(options = {}) {
             closeCellModal(true);
         });
 
-// stj_editor.js (createCellModal 関数内の .stj-cell-modal-delete イベントリスナーを置き換え)
 modal.querySelector('.stj-cell-modal-delete').addEventListener('click', (e) => {
     e.stopPropagation();
     e.preventDefault();
     if (!currentModalCell) return;
-    
-    const entryName = getCellKeyword(currentModalCell) || modalOriginalKeyword;
-    if (!entryName) {
-        showCustomAlert('キーワードが設定されていないため削除できません');
+
+    const cell = currentModalCell;
+    if (cell.classList.contains('stj-special-item')) {
+        showCustomAlert('このセルは削除できません');
         return;
     }
-    
-    // ★ 修正: 自作ダイアログのメッセージを改行して表示
+
+    const entryName = getCellKeyword(cell) || modalOriginalKeyword;
+    const uid = getCellUid(cell);
+    if (!uid && !entryName) {
+        showCustomAlert('対象エントリが特定できないため削除できません');
+        return;
+    }
+
+    // ★ ダイアログはこれ1つだけ。\n で改行。
     showDeleteConfirmDialog(
-        `画像データを残してエントリを削除しますか？<br>エントリ: <b>${entryName}</b><br>この操作は取り消せません！`,
+        `画像データを残してエントリを削除しますか？\nエントリ: ${entryName}\nこの操作は取り消せません！`,
         () => {
-            // 対象のロアブックエントリ要素を探す
-            const hostEl = currentCellModal.querySelector('#stj_cell_modal_entry_host');
-            let targetEntryEl = hostEl?.querySelector('.world_entry[uid]');
-            
-            if (!targetEntryEl) {
-                const worldPopup = document.getElementById('world_popup');
-                const cellUid = getCellUid(currentModalCell);
-                if (cellUid && worldPopup) {
-                    targetEntryEl = worldPopup.querySelector(`.world_entry[uid="${CSS.escape(cellUid)}"]`);
-                }
-            }
-            
-            if (!targetEntryEl) {
-                showCustomAlert('対象のロアブックエントリが見つかりません');
-                return;
-            }
-            
-            const deleteBtn = targetEntryEl.querySelector('.delete_entry_button');
-            if (!deleteBtn) {
-                showCustomAlert('削除ボタンが見つかりません');
-                return;
-            }
-            
-            // ★ 修正: 公式ダイアログを完全にブロックして自動承認
-            let observer = null;
-            let styleEl = null;
-            
-            // 1. CSS で公式ダイアログを即座に非表示化
-            styleEl = document.createElement('style');
-            styleEl.id = 'stj-block-official-dialog';
-            styleEl.textContent = `
-                #dialogue_popup {
-                    display: none !important;
-                    opacity: 0 !important;
-                    pointer-events: none !important;
-                }
-            `;
-            document.head.appendChild(styleEl);
-            
-            // 2. MutationObserver で公式ダイアログの「はい」を自動クリック
-            observer = new MutationObserver((mutations, obs) => {
-                const popup = document.querySelector('#dialogue_popup');
-                if (popup) {
-                    // 即座に非表示化
-                    popup.style.setProperty('display', 'none', 'important');
-                    popup.style.setProperty('opacity', '0', 'important');
-                    
-                    // 「はい」ボタンを自動クリック
-                    const okBtn = popup.querySelector('#dialogue_popup_ok');
-                    if (okBtn && !okBtn.dataset.stjAutoClicked) {
-                        okBtn.dataset.stjAutoClicked = '1';
-                        setTimeout(() => {
-                            try {
-                                okBtn.click();
-                            } catch (e) { /* ignore */ }
-                        }, 10);
-                    }
-                }
-            });
-            
-            observer.observe(document.body, {
-                childList: true,
-                subtree: true,
-                attributes: true,
-                attributeFilter: ['style', 'class']
-            });
-            
-            // 3. ゴミ箱ボタンをクリックして削除処理を実行
-            try {
-                const clickEvent = new MouseEvent('click', {
-                    bubbles: true,
-                    cancelable: true,
-                    view: window
-                });
-                deleteBtn.dispatchEvent(clickEvent);
-            } catch (e) {
-                console.warn('[STJ Editor] deleteBtn click error:', e);
-            }
-            
-            // 4. セルモーダルを閉じ、セルを削除
-            setTimeout(() => {
-                // Observer とスタイルをクリーンアップ
-                if (observer) {
-                    try { observer.disconnect(); } catch (e) { /* ignore */ }
-                }
-                if (styleEl && styleEl.parentNode) {
-                    try { styleEl.remove(); } catch (e) { /* ignore */ }
-                }
-                
-                // セルモーダルを閉じる
+            (async () => {
+                // モーダルを先に閉じ、移動中の .world_entry を #world_popup へ戻す
                 closeCellModal(false);
-                
-                // JSON編集ツリーからセルを削除
-                if (currentModalCell && currentModalCell.parentNode) {
-                    currentModalCell.remove();
+
+                const r = await stjDeleteWorldEntryDirect(uid, entryName);
+                if (!r.ok) {
+                    showCustomAlert(`エントリの削除に失敗しました (${r.reason || 'unknown'})`);
+                    return;
                 }
-                
-                // ツリーレイアウトを再計算して保存
+
+                // JSON編集ツリーからセルを除去
+                if (cell.parentNode) cell.remove();
+
+                // サーバー最新状態でツリーを再同期
+                const charName = detectCharacterNameFromDOM()
+                    || document.getElementById('stj_char_name_display')?.textContent || '';
+                if (charName) {
+                    try { await syncEditorWithLatestLorebook(charName); } catch (err) { /* ignore */ }
+                }
+
                 autoSave({ immediate: true });
                 runLiveTest();
                 _stjScheduleTreeLayout();
-                
-                console.log(`[STJ Editor] 🗑️ エントリ削除完了: ${entryName}`);
-            }, 400);
+            })().catch(err => {
+                console.warn('[STJ Editor] エントリ削除エラー:', err);
+                showCustomAlert('エントリの削除中にエラーが発生しました');
+            });
         }
     );
 });
