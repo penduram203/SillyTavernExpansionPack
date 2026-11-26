@@ -2639,6 +2639,7 @@ async function exportUnifiedBundleJson(options = {}) {
                 }
                 .stj-cell-modal-delete:hover {
                     background: rgba(255, 33, 33, 0.2);
+                    color: #ffffff;
                 }
             `;
             document.head.appendChild(s);
