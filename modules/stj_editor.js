@@ -6105,7 +6105,7 @@ if (addBtn) {
 })();
 
 // ============================================================
-// ★ 新規エントリボタン: 委譲型クリック処理
+// ★ 新規エントリボタン: 自己完結型クリック処理
 // ============================================================
 (function installStjNewEntryButtonHandler() {
     if (window.__stjNewEntryButtonHandlerInstalled) return;
@@ -6116,7 +6116,7 @@ if (addBtn) {
 
         const overlay = document.createElement('div');
         overlay.id = 'stj-new-entry-creating-overlay';
-        overlay.textContent = _t('stj.toast.newentrycreating', '新規エントリ作成中…');
+        overlay.textContent = '新規エントリ作成中…';
 
         Object.assign(overlay.style, {
             position: 'fixed',
@@ -6142,45 +6142,57 @@ if (addBtn) {
         document.getElementById('stj-new-entry-creating-overlay')?.remove();
     }
 
+    function isDialogOpen() {
+        return !!(
+            document.querySelector('.stj-cell-modal.visible') ||
+            document.body.classList.contains('stj-cell-modal-active')
+        );
+    }
+
     function getCells() {
         return Array.from(
             document.querySelectorAll('#stjkeywordscontainer .stj-keyword-item')
         );
     }
 
-    function showError(message) {
-        console.error('[STJ Editor]', message);
+    function getCellUid(cell) {
+        if (!cell) return null;
+        const value = cell.getAttribute('data-entry-uid');
+        return value ? String(value).trim() : null;
+    }
 
+    function requestLorebookSync() {
         try {
-            if (window.GicApi?.showBottomToast) {
-                window.GicApi.showBottomToast(message, '', 'error');
-            } else if (window.toastr?.error) {
-                window.toastr.error(message);
-            }
+            const context = window.SillyTavern?.getContext?.();
+            const eventSource = context?.eventSource;
+            const eventTypes = context?.eventTypes;
+
+            if (!eventSource || !eventTypes?.WORLDINFO_UPDATED) return;
+
+            const worldName =
+                document.querySelector('#world_editor_select')?.selectedOptions?.[0]?.value ||
+                document.querySelector('#world_info')?.selectedOptions?.[0]?.value ||
+                '';
+
+            eventSource.emit(
+                eventTypes.WORLDINFO_UPDATED,
+                worldName || null,
+                null
+            );
+
+            console.log('[STJ Editor] WORLDINFO_UPDATED を送信しました');
         } catch (err) {
-            console.warn('[STJ Editor] エラートースト表示に失敗:', err);
+            console.warn('[STJ Editor] WORLDINFO_UPDATED 送信に失敗:', err);
         }
     }
 
-    async function waitForNewCell(beforeUids, beforeCount, timeoutMs = 5000) {
-        const charName =
-            detectCharacterNameFromDOM(
-                document.getElementById('stjcharnamedisplay')?.textContent
-            ) ||
-            detectCharacterNameFromDOM();
-
+    async function waitForNewCell(beforeUids, beforeCount, timeoutMs = 8000) {
         const startedAt = Date.now();
+        let syncRequested = false;
 
         while (Date.now() - startedAt < timeoutMs) {
-            try {
-                if (charName) {
-                    await syncEditorWithLatestLorebook(charName);
-                }
-            } catch (err) {
-                console.warn('[STJ Editor] 新規セル待ち中の同期エラー:', err);
-            }
-
             const cells = getCells();
+
             const hasNewUid = cells.some(cell => {
                 const uid = getCellUid(cell);
                 return uid && !beforeUids.has(uid);
@@ -6190,7 +6202,12 @@ if (addBtn) {
                 return true;
             }
 
-            await new Promise(resolve => setTimeout(resolve, 80));
+            if (!syncRequested) {
+                requestLorebookSync();
+                syncRequested = true;
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 100));
         }
 
         return false;
@@ -6198,13 +6215,13 @@ if (addBtn) {
 
     async function handleNewEntryClick(button) {
         console.log('[STJ Editor] 新規ボタン クリック検出', {
-            isDialogActive,
+            dialogOpen: isDialogOpen(),
             buttonDisabled: button.disabled,
             worldPopupNew: !!document.getElementById('world_popup_new'),
         });
 
-        if (isDialogActive) {
-            console.warn('[STJ Editor] isDialogActive=true のため新規エントリ作成を中止しました');
+        if (isDialogOpen()) {
+            console.warn('[STJ Editor] セルモーダルが開いているため新規エントリ作成を中止しました');
             showCreatingOverlay();
             setTimeout(hideCreatingOverlay, 1500);
             return;
@@ -6222,8 +6239,6 @@ if (addBtn) {
         showCreatingOverlay();
 
         try {
-            autoSave({ immediate: true });
-
             const newEntryBtn = document.getElementById('world_popup_new');
             console.log('[STJ Editor] world_popup_new:', newEntryBtn);
 
@@ -6237,36 +6252,33 @@ if (addBtn) {
             const appeared = await waitForNewCell(
                 beforeUids,
                 beforeCount,
-                5000
+                8000
             );
 
             console.log('[STJ Editor] 新規セル出現判定:', appeared);
 
-            if (stjModalEl) {
-                stjModalEl.style.display = 'block';
-            }
-
-            runLiveTest();
-
-            if (!appeared) {
-                const charName =
-                    detectCharacterNameFromDOM(
-                        document.getElementById('stjcharnamedisplay')?.textContent
-                    ) ||
-                    detectCharacterNameFromDOM();
-
-                if (charName) {
-                    await syncEditorWithLatestLorebook(charName);
-                }
+            const editor = document.getElementById('stjexportmodal');
+            if (editor) {
+                editor.style.display = 'block';
             }
         } catch (err) {
-            showError(
-                _t('stj.toast.newentryfailed', '新規エントリの作成に失敗しました')
-            );
             console.error('[STJ Editor] 新規エントリ作成エラー:', err);
+            showError('新規エントリの作成に失敗しました');
         } finally {
             hideCreatingOverlay();
             button.disabled = false;
+        }
+    }
+
+    function showError(message) {
+        try {
+            if (window.GicApi?.showBottomToast) {
+                window.GicApi.showBottomToast(message, '', 'error');
+            } else if (window.toastr?.error) {
+                window.toastr.error(message);
+            }
+        } catch (err) {
+            console.warn('[STJ Editor] エラートースト表示に失敗:', err);
         }
     }
 
