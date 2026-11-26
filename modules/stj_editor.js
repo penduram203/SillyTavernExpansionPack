@@ -587,7 +587,7 @@ async function loadWorldInfoEntries(worldName) {
         } catch (err) {
             console.warn(`[STJ Editor] ⚠️ fetch 試行 ${attempt}/2 例外:`, err);
         }
-        if (attempt < 2) await new Promise(r => setTimeout(r, 500));
+        if (attempt < 2) await new Promise(r => setTimeout(r, 100));
     }
 
     // 2. fetch が失敗した場合のみ、LorebookExpansion のキャッシュを利用
@@ -5137,38 +5137,161 @@ function _stjDrawConnections(container, positions, children) {
             }, true);
         }
 
-        const addBtn = document.getElementById('stj_add_keyword');
-        if (addBtn) addBtn.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            if (isDialogActive) return;
+// ============================================================
+// ★ 新規エントリ作成中オーバーレイ + 高速反映待ち
+// ============================================================
+let newEntryCreationToken = 0;
 
-            addBtn.disabled = true;
-            try {
-                autoSave({ immediate: true });
-    
-                const newEntryBtn = document.getElementById('world_popup_new');
-                if (newEntryBtn) {
-                    newEntryBtn.click();
-                } else {
-                    const showToast = window.GicApi?.showBottomToast;
-                    if (typeof showToast === 'function') {
-                        showToast(_t('stj.toast.new_entry_btn_not_found', 'ロアブックの新規追加ボタンが見つかりません'), { type: 'warning' });
-                    }
-                }
- 
-                if (stjModalEl && stjModalEl.style.display === 'block') {
-                    runLiveTest();
-                }
-            } catch (err) {
-                console.warn('[STJ Editor] 新規エントリ追加エラー:', err);
-                const showToast = window.GicApi?.showBottomToast;
-                if (typeof showToast === 'function') {
-                    showToast(_t('stj.toast.new_entry_failed', '新規エントリの追加に失敗しました'), { type: 'error' });
-                }
-            } finally {
-                addBtn.disabled = false;
+function showNewEntryCreatingOverlay() {
+    hideNewEntryCreatingOverlay();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'stj-new-entry-creating-overlay';
+    overlay.textContent = _t('stj.toast.newentrycreating', '新規エントリ作成中…');
+
+    Object.assign(overlay.style, {
+        position: 'fixed',
+        left: '50%',
+        bottom: '96px',
+        transform: 'translateX(-50%)',
+        zIndex: '30000',
+        padding: '10px 18px',
+        borderRadius: '8px',
+        background: 'rgba(20, 20, 20, 0.92)',
+        color: '#fff',
+        fontSize: '14px',
+        fontWeight: '600',
+        boxShadow: '0 4px 16px rgba(0, 0, 0, 0.45)',
+        pointerEvents: 'none',
+        whiteSpace: 'nowrap',
+    });
+
+    document.body.appendChild(overlay);
+}
+
+function hideNewEntryCreatingOverlay() {
+    document.getElementById('stj-new-entry-creating-overlay')?.remove();
+}
+
+function getStandaloneCellElements() {
+    return Array.from(
+        document.querySelectorAll('#stjkeywordscontainer .stj-keyword-item')
+    );
+}
+
+async function waitForNewStandaloneCell(beforeUids, beforeCount, timeoutMs = 5000) {
+    const token = ++newEntryCreationToken;
+    const charName =
+        detectCharacterNameFromDOM(
+            document.getElementById('stjcharnamedisplay')?.textContent
+        ) ||
+        detectCharacterNameFromDOM();
+
+    const startedAt = Date.now();
+    let lastError = null;
+
+    while (Date.now() - startedAt < timeoutMs) {
+        if (token !== newEntryCreationToken) {
+            return false;
+        }
+
+        try {
+            if (charName) {
+                await syncEditorWithLatestLorebook(charName);
             }
+        } catch (err) {
+            lastError = err;
+        }
+
+        const cells = getStandaloneCellElements();
+        const hasNewUid = cells.some(cell => {
+            const uid = getCellUid(cell);
+            return uid && !beforeUids.has(uid);
         });
+
+        if (hasNewUid || cells.length > beforeCount) {
+            return true;
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 80));
+    }
+
+    if (lastError) {
+        console.warn('[STJ Editor] 新規エントリの高速反映待ちでエラー:', lastError);
+    }
+
+    return false;
+}
+
+const addBtn = document.getElementById('stjaddkeyword');
+if (addBtn) {
+    addBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+
+        if (isDialogActive) return;
+
+        const beforeCells = getStandaloneCellElements();
+        const beforeUids = new Set(
+            beforeCells
+                .map(cell => getCellUid(cell))
+                .filter(uid => uid)
+        );
+        const beforeCount = beforeCells.length;
+
+        addBtn.disabled = true;
+        showNewEntryCreatingOverlay();
+
+        try {
+            autoSave({ immediate: true });
+
+            const newEntryBtn = document.getElementById('world_popup_new');
+            if (!newEntryBtn) {
+                throw new Error('world_popup_new button not found');
+            }
+
+            newEntryBtn.click();
+
+            // WORLDINFO_UPDATED の遅延同期を待たず、独立セルの出現を高速に監視する
+            const appeared = await waitForNewStandaloneCell(
+                beforeUids,
+                beforeCount,
+                5000
+            );
+
+            if (stjModalEl) {
+                stjModalEl.style.display = 'block';
+            }
+
+            runLiveTest();
+
+            if (!appeared) {
+                const charName =
+                    detectCharacterNameFromDOM(
+                        document.getElementById('stjcharnamedisplay')?.textContent
+                    ) ||
+                    detectCharacterNameFromDOM();
+
+                if (charName) {
+                    await syncEditorWithLatestLorebook(charName);
+                }
+            }
+        } catch (err) {
+            console.warn('[STJ Editor] 新規エントリ作成に失敗:', err);
+
+            const showToast = window.GicApi?.showBottomToast;
+            if (typeof showToast === 'function') {
+                showToast(
+                    _t('stj.toast.newentryfailed', '新規エントリの作成に失敗しました'),
+                    '',
+                    'error'
+                );
+            }
+        } finally {
+            hideNewEntryCreatingOverlay();
+            addBtn.disabled = false;
+        }
+    });
+}
 
         const cancelBtn = document.getElementById('stj_cancel_export');
         if (cancelBtn) {
@@ -5635,9 +5758,9 @@ function _stjDrawConnections(container, positions, children) {
             }, delay);
         };
 
-        ['WORLDINFO_UPDATED', 'WORLDINFO_SETTINGS_UPDATED'].forEach(name => {
+        WORLDINFO_UPDATED, WORLDINFO_SETTINGS_UPDATED.forEach(name => {
             if (et[name] && typeof es.on === 'function') {
-                es.on(et[name], () => syncLater(600));
+                es.on(et[name], syncLater(50));
             }
         });
 
