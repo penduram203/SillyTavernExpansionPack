@@ -2786,71 +2786,66 @@ async function exportUnifiedBundleJson(options = {}) {
             closeCellModal(true);
         });
 
-modal.querySelector('.stj-cell-modal-delete').addEventListener('click', (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-    if (!currentModalCell) return;
+        modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async () => {
+            if (!currentCellModalState) return;
+            const { entryUid } = currentCellModalState;
 
-    const cell = currentModalCell;
-    if (cell.classList.contains('stj-special-item')) {
-        showCustomAlert('このセルは削除できません');
-        return;
-    }
+            try {
+                // ロアブック管理画面の対象エントリ要素からゴミ箱アイコンを取得
+                const entryEl = document.querySelector(
+                    `#world_popup_entries_list .world_entry[uid="${entryUid}"], .world_entry[uid="${entryUid}"]`
+                );
+                const deleteBtn = entryEl?.querySelector(
+                    '.menu_button.delete_entry_button.fa-trash-can'
+                );
 
-    const entryName = getCellKeyword(cell) || modalOriginalKeyword;
-    const uid = getCellUid(cell);
-    if (!uid && !entryName) {
-        showCustomAlert('対象エントリが特定できないため削除できません');
-        return;
-    }
+                if (!deleteBtn) {
+                    toastr.warning('ロアブック管理画面上に対象エントリの削除ボタンが見つかりません。');
+                    return;
+                }
 
-    const worldName = getCharacterWorldInfoName();
+                // 削除完了検知用リスナー（エントリDOM消滅 or WORLDINFO_UPDATED）
+                let settled = false;
+                const onDeleted = () => {
+                    if (settled) return;
+                    settled = true;
+                    cleanup();
+                    closeCellModal();
+                    if (typeof renderTree === 'function') {
+                        renderTree();
+                    }
+                };
 
-    // ✅ SillyTavern公式の削除処理を呼び出す
-    // 方法1: ロアブック管理画面の削除ボタンをクリック（画面が開いている場合）
-    const deleteButton = document.querySelector(`#world_popup .world_entry[uid="${escapeCssAttrValue(uid)}"] .delete_entry_button`);
-    if (deleteButton) {
-        // ✅ 公式の削除ダイアログが表示される
-        deleteButton.click();
+                const observer = new MutationObserver(() => {
+                    if (!document.body.contains(entryEl)) {
+                        onDeleted();
+                    }
+                });
 
-        // 🔥 モーダルを閉じるのは「はい」を選択した時だけ
-        const closeModalOnDelete = () => {
-            closeCellModal(false);
-            document.removeEventListener('worldinfo-updated', closeModalOnDelete);
-        };
-        document.addEventListener('worldinfo-updated', closeModalOnDelete);
-        return;
-    }
+                const cleanup = () => {
+                    observer.disconnect();
+                    if (window.eventSource && window.event_types?.WORLDINFO_UPDATED) {
+                        window.eventSource.removeListener(window.event_types.WORLDINFO_UPDATED, onDeleted);
+                    }
+                };
 
-    // 方法2: ロアブック管理画面が開いていない場合
-    try {
-        if (window.deleteWorldInfoEntry) {
-            // ✅ 公式の削除処理を呼び出す
-            window.deleteWorldInfoEntry(uid, worldName);
+                observer.observe(document.body, { childList: true, subtree: true });
+                if (window.eventSource && window.event_types?.WORLDINFO_UPDATED) {
+                    window.eventSource.on(window.event_types.WORLDINFO_UPDATED, onDeleted);
+                }
 
-            // 🔥 モーダルを閉じるのは「はい」を選択した時だけ
-            const closeModalOnDelete = () => {
-                closeCellModal(false);
-                document.removeEventListener('worldinfo-updated', closeModalOnDelete);
-            };
-            document.addEventListener('worldinfo-updated', closeModalOnDelete);
-        } else if (window.WorldbookAutoSelect?.deleteEntry) {
-            // ✅ WorldbookAutoSelectの削除処理を呼び出す
-            window.WorldbookAutoSelect.deleteEntry(worldName, uid);
+                // タイムアウト安全装置（キャンセルされた場合などに監視を解除）
+                setTimeout(() => {
+                    if (!settled) cleanup();
+                }, 30000);
 
-            // 🔥 モーダルを閉じるのは「はい」を選択した時だけ
-            const closeModalOnDelete = () => {
-                closeCellModal(false);
-                document.removeEventListener('worldinfo-updated', closeModalOnDelete);
-            };
-            document.addEventListener('worldinfo-updated', closeModalOnDelete);
-        } else {
-            showCustomAlert('削除処理を実行できませんでした');
-        }
-    } catch (e) {
-        showCustomAlert('削除処理中にエラーが発生しました');
-    }
-});
+                // ゴミ箱アイコンのクリックを発火（SillyTavern標準の確認ダイアログと削除・拡張データ連携をそのまま実行）
+                deleteBtn.click();
+            } catch (err) {
+                console.error('[stj_editor] 削除エラー:', err);
+                toastr.error('エントリの削除に失敗しました');
+            }
+        });
 
         modal.addEventListener('click', (e) => {
             if (e.target === modal) closeCellModal(true);
