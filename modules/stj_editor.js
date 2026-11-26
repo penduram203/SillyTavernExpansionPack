@@ -2668,13 +2668,34 @@ modal.querySelector('.stj-cell-modal-delete').addEventListener('click', (e) => {
         return;
     }
     
-    // 1. 自作の確認ダイアログを表示（改行付き）
+    // ★ 一時的なCSS注入で #dialogue_popup を完全に非表示化
+    const styleId = 'stj-block-dialogue-popup';
+    if (!document.getElementById(styleId)) {
+        const style = document.createElement('style');
+        style.id = styleId;
+        style.textContent = `
+            #dialogue_popup.stj-auto-confirmed {
+                display: none !important;
+                visibility: hidden !important;
+                opacity: 0 !important;
+                pointer-events: none !important;
+                position: fixed !important;
+                z-index: -9999 !important;
+            }
+            #dialogue_popup.stj-auto-confirmed #dialogue_popup_text {
+                white-space: pre-line !important;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+    
+    // 1. 自作の確認ダイアログを表示
     showDeleteConfirmDialog(
         `画像データを残してエントリを削除しますか？\nエントリ: ${entryName}\nこの操作は取り消せません！`,
         () => {
             // 「はい」が押されたら実行されるコールバック
             
-            // 2. 対象のロアブックエントリ要素を探す（セルモーダル内にマウントされている）
+            // 2. 対象のロアブックエントリ要素を探す
             const hostEl = currentCellModal.querySelector('#stj_cell_modal_entry_host');
             let targetEntryEl = hostEl?.querySelector('.world_entry[uid]');
             
@@ -2697,33 +2718,32 @@ modal.querySelector('.stj-cell-modal-delete').addEventListener('click', (e) => {
                 return;
             }
             
-            // 3. 公式ダイアログ(#dialogue_popup)を即座に非表示化してスキップ
+            // 3. 公式ダイアログ(#dialogue_popup)を完全にブロック
             const observer = new MutationObserver((mutations, obs) => {
                 const popup = document.querySelector('#dialogue_popup');
-                if (popup && popup.style.display !== 'none' && !popup.classList.contains('stj-auto-confirmed')) {
+                if (popup && !popup.classList.contains('stj-auto-confirmed')) {
                     popup.classList.add('stj-auto-confirmed');
                     
-                    // ★ 修正: 即座に非表示にしてユーザーに見せない
-                    popup.style.setProperty('display', 'none', 'important');
-                    
-                    // ★ 修正: innerHTML で <br> を使って確実に改行
+                    // ★ 改行を強制（textContent + \n + CSS white-space: pre-line）
                     const textEl = popup.querySelector('#dialogue_popup_text');
                     if (textEl) {
-                        textEl.innerHTML = `画像データを残してエントリを削除しますか？<br>エントリ: <b>${entryName}</b><br>この操作は取り消せません！`;
+                        textEl.textContent = `画像データを残してエントリを削除しますか？\nエントリ: ${entryName}\nこの操作は取り消せません！`;
                     }
                     
-                    // 即座に「はい」を自動クリック
+                    // ★ 即座に「はい」を自動クリック（遅延0ms）
                     const okBtn = popup.querySelector('#dialogue_popup_ok');
                     if (okBtn) {
                         setTimeout(() => {
                             okBtn.click();
-                        }, 10);
+                        }, 0);
                     }
                     
                     // Observerは一度処理したら切断
                     setTimeout(() => obs.disconnect(), 300);
                 }
             });
+            
+            // ★ より広範囲を監視（body全体 + style/class属性）
             observer.observe(document.body, { 
                 childList: true, 
                 subtree: true, 
@@ -2741,15 +2761,12 @@ modal.querySelector('.stj-cell-modal-delete').addEventListener('click', (e) => {
             
             // 5. セルモーダルを閉じ、セルを削除する処理を予約
             setTimeout(() => {
-                // セルモーダルを閉じる
                 closeCellModal(false);
                 
-                // JSON編集ツリーからセルを削除
                 if (currentModalCell && currentModalCell.parentNode) {
                     currentModalCell.remove();
                 }
                 
-                // ツリーレイアウトを再計算して保存
                 autoSave({ immediate: true });
                 runLiveTest();
                 _stjScheduleTreeLayout();
