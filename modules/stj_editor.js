@@ -1670,56 +1670,64 @@ async function stjDeleteWorldEntryDirect(uid, entryName) {
         }
     }
     
-    // 5. ST 内部メモリキャッシュからも削除（Map / object 両対応 + module export）
-    const _clearEntryCache = (wi, targetKey, uid, entryName) => {
-        if (!wi) return 0;
-        let n = 0;
-        const processEntries = (es) => {
-            if (!es) return;
-            const shouldDelete = (k, v) => {
-                if (targetKey !== null && String(k) === String(targetKey)) return true;
-                if (String(v?.uid) === String(uid)) return true;
-                if (entryName && String(v?.comment ?? '').trim() === String(entryName).trim()) return true;
-                return false;
-            };
-            if (es instanceof Map) {
-                for (const [k, v] of [...es]) {
-                    if (shouldDelete(k, v)) { es.delete(k); n++; }
-                }
-            } else if (typeof es === 'object') {
-                for (const k of Object.keys(es)) {
-                    if (shouldDelete(k, es[k])) { delete es[k]; n++; }
-                }
-            }
-        };
-        if (wi instanceof Map) {
-            const entry = wi.get(worldName);
-            if (entry?.entries) processEntries(entry.entries);
-        } else if (typeof wi === 'object') {
-            const entry = wi[worldName];
-            if (entry?.entries) processEntries(entry.entries);
-        }
-        return n;
+
+
+// 5. ST 内部メモリキャッシュからも削除（module import 経由＋window/ctx 併用）
+const _clearEntryCacheImpl = (es, uid, entryName) => {
+    if (!es) return 0;
+    let n = 0;
+    const shouldDelete = (k, v) => {
+        if (uid && String(v?.uid ?? k) === String(uid)) return true;
+        if (entryName && String(v?.comment ?? '').trim() === String(entryName).trim()) return true;
+        return false;
     };
-
-    let _cacheCleared = 0;
-    for (const wi of [window.world_info, ctx?.world_info]) {
-        try { _cacheCleared += _clearEntryCache(wi, targetKey, uid, entryName); } catch (e) {}
+    if (es instanceof Map) {
+        for (const [k, v] of [...es]) if (shouldDelete(k, v)) { es.delete(k); n++; }
+    } else if (typeof es === 'object') {
+        for (const k of Object.keys(es)) if (shouldDelete(k, es[k])) { delete es[k]; n++; }
     }
+    return n;
+};
 
-    // ★ world-info.js モジュール変数のキャッシュもクリア
-    try {
-        const mod = await import('../../../../world-info.js').catch(() => null);
-        if (mod?.world_info) {
-            _cacheCleared += _clearEntryCache(mod.world_info, targetKey, uid, entryName);
+let _cacheCleared = 0;
+
+// 5a. window / ctx 経由
+for (const wi of [window.world_info, ctx?.world_info]) {
+    if (!wi) continue;
+    const entry = wi instanceof Map ? wi.get(worldName) : wi?.[worldName];
+    if (entry?.entries) _cacheCleared += _clearEntryCacheImpl(entry.entries, uid, entryName);
+}
+
+// 5b. world-info.js モジュール経由（★ 実体はここにある）
+try {
+    let mod = null;
+    if (typeof window.LorebookExpansion?.getWorldInfoModule === 'function') {
+        mod = await window.LorebookExpansion.getWorldInfoModule();
+    }
+    if (!mod) {
+        mod = await import('../../../../world-info.js').catch(() => null);
+    }
+    if (mod?.world_info) {
+        const wi = mod.world_info;
+        const entry = wi instanceof Map ? wi.get(worldName) : wi?.[worldName];
+        if (entry?.entries) {
+            const n = _clearEntryCacheImpl(entry.entries, uid, entryName);
+            _cacheCleared += n;
+            console.log(`[STJ Editor] 🧹 module.world_info から ${n} 件クリア ` +
+                `(entriesは${entry.entries instanceof Map ? 'Map' : 'object'})`);
+        } else {
+            console.log(`[STJ Editor] ⚠️ module.world_info に "${worldName}" のエントリが見つからない`);
         }
-    } catch (e) {}
+    } else {
+        console.log('[STJ Editor] ⚠️ module.world_info が取得できなかった');
+    }
+} catch (e) {
+    console.warn('[STJ Editor] module cache clear error:', e);
+}
+console.log(`[STJ Editor] 🧹 内部キャッシュから合計 ${_cacheCleared} 件クリア`);
 
-    console.log(
-        `[STJ Editor] 🧹 メモリキャッシュから ${_cacheCleared} 件クリア ` +
-        `(window=${window.world_info instanceof Map ? 'Map' : typeof window.world_info})`
-    );
 
+    
     // 6. LEX 残骸（プロンプト/テンプレ/解像度/ネガ/選択肢/変数）を削除
     try {
         window.LorebookExpansion?.clearWorldInfoEntriesCache?.(worldName);
@@ -1748,6 +1756,42 @@ async function stjDeleteWorldEntryDirect(uid, entryName) {
         }
     } catch (e) { /* ignore */ }
 
+
+    
+// 8.5 サーバーに存在しないDOMエントリ（幽霊）を強制削除
+const forceCleanGhostDom = async () => {
+    try {
+        const r = await fetch('/api/worldinfo/get', {
+            method: 'POST', headers,
+            body: JSON.stringify({ name: worldName }),
+            cache: 'no-store',
+        });
+        if (!r.ok) return;
+        const d = await r.json();
+        const serverUids = new Set(
+            Object.values(d.entries || {}).map(e => String(e.uid))
+        );
+        let removed = 0;
+        document.querySelectorAll('#world_popup .world_entry').forEach(el => {
+            const domUid = el.getAttribute('uid');
+            if (domUid && !serverUids.has(String(domUid))) {
+                console.log(`[STJ Editor] 👻 幽霊エントリを DOM から削除: uid=${domUid}`);
+                el.remove();
+                removed++;
+            }
+        });
+        if (removed > 0) {
+            console.log(`[STJ Editor] 🧹 幽霊エントリ計 ${removed} 件を DOM から削除`);
+        }
+    } catch (e) { /* ignore */ }
+};
+forceCleanGhostDom();
+setTimeout(forceCleanGhostDom, 300);
+setTimeout(forceCleanGhostDom, 1000);
+setTimeout(forceCleanGhostDom, 2500);
+
+    
+    
     // 9. 更新通知
     try {
         if (ctx?.eventSource && ctx?.eventTypes?.WORLDINFO_UPDATED) {
