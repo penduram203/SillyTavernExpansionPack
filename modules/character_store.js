@@ -201,7 +201,7 @@ async function _pushToServer(namespace, payload, capturedAvatar, capturedName) {
             console.warn(`${LOG} merge-attributes 失敗 (${resp.status}): ${text.slice(0, 300)}`);
             return false;
         }
-        console.log(`${LOG} ✅ ${namespace} を ${capturedName} に保存`);
+        //console.log(`${LOG} ✅ ${namespace} を ${capturedName} に保存`);
         return true;
     } catch (e) {
         console.warn(`${LOG} merge-attributes 例外:`, e);
@@ -311,7 +311,7 @@ export async function flushAll() {
         const clearPending = () => {
             for (const k of _pendingPayloads.keys()) _pendingPayloads.delete(k);
             for (const [k, t] of _saveTimers.entries()) { clearTimeout(t); _saveTimers.delete(k); }
-            console.log('[CharStore] キャラ切替: pending をクリア');
+            //console.log('[CharStore] キャラ切替: pending をクリア');
         };
 
         const es = ctx.eventSource;
@@ -328,7 +328,7 @@ export async function flushAll() {
         if (installed === 0) {
             console.warn('[CharStore] 利用可能な切替イベントが見つかりません（スキップ）');
         } else {
-            console.log(`[CharStore] 🎯 キャラ切替クリーンアップフックを設置 (${installed} events)`);
+            //console.log(`[CharStore] 🎯 キャラ切替クリーンアップフックを設置 (${installed} events)`);
         }
     };
     tryInstall();
@@ -361,7 +361,7 @@ export async function flushAll() {
             char.data.extensions[ns] = JSON.parse(JSON.stringify(payload));
             restored++;
         }
-        if (restored > 0) console.log(`${LOG} 🎯 export 直前に ${restored} ns を復元`);
+        if (restored > 0) //console.log(`${LOG} 🎯 export 直前に ${restored} ns を復元`);
         return restored;
     }
 
@@ -396,7 +396,7 @@ function _buildJsonExport() {
     // ★ null 値除去（バックアップ注入後）
     const removed = _stripNullsFromExtensions(char);
     if (removed > 0) {
-        console.log(`${LOG} 🧹 export 前に null 値を ${removed} 件除去`);
+        //console.log(`${LOG} 🧹 export 前に null 値を ${removed} 件除去`);
     }
 
     const exportData = JSON.parse(JSON.stringify(char));
@@ -481,7 +481,7 @@ export async function exportCurrentCharacterJsonToFiles(options = {}) {
 
         const name = fileName || _makeSafeExportFileName(char.name, 'json');
         const r = await _uploadToUserFiles(name, built.bytes);
-        console.log(`${LOG} ✅ 自動 JSON 出力: ${r.path} (${r.bytes} bytes)`);
+        //console.log(`${LOG} ✅ 自動 JSON 出力: ${r.path} (${r.bytes} bytes)`);
         return { ...r, format: 'json' };
     } catch (e) {
         console.warn(`${LOG} 自動 JSON 出力エラー:`, e);
@@ -508,7 +508,7 @@ export async function exportCurrentCharacterPngToFiles(options = {}) {
         if (pngBytes) {
             const name = fileName || _makeSafeExportFileName(char.name, 'png');
             const r = await _uploadToUserFiles(name, pngBytes);
-            console.log(`${LOG} ✅ 自動 PNG 出力: ${r.path} (${r.bytes} bytes)`);
+            //console.log(`${LOG} ✅ 自動 PNG 出力: ${r.path} (${r.bytes} bytes)`);
             return { ...r, format: 'png' };
         }
     } catch (e) {
@@ -518,7 +518,7 @@ export async function exportCurrentCharacterPngToFiles(options = {}) {
         _fileExportInFlight = false;
     }
     if (!jsonFallback) return { ok: false, reason: 'no_avatar_png' };
-    console.log(`${LOG} PNG 不可 → JSON にフォールバック`);
+    //console.log(`${LOG} PNG 不可 → JSON にフォールバック`);
     return exportCurrentCharacterJsonToFiles({ expectedCharName });
 }
 
@@ -549,7 +549,7 @@ export async function exportCurrentCharacterPngToFiles(options = {}) {
             a.href = url; a.download = filename; a.style.display = 'none';
             document.body.appendChild(a); a.click(); document.body.removeChild(a);
             setTimeout(() => { try { URL.revokeObjectURL(url); } catch (e) {} }, 2000);
-            console.log(`${LOG} 🎯 自前 JSON export 完了: ${filename} (${jsonStr.length} chars)`);
+            //console.log(`${LOG} 🎯 自前 JSON export 完了: ${filename} (${jsonStr.length} chars)`);
             return true;
         } catch (e) {
             console.error(`${LOG} JSON export エラー:`, e);
@@ -608,7 +608,7 @@ export async function exportCurrentCharacterPngToFiles(options = {}) {
                 if (!r.ok) continue;
                 const b = new Uint8Array(await r.arrayBuffer());
                 if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47) {
-                    console.log(`${LOG} avatar PNG 取得: ${url}`);
+                    //console.log(`${LOG} avatar PNG 取得: ${url}`);
                     return b;
                 }
             } catch (e) {}
@@ -625,12 +625,12 @@ export async function exportCurrentCharacterPngToFiles(options = {}) {
         // ★ null 値除去
         const removed = _stripNullsFromExtensions(char);
         if (removed > 0) {
-            console.log(`${LOG} 🧹 PNG export 前に null 値を ${removed} 件除去`);
+            //console.log(`${LOG} 🧹 PNG export 前に null 値を ${removed} 件除去`);
         }
 
         const backups = _getBackupsForChar(char);
         if (Object.keys(backups).length === 0) {
-            console.log(`${LOG} PNG: 現在キャラの backup なし → パッチスキップ`);
+            //console.log(`${LOG} PNG: 現在キャラの backup なし → パッチスキップ`);
             return bytes;
         }
         const chunks = []; let pos = 8; const patchIdx = [];
@@ -690,7 +690,7 @@ export async function exportCurrentCharacterPngToFiles(options = {}) {
             if (inj === 0) continue;
             const nt = new TextEncoder().encode(k + '\0' + u2b(JSON.stringify(json)));
             out[i] = { type: 'tEXt', raw: makeChunk('tEXt', nt) };
-            console.log(`${LOG} 🎯 PNG ${k} パッチ (${inj} ns)`);
+            //console.log(`${LOG} 🎯 PNG ${k} パッチ (${inj} ns)`);
         }
         const total = 8 + out.reduce((s, c) => s + c.raw.length, 0);
         const res = new Uint8Array(total);
@@ -703,7 +703,7 @@ export async function exportCurrentCharacterPngToFiles(options = {}) {
     async function doPngExport() {
         const char = _getCurrentChar();
         if (!char) return false;
-        console.log(`${LOG} 🎯 自前 PNG export 開始`);
+        //console.log(`${LOG} 🎯 自前 PNG export 開始`);
         const bytes = await fetchAvatarPngBytes();
         if (!bytes) { console.warn(`${LOG} PNG: avatar 取得失敗`); return false; }
         const patched = patchPng(bytes);
@@ -713,7 +713,7 @@ export async function exportCurrentCharacterPngToFiles(options = {}) {
         a.href = url; a.download = `${char.name || 'character'}.png`; a.style.display = 'none';
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
         setTimeout(() => { try { URL.revokeObjectURL(url); } catch (e) {} }, 5000);
-        console.log(`${LOG} 🎯 PNG export 完了: ${patched.length} bytes`);
+        //console.log(`${LOG} 🎯 PNG export 完了: ${patched.length} bytes`);
         return true;
     }
 
@@ -736,7 +736,7 @@ export async function exportCurrentCharacterPngToFiles(options = {}) {
             } else {
                 doPngExport().then(ok => {
                     if (!ok) {
-                        console.log(`${LOG} PNG 不可 → JSON にフォールバック`);
+                        //console.log(`${LOG} PNG 不可 → JSON にフォールバック`);
                         doJsonExport();
                     }
                 });
@@ -752,7 +752,7 @@ export async function exportCurrentCharacterPngToFiles(options = {}) {
         try { window.addEventListener(t, handler, true); } catch (e) {}
     });
 
-    console.log(`${LOG} 🎯 export_button 完全乗っ取り完了 (click=PNG / Shift+click=JSON)`);
+    //console.log(`${LOG} 🎯 export_button 完全乗っ取り完了 (click=PNG / Shift+click=JSON)`);
 })();
 
 // ============================================================
@@ -791,7 +791,7 @@ export async function exportCurrentCharacterPngToFiles(options = {}) {
     };
     Object.setPrototypeOf(window.Blob, OrigBlob);
     window.Blob.prototype = OrigBlob.prototype;
-    console.log(`${LOG} 🎯 Blob パッチをインストール`);
+    //console.log(`${LOG} 🎯 Blob パッチをインストール`);
 })();
 
 // ============================================================
@@ -826,13 +826,13 @@ export async function exportCurrentCharacterPngToFiles(options = {}) {
                 inj++;
             }
             if (inj === 0) return origFetch.apply(this, arguments);
-            console.log(`${LOG} 🎯 ${url.includes('merge') ? 'merge' : 'edit'} に backup 注入 (${inj} ns, key=${matchKey})`);
+            //console.log(`${LOG} 🎯 ${url.includes('merge') ? 'merge' : 'edit'} に backup 注入 (${inj} ns, key=${matchKey})`);
             return await origFetch.call(this, input, { ...init, body: JSON.stringify(body) });
         } catch (e) {
             return origFetch.apply(this, arguments);
         }
     };
-    console.log(`${LOG} 🎯 edit fetch インターセプタを設置`);
+    //console.log(`${LOG} 🎯 edit fetch インターセプタを設置`);
 })();
 
 // ============================================================
@@ -867,4 +867,4 @@ window.CharStore = {
         return out;
     },
 };
-console.log(`${LOG} 公開APIを window.CharStore に登録`);
+//console.log(`${LOG} 公開APIを window.CharStore に登録`);
