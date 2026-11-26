@@ -64,7 +64,11 @@
 
     // ===== オートセーブ用 =====
     let _autoSaveTimer = null;
-
+    
+    let _pendingDeleteUid = null;
+    let _pendingDeleteKw = null;
+    let _pendingDeleteAt = 0;
+    
     // ===== エディタ初期化中フラグ =====
     let _editorLoading = false;
     const _explicitlyDeletedKeys = new Set();
@@ -2787,47 +2791,120 @@ async function exportUnifiedBundleJson(options = {}) {
             closeCellModal(true);
         });
 
-modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e) => {
+modal.querySelector('#stj_cell_modal_delete').addEventListener('click', (e) => {
     e.stopPropagation();
     e.preventDefault();
     if (!currentModalCell || !currentCellModal) return;
 
-    const uid = getCellUid(currentModalCell);
-    const kw = getCellKeyword(currentModalCell).trim();
+    const cell = currentModalCell;
+    const uid = getCellUid(cell);
+    const kw = getCellKeyword(cell).trim();
     if (!uid && !kw) {
         window.toastr?.warning?.('対象エントリのUID/キーワードが取得できません');
         return;
     }
 
-    // モーダルにマウント中の実エントリ要素を優先取得
+    const worldName = getCharacterWorldInfoName();
+    if (!worldName) return;
+
+    // モーダル内の実エントリ要素（削除ボタンをクリックする対象）
     const entryHostEl = currentCellModal.querySelector('#stj_cell_modal_entry_host');
     let entryEl = entryHostEl?._movedEntryEl || null;
-
-    // UIDフォールバック（モーダル内 → #world_popup → 全体）
     if (!entryEl && uid) {
         const safeUid = escapeCssAttrValue(uid);
         entryEl = entryHostEl?.querySelector(`.world_entry[uid="${safeUid}"]`)
             || document.querySelector(`#world_popup .world_entry[uid="${safeUid}"]`)
             || document.querySelector(`.world_entry[uid="${safeUid}"]`);
     }
-
     if (!entryEl) {
         window.toastr?.warning?.('対象のロアブックエントリが見つかりません');
         return;
     }
 
-    // 削除完了を検知（entryElの参照はrestore後も有効）
+    const deleteBtn = entryEl.querySelector('.delete_entry_button')
+        || entryEl.querySelector('.fa-trash-can');
+    if (!deleteBtn) {
+        window.toastr?.warning?.('削除ボタンが見つかりません');
+        return;
+    }
+
+    // ★ 判定中の自動保存を保留
+    _pendingDeleteUid = uid ? String(uid) : null;
+    _pendingDeleteKw = kw || null;
+    _pendingDeleteAt = Date.now();
+
     const ctx = getSTContext();
     const es = ctx?.eventSource;
     const et = ctx?.eventTypes;
     let settled = false;
 
     const cleanup = () => {
-        observer.disconnect();
+        _pendingDeleteUid = null;
+        _pendingDeleteKw = null;
+        _pendingDeleteAt = 0;
         if (es && et?.WORLDINFO_UPDATED) {
             es.removeListener(et.WORLDINFO_UPDATED, onWorldInfoUpdated);
         }
     };
+
+    const finalize = async () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+
+        try { window.LorebookExpansion?.clearWorldInfoEntriesCache?.(worldName); } catch (err) {}
+        let entries = null;
+        try { entries = await loadWorldInfoEntries(worldName); } catch (err) {}
+        const list = entries
+            ? (Array.isArray(entries) ? entries : Object.values(entries))
+            : [];
+
+        const stillExists = list.some((en) => {
+            if (!en) return false;
+            if (uid && getEntryUid(en) === String(uid)) return true;
+            if (kw && getEntryKeyword(en) === kw) return true;
+            return false;
+        });
+
+        const charName = document.getElementById('stj_char_name_display')?.textContent || '';
+
+        if (stillExists) {
+            // 「いいえ」: モーダルもセルも維持。念のためセルを再同期
+            if (charName) {
+                syncEditorWithLatestLorebook(charName)
+                    .then(() => { try { flushAutoSave(); } catch (err) {} })
+                    .catch(() => {});
+            }
+            return;
+        }
+
+        // 「はい」: モーダルを閉じる
+        const hostEl = currentCellModal?.querySelector('#stj_cell_modal_entry_host');
+        if (hostEl) delete hostEl._movedEntryEl;
+        try { closeCellModal(false); } catch (err) {}
+        if (charName) {
+            syncEditorWithLatestLorebook(charName).catch(() => {});
+            scheduleUnifiedBundleExport(charName, 800);
+        }
+    };
+
+    const onWorldInfoUpdated = () => {
+        // STのエントリ書き戻し完了を待つ
+        setTimeout(() => { finalize().catch(() => {}); }, 150);
+    };
+
+    if (es && et?.WORLDINFO_UPDATED) {
+        es.on(et.WORLDINFO_UPDATED, onWorldInfoUpdated);
+    }
+
+    // 保険: WORLDINFO_UPDATED が来ない場合でも 60 秒後に保留解除（モーダルは閉じない）
+    setTimeout(() => {
+        if (!settled) { settled = true; cleanup(); }
+    }, 60000);
+
+    // ゴミ箱アイコンをクリック → STネイティブの確認ダイアログと削除処理を発火
+    deleteBtn.click();
+});
 
 const onDeleted = () => {
     if (settled) return;
@@ -4734,11 +4811,21 @@ function _stjDrawConnections(container, positions, children) {
         }, 3000);
     }
 
-    function _doAutoSave() {
-        try {
-            const nameEl = document.getElementById('stj_char_name_display');
-            const charName = nameEl ? nameEl.textContent : '';
-            if (!charName) return;
+function _doAutoSave() {
+    // ★ 削除判定中は保留（判定完了後に再実行される）
+    if (_pendingDeleteUid || _pendingDeleteKw) {
+        if (!_autoSaveTimer) {
+            _autoSaveTimer = setTimeout(() => {
+                _autoSaveTimer = null;
+                _doAutoSave();
+            }, 500);
+        }
+        return;
+    }
+    try {
+        const nameEl = document.getElementById('stj_char_name_display');
+        const charName = nameEl ? nameEl.textContent : '';
+        if (!charName) return;
 
             if (_editorLoading) return;
 
