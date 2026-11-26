@@ -780,133 +780,68 @@ console.log('[WBAutoSelect] 📦 v8.6 module loading (payload auto-sync, no trac
         try { alert(msg); } catch (e) { console.warn(LOG, msg); }
     }
 
-function purgeLexEntryResidue(worldName, uid, entryComment, entryEl = null) {
-    const keysToPurge = new Set();
-
-    if (entryComment && String(entryComment).trim()) {
-        keysToPurge.add(String(entryComment).trim());
-    }
-
-    if (uid !== undefined && uid !== null) {
-        const uidText = String(uid).trim();
-        if (uidText) {
-            keysToPurge.add(uidText);
-            keysToPurge.add(`uid:${uidText}`);
+    function _purgeLexEntryResidue(worldName, uid, entryComment, entryEl = null) {
+        const keysToPurge = new Set();
+        if (entryComment && String(entryComment).trim()) {
+            keysToPurge.add(String(entryComment).trim());
         }
-    }
+        if (uid !== undefined && uid !== null && String(uid).trim() !== '') {
+            keysToPurge.add(String(uid).trim());
+            keysToPurge.add(`uid_${String(uid).trim()}`);
+        }
 
-    if (!keysToPurge.size) return;
-
-    const context = getSTContext();
-    const char = getCurrentChar();
-
-    // ============================================================
-    // 1) 一次保存先: extension_settings.lorebook_expansion.data
-    //    extension_settings.lorebook_expansion.data[worldName][charKey]
-    // ============================================================
-    try {
-        const lexSettings = context?.extensionSettings?.lorebook_expansion;
-
-        if (lexSettings?.data && typeof lexSettings.data === 'object') {
-            const worldBuckets = worldName
-                ? [worldName]
-                : Object.keys(lexSettings.data);
-
-            for (const targetWorld of worldBuckets) {
-                const bucket = lexSettings.data[targetWorld];
-                if (!bucket || typeof bucket !== 'object') continue;
-
-                for (const key of keysToPurge) {
-                    if (Object.prototype.hasOwnProperty.call(bucket, key)) {
-                        delete bucket[key];
+        // 1. キャラクター拡張データ内の Lorebook_Expansion ストアから残骸を削除
+        try {
+            const char = getCurrentChar();
+            const root = char?.data?.extensions?.lorebook_expansion;
+            if (root && typeof root === 'object') {
+                const targetWorlds = worldName ? [worldName] : Object.keys(root);
+                for (const w of targetWorlds) {
+                    const bucket = root[w];
+                    if (!bucket || typeof bucket !== 'object') continue;
+                    for (const k of keysToPurge) {
+                        if (Object.prototype.hasOwnProperty.call(bucket, k)) {
+                            delete bucket[k];
+                        }
                     }
                 }
             }
+        } catch (e) { /* ignore */ }
 
-            if (typeof context.saveSettings === 'function') {
-                context.saveSettings();
-            } else if (typeof context.saveSettingsDebounced === 'function') {
-                context.saveSettingsDebounced();
-            }
-        }
-    } catch (err) {
-        console.warn('[WBAutoSelect] per-world LEX store の掃除に失敗:', err);
-    }
-
-    // ============================================================
-    // 2) character.data のミラー
-    //    新形式: worldName␟charKey
-    //    旧形式: charKey（自キャラのロアブックのみ）
-    // ============================================================
-    try {
-        const root = char?.data?.extensions?.lorebook_expansion;
-
-        if (root && typeof root === 'object') {
-            let removed = false;
-
-            for (const key of Object.keys(root)) {
-                const isPrefixed = key.includes('\x1f');
-
-                if (isPrefixed) {
-                    const separatorIndex = key.indexOf('\x1f');
-                    const keyWorld = key.slice(0, separatorIndex);
-                    const keyChar = key.slice(separatorIndex + 1);
-
-                    const shouldDelete =
-                        (!worldName || keyWorld === worldName) &&
-                        keysToPurge.has(keyChar);
-
-                    if (shouldDelete) {
-                        delete root[key];
-                        removed = true;
-                    }
-                } else {
-                    const isOwnWorld =
-                        !worldName ||
-                        worldName === char?.name ||
-                        worldName === char?.data?.extensions?.world ||
-                        worldName === char?.data?.world;
-
-                    if (isOwnWorld && keysToPurge.has(key)) {
-                        delete root[key];
-                        removed = true;
+        // 2. LorebookExpansion 公開 API があればキャッシュ・ストアもクリア
+        try {
+            const lex = window.LorebookExpansion;
+            if (lex) {
+                if (typeof lex.deleteEntryData === 'function') {
+                    for (const k of keysToPurge) {
+                        lex.deleteEntryData(worldName, k);
                     }
                 }
+                if (typeof lex.clearCache === 'function') {
+                    lex.clearCache(worldName);
+                }
             }
+        } catch (e) { /* ignore */ }
 
-            if (removed && window.CharStore?.saveCharacterExtension) {
-                window.CharStore.saveCharacterExtension(
-                    'lorebook_expansion',
-                    root,
-                    { immediate: true }
-                );
-            }
-        }
-    } catch (err) {
-        console.warn('[WBAutoSelect] character.data の LEX ミラー掃除に失敗:', err);
-    }
-
-    // ============================================================
-    // 3) ST内部エントリの extensions / 旧形式プロパティ
-    // ============================================================
-    try {
+        // 3. ST 内部エントリの extensions / 独自プロパティ残骸をリセット
         if (worldName && uid !== undefined && uid !== null) {
-            const stEntry = getSTEntry(worldName, uid);
-
+            const stEntry = _getSTEntry(worldName, uid);
             if (stEntry && typeof stEntry === 'object') {
+                stEntry.content = '';
                 if (stEntry.extensions && typeof stEntry.extensions === 'object') {
                     delete stEntry.extensions.lorebook_expansion;
+                    delete stEntry.extensions.template;
+                    delete stEntry.extensions.resolution;
+                    delete stEntry.extensions.img_prompt;
+                    delete stEntry.extensions.Negative_prompt;
+                    delete stEntry.extensions.negative_prompt;
+                    delete stEntry.extensions.choices;
+                    delete stEntry.extensions.variables;
                 }
-
                 for (const prop of [
-                    'template',
-                    'resolution',
-                    'img_prompt',
-                    'Negative_prompt',
-                    'negative_prompt',
-                    'choices',
-                    'variables',
-                    'lbe_data',
+                    'template', 'resolution', 'width', 'height',
+                    'img_prompt', 'Negative_prompt', 'negative_prompt',
+                    'choices', 'variables', 'lbe_data'
                 ]) {
                     if (Object.prototype.hasOwnProperty.call(stEntry, prop)) {
                         delete stEntry[prop];
@@ -914,76 +849,46 @@ function purgeLexEntryResidue(worldName, uid, entryComment, entryEl = null) {
                 }
             }
         }
-    } catch (err) {
-        console.warn('[WBAutoSelect] ST内部エントリの LEX 掃除に失敗:', err);
-    }
 
-    // ============================================================
-    // 4) DOM上の LEX UI を空状態へ戻す
-    // ============================================================
-    if (entryEl instanceof Element) {
-        try {
-            const contentEl = entryEl.querySelector(
-                'textarea[name="content"], input[name="content"]'
-            );
-
-            if (contentEl && contentEl.value) {
+        // 4. DOM 上の LEX 拡張フィールド（template / 解像度 / ネガティブプロンプト / 選択肢 / 変数）をリセット
+        if (entryEl && entryEl instanceof Element) {
+            const contentEl = entryEl.querySelector('textarea[name="content"], input[name="content"]');
+            if (contentEl && contentEl.value !== '') {
                 contentEl.value = '';
-                triggerInputAndChange(contentEl);
+                _triggerInputAndChange(contentEl);
             }
 
             const lexFields = entryEl.querySelectorAll(
-                [
-                    '.lbe-panel input',
-                    '.lbe-panel textarea',
-                    '.lbe-panel select',
-                    '[class*="lbe-"] input',
-                    '[class*="lbe-"] textarea',
-                    '[class*="lbe-"] select',
-                    'input[name="template"]',
-                    'select[name="resolution"]',
-                    'textarea[name="negative"]',
-                    'textarea[name="Negative"]',
-                    'textarea[name="img_prompt"]',
-                    'input[name="choice"]',
-                    'input[name="variable"]',
-                ].join(', ')
+                '.lbe-panel input, .lbe-panel textarea, .lbe-panel select, ' +
+                '[class*="lbe-"] input, [class*="lbe-"] textarea, [class*="lbe-"] select, ' +
+                '[name*="template"], [name*="resolution"], [name*="negative"], [name*="Negative"], ' +
+                '[name*="img_prompt"], [name*="choice"], [name*="variable"]'
             );
-
             for (const field of lexFields) {
                 if (field instanceof HTMLSelectElement) {
                     if (field.selectedIndex !== 0) {
                         field.selectedIndex = 0;
-                        triggerInputAndChange(field);
+                        _triggerInputAndChange(field);
                     }
-                } else if (
-                    field instanceof HTMLInputElement &&
-                    (field.type === 'checkbox' || field.type === 'radio')
-                ) {
+                } else if (field instanceof HTMLInputElement && (field.type === 'checkbox' || field.type === 'radio')) {
                     if (field.checked) {
                         field.checked = false;
-                        triggerInputAndChange(field);
+                        _triggerInputAndChange(field);
                     }
-                } else if ('value' in field && field.value) {
+                } else if ('value' in field && field.value !== '') {
                     field.value = '';
-                    triggerInputAndChange(field);
+                    _triggerInputAndChange(field);
                 }
             }
 
-            entryEl.querySelectorAll(
-                '.lbe-choice-row, .lbe-choice-item, ' +
-                '.lbe-var-row, .lbe-variable-row, .lbe-variable-item'
-            ).forEach(row => row.remove());
-        } catch (err) {
-            console.warn('[WBAutoSelect] DOM上の LEX UI 掃除に失敗:', err);
+            const dynamicRows = entryEl.querySelectorAll(
+                '.lbe-choice-row, .lbe-choice-item, .lbe-var-row, .lbe-variable-row, .lbe-variable-item'
+            );
+            for (const row of dynamicRows) {
+                row.remove();
+            }
         }
     }
-
-    console.log(
-        '[WBAutoSelect] 削除済みエントリの LEX 残骸を掃除:',
-        { worldName, uid, entryComment }
-    );
-}
 
     function _triggerInput(el) {
         if (!el) return;
