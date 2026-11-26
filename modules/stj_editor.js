@@ -2628,8 +2628,8 @@ async function exportUnifiedBundleJson(options = {}) {
                     height: calc(var(--exp-scale, 1) * 36px);
                     padding: 0 calc(var(--exp-scale, 1) * 8px);
                     background: rgba(255, 255, 255, 1.0);
-                    color: #ffffff;
-                    border: 4px solid #ffffff;
+                    color: #ff0000;
+                    border: 4px solid #ff0000;
                     border-radius: calc(var(--exp-scale, 1) * 4px);
                     cursor: pointer;
                     font-size: calc(var(--exp-scale, 1) * 18px);
