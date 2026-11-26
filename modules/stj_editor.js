@@ -2906,55 +2906,6 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', (e) => {
     deleteBtn.click();
 });
 
-const onDeleted = () => {
-    if (settled) return;
-    settled = true;
-    cleanup();
-
-    // ★ 削除済みエントリの参照をクリア（restore による再挿入を防止）
-    const hostEl = currentCellModal?.querySelector('#stj_cell_modal_entry_host');
-    if (hostEl) delete hostEl._movedEntryEl;
-
-    try { closeCellModal(false); } catch (err) { /* ignore */ }
-    const charName = document.getElementById('stj_char_name_display')?.textContent || '';
-    if (charName) {
-        syncEditorWithLatestLorebook(charName).catch(() => {});
-        scheduleUnifiedBundleExport(charName, 800);
-    }
-};
-
-    const observer = new MutationObserver(() => {
-        if (!document.body.contains(entryEl)) onDeleted();
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-
-    const onWorldInfoUpdated = () => {
-        // DOM消滅検知の取りこぼしに備えて少し待ってから再確認
-        setTimeout(() => {
-            if (!document.body.contains(entryEl)) onDeleted();
-        }, 100);
-    };
-    if (es && et?.WORLDINFO_UPDATED) {
-        es.on(et.WORLDINFO_UPDATED, onWorldInfoUpdated);
-    }
-
-    // タイムアウト安全装置
-    setTimeout(() => { if (!settled) cleanup(); }, 60000);
-
-    // ゴミ箱アイコンを取得
-    const deleteBtn = entryEl.querySelector('.delete_entry_button')
-        || entryEl.querySelector('.fa-trash-can');
-
-    if (!deleteBtn) {
-        cleanup();
-        window.toastr?.warning?.('削除ボタンが見つかりません');
-        return;
-    }
-
-    // STネイティブの削除フロー（確認ダイアログ → サーバー削除 → WORLDINFO_UPDATED）を発火
-    deleteBtn.click();
-});
-
         modal.addEventListener('click', (e) => {
             if (e.target === modal) closeCellModal(true);
         });
