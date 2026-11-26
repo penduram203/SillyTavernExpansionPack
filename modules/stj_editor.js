@@ -5774,10 +5774,22 @@ if (addBtn) {
 
         worldInfoSyncEvents.forEach(name => {
             if (name && typeof es.on === 'function') {
-                es.on(name, syncLater(50));
+                es.on(name, () => syncLater(50));
             }
         });
 
+        const characterSyncEvents = [
+            et.CHAT_CHANGED,
+            et.CHARACTER_SELECTED,
+            et.CHARACTER_PAGE_LOADED,
+        ];
+
+        characterSyncEvents.forEach(name => {
+            if (name && typeof es.on === 'function') {
+                es.on(name, () => syncLater(800));
+            }
+        });
+        
         ['CHAT_CHANGED', 'CHARACTER_SELECTED', 'CHARACTER_PAGE_LOADED'].forEach(name => {
             if (et[name] && typeof es.on === 'function') {
                 es.on(et[name], () => syncLater(800));
