@@ -6133,16 +6133,21 @@ if (addBtn) {
         Object.assign(overlay.style, {
             position: 'fixed',
             left: '50%',
-            bottom: '96px',
+            bottom: '140px',
             transform: 'translateX(-50%)',
             zIndex: '30000',
-            padding: '10px 18px',
-            borderRadius: '8px',
-            background: 'rgba(20, 20, 20, 0.92)',
+            padding: '20px 36px',
+            minWidth: '420px',
+            textAlign: 'center',
+            borderRadius: '16px',
+            background: 'rgba(20, 20, 20, 0.95)',
             color: '#fff',
-            fontSize: '14px',
-            fontWeight: '600',
-            boxShadow: '0 4px 16px rgba(0, 0, 0, 0.45)',
+            fontSize: '28px',
+            fontWeight: '800',
+            lineHeight: '1.3',
+            letterSpacing: '0.02em',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6)',
+            border: '2px solid rgba(255, 255, 255, 0.25)',
             pointerEvents: 'none',
             whiteSpace: 'nowrap',
         });
@@ -6163,7 +6168,10 @@ if (addBtn) {
 
     function getCells() {
         return Array.from(
-            document.querySelectorAll('#stjkeywordscontainer .stj-keyword-item')
+            document.querySelectorAll(
+                '#stj_keywords_container .stj-keyword-item, ' +
+                '#stjkeywordscontainer .stj-keyword-item'
+            )
         );
     }
 
@@ -6219,7 +6227,7 @@ if (addBtn) {
                 syncRequested = true;
             }
 
-            await new Promise(resolve => setTimeout(resolve, 100));
+            await new Promise(resolve => setTimeout(resolve, 50));
         }
 
         return false;
