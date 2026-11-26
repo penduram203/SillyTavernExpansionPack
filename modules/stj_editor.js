@@ -2370,6 +2370,7 @@ async function exportUnifiedBundleJson(options = {}) {
                     <button type="button" class="stj-cell-modal-apply">${_t('stj.cell_modal.apply', '決定')}</button>
                     <button type="button" class="stj-cell-modal-cancel">${_t('stj.cell_modal.cancel', 'キャンセル')}</button>
                     <div class="stj-cell-modal-keyword-display" id="stj_cell_modal_keyword_display"></div>
+                    <button type="button" class="stj-cell-modal-delete">削除</button>
                 </div>
                 <div class="stj-cell-modal-entry-host" id="stj_cell_modal_entry_host" style="display: block; height: 35%;"></div>
                 <div class="stj-cell-modal-grid"></div>
@@ -2623,6 +2624,22 @@ async function exportUnifiedBundleJson(options = {}) {
                 .lbe-variable-add {
                     font-size: calc(var(--exp-scale, 1) * 14px) !important;
                 }
+                .stj-cell-modal-delete {
+                    height: calc(var(--exp-scale, 1) * 36px);
+                    padding: 0 calc(var(--exp-scale, 1) * 8px);
+                    background: transparent;
+                    color: #ff4d4d;
+                    border: 1px solid #ff4d4d;
+                    border-radius: calc(var(--exp-scale, 1) * 4px);
+                    cursor: pointer;
+                    font-size: calc(var(--exp-scale, 1) * 18px);
+                    font-weight: bold;
+                    flex-shrink: 0;
+                    margin-left: auto; /* 右端に寄せる */
+                }
+                .stj-cell-modal-delete:hover {
+                    background: rgba(255, 77, 77, 0.1);
+                }
             `;
             document.head.appendChild(s);
         }
@@ -2637,7 +2654,76 @@ async function exportUnifiedBundleJson(options = {}) {
             e.stopPropagation();
             closeCellModal(true);
         });
-
+        modal.querySelector('.stj-cell-modal-delete').addEventListener('click', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            if (!currentModalCell) return;
+    
+            const entryName = getCellKeyword(currentModalCell) || modalOriginalKeyword;
+            if (!entryName) {
+                showCustomAlert('キーワードが設定されていないため削除できません');
+                return;
+            }
+    
+            const message = `画像データを残してエントリを削除しますか？\nエントリ:\n${entryName}\nこの操作は取り消せません！`;
+    
+            showDeleteConfirmDialog(message, () => {
+                const worldPopup = document.getElementById('world_popup');
+                if (!worldPopup) return;
+        
+                // 現在のセルに対応するロアブックエントリ要素を特定
+                const cellUid = getCellUid(currentModalCell);
+                let targetEntryEl = null;
+                if (cellUid) {
+                    targetEntryEl = worldPopup.querySelector(`.world_entry[uid="${CSS.escape(cellUid)}"]`);
+                }
+                if (!targetEntryEl) {
+                    const entries = worldPopup.querySelectorAll('.world_entry[uid]');
+                    for (const el of entries) {
+                        const commentEl = el.querySelector('textarea[name="comment"], input[name="comment"]');
+                        if (commentEl && commentEl.value.trim() === entryName) {
+                            targetEntryEl = el;
+                            break;
+                        }
+                    }
+                }
+        
+                if (!targetEntryEl) {
+                    showCustomAlert('対象のロアブックエントリが見つかりません');
+                    return;
+                }
+        
+                const deleteBtn = targetEntryEl.querySelector('.delete_entry_button, .delete_entry, [class*="delete"]');
+                if (!deleteBtn) {
+                    showCustomAlert('削除ボタンが見つかりません');
+                    return;
+                }
+        
+                // ★ ST本体の確認ダイアログ(#dialogue_popup)をインターセプトして文言を書き換え
+                const observer = new MutationObserver((mutations, obs) => {
+                    const popup = document.querySelector('#dialogue_popup, .dialogue_popup');
+                    if (popup) {
+                        const textEl = popup.querySelector('#dialogue_popup_text, .dialogue_popup_text');
+                        if (textEl && !textEl.dataset.stjRewritten) {
+                            textEl.innerHTML = `画像データを残してエントリを削除しますか？<br>エントリ:<br><b>${entryName}</b><br>この操作は取り消せません！`;
+                            textEl.dataset.stjRewritten = '1';
+                        }
+                        const okBtn = popup.querySelector('#dialogue_popup_ok, .dialogue_popup_ok');
+                        const cancelBtn = popup.querySelector('#dialogue_popup_cancel, .dialogue_popup_cancel');
+                        if (okBtn && okBtn.textContent.trim() !== 'はい') okBtn.textContent = 'はい';
+                        if (cancelBtn && cancelBtn.textContent.trim() !== 'いいえ') cancelBtn.textContent = 'いいえ';
+                    }
+                });
+                observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+        
+                // ゴミ箱アイコンをクリックしてST本体の削除処理を発火
+                deleteBtn.click();
+        
+                // 念のため3秒後にObserverを切断
+                setTimeout(() => observer.disconnect(), 3000);
+            });
+        });
+        
         modal.addEventListener('click', (e) => {
             if (e.target === modal) closeCellModal(true);
         });
