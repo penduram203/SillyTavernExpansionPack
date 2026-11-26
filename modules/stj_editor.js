@@ -5758,9 +5758,14 @@ if (addBtn) {
             }, delay);
         };
 
-        WORLDINFO_UPDATED, WORLDINFO_SETTINGS_UPDATED.forEach(name => {
-            if (et[name] && typeof es.on === 'function') {
-                es.on(et[name], syncLater(50));
+        const worldInfoSyncEvents = [
+            et.WORLDINFO_UPDATED,
+            et.WORLDINFO_SETTINGS_UPDATED,
+        ];
+
+        worldInfoSyncEvents.forEach(name => {
+            if (name && typeof es.on === 'function') {
+                es.on(name, syncLater(50));
             }
         });
 
