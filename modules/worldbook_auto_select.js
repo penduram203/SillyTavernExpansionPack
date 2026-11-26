@@ -1833,6 +1833,62 @@ function _applyCommentAndKeyDefault(entryEl, assignedName) {
 
     console.log(`${LOG} 🔄 STJ auto-refresh installed`);
 })();
+
+// worldbook_auto_select.js の末尾付近（公開APIの直前）に追加
+
+// ============================================================
+// ★ WIDrawerIcon クリック検知 → 1秒後に #world_refresh 自動実行
+//   JSON編集画面から新規エントリを作成した後、ロアブック画面を開く際、
+//   DOM の再構築が完了する前に #world_refresh が走ると textarea 高さが
+//   異常縮小（8px）したまま固定されてしまう。
+//   そのため、WIDrawerIcon クリックから正確に1秒待機してから
+//   #world_refresh を実行することで、DOM 再構築完了を待つ。
+// ============================================================
+(function installWIDrawerIconRefresh() {
+    if (window.__wbAutoSelectWIDrawerRefreshInstalled) return;
+    window.__wbAutoSelectWIDrawerRefreshInstalled = true;
+
+    let refreshTimer = null;
+
+    function scheduleWorldRefresh() {
+        if (refreshTimer) clearTimeout(refreshTimer);
+        refreshTimer = setTimeout(() => {
+            refreshTimer = null;
+            const refreshBtn = document.getElementById('world_refresh');
+            if (refreshBtn) {
+                console.log(`${LOG} 🔄 WIDrawerIcon クリックから1秒後に #world_refresh を自動実行`);
+                try {
+                    refreshBtn.click();
+                } catch (e) {
+                    console.warn(LOG, 'world_refresh click failed:', e);
+                }
+            }
+        }, 1000); // ★ 正確に1秒待機
+    }
+
+    // 1. #WIDrawerIcon のクリックを検知
+    document.addEventListener('click', (e) => {
+        const icon = e.target?.closest?.('#WIDrawerIcon');
+        if (!icon) return;
+        console.log(`${LOG} 👁️ WIDrawerIcon クリックを検知 → 1秒後に #world_refresh を予約`);
+        scheduleWorldRefresh();
+    }, true);
+
+    // 2. 念のため、WorldInfo ドロワー関連のトグルも検知
+    document.addEventListener('click', (e) => {
+        const toggle = e.target?.closest?.('.drawer-toggle, .drawer-header, .drawer-icon');
+        if (!toggle) return;
+        // WIDrawerIcon 自体は上で処理済みなので除外
+        if (toggle.id === 'WIDrawerIcon') return;
+        // WorldInfo ドロワーに関連するトグルか確認
+        const wi = toggle.closest('#WorldInfo') || toggle.closest('[id*="WorldInfo" i]');
+        if (!wi) return;
+        console.log(`${LOG} 👁️ WorldInfo トグル クリックを検知 → 1秒後に #world_refresh を予約`);
+        scheduleWorldRefresh();
+    }, true);
+
+    console.log(`${LOG} 👁️ WIDrawerIcon → #world_refresh auto-refresh installed (1秒遅延)`);
+})();
     
     // ============================================================
     // 公開 API
