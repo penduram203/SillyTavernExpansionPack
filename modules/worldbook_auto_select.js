@@ -1742,6 +1742,98 @@ function _applyCommentAndKeyDefault(entryEl, assignedName) {
         init();
     }
 
+(function installStjAutoRefresh() {
+    if (window.__wbAutoSelectStjRefreshInstalled) return;
+    window.__wbAutoSelectStjRefreshInstalled = true;
+
+    let lastRefreshAt = 0;
+    const REFRESH_COOLDOWN_MS = 1500;
+
+    function triggerWorldRefresh(reason) {
+        const now = Date.now();
+        if (now - lastRefreshAt < REFRESH_COOLDOWN_MS) return;
+
+        // ロアブック編集画面が表示中でない場合は何もしない
+        const popup = document.getElementById('world_popup');
+        if (!popup) return;
+        const popupVisible =
+            popup.style.display !== 'none' &&
+            !popup.closest('[style*="display: none"]') &&
+            document.querySelector('#WorldInfo.openDrawer, .drawer-content.openDrawer');
+        if (!popupVisible) return;
+
+        const refreshBtn = document.getElementById('world_refresh');
+        if (!refreshBtn) return;
+
+        lastRefreshAt = now;
+        console.log(`${LOG} 🔄 STJ操作後の自動リフレッシュ実行 (${reason})`);
+
+        try {
+            refreshBtn.click();
+        } catch (e) {
+            console.warn(LOG, 'world_refresh click failed:', e);
+        }
+    }
+
+    // 1. STJ Editor モーダルの DOM 除去（=モーダル閉じる）を検知
+    try {
+        const mo = new MutationObserver((mutations) => {
+            for (const m of mutations) {
+                for (const node of m.removedNodes) {
+                    if (!(node instanceof Element)) continue;
+                    const hit =
+                        node.id === 'stj_editor_modal' ||
+                        node.id === 'stj_cell_modal' ||
+                        node.classList?.contains('stj-editor-modal') ||
+                        node.querySelector?.('#stj_editor_modal, #stj_cell_modal, .stj-editor-modal');
+                    if (hit) {
+                        setTimeout(() => triggerWorldRefresh('stj-modal-closed'), 300);
+                        return;
+                    }
+                }
+            }
+        });
+        mo.observe(document.body, { childList: true, subtree: true });
+    } catch (e) { /* ignore */ }
+
+    // 2. JSON編集画面の「新規」ボタン押下検知
+    document.addEventListener('click', (e) => {
+        const btn = e.target?.closest?.('#stj_add_keyword');
+        if (!btn) return;
+        // 新規追加 → モーダルが開いて保存→閉じるまで待つ
+        setTimeout(() => triggerWorldRefresh('stj-add-keyword'), 1500);
+    }, true);
+
+    // 3. STJ Editor が発火する可能性のあるカスタムイベント
+    ['stj-editor-saved', 'stj-editor-closed', 'stj-saved', 'stj-closed'].forEach(evt => {
+        window.addEventListener(evt, () => {
+            setTimeout(() => triggerWorldRefresh(evt), 300);
+        });
+    });
+
+    // 4. #world_popup_entries_list の大量再描画（STJ反映直後など）を検知したら
+    //    高さが異常な textarea を強制再計算
+    try {
+        const listMo = new MutationObserver(() => {
+            const popup = document.getElementById('world_popup');
+            if (!popup) return;
+            requestAnimationFrame(() => {
+                document.querySelectorAll('#world_popup textarea[name="comment"]').forEach(ta => {
+                    const h = parseInt(ta.style.height || '', 10);
+                    if (!isNaN(h) && h < 20) {
+                        ta.style.height = 'auto';
+                        ta.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
+                });
+            });
+        });
+        const list = document.getElementById('world_popup_entries_list');
+        if (list) listMo.observe(list, { childList: true, subtree: true });
+    } catch (e) { /* ignore */ }
+
+    console.log(`${LOG} 🔄 STJ auto-refresh installed`);
+})();
+    
     // ============================================================
     // 公開 API
     // ============================================================
