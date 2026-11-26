@@ -6286,7 +6286,7 @@ if (addBtn) {
 console.log('[STJ Editor] 末尾コード読み込み完了');
 
 document.addEventListener('click', (event) => {
-    const button = event.target?.closest?.('#stjaddkeyword');
+    const button = event.target?.closest?.('#stj_add_keyword');
     if (!button) return;
 
     console.log('[STJ Editor] 新規ボタン クリック検出', button);
