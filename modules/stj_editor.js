@@ -3277,144 +3277,25 @@ async function exportUnifiedBundleJson(options = {}) {
             closeCellModal(true);
         });
 
-modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-    if (!currentModalCell || !currentCellModal) return;
-
-    const cell = currentModalCell;
-    const uid = getCellUid(cell);
-    const kw = getCellKeyword(cell).trim();
-    const worldName = getCharacterWorldInfoName();
-    if (!worldName || !uid) {
-        window.toastr?.warning?.('エントリ情報が取得できません');
-        return;
-    }
-
-    const ctx = getSTContext();
-    const callGenericPopup = window.callGenericPopup || ctx?.callGenericPopup;
-    const POPUP_TYPE = window.POPUP_TYPE || ctx?.POPUP_TYPE;
-    if (typeof callGenericPopup !== 'function' || POPUP_TYPE?.CONFIRM === undefined) {
-        window.toastr?.warning?.('確認ダイアログを表示できません');
-        return;
-    }
-
-    // 1) callGenericPopup で確認（以前動作実績あり）
-    let confirmed = false;
+    // ★ ST本来のゴミ箱ボタンをクリック
+    // 公式確認ダイアログも公式削除処理もそのまま利用する
     try {
-        const result = await callGenericPopup(
-            'この世界情報エントリを削除しますか？',
-            POPUP_TYPE.CONFIRM
+        officialDeleteButton.click();
+
+        console.log(
+            '[STJ Editor] ST公式削除ボタンを実行',
+            { worldName, uid }
         );
-        confirmed = !!result && result !== 0 && result !== '0' && result !== 'false';
-        console.log('[STJ Editor] 削除確認:', { confirmed, result });
+
     } catch (err) {
-        console.warn('[STJ Editor] 確認ダイアログエラー:', err);
-        return;
-    }
-    if (!confirmed) {
-        console.log('[STJ Editor] 削除キャンセル（いいえ）→ 何もしない');
-        return;
-    }
+        cleanupListener();
 
-    try {
-        const mod = window.LorebookExpansion?.getWorldInfoModule
-            ? await window.LorebookExpansion.getWorldInfoModule()
-            : await import('/scripts/world-info.js');
+        console.error(
+            '[STJ Editor] 公式削除ボタン実行エラー:',
+            err
+        );
 
-        // 2) 最新データを取得
-        let data = await mod.loadWorldInfo(worldName);
-        if (!data?.entries?.[uid]) {
-            const headers = (typeof ctx?.getRequestHeaders === 'function')
-                ? ctx.getRequestHeaders()
-                : { 'Content-Type': 'application/json' };
-            const r = await fetch('/api/worldinfo/get', {
-                method: 'POST', headers,
-                body: JSON.stringify({ name: worldName }),
-                cache: 'no-store',
-            });
-            if (r.ok) data = await r.json();
-        }
-        if (!data?.entries?.[uid]) {
-            window.toastr?.warning?.('エントリが見つかりません');
-            return;
-        }
-
-        // 3) ST公式削除（silent:true で内部ダイアログをスキップ）
-        const deleted = await mod.deleteWorldInfoEntry(data, uid, { silent: true });
-        console.log('[STJ Editor] deleteWorldInfoEntry 結果:', { deleted, stillExists: !!data.entries?.[uid] });
-
-        // deleted===undefined でも data.entries[uid] が消えていれば成功扱い
-        if (deleted === false || data.entries?.[uid]) {
-            window.toastr?.warning?.('削除できませんでした');
-            return;
-        }
-
-// 4) ST公式保存（worldInfoCache 更新 + 即時サーバー保存）
-await mod.saveWorldInfo(worldName, data, true);
-console.log('[STJ Editor] 💾 saveWorldInfo 完了');
-
-// ★ world_info（レガシービュー）も data と同一参照に揃える
-try {
-    const syncTarget = (wi, label) => {
-        if (!wi) return;
-        try {
-            if (wi instanceof Map) {
-                wi.set(worldName, data);
-            } else {
-                wi[worldName] = data;
-            }
-        } catch (e) {
-            console.warn(`[STJ Editor] ${label} 同期エラー:`, e);
-        }
-    };
-    syncTarget(mod.world_info, 'mod.world_info');
-    syncTarget(window.world_info, 'window.world_info');
-    syncTarget(getSTContext()?.world_info, 'ctx.world_info');
-
-    // 診断ログ
-    const wi_mod = mod.world_info instanceof Map ? mod.world_info.get(worldName) : mod.world_info?.[worldName];
-    const wi_win = window.world_info instanceof Map ? window.world_info.get(worldName) : window.world_info?.[worldName];
-    const cnt = (x) => x?.entries ? Object.keys(x.entries).length : 0;
-    console.log(
-        `[STJ Editor] 🔗 world_info 同期完了: ` +
-        `data=${Object.keys(data.entries || {}).length}件, ` +
-        `mod=${cnt(wi_mod)}件(同参照:${data === wi_mod}), ` +
-        `window=${cnt(wi_win)}件(同参照:${data === wi_win})`
-    );
-} catch (e) {
-    console.warn('[STJ Editor] world_info 同期エラー:', e);
-}
-
-        // 5) restore 防止 + JSON画面のセル除去
-        const entryHostEl = currentCellModal.querySelector('#stj_cell_modal_entry_host');
-        if (entryHostEl) {
-            delete entryHostEl._movedEntryEl;
-            delete entryHostEl._sourceEntryEl;
-            delete entryHostEl._entryPlaceholder;
-            delete entryHostEl._syncEntry;
-        }
-        try {
-            if (kw) _explicitlyDeletedKeys.add(kw);
-            cell.remove();
-        } catch (err) {}
-
-        // 6) 0.1秒後に決定ボタン自動押下
-        setTimeout(() => {
-            try {
-                currentCellModal?.querySelector('.stj-cell-modal-apply')?.click();
-            } catch (err) {}
-        }, 100);
-
-        // 7) 事後同期
-        const charName = document.getElementById('stj_char_name_display')?.textContent || '';
-        if (charName) {
-            syncEditorWithLatestLorebook(charName).catch(() => {});
-            scheduleUnifiedBundleExport(charName, 800);
-        }
-    } catch (err) {
-        console.error('[STJ Editor] 削除エラー:', err);
-        window.toastr?.error?.('削除に失敗しました');
+        window.toastr?.error?.('削除処理を実行できませんでした');
     }
 });
 
