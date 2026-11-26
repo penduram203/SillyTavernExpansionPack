@@ -2804,39 +2804,34 @@ modal.querySelector('.stj-cell-modal-delete').addEventListener('click', (e) => {
         return;
     }
 
-    // 自作ダイアログを削除し、直接ロアブック管理画面のゴミ箱アイコンをクリック
-    closeCellModal(false);
+    // 削除確認ダイアログを表示
+    showDeleteConfirmDialog(
+        `画像データを残してエントリを削除しますか？\nエントリ: ${entryName}\nこの操作は取り消せません！`,
+        async () => {
+            // ✅ 「はい」を選択した時だけモーダルを閉じて削除処理を実行
+            closeCellModal(false);
 
-    // 方法1: ロアブック管理画面の削除ボタンをクリック（画面が開いている場合）
-    const worldName = getCharacterWorldInfoName();
-    const deleteButton = document.querySelector(`#world_popup .world_entry[uid="${escapeCssAttrValue(uid)}"] .delete_entry_button`);
-    if (deleteButton) {
-        deleteButton.click();
-        return;
-    }
-
-    // 方法2: SillyTavern本体の削除APIを直接呼び出す（画面が開いていない場合）
-    try {
-        if (window.deleteWorldInfoEntry) {
-            // SillyTavern本体の削除関数を直接呼び出す
-            window.deleteWorldInfoEntry(uid, worldName);
-        } else if (window.WorldbookAutoSelect?.forceDeleteEntry) {
-            // WorldbookAutoSelectの強制削除
-            window.WorldbookAutoSelect.forceDeleteEntry(worldName, uid);
-        } else {
-            // 世界情報を直接操作
-            if (window.world_info?.[worldName]?.entries?.[uid]) {
-                delete window.world_info[worldName].entries[uid];
-                if (window.saveWorldInfo) {
-                    window.saveWorldInfo(worldName, true);
-                }
+            const r = await stjDeleteWorldEntryDirect(uid, entryName);
+            if (!r.ok) {
+                showCustomAlert(`エントリの削除に失敗しました (${r.reason || 'unknown'})`);
+                return;
             }
+
+            if (cell.parentNode) cell.remove();
+            const charName = detectCharacterNameFromDOM() || document.getElementById('stj_char_name_display')?.textContent || '';
+            if (charName) {
+                try { await syncEditorWithLatestLorebook(charName); } catch (err) { /* ignore */ }
+            }
+            autoSave({ immediate: true });
+            runLiveTest();
+        },
+        () => {
+            // ❌ 「いいえ」を選択した時は何もしない（モーダルを閉じない）
+            // 空のコールバック
         }
-    } catch (e) {
-        console.error('[STJ Editor] 削除処理中にエラー:', e);
-    }
+    );
 });
-        
+
         modal.addEventListener('click', (e) => {
             if (e.target === modal) closeCellModal(true);
         });
