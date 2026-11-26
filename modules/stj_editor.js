@@ -2806,42 +2806,49 @@ modal.querySelector('.stj-cell-modal-delete').addEventListener('click', (e) => {
 
     const worldName = getCharacterWorldInfoName();
 
-    // 方法1: ロアブック管理画面の削除ボタンをクリック（画面が開いている場合）
-    const deleteButton = document.querySelector(`#world_popup .world_entry[uid="${escapeCssAttrValue(uid)}"] .delete_entry_button`);
-    if (deleteButton) {
-        deleteButton.click();
-        return;
-    }
+    // ✅ 自作の確認ダイアログを表示
+    showDeleteConfirmDialog(
+        `画像データを残してエントリを削除しますか？\nエントリ: ${entryName}\nこの操作は取り消せません！`,
+        async () => {
+            // ✅ 「はい」を選択した時の処理
 
-    // 方法2: ロアブック管理画面が開いていない場合
-    // 直接削除処理を呼び出す
-    (async () => {
-        try {
-            // ✅ SillyTavern本体の削除処理を呼び出す
-            const r = await stjDeleteWorldEntryDirect(uid, entryName);
-
-            if (!r.ok) {
-                showCustomAlert(`エントリの削除に失敗しました (${r.reason || 'unknown'})`);
+            // 方法1: ロアブック管理画面の削除ボタンをクリック（画面が開いている場合）
+            const deleteButton = document.querySelector(`#world_popup .world_entry[uid="${escapeCssAttrValue(uid)}"] .delete_entry_button`);
+            if (deleteButton) {
+                deleteButton.click();
+                closeCellModal(false);
                 return;
             }
 
-            // ✅ 削除が完了した後にモーダルを閉じる
-            closeCellModal(false);
+            // 方法2: ロアブック管理画面が開いていない場合
+            try {
+                const r = await stjDeleteWorldEntryDirect(uid, entryName);
+                if (!r.ok) {
+                    showCustomAlert(`エントリの削除に失敗しました (${r.reason || 'unknown'})`);
+                    return;
+                }
 
-            // JSON編集ツリーからセルを削除
-            if (cell.parentNode) cell.remove();
+                // ✅ 削除が完了した後にモーダルを閉じる
+                closeCellModal(false);
 
-            // 同期処理
-            const charName = detectCharacterNameFromDOM() || document.getElementById('stj_char_name_display')?.textContent || '';
-            if (charName) {
-                try { await syncEditorWithLatestLorebook(charName); } catch (err) { /* ignore */ }
+                // JSON編集ツリーからセルを削除
+                if (cell.parentNode) cell.remove();
+
+                // 同期処理
+                const charName = detectCharacterNameFromDOM() || document.getElementById('stj_char_name_display')?.textContent || '';
+                if (charName) {
+                    try { await syncEditorWithLatestLorebook(charName); } catch (err) { /* ignore */ }
+                }
+                autoSave({ immediate: true });
+                runLiveTest();
+            } catch (e) {
+                showCustomAlert('削除処理中にエラーが発生しました');
             }
-            autoSave({ immediate: true });
-            runLiveTest();
-        } catch (e) {
-            showCustomAlert('削除処理中にエラーが発生しました');
+        },
+        () => {
+            // ❌ 「いいえ」を選択した時は何もしない（モーダルを閉じない）
         }
-    })();
+    );
 });
 
         modal.addEventListener('click', (e) => {
