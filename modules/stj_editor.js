@@ -2804,48 +2804,44 @@ modal.querySelector('.stj-cell-modal-delete').addEventListener('click', (e) => {
         return;
     }
 
-    // ❌ 自作ダイアログを完全削除
-    // ✅ SillyTavern公式の削除処理を呼び出す
-
     const worldName = getCharacterWorldInfoName();
 
     // 方法1: ロアブック管理画面の削除ボタンをクリック（画面が開いている場合）
     const deleteButton = document.querySelector(`#world_popup .world_entry[uid="${escapeCssAttrValue(uid)}"] .delete_entry_button`);
     if (deleteButton) {
-        // SillyTavern本体の削除処理を呼び出す
-        // これにより公式の削除ダイアログが表示される
         deleteButton.click();
-
-        // 🔥 モーダルを閉じるのは「はい」を選択した時だけ
-        // SillyTavern本体のダイアログで「はい」を選択すると削除処理が実行される
-        // その際にモーダルを閉じる
-        // 以下のイベントリスナーでモーダルを閉じる
-        const closeModalOnDelete = () => {
-            closeCellModal(false);
-            document.removeEventListener('worldinfo-updated', closeModalOnDelete);
-        };
-        document.addEventListener('worldinfo-updated', closeModalOnDelete);
-
         return;
     }
 
     // 方法2: ロアブック管理画面が開いていない場合
-    // 直接SillyTavern本体の削除APIを呼び出す
-    try {
-        if (window.deleteWorldInfoEntry) {
-            // SillyTavern本体の削除関数を直接呼び出す
-            window.deleteWorldInfoEntry(uid, worldName);
-        } else if (window.saveWorldInfo) {
-            // 世界情報を保存して再読み込み
-            const worldInfo = window.world_info?.[worldName];
-            if (worldInfo?.entries?.[uid]) {
-                delete worldInfo.entries[uid];
-                window.saveWorldInfo(worldName, true);
+    // 直接削除処理を呼び出す
+    (async () => {
+        try {
+            // ✅ SillyTavern本体の削除処理を呼び出す
+            const r = await stjDeleteWorldEntryDirect(uid, entryName);
+
+            if (!r.ok) {
+                showCustomAlert(`エントリの削除に失敗しました (${r.reason || 'unknown'})`);
+                return;
             }
+
+            // ✅ 削除が完了した後にモーダルを閉じる
+            closeCellModal(false);
+
+            // JSON編集ツリーからセルを削除
+            if (cell.parentNode) cell.remove();
+
+            // 同期処理
+            const charName = detectCharacterNameFromDOM() || document.getElementById('stj_char_name_display')?.textContent || '';
+            if (charName) {
+                try { await syncEditorWithLatestLorebook(charName); } catch (err) { /* ignore */ }
+            }
+            autoSave({ immediate: true });
+            runLiveTest();
+        } catch (e) {
+            showCustomAlert('削除処理中にエラーが発生しました');
         }
-    } catch (e) {
-        showCustomAlert('削除処理中にエラーが発生しました');
-    }
+    })();
 });
 
         modal.addEventListener('click', (e) => {
