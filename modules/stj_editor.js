@@ -6282,14 +6282,3 @@ if (addBtn) {
         console.log('[STJ Editor] 新規エントリボタンの委譲型クリック処理を登録しました');
     })();
 })();
-
-console.log('[STJ Editor] 末尾コード読み込み完了');
-
-document.addEventListener('click', (event) => {
-    const button = event.target?.closest?.('#stjaddkeyword');
-    if (!button) return;
-
-    console.log('[STJ Editor] 新規ボタン クリック検出', button);
-    event.preventDefault();
-    event.stopImmediatePropagation();
-}, true);
