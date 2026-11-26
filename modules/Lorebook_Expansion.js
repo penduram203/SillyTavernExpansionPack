@@ -2637,6 +2637,7 @@ jQuery(async () => {
 window.LorebookExpansion = {
     getDataFor,
     setDataFor,
+    removeEntryData: (worldName, charKey) => removeLexDataEverywhere(worldName, charKey),
     getData: getExpansionData,
     setData: setExpansionData,
     removeEntryData: (worldName, charKey) => removeLexDataEverywhere(worldName, charKey),
