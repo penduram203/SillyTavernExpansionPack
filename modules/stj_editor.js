@@ -2638,7 +2638,7 @@ async function exportUnifiedBundleJson(options = {}) {
                     margin-left: auto; /* 右端に寄せる */
                 }
                 .stj-cell-modal-delete:hover {
-                    background: rgba(255, 33, 33, 0.5);
+                    background: rgba(255, 33, 33, 0.2);
                 }
             `;
             document.head.appendChild(s);
