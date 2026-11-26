@@ -2500,7 +2500,7 @@ async function exportUnifiedBundleJson(options = {}) {
                     <button type="button" class="stj-cell-modal-apply">${_t('stj.cell_modal.apply', '決定')}</button>
                     <button type="button" class="stj-cell-modal-cancel">${_t('stj.cell_modal.cancel', 'キャンセル')}</button>
                     <div class="stj-cell-modal-keyword-display" id="stj_cell_modal_keyword_display"></div>
-                    <button type="button" class="stj-cell-modal-delete">削除</button>
+                    <button type="button" id="stj_cell_modal_delete" class="stj-cell-modal-delete">削除</button>
                 </div>
                 <div class="stj-cell-modal-entry-host" id="stj_cell_modal_entry_host" style="display: block; height: 35%;"></div>
                 <div class="stj-cell-modal-grid"></div>
@@ -2786,66 +2786,97 @@ async function exportUnifiedBundleJson(options = {}) {
             closeCellModal(true);
         });
 
-        modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async () => {
-            if (!currentCellModalState) return;
-            const { entryUid } = currentCellModalState;
+modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (!currentModalCell || !currentCellModal) return;
 
-            try {
-                // ロアブック管理画面の対象エントリ要素からゴミ箱アイコンを取得
-                const entryEl = document.querySelector(
-                    `#world_popup_entries_list .world_entry[uid="${entryUid}"], .world_entry[uid="${entryUid}"]`
-                );
-                const deleteBtn = entryEl?.querySelector(
-                    '.menu_button.delete_entry_button.fa-trash-can'
-                );
+    const uid = getCellUid(currentModalCell);
+    const kw = getCellKeyword(currentModalCell).trim();
+    if (!uid && !kw) {
+        window.toastr?.warning?.('対象エントリのUID/キーワードが取得できません');
+        return;
+    }
 
-                if (!deleteBtn) {
-                    toastr.warning('ロアブック管理画面上に対象エントリの削除ボタンが見つかりません。');
-                    return;
-                }
+    // モーダルにマウント中の実エントリ要素を優先取得
+    const entryHostEl = currentCellModal.querySelector('#stj_cell_modal_entry_host');
+    let entryEl = entryHostEl?._movedEntryEl || null;
 
-                // 削除完了検知用リスナー（エントリDOM消滅 or WORLDINFO_UPDATED）
-                let settled = false;
-                const onDeleted = () => {
-                    if (settled) return;
-                    settled = true;
-                    cleanup();
-                    closeCellModal();
-                    if (typeof renderTree === 'function') {
-                        renderTree();
-                    }
-                };
+    // UIDフォールバック（モーダル内 → #world_popup → 全体）
+    if (!entryEl && uid) {
+        const safeUid = escapeCssAttrValue(uid);
+        entryEl = entryHostEl?.querySelector(`.world_entry[uid="${safeUid}"]`)
+            || document.querySelector(`#world_popup .world_entry[uid="${safeUid}"]`)
+            || document.querySelector(`.world_entry[uid="${safeUid}"]`);
+    }
 
-                const observer = new MutationObserver(() => {
-                    if (!document.body.contains(entryEl)) {
-                        onDeleted();
-                    }
-                });
+    if (!entryEl) {
+        window.toastr?.warning?.('対象のロアブックエントリが見つかりません');
+        return;
+    }
 
-                const cleanup = () => {
-                    observer.disconnect();
-                    if (window.eventSource && window.event_types?.WORLDINFO_UPDATED) {
-                        window.eventSource.removeListener(window.event_types.WORLDINFO_UPDATED, onDeleted);
-                    }
-                };
+    // 削除完了を検知（entryElの参照はrestore後も有効）
+    const ctx = getSTContext();
+    const es = ctx?.eventSource;
+    const et = ctx?.eventTypes;
+    let settled = false;
 
-                observer.observe(document.body, { childList: true, subtree: true });
-                if (window.eventSource && window.event_types?.WORLDINFO_UPDATED) {
-                    window.eventSource.on(window.event_types.WORLDINFO_UPDATED, onDeleted);
-                }
+    const cleanup = () => {
+        observer.disconnect();
+        if (es && et?.WORLDINFO_UPDATED) {
+            es.removeListener(et.WORLDINFO_UPDATED, onWorldInfoUpdated);
+        }
+    };
 
-                // タイムアウト安全装置（キャンセルされた場合などに監視を解除）
-                setTimeout(() => {
-                    if (!settled) cleanup();
-                }, 30000);
+    const onDeleted = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        try { closeCellModal(false); } catch (err) { /* ignore */ }
+        const charName = document.getElementById('stj_char_name_display')?.textContent || '';
+        if (charName) {
+            syncEditorWithLatestLorebook(charName).catch(() => {});
+            scheduleUnifiedBundleExport(charName, 800);
+        }
+    };
 
-                // ゴミ箱アイコンのクリックを発火（SillyTavern標準の確認ダイアログと削除・拡張データ連携をそのまま実行）
-                deleteBtn.click();
-            } catch (err) {
-                console.error('[stj_editor] 削除エラー:', err);
-                toastr.error('エントリの削除に失敗しました');
-            }
-        });
+    const observer = new MutationObserver(() => {
+        if (!document.body.contains(entryEl)) onDeleted();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    const onWorldInfoUpdated = () => {
+        // DOM消滅検知の取りこぼしに備えて少し待ってから再確認
+        setTimeout(() => {
+            if (!document.body.contains(entryEl)) onDeleted();
+        }, 100);
+    };
+    if (es && et?.WORLDINFO_UPDATED) {
+        es.on(et.WORLDINFO_UPDATED, onWorldInfoUpdated);
+    }
+
+    // タイムアウト安全装置
+    setTimeout(() => { if (!settled) cleanup(); }, 60000);
+
+    // ゴミ箱アイコンを取得
+    const deleteBtn = entryEl.querySelector('.delete_entry_button')
+        || entryEl.querySelector('.fa-trash-can');
+
+    if (!deleteBtn) {
+        cleanup();
+        window.toastr?.warning?.('削除ボタンが見つかりません');
+        return;
+    }
+
+    // モーダルへ移動済みなら #world_popup へ戻してからクリック
+    // （STが #world_popup へのイベント委譲で処理している場合に備える）
+    if (entryHostEl && entryHostEl._movedEntryEl === entryEl) {
+        restoreMountedWorldEntry(entryHostEl);
+    }
+
+    // STネイティブの削除フロー（確認ダイアログ → サーバー削除 → WORLDINFO_UPDATED）を発火
+    deleteBtn.click();
+});
 
         modal.addEventListener('click', (e) => {
             if (e.target === modal) closeCellModal(true);
