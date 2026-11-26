@@ -3291,16 +3291,40 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
         return;
     }
 
+    const ctx = getSTContext();
+    const callGenericPopup = window.callGenericPopup || ctx?.callGenericPopup;
+    const POPUP_TYPE = window.POPUP_TYPE || ctx?.POPUP_TYPE;
+    if (typeof callGenericPopup !== 'function' || POPUP_TYPE?.CONFIRM === undefined) {
+        window.toastr?.warning?.('確認ダイアログを表示できません');
+        return;
+    }
+
+    // 1) callGenericPopup で確認（以前動作実績あり）
+    let confirmed = false;
+    try {
+        const result = await callGenericPopup(
+            'この世界情報エントリを削除しますか？',
+            POPUP_TYPE.CONFIRM
+        );
+        confirmed = !!result && result !== 0 && result !== '0' && result !== 'false';
+        console.log('[STJ Editor] 削除確認:', { confirmed, result });
+    } catch (err) {
+        console.warn('[STJ Editor] 確認ダイアログエラー:', err);
+        return;
+    }
+    if (!confirmed) {
+        console.log('[STJ Editor] 削除キャンセル（いいえ）→ 何もしない');
+        return;
+    }
+
     try {
         const mod = window.LorebookExpansion?.getWorldInfoModule
             ? await window.LorebookExpansion.getWorldInfoModule()
             : await import('/scripts/world-info.js');
 
-        // 1) ST公式キャッシュから data を取得（worldInfoCache 優先）
+        // 2) 最新データを取得
         let data = await mod.loadWorldInfo(worldName);
         if (!data?.entries?.[uid]) {
-            // キャッシュに無い → サーバーから直接取得して data を差し替え
-            const ctx = getSTContext();
             const headers = (typeof ctx?.getRequestHeaders === 'function')
                 ? ctx.getRequestHeaders()
                 : { 'Content-Type': 'application/json' };
@@ -3316,19 +3340,21 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
             return;
         }
 
-        // 2) ST公式の削除関数（ダイアログ表示＋data.entries[uid] を削除）
-        const deleted = await mod.deleteWorldInfoEntry(data, uid);
-        if (!deleted) {
-            console.log('[STJ Editor] 削除キャンセル（いいえ）');
+        // 3) ST公式削除（silent:true で内部ダイアログをスキップ）
+        const deleted = await mod.deleteWorldInfoEntry(data, uid, { silent: true });
+        console.log('[STJ Editor] deleteWorldInfoEntry 結果:', { deleted, stillExists: !!data.entries?.[uid] });
+
+        // deleted===undefined でも data.entries[uid] が消えていれば成功扱い
+        if (deleted === false || data.entries?.[uid]) {
+            window.toastr?.warning?.('削除できませんでした');
             return;
         }
-        console.log('[STJ Editor] ✅ deleteWorldInfoEntry 完了');
 
-        // 3) ST公式の保存（worldInfoCache 更新 + 即時サーバー保存）
+        // 4) ST公式保存（worldInfoCache 更新 + 即時サーバー保存）
         await mod.saveWorldInfo(worldName, data, true);
-        console.log('[STJ Editor] 💾 saveWorldInfo 完了（worldInfoCache 同期済み）');
+        console.log('[STJ Editor] 💾 saveWorldInfo 完了');
 
-        // 4) restore 防止 + JSON画面のセル除去
+        // 5) restore 防止 + JSON画面のセル除去
         const entryHostEl = currentCellModal.querySelector('#stj_cell_modal_entry_host');
         if (entryHostEl) {
             delete entryHostEl._movedEntryEl;
@@ -3341,14 +3367,14 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
             cell.remove();
         } catch (err) {}
 
-        // 5) 0.1秒後に決定ボタン自動押下 → モーダルを閉じる
+        // 6) 0.1秒後に決定ボタン自動押下
         setTimeout(() => {
             try {
                 currentCellModal?.querySelector('.stj-cell-modal-apply')?.click();
             } catch (err) {}
         }, 100);
 
-        // 6) 事後同期
+        // 7) 事後同期
         const charName = document.getElementById('stj_char_name_display')?.textContent || '';
         if (charName) {
             syncEditorWithLatestLorebook(charName).catch(() => {});
