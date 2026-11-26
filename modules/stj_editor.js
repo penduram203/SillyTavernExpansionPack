@@ -2665,7 +2665,7 @@ async function exportUnifiedBundleJson(options = {}) {
                 return;
             }
     
-            const message = `画像データを残してエントリを削除しますか？\nエントリ:\n${entryName}\nこの操作は取り消せません！`;
+            const message = `画像データを残してエントリを削除しますか？\n\nエントリ:\n${entryName}\n\nこの操作は取り消せません！`;
     
             showDeleteConfirmDialog(message, () => {
                 const worldPopup = document.getElementById('world_popup');
