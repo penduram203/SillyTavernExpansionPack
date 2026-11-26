@@ -1779,7 +1779,7 @@ async function stjDeleteWorldEntryDirect(uid, entryName) {
         saveOk = resp.ok;
     } catch (e) { /* ignore */ }
     if (!saveOk) return { ok: false, reason: 'save_failed' };
-
+    stjRecordDeletedEntry(worldName, uid, entryName || '');
     // ★ 削除の検証＋復活時の再削除
     for (let attempt = 1; attempt <= 5; attempt++) {
         await new Promise(r => setTimeout(r, 150));
@@ -6685,6 +6685,84 @@ if (addBtn) {
         };
     }
     $(document).ready(() => { initStjEditor(); });
+})();
+
+// ============================================================
+// ★ 削除済みエントリ UID 記録 + 保存時フィルタ
+//   ST本体の内部キャッシュが触れないため、fetch を横取りして
+//   /api/worldinfo/edit 送信前に削除済みエントリを除去する。
+// ============================================================
+const _stjDeletedRecords = new Map(); // worldName -> Map(uid -> { comment, deletedAt })
+const STJ_DELETED_TTL_MS = 120000;     // 2分間ブロック
+
+function stjRecordDeletedEntry(worldName, uid, comment) {
+    if (!worldName || uid === null || uid === undefined) return;
+    if (!_stjDeletedRecords.has(worldName)) _stjDeletedRecords.set(worldName, new Map());
+    _stjDeletedRecords.get(worldName).set(String(uid), {
+        comment: String(comment || ''),
+        deletedAt: Date.now(),
+    });
+    console.log(`[STJ Editor] 📌 削除記録: world="${worldName}", uid=${uid}, comment="${comment || ''}"`);
+}
+
+function _stjCleanupDeletedRecords() {
+    const now = Date.now();
+    for (const [world, map] of _stjDeletedRecords) {
+        for (const [uid, rec] of map) {
+            if (now - rec.deletedAt > STJ_DELETED_TTL_MS) map.delete(uid);
+        }
+        if (map.size === 0) _stjDeletedRecords.delete(world);
+    }
+}
+
+(function installStjWorldInfoEditInterceptor() {
+    if (window.__stjEditInterceptorInstalled) return;
+    window.__stjEditInterceptorInstalled = true;
+
+    const _origFetch = window.fetch;
+    window.fetch = async function(url, opts) {
+        // /api/worldinfo/edit への POST のみ対象
+        if (typeof url === 'string'
+            && url.includes('/api/worldinfo/edit')
+            && opts
+            && (opts.method || 'GET').toUpperCase() === 'POST'
+            && opts.body) {
+            try {
+                _stjCleanupDeletedRecords();
+                const parsed = JSON.parse(opts.body);
+                const worldName = parsed?.name;
+                const entries = parsed?.data?.entries;
+                const recs = worldName ? _stjDeletedRecords.get(worldName) : null;
+
+                if (recs && recs.size > 0 && entries && typeof entries === 'object') {
+                    let stripped = 0;
+                    for (const k of Object.keys(entries)) {
+                        const uid = String(entries[k]?.uid ?? k);
+                        const comment = String(entries[k]?.comment ?? '');
+                        const rec = recs.get(uid);
+                        if (!rec) continue;
+
+                        // uid + comment が一致 → 削除したエントリの復活 → 除去
+                        if (rec.comment === comment) {
+                            delete entries[k];
+                            stripped++;
+                            continue;
+                        }
+                        // comment が異なる = ユーザーが新規作成した別エントリ → 許可 & 記録クリア
+                        recs.delete(uid);
+                    }
+                    if (stripped > 0) {
+                        opts = { ...opts, body: JSON.stringify(parsed) };
+                        console.log(`[STJ Editor] 🛡️ 保存前フィルタ: 削除済みエントリ ${stripped} 件を除去しました`);
+                    }
+                }
+            } catch (e) {
+                // パース不能な body は素通し
+            }
+        }
+        return _origFetch.call(this, url, opts);
+    };
+    console.log('[STJ Editor] 🛡️ worldinfo/edit インターセプタを設置しました');
 })();
 
 // ============================================================
