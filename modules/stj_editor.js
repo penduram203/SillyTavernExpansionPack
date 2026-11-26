@@ -3350,9 +3350,41 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
             return;
         }
 
-        // 4) ST公式保存（worldInfoCache 更新 + 即時サーバー保存）
-        await mod.saveWorldInfo(worldName, data, true);
-        console.log('[STJ Editor] 💾 saveWorldInfo 完了');
+// 4) ST公式保存（worldInfoCache 更新 + 即時サーバー保存）
+await mod.saveWorldInfo(worldName, data, true);
+console.log('[STJ Editor] 💾 saveWorldInfo 完了');
+
+// ★ world_info（レガシービュー）も data と同一参照に揃える
+try {
+    const syncTarget = (wi, label) => {
+        if (!wi) return;
+        try {
+            if (wi instanceof Map) {
+                wi.set(worldName, data);
+            } else {
+                wi[worldName] = data;
+            }
+        } catch (e) {
+            console.warn(`[STJ Editor] ${label} 同期エラー:`, e);
+        }
+    };
+    syncTarget(mod.world_info, 'mod.world_info');
+    syncTarget(window.world_info, 'window.world_info');
+    syncTarget(getSTContext()?.world_info, 'ctx.world_info');
+
+    // 診断ログ
+    const wi_mod = mod.world_info instanceof Map ? mod.world_info.get(worldName) : mod.world_info?.[worldName];
+    const wi_win = window.world_info instanceof Map ? window.world_info.get(worldName) : window.world_info?.[worldName];
+    const cnt = (x) => x?.entries ? Object.keys(x.entries).length : 0;
+    console.log(
+        `[STJ Editor] 🔗 world_info 同期完了: ` +
+        `data=${Object.keys(data.entries || {}).length}件, ` +
+        `mod=${cnt(wi_mod)}件(同参照:${data === wi_mod}), ` +
+        `window=${cnt(wi_win)}件(同参照:${data === wi_win})`
+    );
+} catch (e) {
+    console.warn('[STJ Editor] world_info 同期エラー:', e);
+}
 
         // 5) restore 防止 + JSON画面のセル除去
         const entryHostEl = currentCellModal.querySelector('#stj_cell_modal_entry_host');
