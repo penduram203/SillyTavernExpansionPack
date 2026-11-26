@@ -1670,17 +1670,55 @@ async function stjDeleteWorldEntryDirect(uid, entryName) {
         }
     }
     
-    // 5. ST 内部メモリキャッシュからも削除
-    for (const wi of [window.world_info, ctx?.world_info]) {
-        try {
-            const es = wi?.[worldName]?.entries;
-            if (!es) continue;
-            if (Object.prototype.hasOwnProperty.call(es, targetKey)) delete es[targetKey];
-            for (const k of Object.keys(es)) {
-                if (String(es[k]?.uid) === String(uid)) delete es[k];
+    // 5. ST 内部メモリキャッシュからも削除（Map / object 両対応 + module export）
+    const _clearEntryCache = (wi, targetKey, uid, entryName) => {
+        if (!wi) return 0;
+        let n = 0;
+        const processEntries = (es) => {
+            if (!es) return;
+            const shouldDelete = (k, v) => {
+                if (targetKey !== null && String(k) === String(targetKey)) return true;
+                if (String(v?.uid) === String(uid)) return true;
+                if (entryName && String(v?.comment ?? '').trim() === String(entryName).trim()) return true;
+                return false;
+            };
+            if (es instanceof Map) {
+                for (const [k, v] of [...es]) {
+                    if (shouldDelete(k, v)) { es.delete(k); n++; }
+                }
+            } else if (typeof es === 'object') {
+                for (const k of Object.keys(es)) {
+                    if (shouldDelete(k, es[k])) { delete es[k]; n++; }
+                }
             }
-        } catch (e) { /* ignore */ }
+        };
+        if (wi instanceof Map) {
+            const entry = wi.get(worldName);
+            if (entry?.entries) processEntries(entry.entries);
+        } else if (typeof wi === 'object') {
+            const entry = wi[worldName];
+            if (entry?.entries) processEntries(entry.entries);
+        }
+        return n;
+    };
+
+    let _cacheCleared = 0;
+    for (const wi of [window.world_info, ctx?.world_info]) {
+        try { _cacheCleared += _clearEntryCache(wi, targetKey, uid, entryName); } catch (e) {}
     }
+
+    // ★ world-info.js モジュール変数のキャッシュもクリア
+    try {
+        const mod = await import('../../../../world-info.js').catch(() => null);
+        if (mod?.world_info) {
+            _cacheCleared += _clearEntryCache(mod.world_info, targetKey, uid, entryName);
+        }
+    } catch (e) {}
+
+    console.log(
+        `[STJ Editor] 🧹 メモリキャッシュから ${_cacheCleared} 件クリア ` +
+        `(window=${window.world_info instanceof Map ? 'Map' : typeof window.world_info})`
+    );
 
     // 6. LEX 残骸（プロンプト/テンプレ/解像度/ネガ/選択肢/変数）を削除
     try {
