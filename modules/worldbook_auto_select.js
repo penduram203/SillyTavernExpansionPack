@@ -1809,6 +1809,11 @@ function _applyCommentAndKeyDefault(entryEl, assignedName) {
             }
             return _scheduleReloadAndExit(charName, charName);
         },
+        clearEmptySaveGuard: (name) => {
+            if (name) _emptySaveGuards.delete(name);
+            else _emptySaveGuards.clear();
+            return true;
+        },
         getSettings: () => ({ ...settings }),
         setSettings: (patch) => {
             settings = { ...settings, ...patch };
