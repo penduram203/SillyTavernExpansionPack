@@ -1559,6 +1559,16 @@ async function stjDeleteWorldEntryDirect(uid, entryName) {
     const worldName = getCharacterWorldInfoName();
     if (!worldName) return { ok: false, reason: 'no_world' };
 
+    try {
+        const wba = window.WorldbookAutoSelect;
+        if (wba) {
+            if (typeof wba.suppressAutoHeal === 'function') wba.suppressAutoHeal(worldName, uid);
+            if (typeof wba.markAsDeleted === 'function') wba.markAsDeleted(worldName, uid);
+            if (typeof wba.excludeFromSync === 'function') wba.excludeFromSync(worldName, uid);
+            if (typeof wba.invalidateCache === 'function') wba.invalidateCache(worldName);
+        }
+    } catch (e) { /* ignore */ }
+    
     const ctx = getSTContext();
     const headers = (typeof ctx?.getRequestHeaders === 'function')
         ? ctx.getRequestHeaders()
@@ -1613,6 +1623,53 @@ async function stjDeleteWorldEntryDirect(uid, entryName) {
     } catch (e) { /* ignore */ }
     if (!saveOk) return { ok: false, reason: 'save_failed' };
 
+    // ★ 削除の検証＋復活時の再削除
+    for (let attempt = 1; attempt <= 5; attempt++) {
+        await new Promise(r => setTimeout(r, 150));
+        try {
+            const vr = await fetch('/api/worldinfo/get', {
+                method: 'POST', headers,
+                body: JSON.stringify({ name: worldName }),
+                cache: 'no-store',
+            });
+            if (!vr.ok) continue;
+            const vd = await vr.json();
+            const vEntries = vd?.entries || {};
+
+            const stillThere = Object.keys(vEntries).some(k => {
+                if (uid && String(vEntries[k]?.uid ?? k) === String(uid)) return true;
+                if (entryName && String(vEntries[k]?.comment ?? '').trim() === String(entryName).trim()) return true;
+                return false;
+            });
+            if (!stillThere) {
+                console.log(`[STJ Editor] ✅ 削除検証OK (試行${attempt})`);
+                break;
+            }
+    
+            console.log(`[STJ Editor] ⚠️ 削除が復活、再削除 (試行${attempt})`);
+
+            // 再度 WBAutoSelect を抑止
+            try {
+                const wba = window.WorldbookAutoSelect;
+                if (wba?.suppressAutoHeal) wba.suppressAutoHeal(worldName, uid);
+                if (wba?.invalidateCache) wba.invalidateCache(worldName);
+            } catch (e) {}
+
+            const filtered = {};
+            for (const k of Object.keys(vEntries)) {
+                const isTarget = (uid && String(vEntries[k]?.uid ?? k) === String(uid))
+                    || (entryName && String(vEntries[k]?.comment ?? '').trim() === String(entryName).trim());
+                if (!isTarget) filtered[k] = vEntries[k];
+            }
+            await fetch('/api/worldinfo/edit', {
+                method: 'POST', headers,
+                body: JSON.stringify({ name: worldName, data: { entries: filtered } }),
+            });
+        } catch (e) {
+            console.warn('[STJ Editor] 削除検証エラー:', e);
+        }
+    }
+    
     // 5. ST 内部メモリキャッシュからも削除
     for (const wi of [window.world_info, ctx?.world_info]) {
         try {
@@ -1638,18 +1695,7 @@ async function stjDeleteWorldEntryDirect(uid, entryName) {
             `#world_popup .world_entry[uid="${escapeCssAttrValue(uid)}"]`
         ).forEach(el => el.remove());
     } catch (e) { /* ignore */ }
-
-    // 7.5. SillyTavern本体の削除処理を直接呼び出す
-    try {
-        // 世界情報を強制的に再読み込み
-        if (window.WorldbookAutoSelect?.selfHealNow) {
-            await window.WorldbookAutoSelect.selfHealNow(worldName);
-        }
-        if (window.WorldbookAutoSelect?.forceSyncWorldInfo) {
-            await window.WorldbookAutoSelect.forceSyncWorldInfo(worldName);
-        }
-    } catch (e) { /* ignore */ }
-    
+   
     // 8. 世界情報を強制的に再読み込み
     try {
         document.getElementById('world_refresh')?.click();
