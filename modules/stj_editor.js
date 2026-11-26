@@ -3277,6 +3277,110 @@ async function exportUnifiedBundleJson(options = {}) {
             closeCellModal(true);
         });
 
+
+modal.querySelector('#stj_cell_modal_delete').addEventListener('click', (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+
+    if (!currentModalCell || !currentCellModal) return;
+
+    const cell = currentModalCell;
+    const uid = getCellUid(cell);
+    const worldName = getCharacterWorldInfoName();
+
+    if (!worldName || !uid) {
+        window.toastr?.warning?.('エントリ情報が取得できません');
+        return;
+    }
+
+    // モーダル内に移動されている本物のロアブックエントリを取得
+    const entryHostEl = currentCellModal.querySelector(
+        '#stj_cell_modal_entry_host'
+    );
+
+    const officialDeleteButton =
+        entryHostEl?.querySelector('.delete_entry_button')
+        || entryHostEl?._movedEntryEl?.querySelector('.delete_entry_button');
+
+    if (!officialDeleteButton) {
+        window.toastr?.warning?.(
+            'ロアブックの公式削除ボタンが見つかりません'
+        );
+        console.warn(
+            '[STJ Editor] 公式削除ボタンが見つかりません',
+            { uid, entryHostEl }
+        );
+        return;
+    }
+
+    // ST公式のイベントを取得
+    const ctx = getSTContext();
+    const eventSource = ctx?.eventSource;
+    const eventType = ctx?.eventTypes?.WORLDINFO_UPDATED;
+
+    // 公式削除成功後のJSON編集画面同期
+    let syncCompleted = false;
+
+    const cleanupListener = () => {
+        if (eventSource && eventType) {
+            eventSource.off?.(eventType, onWorldInfoUpdated);
+            eventSource.removeListener?.(eventType, onWorldInfoUpdated);
+        }
+    };
+
+    const onWorldInfoUpdated = (updatedWorldName) => {
+        if (updatedWorldName && updatedWorldName !== worldName) {
+            return;
+        }
+
+        if (syncCompleted) return;
+        syncCompleted = true;
+
+        cleanupListener();
+
+        setTimeout(async () => {
+            try {
+                // 削除済みエントリのDOMを復元しないようにする
+                if (currentModalCell === cell) {
+                    closeCellModal(false);
+                }
+
+                const charName =
+                    document.getElementById('stj_char_name_display')
+                        ?.textContent || '';
+
+                // サーバーの最新状態からJSON編集ツリーを再構築
+                if (charName) {
+                    await syncEditorWithLatestLorebook(charName);
+
+                    scheduleUnifiedBundleExport(charName, 800);
+                }
+
+                console.log(
+                    '[STJ Editor] 公式削除後のJSON編集画面同期完了',
+                    { worldName, uid }
+                );
+
+            } catch (err) {
+                console.error(
+                    '[STJ Editor] 削除後の同期エラー:',
+                    err
+                );
+            }
+        }, 200);
+    };
+
+    if (eventSource && eventType) {
+        eventSource.on(eventType, onWorldInfoUpdated);
+
+        // キャンセルされた場合などにリスナーが残り続けるのを防止
+        setTimeout(() => {
+            if (!syncCompleted) {
+                cleanupListener();
+            }
+        }, 30000);
+    }
+
     // ★ ST本来のゴミ箱ボタンをクリック
     // 公式確認ダイアログも公式削除処理もそのまま利用する
     try {
@@ -3298,6 +3402,7 @@ async function exportUnifiedBundleJson(options = {}) {
         window.toastr?.error?.('削除処理を実行できませんでした');
     }
 });
+
 
         modal.addEventListener('click', (e) => {
             if (e.target === modal) closeCellModal(true);
