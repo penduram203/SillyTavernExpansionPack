@@ -1550,6 +1550,83 @@ function showDeleteConfirmDialog(message, onConfirm, onCancel) {
 }
 
 // ============================================================
+// ★ ST の world_info キャッシュをサーバー状態と完全一致させる
+// ============================================================
+async function _forceSyncSTCacheWithServer(worldName) {
+    if (!worldName) return { ok: false, reason: 'no_world' };
+    const ctx = getSTContext();
+    const headers = (typeof ctx?.getRequestHeaders === 'function')
+        ? ctx.getRequestHeaders()
+        : { 'Content-Type': 'application/json' };
+
+    let serverData = null;
+    try {
+        const r = await fetch('/api/worldinfo/get', {
+            method: 'POST', headers,
+            body: JSON.stringify({ name: worldName }),
+            cache: 'no-store',
+        });
+        if (r.ok) serverData = await r.json();
+    } catch (e) { /* ignore */ }
+
+    if (!serverData) return { ok: false, reason: 'fetch_failed' };
+    const serverEntries = serverData.entries || {};
+    const serverCount = Object.keys(serverEntries).length;
+
+    // mod を取得
+    let mod = null;
+    try {
+        if (typeof window.LorebookExpansion?.getWorldInfoModule === 'function') {
+            mod = await window.LorebookExpansion.getWorldInfoModule();
+        }
+    } catch (e) {}
+    if (!mod) {
+        try { mod = await import('/scripts/world-info.js'); } catch (e) { mod = null; }
+    }
+
+    // 各 world_info を置換
+    const targets = [
+        ['window.world_info', window.world_info],
+        ['ctx.world_info', ctx?.world_info],
+        ['mod.world_info', mod?.world_info],
+    ];
+
+    const report = [];
+    for (const [label, wi] of targets) {
+        if (!wi) { report.push(`${label}: null`); continue; }
+        try {
+            const hasEntry = wi instanceof Map ? wi.has(worldName) : worldName in wi;
+            const cur = wi instanceof Map ? wi.get(worldName) : wi[worldName];
+            const curCount = cur?.entries
+                ? (cur.entries instanceof Map ? cur.entries.size : Object.keys(cur.entries).length)
+                : 0;
+
+            // 置換（entriesオブジェクトをそのまま差し替え）
+            const newEntry = {
+                ...(cur && typeof cur === 'object' ? cur : {}),
+                entries: serverEntries,
+            };
+            if (wi instanceof Map) {
+                wi.set(worldName, newEntry);
+            } else {
+                wi[worldName] = newEntry;
+            }
+
+            // 事後確認
+            const after = wi instanceof Map ? wi.get(worldName) : wi[worldName];
+            const afterCount = after?.entries
+                ? (after.entries instanceof Map ? after.entries.size : Object.keys(after.entries).length)
+                : 0;
+            report.push(`${label}: ${curCount}→${afterCount}件`);
+        } catch (e) {
+            report.push(`${label}: error ${e.message}`);
+        }
+    }
+    console.log(`[STJ Editor] 🔄 STキャッシュ同期 (server=${serverCount}件): ${report.join(', ')}`);
+    return { ok: true, serverCount, report };
+}
+    
+// ============================================================
 // ★ 幽霊エントリ（サーバーに無いのに DOM に残るエントリ）の継続監視
 // ============================================================
 let _ghostObserver = null;
@@ -1875,70 +1952,20 @@ try {
 } catch (e) { /* ignore */ }
 
     
-// 8. 世界情報を強制的に再読み込み（多段＋ST内部キャッシュ強制更新）
+// 8. ST内部キャッシュをサーバー状態に完全一致させる＋多段リフレッシュ
 try {
-    // 8a. ST 本体の world_info キャッシュを削除してサーバーから再取得
-    let mod = null;
-    try {
-        if (typeof window.LorebookExpansion?.getWorldInfoModule === 'function') {
-            mod = await window.LorebookExpansion.getWorldInfoModule();
-        }
-        if (!mod) {
-            mod = await import('../../../../world-info.js').catch(() => null);
-        }
-    } catch (e) { /* ignore */ }
-
-    if (mod) {
-        // 既存キャッシュを削除（Map / object 両対応）
-        const dropCache = (wi, label) => {
-            if (!wi) return;
-            try {
-                if (wi instanceof Map) {
-                    if (wi.has(worldName)) {
-                        wi.delete(worldName);
-                        console.log(`[STJ Editor] 🗑️ ${label}.world_info.delete("${worldName}")`);
-                    }
-                } else if (typeof wi === 'object' && wi[worldName]) {
-                    delete wi[worldName];
-                    console.log(`[STJ Editor] 🗑️ delete ${label}.world_info["${worldName}"]`);
-                }
-            } catch (e) { /* ignore */ }
-        };
-        dropCache(mod.world_info, 'mod');
-        dropCache(window.world_info, 'window');
-        dropCache(ctx?.world_info, 'ctx');
-
-        // サーバーから強制再取得
-        if (typeof mod.loadWorldInfo === 'function') {
-            try {
-                await mod.loadWorldInfo(worldName, true);
-                const wi = mod.world_info;
-                const entry = wi instanceof Map ? wi.get(worldName) : wi?.[worldName];
-                const es = entry?.entries;
-                if (es) {
-                    const keys = es instanceof Map ? [...es.keys()] : Object.keys(es);
-                    const has18 = keys.some(k => String(k) === String(uid));
-                    console.log(`[STJ Editor] 🔄 loadWorldInfo 完了: ${keys.length}件 (uid=${uid}存在? ${has18})`);
-                }
-            } catch (e) {
-                console.warn('[STJ Editor] loadWorldInfo エラー:', e);
-            }
-        }
-    }
-
-    // 8b. #world_refresh を段階実行（STの遅延描画・拡張同期をカバー）
-    for (const delay of [100, 500, 1500, 3000]) {
-        setTimeout(() => {
-            try { document.getElementById('world_refresh')?.click(); } catch (e) { /* ignore */ }
-        }, delay);
-    }
+    await _forceSyncSTCacheWithServer(worldName);
 } catch (e) {
-    console.warn('[STJ Editor] 世界情報再読み込みエラー:', e);
+    console.warn('[STJ Editor] STキャッシュ同期エラー:', e);
 }
 
+for (const delay of [100, 500, 1500, 3000]) {
+    setTimeout(() => {
+        try { document.getElementById('world_refresh')?.click(); } catch (e) { /* ignore */ }
+    }, delay);
+}
 
-    
-// 8.5 サーバーに存在しないDOMエントリ（幽霊）を強制削除
+// 8.5 幽霊DOM削除（保険：_forceSyncSTCacheWithServer が効けば発動しない）
 const forceCleanGhostDom = async () => {
     try {
         const r = await fetch('/api/worldinfo/get', {
@@ -1955,22 +1982,17 @@ const forceCleanGhostDom = async () => {
         document.querySelectorAll('#world_popup .world_entry').forEach(el => {
             const domUid = el.getAttribute('uid');
             if (domUid && !serverUids.has(String(domUid))) {
-                console.log(`[STJ Editor] 👻 幽霊エントリを DOM から削除: uid=${domUid}`);
                 el.remove();
                 removed++;
             }
         });
-        if (removed > 0) {
-            console.log(`[STJ Editor] 🧹 幽霊エントリ計 ${removed} 件を DOM から削除`);
-        }
+        if (removed > 0) console.log(`[STJ Editor] 🧹 幽霊エントリ ${removed} 件を DOM から削除`);
     } catch (e) { /* ignore */ }
 };
 forceCleanGhostDom();
 setTimeout(forceCleanGhostDom, 300);
 setTimeout(forceCleanGhostDom, 1000);
 setTimeout(forceCleanGhostDom, 2500);
-
-    
     
     // 9. 更新通知
     try {
@@ -6782,62 +6804,75 @@ if (addBtn) {
         return false;
     }
 
-    async function handleNewEntryClick(button) {
-        console.log('[STJ Editor] 新規ボタン クリック検出', {
-            dialogOpen: isDialogOpen(),
-            buttonDisabled: button.disabled,
-            worldPopupNew: !!document.getElementById('world_popup_new'),
-        });
-
-        if (isDialogOpen()) {
-            console.warn('[STJ Editor] セルモーダルが開いているため新規エントリ作成を中止しました');
-            showCreatingOverlay();
-            setTimeout(hideCreatingOverlay, 1500);
-            return;
-        }
-
-        const beforeCells = getCells();
-        const beforeUids = new Set(
-            beforeCells
-                .map(cell => getCellUid(cell))
-                .filter(uid => uid)
-        );
-        const beforeCount = beforeCells.length;
-
-        button.disabled = true;
-        showCreatingOverlay();
-
+async function handleNewEntryClick(button) {
+    // ★ 新規作成前にSTキャッシュをサーバー状態に同期（削除済みエントリの復活防止）
+    const _wn = window.LorebookExpansion?.getChoicesWorldName?.()
+             || window.LorebookExpansion?.getCurrentWorldName?.()
+             || '';
+    if (_wn && typeof window.STJEditor?.forceSyncCache === 'function') {
         try {
-            const newEntryBtn = document.getElementById('world_popup_new');
-            console.log('[STJ Editor] world_popup_new:', newEntryBtn);
-
-            if (!newEntryBtn) {
-                throw new Error('world_popup_new ボタンが見つかりません');
-            }
-
-            newEntryBtn.click();
-            console.log('[STJ Editor] world_popup_new をクリックしました');
-
-            const appeared = await waitForNewCell(
-                beforeUids,
-                beforeCount,
-                8000
-            );
-
-            console.log('[STJ Editor] 新規セル出現判定:', appeared);
-
-            const editor = document.getElementById('stjexportmodal');
-            if (editor) {
-                editor.style.display = 'block';
-            }
-        } catch (err) {
-            console.error('[STJ Editor] 新規エントリ作成エラー:', err);
-            showError('新規エントリの作成に失敗しました');
-        } finally {
-            hideCreatingOverlay();
-            button.disabled = false;
+            await window.STJEditor.forceSyncCache(_wn);
+            console.log(`[STJ Editor] 新規作成前にSTキャッシュを同期: world="${_wn}"`);
+        } catch (e) {
+            console.warn('[STJ Editor] STキャッシュ同期に失敗:', e);
         }
     }
+
+    console.log('[STJ Editor] 新規ボタン クリック検出', {
+        dialogOpen: isDialogOpen(),
+        buttonDisabled: button.disabled,
+        worldPopupNew: !!document.getElementById('world_popup_new'),
+    });
+
+    if (isDialogOpen()) {
+        console.warn('[STJ Editor] セルモーダルが開いているため新規エントリ作成を中止しました');
+        showCreatingOverlay();
+        setTimeout(hideCreatingOverlay, 1500);
+        return;
+    }
+
+    const beforeCells = getCells();
+    const beforeUids = new Set(
+        beforeCells
+            .map(cell => getCellUid(cell))
+            .filter(uid => uid)
+    );
+    const beforeCount = beforeCells.length;
+
+    button.disabled = true;
+    showCreatingOverlay();
+
+    try {
+        const newEntryBtn = document.getElementById('world_popup_new');
+        console.log('[STJ Editor] world_popup_new:', newEntryBtn);
+
+        if (!newEntryBtn) {
+            throw new Error('world_popup_new ボタンが見つかりません');
+        }
+
+        newEntryBtn.click();
+        console.log('[STJ Editor] world_popup_new をクリックしました');
+
+        const appeared = await waitForNewCell(
+            beforeUids,
+            beforeCount,
+            8000
+        );
+
+        console.log('[STJ Editor] 新規セル出現判定:', appeared);
+
+        const editor = document.getElementById('stjexportmodal');
+        if (editor) {
+            editor.style.display = 'block';
+        }
+    } catch (err) {
+        console.error('[STJ Editor] 新規エントリ作成エラー:', err);
+        showError('新規エントリの作成に失敗しました');
+    } finally {
+        hideCreatingOverlay();
+        button.disabled = false;
+    }
+}
 
     function showError(message) {
         try {
