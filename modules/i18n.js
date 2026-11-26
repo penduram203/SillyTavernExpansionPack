@@ -159,6 +159,7 @@
             'stj.toast.sync_added': 'Synced with lorebook ({count} added)',
             'stj.toast.sync_no_add': 'No new cells to sync',
             'stj.toast.sync_failed': 'Sync failed',
+            'stj.toast.newentrycreating': 'Creating new entry…',
 
             // === Text Styling ===
             'ts.panel_title': 'Text Style Settings',
@@ -478,8 +479,9 @@
             'stj.toast.sync_added': 'ロアブックと同期しました（{count} 件追加）',
             'stj.toast.sync_no_add': '同期する新規セルはありませんでした',
             'stj.toast.sync_failed': '同期に失敗しました',
-
-                   // === Text Styling ===
+            'stj.toast.newentrycreating': '新規エントリ作成中…',
+            
+            // === Text Styling ===
             'ts.panel_title': 'テキストスタイル設定',
             'ts.restore_title': '設定パネルの表示/非表示',
             'ts.tag.p': '通常テキスト',
