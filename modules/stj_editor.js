@@ -5228,7 +5228,16 @@ if (addBtn) {
     addBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
 
-        if (isDialogActive) return;
+        console.log('[STJ Editor] 新規ボタン クリック検出', {
+            isDialogActive,
+            addBtnDisabled: addBtn.disabled,
+            worldPopupNew: !!document.getElementById('world_popup_new'),
+        });
+
+        if (isDialogActive) {
+            console.warn('[STJ Editor] isDialogActive=true のため新規エントリ作成を中止しました');
+            return;
+        }
 
         const beforeCells = getStandaloneCellElements();
         const beforeUids = new Set(
