@@ -1550,6 +1550,86 @@ function showDeleteConfirmDialog(message, onConfirm, onCancel) {
 }
 
 // ============================================================
+// ★ 幽霊エントリ（サーバーに無いのに DOM に残るエントリ）の継続監視
+// ============================================================
+let _ghostObserver = null;
+let _ghostObserverTimer = null;
+let _ghostObserverStopTimer = null;
+
+function installGhostObserver(worldName) {
+    if (!worldName) return;
+    if (_ghostObserver) {
+        try { _ghostObserver.disconnect(); } catch (e) { /* ignore */ }
+        _ghostObserver = null;
+    }
+    if (_ghostObserverTimer) { clearTimeout(_ghostObserverTimer); _ghostObserverTimer = null; }
+    if (_ghostObserverStopTimer) { clearTimeout(_ghostObserverStopTimer); _ghostObserverStopTimer = null; }
+
+    const target = document.getElementById('world_popup');
+    if (!target) return;
+
+    let checking = false;
+    const check = async () => {
+        if (checking) return;
+        checking = true;
+        try {
+            const ctx = getSTContext();
+            const headers = (typeof ctx?.getRequestHeaders === 'function')
+                ? ctx.getRequestHeaders()
+                : { 'Content-Type': 'application/json' };
+            const r = await fetch('/api/worldinfo/get', {
+                method: 'POST', headers,
+                body: JSON.stringify({ name: worldName }),
+                cache: 'no-store',
+            });
+            if (!r.ok) return;
+            const d = await r.json();
+            const serverUids = new Set(
+                Object.values(d.entries || {}).map(e => String(e.uid))
+            );
+            let removed = 0;
+            document.querySelectorAll('#world_popup .world_entry').forEach(el => {
+                const domUid = el.getAttribute('uid');
+                if (domUid && !serverUids.has(String(domUid))) {
+                    el.remove();
+                    removed++;
+                }
+            });
+            if (removed > 0) {
+                console.log(`[STJ Editor] 👻 幽霊エントリ ${removed} 件を継続監視で削除`);
+            }
+        } catch (e) { /* ignore */ }
+        finally { checking = false; }
+    };
+
+    _ghostObserver = new MutationObserver((mutations) => {
+        const hasAdded = mutations.some(m =>
+            m.type === 'childList' && m.addedNodes.length > 0
+        );
+        if (!hasAdded) return;
+        if (_ghostObserverTimer) clearTimeout(_ghostObserverTimer);
+        _ghostObserverTimer = setTimeout(() => {
+            _ghostObserverTimer = null;
+            check();
+        }, 150);
+    });
+    _ghostObserver.observe(target, { childList: true, subtree: true });
+
+    // 即時1回実行
+    check();
+
+    // ★ 30秒後に自動停止（修正③）
+    _ghostObserverStopTimer = setTimeout(() => {
+        if (_ghostObserver) {
+            try { _ghostObserver.disconnect(); } catch (e) { /* ignore */ }
+            _ghostObserver = null;
+        }
+        _ghostObserverStopTimer = null;
+        console.log('[STJ Editor] 👻 幽霊監視を終了しました');
+    }, 30000);
+}
+  
+// ============================================================
 // ★ ロアブックエントリの直接削除（ST公式確認ダイアログを一切出さない）
 //   ゴミ箱ボタンをクリックすると callGenericPopup が必ず走るため、
 //   サーバー編集 + キャッシュ/DOM 同期をここで行う。
@@ -1735,26 +1815,126 @@ console.log(`[STJ Editor] 🧹 内部キャッシュから合計 ${_cacheCleared
         if (uid !== undefined && uid !== null) window.LorebookExpansion?.removeEntryData?.(worldName, String(uid));
     } catch (e) { /* ignore */ }
 
-    // 7. ロアブック編集画面の DOM から削除
-    try {
-        document.querySelectorAll(
-            `#world_popup .world_entry[uid="${escapeCssAttrValue(uid)}"]`
-        ).forEach(el => el.remove());
-    } catch (e) { /* ignore */ }
-   
-    // 8. 世界情報を強制的に再読み込み
-    try {
-        document.getElementById('world_refresh')?.click();
-        // 世界情報モジュールを直接更新
-        if (window.world_info && window.world_info[worldName]) {
-            delete window.world_info[worldName].entries[targetKey];
-            for (const k of Object.keys(window.world_info[worldName].entries)) {
-                if (String(window.world_info[worldName].entries[k]?.uid) === String(uid)) {
-                    delete window.world_info[worldName].entries[k];
+
+// 6.5 ST 本体の world_info をサーバーから強制再取得
+try {
+    let mod = null;
+    if (typeof window.LorebookExpansion?.getWorldInfoModule === 'function') {
+        mod = await window.LorebookExpansion.getWorldInfoModule();
+    }
+    if (!mod) {
+        mod = await import('../../../../world-info.js').catch(() => null);
+    }
+
+    if (mod) {
+        // 6.5a 既存キャッシュを削除（試せる全経路）
+        const tryDelete = (wi, label) => {
+            if (!wi) return;
+            try {
+                if (wi instanceof Map) {
+                    if (wi.has(worldName)) { wi.delete(worldName); console.log(`[STJ Editor] 🗑️ ${label}.world_info.delete("${worldName}")`); }
+                } else if (typeof wi === 'object' && wi[worldName]) {
+                    delete wi[worldName];
+                    console.log(`[STJ Editor] 🗑️ delete ${label}.world_info["${worldName}"]`);
                 }
+            } catch (e) {}
+        };
+        tryDelete(mod.world_info, 'mod');
+        tryDelete(window.world_info, 'window');
+        tryDelete(ctx?.world_info, 'ctx');
+
+        // 6.5b サーバーから強制再取得（immediately=true）
+        if (typeof mod.loadWorldInfo === 'function') {
+            try {
+                await mod.loadWorldInfo(worldName, true);
+                console.log('[STJ Editor] 🔄 loadWorldInfo(immediately=true) 実行完了');
+
+                // 取得結果を検証
+                const wi = mod.world_info;
+                const entry = wi instanceof Map ? wi.get(worldName) : wi?.[worldName];
+                const es = entry?.entries;
+                if (es) {
+                    const keys = es instanceof Map ? [...es.keys()] : Object.keys(es);
+                    console.log(`[STJ Editor] 🔍 再取得後: ${keys.length}件 (uid=18存在? ${keys.some(k => String(k) === '18')})`);
+                }
+            } catch (e) {
+                console.warn('[STJ Editor] loadWorldInfo エラー:', e);
             }
         }
+    }
+} catch (e) {
+    console.warn('[STJ Editor] world_info 強制再取得エラー:', e);
+}
+    
+    
+// 7. ロアブック編集画面の DOM から削除
+try {
+    document.querySelectorAll(
+        `#world_popup .world_entry[uid="${escapeCssAttrValue(uid)}"]`
+    ).forEach(el => el.remove());
+} catch (e) { /* ignore */ }
+
+    
+// 8. 世界情報を強制的に再読み込み（多段＋ST内部キャッシュ強制更新）
+try {
+    // 8a. ST 本体の world_info キャッシュを削除してサーバーから再取得
+    let mod = null;
+    try {
+        if (typeof window.LorebookExpansion?.getWorldInfoModule === 'function') {
+            mod = await window.LorebookExpansion.getWorldInfoModule();
+        }
+        if (!mod) {
+            mod = await import('../../../../world-info.js').catch(() => null);
+        }
     } catch (e) { /* ignore */ }
+
+    if (mod) {
+        // 既存キャッシュを削除（Map / object 両対応）
+        const dropCache = (wi, label) => {
+            if (!wi) return;
+            try {
+                if (wi instanceof Map) {
+                    if (wi.has(worldName)) {
+                        wi.delete(worldName);
+                        console.log(`[STJ Editor] 🗑️ ${label}.world_info.delete("${worldName}")`);
+                    }
+                } else if (typeof wi === 'object' && wi[worldName]) {
+                    delete wi[worldName];
+                    console.log(`[STJ Editor] 🗑️ delete ${label}.world_info["${worldName}"]`);
+                }
+            } catch (e) { /* ignore */ }
+        };
+        dropCache(mod.world_info, 'mod');
+        dropCache(window.world_info, 'window');
+        dropCache(ctx?.world_info, 'ctx');
+
+        // サーバーから強制再取得
+        if (typeof mod.loadWorldInfo === 'function') {
+            try {
+                await mod.loadWorldInfo(worldName, true);
+                const wi = mod.world_info;
+                const entry = wi instanceof Map ? wi.get(worldName) : wi?.[worldName];
+                const es = entry?.entries;
+                if (es) {
+                    const keys = es instanceof Map ? [...es.keys()] : Object.keys(es);
+                    const has18 = keys.some(k => String(k) === String(uid));
+                    console.log(`[STJ Editor] 🔄 loadWorldInfo 完了: ${keys.length}件 (uid=${uid}存在? ${has18})`);
+                }
+            } catch (e) {
+                console.warn('[STJ Editor] loadWorldInfo エラー:', e);
+            }
+        }
+    }
+
+    // 8b. #world_refresh を段階実行（STの遅延描画・拡張同期をカバー）
+    for (const delay of [100, 500, 1500, 3000]) {
+        setTimeout(() => {
+            try { document.getElementById('world_refresh')?.click(); } catch (e) { /* ignore */ }
+        }, delay);
+    }
+} catch (e) {
+    console.warn('[STJ Editor] 世界情報再読み込みエラー:', e);
+}
 
 
     
@@ -1798,7 +1978,7 @@ setTimeout(forceCleanGhostDom, 2500);
             ctx.eventSource.emit(ctx.eventTypes.WORLDINFO_UPDATED, worldName, uid);
         }
     } catch (e) { /* ignore */ }
-
+    installGhostObserver(worldName);
     console.log(`[STJ Editor] 🗑️ エントリ直接削除完了: world="${worldName}", uid=${uid}, name="${entryName}"`);
     return { ok: true };
 }
