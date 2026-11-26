@@ -2627,7 +2627,7 @@ async function exportUnifiedBundleJson(options = {}) {
                 .stj-cell-modal-delete {
                     height: calc(var(--exp-scale, 1) * 36px);
                     padding: 0 calc(var(--exp-scale, 1) * 8px);
-                    background: transparent;
+                    background: rgba(255, 255, 255, 1.0);
                     color: #ff4d4d;
                     border: 1px solid #ff4d4d;
                     border-radius: calc(var(--exp-scale, 1) * 4px);
@@ -2638,7 +2638,7 @@ async function exportUnifiedBundleJson(options = {}) {
                     margin-left: auto; /* 右端に寄せる */
                 }
                 .stj-cell-modal-delete:hover {
-                    background: rgba(255, 77, 77, 0.1);
+                    background: rgba(255, 33, 33, 0.5);
                 }
             `;
             document.head.appendChild(s);
@@ -2665,7 +2665,7 @@ async function exportUnifiedBundleJson(options = {}) {
                 return;
             }
     
-            const message = `画像データを残してエントリを削除しますか？\n\nエントリ:\n${entryName}\n\nこの操作は取り消せません！`;
+            const message = `画像データを残してエントリを削除しますか？\nエントリ:\n${entryName}\nこの操作は取り消せません！`;
     
             showDeleteConfirmDialog(message, () => {
                 const worldPopup = document.getElementById('world_popup');
@@ -2705,7 +2705,7 @@ async function exportUnifiedBundleJson(options = {}) {
                     if (popup) {
                         const textEl = popup.querySelector('#dialogue_popup_text, .dialogue_popup_text');
                         if (textEl && !textEl.dataset.stjRewritten) {
-                            textEl.innerHTML = `画像データを残してエントリを削除しますか？<br><br>エントリ:<br><b>${entryName}</b><br><br>この操作は取り消せません！`;
+                            textEl.innerHTML = `画像データを残してエントリを削除しますか？<br>エントリ:<br><b>${entryName}</b><br>この操作は取り消せません！`;
                             textEl.dataset.stjRewritten = '1';
                         }
                         const okBtn = popup.querySelector('#dialogue_popup_ok, .dialogue_popup_ok');
