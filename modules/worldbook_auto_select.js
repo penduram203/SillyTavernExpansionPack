@@ -982,46 +982,73 @@ function _purgeLexEntryResidue(worldName, uid, entryComment, entryEl = null) {
         return true;
     }
 
-    function _applyCommentAndKeyDefault(entryEl, assignedName) {
-        let appliedAny = false;
-        const uid = String(entryEl.getAttribute('uid') || entryEl.getAttribute('data-uid') || '').trim();
-        const targetName = assignedName || _allocateNextNewEntryName(uid);
-        if (uid) _autoNamingUids.add(uid);
-
-        const commentEl = entryEl.querySelector('textarea[name="comment"], input[name="comment"]');
-        if (commentEl) {
-            const cur = String(commentEl.value ?? '');
-            if (cur.trim() === '' || /^new_\d+$/i.test(cur.trim()) || cur.trim() === 'new') {
-                if (commentEl.value !== targetName) {
-                    commentEl.value = targetName;
-                    _triggerInputAndChange(commentEl);
-                }
-                if (uid) _entryLastValidNames.set(uid, targetName);
-                appliedAny = true;
-            } else {
-                appliedAny = true;
+function _applyCommentAndKeyDefault(entryEl, assignedName) {
+    let appliedAny = false;
+    const uid = String(entryEl.getAttribute('uid') || entryEl.getAttribute('data-uid') || '').trim();
+    const targetName = assignedName || _allocateNextNewEntryName(uid);
+    if (uid) _autoNamingUids.add(uid);
+    
+    const commentEl = entryEl.querySelector('textarea[name="comment"], input[name="comment"]');
+    if (commentEl) {
+        const cur = String(commentEl.value ?? '');
+        if (cur.trim() === '' || /^new_\d+$/i.test(cur.trim()) || cur.trim() === 'new') {
+            if (commentEl.value !== targetName) {
+                // ★ 修正: ST本体のauto-resize競合による高さ異常収縮(8px等)を防ぐ
+                commentEl.style.height = 'auto';
+                commentEl.setAttribute('rows', '1');
+                commentEl.value = targetName;
+                _triggerInputAndChange(commentEl);
+                
+                // 念のため、次のレンダリングフレームで高さが異常に小さくなっていたら再調整
+                requestAnimationFrame(() => {
+                    if (commentEl && commentEl.style.height !== '') {
+                        const h = parseInt(commentEl.style.height, 10);
+                        if (!isNaN(h) && h < 20) {
+                            commentEl.style.height = 'auto';
+                            commentEl.dispatchEvent(new Event('input', { bubbles: true }));
+                        }
+                    }
+                });
             }
+            if (uid) _entryLastValidNames.set(uid, targetName);
+            appliedAny = true;
+        } else {
+            appliedAny = true;
         }
-
-        const keyEl = entryEl.querySelector('textarea[name="key"], input[name="key"]');
-        if (keyEl) {
-            const cur = String(keyEl.value ?? '');
-            if (cur.trim() === '' || /^new_\d+$/i.test(cur.trim()) || cur.trim() === 'new') {
-                if (keyEl.value !== targetName) {
-                    keyEl.value = targetName;
-                    _triggerInputAndChange(keyEl);
-                }
-                appliedAny = true;
-            } else {
-                appliedAny = true;
-            }
-        }
-
-        if (uid) {
-            setTimeout(() => _autoNamingUids.delete(uid), 500);
-        }
-        return appliedAny;
     }
+    
+    const keyEl = entryEl.querySelector('textarea[name="key"], input[name="key"]');
+    if (keyEl) {
+        const cur = String(keyEl.value ?? '');
+        if (cur.trim() === '' || /^new_\d+$/i.test(cur.trim()) || cur.trim() === 'new') {
+            if (keyEl.value !== targetName) {
+                // ★ 修正: 同上
+                keyEl.style.height = 'auto';
+                keyEl.setAttribute('rows', '1');
+                keyEl.value = targetName;
+                _triggerInputAndChange(keyEl);
+                
+                requestAnimationFrame(() => {
+                    if (keyEl && keyEl.style.height !== '') {
+                        const h = parseInt(keyEl.style.height, 10);
+                        if (!isNaN(h) && h < 20) {
+                            keyEl.style.height = 'auto';
+                            keyEl.dispatchEvent(new Event('input', { bubbles: true }));
+                        }
+                    }
+                });
+            }
+            appliedAny = true;
+        } else {
+            appliedAny = true;
+        }
+    }
+    
+    if (uid) {
+        setTimeout(() => _autoNamingUids.delete(uid), 500);
+    }
+    return appliedAny;
+}
 
     function _applyStatusNormalDefault(entryEl) {
         const stateSel = entryEl.querySelector('select[name="entryStateSelector"], select[name="status"]');
