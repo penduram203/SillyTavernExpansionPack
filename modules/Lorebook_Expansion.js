@@ -2677,6 +2677,7 @@ window.LorebookExpansion = {
 
     loadWorldInfoEntriesByName,
     getCurrentWorldName,
+    getWorldInfoModule,
 
     forceInject: () => injectExpansionSections(),
     debugInfo: async () => {
