@@ -3144,7 +3144,7 @@ async function exportUnifiedBundleJson(options = {}) {
             closeCellModal(true);
         });
 
-modal.querySelector('#stj_cell_modal_delete').addEventListener('click', (e) => {
+modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e) => {
     e.stopPropagation();
     e.preventDefault();
     if (!currentModalCell || !currentCellModal) return;
@@ -3155,69 +3155,73 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', (e) => {
     const worldName = getCharacterWorldInfoName();
     if (!worldName) return;
 
-    const entryHostEl = currentCellModal.querySelector('#stj_cell_modal_entry_host');
-    const entryEl = entryHostEl?._movedEntryEl;
-    const realDeleteBtn = entryEl?.querySelector('.delete_entry_button')
-        || entryEl?.querySelector('.fa-trash-can');
-    if (!realDeleteBtn) {
-        window.toastr?.warning?.('削除ボタンが見つかりません');
+    const ctx = getSTContext();
+    const callGenericPopup = window.callGenericPopup || ctx?.callGenericPopup;
+    const POPUP_TYPE = window.POPUP_TYPE || ctx?.POPUP_TYPE;
+
+    if (typeof callGenericPopup !== 'function' || POPUP_TYPE?.CONFIRM === undefined) {
+        window.toastr?.warning?.('確認ダイアログを表示できません');
         return;
     }
 
-    // ★ クリックだけ。STの確認ダイアログが開く。それ以外は何もしない。
-    realDeleteBtn.click();
+    // ★ ST と同一の確認ダイアログを表示。ここでは一切の削除・DOM操作を行わない
+    let confirmed = false;
+    try {
+        const result = await callGenericPopup(
+            'この世界情報エントリを削除しますか？',
+            POPUP_TYPE.CONFIRM
+        );
+        confirmed = !!result && result !== 0 && result !== '0' && result !== 'false';
+        console.log('[STJ Editor] 削除確認:', { confirmed, result });
+    } catch (err) {
+        console.warn('[STJ Editor] 確認ダイアログエラー:', err);
+        return;
+    }
 
-    // ★ サーバー状態のポーリングで「はい」だけを検出（読むだけで何も消さない）
-    const ctx = getSTContext();
-    const startedAt = Date.now();
-    const poll = async () => {
-        if (Date.now() - startedAt > 30000) return;
-        if (!currentCellModal || currentModalCell !== cell) return;
+    // ★ 「いいえ」: 何もしない（JSON・ロアブック・モーダル全てに影響なし）
+    if (!confirmed) {
+        console.log('[STJ Editor] 削除キャンセル → 何もしない');
+        return;
+    }
 
+    // ===== ここから「はい」確定後のみ実行 =====
+    console.log('[STJ Editor] 削除実行:', { uid, kw });
+
+    // restore による復元を防ぐため、モーダル側の参照を先にクリア
+    const entryHostEl = currentCellModal.querySelector('#stj_cell_modal_entry_host');
+    if (entryHostEl) {
+        delete entryHostEl._movedEntryEl;
+        delete entryHostEl._sourceEntryEl;
+        delete entryHostEl._entryPlaceholder;
+        delete entryHostEl._syncEntry;
+    }
+
+    // サーバー削除（既存の削除関数を利用）
+    try {
+        await stjDeleteWorldEntryDirect(uid, kw);
+    } catch (err) {
+        console.warn('[STJ Editor] 削除エラー:', err);
+    }
+
+    // JSON画面のセルも除去
+    try {
+        if (kw) _explicitlyDeletedKeys.add(kw);
+        cell.remove();
+    } catch (err) {}
+
+    // 0.1秒後に決定ボタンを自動押下（＝モーダルを閉じる）
+    setTimeout(() => {
         try {
-            const headers = (typeof ctx?.getRequestHeaders === 'function')
-                ? ctx.getRequestHeaders()
-                : { 'Content-Type': 'application/json' };
-            const r = await fetch('/api/worldinfo/get', {
-                method: 'POST', headers,
-                body: JSON.stringify({ name: worldName }),
-                cache: 'no-store',
-            });
-            if (r.ok) {
-                const d = await r.json();
-                const exists = Object.values(d.entries || {}).some(en =>
-                    (uid && String(en?.uid ?? '') === String(uid)) ||
-                    (kw && String(en?.comment ?? '').trim() === kw)
-                );
-                if (!exists) {
-                    // 「はい」確定 → モーダルを閉じる準備
-                    console.log('[STJ Editor] 削除確定 → 0.1秒後に決定ボタンを自動押下');
-
-                    // restore 防止
-                    if (entryHostEl) {
-                        delete entryHostEl._movedEntryEl;
-                        delete entryHostEl._sourceEntryEl;
-                    }
-
-                    // JSON画面のセルもここで除去
-                    try {
-                        if (kw) _explicitlyDeletedKeys.add(kw);
-                        cell.remove();
-                    } catch (err) {}
-
-                    // 0.1秒後に決定ボタンを押下（＝モーダルが閉じる）
-                    setTimeout(() => {
-                        try {
-                            currentCellModal?.querySelector('.stj-cell-modal-apply')?.click();
-                        } catch (err) {}
-                    }, 100);
-                    return;
-                }
-            }
+            currentCellModal?.querySelector('.stj-cell-modal-apply')?.click();
         } catch (err) {}
-        setTimeout(poll, 300);
-    };
-    setTimeout(poll, 300);
+    }, 100);
+
+    // 事後同期
+    const charName = document.getElementById('stj_char_name_display')?.textContent || '';
+    if (charName) {
+        syncEditorWithLatestLorebook(charName).catch(() => {});
+        scheduleUnifiedBundleExport(charName, 800);
+    }
 });
 
         modal.addEventListener('click', (e) => {
