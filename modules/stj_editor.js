@@ -1634,6 +1634,17 @@ async function stjDeleteWorldEntryDirect(uid, entryName) {
         ).forEach(el => el.remove());
     } catch (e) { /* ignore */ }
 
+    // 7.5. ロアブック管理画面の削除ボタンをクリックし、ST本体の削除処理を起動
+    try {
+        const entryElement = document.querySelector(`#world_popup .world_entry[uid="${escapeCssAttrValue(uid)}"]`);
+        if (entryElement) {
+            const deleteButton = entryElement.querySelector(".delete_entry_button");
+            if (deleteButton) {
+                deleteButton.click();
+            }
+        }
+    } catch (e) { /* ignore */ }
+    
     // 8. エディタをサーバー最新状態で再構築（textarea 高さ問題も同時に解消）
     try { document.getElementById('world_refresh')?.click(); } catch (e) { /* ignore */ }
 
