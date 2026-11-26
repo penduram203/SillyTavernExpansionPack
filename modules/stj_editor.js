@@ -1779,7 +1779,6 @@ async function stjDeleteWorldEntryDirect(uid, entryName) {
         saveOk = resp.ok;
     } catch (e) { /* ignore */ }
     if (!saveOk) return { ok: false, reason: 'save_failed' };
-    stjRecordDeletedEntry(worldName, uid, entryName || '');
     // ★ 削除の検証＋復活時の再削除
     for (let attempt = 1; attempt <= 5; attempt++) {
         await new Promise(r => setTimeout(r, 150));
@@ -2025,7 +2024,6 @@ setTimeout(forceCleanGhostDom, 2500);
             ctx.eventSource.emit(ctx.eventTypes.WORLDINFO_UPDATED, worldName, uid);
         }
     } catch (e) { /* ignore */ }
-    installGhostObserver(worldName);
     console.log(`[STJ Editor] 🗑️ エントリ直接削除完了: world="${worldName}", uid=${uid}, name="${entryName}"`);
     return { ok: true };
 }
@@ -3157,7 +3155,6 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', (e) => {
     const worldName = getCharacterWorldInfoName();
     if (!worldName) return;
 
-    // ★ モーダルにマウントされている実エントリの「本物の」ゴミ箱アイコンを探す
     const entryHostEl = currentCellModal.querySelector('#stj_cell_modal_entry_host');
     const entryEl = entryHostEl?._movedEntryEl;
     const realDeleteBtn = entryEl?.querySelector('.delete_entry_button')
@@ -3167,18 +3164,16 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', (e) => {
         return;
     }
 
+    // ★ クリックだけ。STの確認ダイアログが開く。それ以外は何もしない。
+    realDeleteBtn.click();
+
+    // ★ サーバー状態のポーリングで「はい」だけを検出（読むだけで何も消さない）
     const ctx = getSTContext();
-    const es = ctx?.eventSource;
-    const et = ctx?.eventTypes;
-    let settled = false;
+    const startedAt = Date.now();
+    const poll = async () => {
+        if (Date.now() - startedAt > 30000) return;
+        if (!currentCellModal || currentModalCell !== cell) return;
 
-    const cleanup = () => {
-        if (es && et?.WORLDINFO_UPDATED) {
-            es.removeListener(et.WORLDINFO_UPDATED, onWorldInfoUpdated);
-        }
-    };
-
-    const checkServerState = async () => {
         try {
             const headers = (typeof ctx?.getRequestHeaders === 'function')
                 ? ctx.getRequestHeaders()
@@ -3188,59 +3183,41 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', (e) => {
                 body: JSON.stringify({ name: worldName }),
                 cache: 'no-store',
             });
-            if (!r.ok) return null;
-            const d = await r.json();
-            const list = Object.values(d.entries || {});
-            return list.some(en =>
-                (uid && String(en?.uid ?? '') === String(uid)) ||
-                (kw && String(en?.comment ?? '').trim() === kw)
-            );
-        } catch (err) {
-            return null;
-        }
-    };
+            if (r.ok) {
+                const d = await r.json();
+                const exists = Object.values(d.entries || {}).some(en =>
+                    (uid && String(en?.uid ?? '') === String(uid)) ||
+                    (kw && String(en?.comment ?? '').trim() === kw)
+                );
+                if (!exists) {
+                    // 「はい」確定 → モーダルを閉じる準備
+                    console.log('[STJ Editor] 削除確定 → 0.1秒後に決定ボタンを自動押下');
 
-    const onWorldInfoUpdated = () => {
-        setTimeout(async () => {
-            if (settled) return;
-            const exists = await checkServerState();
-            if (exists === null) return;  // 確認失敗 → 次の発火を待つ
-            if (exists) {
-                // 「いいえ」= エントリ健在 → 何もしない
-                console.log('[STJ Editor] 削除キャンセル（サーバーにエントリ健在）');
-                settled = true;
-                cleanup();
-                return;
+                    // restore 防止
+                    if (entryHostEl) {
+                        delete entryHostEl._movedEntryEl;
+                        delete entryHostEl._sourceEntryEl;
+                    }
+
+                    // JSON画面のセルもここで除去
+                    try {
+                        if (kw) _explicitlyDeletedKeys.add(kw);
+                        cell.remove();
+                    } catch (err) {}
+
+                    // 0.1秒後に決定ボタンを押下（＝モーダルが閉じる）
+                    setTimeout(() => {
+                        try {
+                            currentCellModal?.querySelector('.stj-cell-modal-apply')?.click();
+                        } catch (err) {}
+                    }, 100);
+                    return;
+                }
             }
-            // 「はい」= サーバーから消えた → モーダルを閉じる
-            console.log('[STJ Editor] 削除確定（サーバーから消えた）→ モーダルを閉じます');
-            settled = true;
-            cleanup();
-
-            // ★ restore による復元を防ぐ
-            if (entryHostEl) delete entryHostEl._movedEntryEl;
-
-            try { closeCellModal(false); } catch (err) {}
-
-            const charName = document.getElementById('stj_char_name_display')?.textContent || '';
-            if (charName) {
-                syncEditorWithLatestLorebook(charName).catch(() => {});
-                scheduleUnifiedBundleExport(charName, 800);
-            }
-        }, 400);
+        } catch (err) {}
+        setTimeout(poll, 300);
     };
-
-    if (es && et?.WORLDINFO_UPDATED) {
-        es.on(et.WORLDINFO_UPDATED, onWorldInfoUpdated);
-    }
-
-    // 保険: 60秒でリスナー解除（モーダルは維持）
-    setTimeout(() => {
-        if (!settled) { settled = true; cleanup(); }
-    }, 60000);
-
-    // ★ ST本来の削除ボタンをクリック（STの確認ダイアログ→削除処理が走る）
-    realDeleteBtn.click();
+    setTimeout(poll, 300);
 });
 
         modal.addEventListener('click', (e) => {
@@ -6367,6 +6344,7 @@ if (addBtn) {
         const et = ctx.eventTypes;
 
         async function syncLorebookEntriesToImageMap() {
+            if (currentCellModal?.classList.contains('visible')) return false;
             const charName = detectCharacterNameFromDOM()
                 || document.getElementById('stj_char_name_display')?.textContent
                 || '';
