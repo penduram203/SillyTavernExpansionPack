@@ -2637,10 +2637,9 @@ jQuery(async () => {
 window.LorebookExpansion = {
     getDataFor,
     setDataFor,
-
     getData: getExpansionData,
     setData: setExpansionData,
-
+    removeEntryData: (worldName, charKey) => removeLexDataEverywhere(worldName, charKey),
     dumpCharacterLex: () => {
         try {
             const ctx = getContext();
