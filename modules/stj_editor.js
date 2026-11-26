@@ -5297,7 +5297,7 @@ function showNewEntryCreatingOverlay() {
     Object.assign(overlay.style, {
         position: 'fixed',
         left: '50%',
-        bottom: 'calc(var(--exp-scale, 1) * 400px)',
+        bottom: '50%',
         transform: 'translateX(-50%)',
         zIndex: '30000',
         padding: '10px 18px',
