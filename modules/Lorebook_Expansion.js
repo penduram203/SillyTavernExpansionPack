@@ -1018,7 +1018,7 @@ async function fetchWorldInfoWithRetry(worldName, maxRetries = WORLDIINFO_FETCH_
                 } catch (err) {
                     debugLog(`fetch 試行 ${attempt}/2 例外: ${err.message || err}`);
                 }
-                if (attempt < 2) await wait(300);
+                if (attempt < 2) await wait(80);
             }
 
             // === fetch 失敗時のみ ST 内部キャッシュにフォールバック ===
