@@ -1084,29 +1084,30 @@ async function loadWorldInfoEntries(worldName) {
         });
     }
 
-    function restoreMountedWorldEntry(hostEl) {
-        if (!hostEl) return;
-        const movedEl = hostEl._movedEntryEl;
-        const placeholder = hostEl._entryPlaceholder;
-        if (movedEl && placeholder && placeholder.parentNode) {
-            cleanupEntryModalState(movedEl);
-            placeholder.parentNode.insertBefore(movedEl, placeholder);
-            placeholder.remove();
-            try {
-                if (typeof window.saveSettingsDebounced === 'function') {
-                    window.saveSettingsDebounced();
-                }
-            } catch (e) { /* ignore */ }
-        } else if (placeholder && placeholder.parentNode) {
-            placeholder.remove();
-        }
-        hostEl.innerHTML = '';
-        hostEl.style.display = 'none';
-        delete hostEl._sourceEntryEl;
-        delete hostEl._movedEntryEl;
-        delete hostEl._entryPlaceholder;
-        delete hostEl._syncEntry;
+function restoreMountedWorldEntry(hostEl) {
+    if (!hostEl) return;
+    const movedEl = hostEl._movedEntryEl;
+    const placeholder = hostEl._entryPlaceholder;
+    // ★ movedEl がまだ DOM に接続されている場合のみ復元する
+    if (movedEl && placeholder && placeholder.parentNode && document.body.contains(movedEl)) {
+        cleanupEntryModalState(movedEl);
+        placeholder.parentNode.insertBefore(movedEl, placeholder);
+        placeholder.remove();
+        try {
+            if (typeof window.saveSettingsDebounced === 'function') {
+                window.saveSettingsDebounced();
+            }
+        } catch (e) { /* ignore */ }
+    } else if (placeholder && placeholder.parentNode) {
+        placeholder.remove();
     }
+    hostEl.innerHTML = '';
+    hostEl.style.display = 'none';
+    delete hostEl._sourceEntryEl;
+    delete hostEl._movedEntryEl;
+    delete hostEl._entryPlaceholder;
+    delete hostEl._syncEntry;
+}
 
 async function mountWorldEntryInCellModal(cell) {
         const modal = currentCellModal;
@@ -2828,17 +2829,22 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
         }
     };
 
-    const onDeleted = () => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        try { closeCellModal(false); } catch (err) { /* ignore */ }
-        const charName = document.getElementById('stj_char_name_display')?.textContent || '';
-        if (charName) {
-            syncEditorWithLatestLorebook(charName).catch(() => {});
-            scheduleUnifiedBundleExport(charName, 800);
-        }
-    };
+const onDeleted = () => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+
+    // ★ 削除済みエントリの参照をクリア（restore による再挿入を防止）
+    const hostEl = currentCellModal?.querySelector('#stj_cell_modal_entry_host');
+    if (hostEl) delete hostEl._movedEntryEl;
+
+    try { closeCellModal(false); } catch (err) { /* ignore */ }
+    const charName = document.getElementById('stj_char_name_display')?.textContent || '';
+    if (charName) {
+        syncEditorWithLatestLorebook(charName).catch(() => {});
+        scheduleUnifiedBundleExport(charName, 800);
+    }
+};
 
     const observer = new MutationObserver(() => {
         if (!document.body.contains(entryEl)) onDeleted();
@@ -2866,12 +2872,6 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
         cleanup();
         window.toastr?.warning?.('削除ボタンが見つかりません');
         return;
-    }
-
-    // モーダルへ移動済みなら #world_popup へ戻してからクリック
-    // （STが #world_popup へのイベント委譲で処理している場合に備える）
-    if (entryHostEl && entryHostEl._movedEntryEl === entryEl) {
-        restoreMountedWorldEntry(entryHostEl);
     }
 
     // STネイティブの削除フロー（確認ダイアログ → サーバー削除 → WORLDINFO_UPDATED）を発火
