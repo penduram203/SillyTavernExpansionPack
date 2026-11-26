@@ -1534,7 +1534,10 @@ async function mountWorldEntryInCellModal(cell) {
     function showDeleteConfirmDialog(message, onConfirm, onCancel) {
         if (!confirmDialogEl) return;
         const msgEl = confirmDialogEl.querySelector('.stj-confirm-message');
-        if (msgEl) msgEl.textContent = message || '本当に削除しますか？';
+        if (msgEl) {
+            // ★ 修正: innerHTML で <br> を使って改行
+            msgEl.innerHTML = message || '本当に削除しますか？';
+        }
         pendingDeleteCallback = onConfirm;
         pendingCancelCallback = onCancel || null;
         confirmDialogEl.style.display = 'flex';
@@ -2668,34 +2671,11 @@ modal.querySelector('.stj-cell-modal-delete').addEventListener('click', (e) => {
         return;
     }
     
-    // ★ 一時的なCSS注入で #dialogue_popup を完全に非表示化
-    const styleId = 'stj-block-dialogue-popup';
-    if (!document.getElementById(styleId)) {
-        const style = document.createElement('style');
-        style.id = styleId;
-        style.textContent = `
-            #dialogue_popup.stj-auto-confirmed {
-                display: none !important;
-                visibility: hidden !important;
-                opacity: 0 !important;
-                pointer-events: none !important;
-                position: fixed !important;
-                z-index: -9999 !important;
-            }
-            #dialogue_popup.stj-auto-confirmed #dialogue_popup_text {
-                white-space: pre-line !important;
-            }
-        `;
-        document.head.appendChild(style);
-    }
-    
-    // 1. 自作の確認ダイアログを表示
+    // ★ 修正: 自作ダイアログのメッセージを改行して表示
     showDeleteConfirmDialog(
-        `画像データを残してエントリを削除しますか？\nエントリ: ${entryName}\nこの操作は取り消せません！`,
+        `画像データを残してエントリを削除しますか？<br>エントリ: <b>${entryName}</b><br>この操作は取り消せません！`,
         () => {
-            // 「はい」が押されたら実行されるコールバック
-            
-            // 2. 対象のロアブックエントリ要素を探す
+            // 対象のロアブックエントリ要素を探す
             const hostEl = currentCellModal.querySelector('#stj_cell_modal_entry_host');
             let targetEntryEl = hostEl?.querySelector('.world_entry[uid]');
             
@@ -2718,61 +2698,87 @@ modal.querySelector('.stj-cell-modal-delete').addEventListener('click', (e) => {
                 return;
             }
             
-            // 3. 公式ダイアログ(#dialogue_popup)を完全にブロック
-            const observer = new MutationObserver((mutations, obs) => {
+            // ★ 修正: 公式ダイアログを完全にブロックして自動承認
+            let observer = null;
+            let styleEl = null;
+            
+            // 1. CSS で公式ダイアログを即座に非表示化
+            styleEl = document.createElement('style');
+            styleEl.id = 'stj-block-official-dialog';
+            styleEl.textContent = `
+                #dialogue_popup {
+                    display: none !important;
+                    opacity: 0 !important;
+                    pointer-events: none !important;
+                }
+            `;
+            document.head.appendChild(styleEl);
+            
+            // 2. MutationObserver で公式ダイアログの「はい」を自動クリック
+            observer = new MutationObserver((mutations, obs) => {
                 const popup = document.querySelector('#dialogue_popup');
-                if (popup && !popup.classList.contains('stj-auto-confirmed')) {
-                    popup.classList.add('stj-auto-confirmed');
+                if (popup) {
+                    // 即座に非表示化
+                    popup.style.setProperty('display', 'none', 'important');
+                    popup.style.setProperty('opacity', '0', 'important');
                     
-                    // ★ 改行を強制（textContent + \n + CSS white-space: pre-line）
-                    const textEl = popup.querySelector('#dialogue_popup_text');
-                    if (textEl) {
-                        textEl.textContent = `画像データを残してエントリを削除しますか？\nエントリ: ${entryName}\nこの操作は取り消せません！`;
-                    }
-                    
-                    // ★ 即座に「はい」を自動クリック（遅延0ms）
+                    // 「はい」ボタンを自動クリック
                     const okBtn = popup.querySelector('#dialogue_popup_ok');
-                    if (okBtn) {
+                    if (okBtn && !okBtn.dataset.stjAutoClicked) {
+                        okBtn.dataset.stjAutoClicked = '1';
                         setTimeout(() => {
-                            okBtn.click();
-                        }, 0);
+                            try {
+                                okBtn.click();
+                            } catch (e) { /* ignore */ }
+                        }, 10);
                     }
-                    
-                    // Observerは一度処理したら切断
-                    setTimeout(() => obs.disconnect(), 300);
                 }
             });
             
-            // ★ より広範囲を監視（body全体 + style/class属性）
-            observer.observe(document.body, { 
-                childList: true, 
-                subtree: true, 
+            observer.observe(document.body, {
+                childList: true,
+                subtree: true,
                 attributes: true,
                 attributeFilter: ['style', 'class']
             });
             
-            // 4. ゴミ箱ボタンをクリックしてST本体の削除処理を発火
-            const clickEvent = new MouseEvent('click', {
-                bubbles: true,
-                cancelable: true,
-                view: window
-            });
-            deleteBtn.dispatchEvent(clickEvent);
+            // 3. ゴミ箱ボタンをクリックして削除処理を実行
+            try {
+                const clickEvent = new MouseEvent('click', {
+                    bubbles: true,
+                    cancelable: true,
+                    view: window
+                });
+                deleteBtn.dispatchEvent(clickEvent);
+            } catch (e) {
+                console.warn('[STJ Editor] deleteBtn click error:', e);
+            }
             
-            // 5. セルモーダルを閉じ、セルを削除する処理を予約
+            // 4. セルモーダルを閉じ、セルを削除
             setTimeout(() => {
+                // Observer とスタイルをクリーンアップ
+                if (observer) {
+                    try { observer.disconnect(); } catch (e) { /* ignore */ }
+                }
+                if (styleEl && styleEl.parentNode) {
+                    try { styleEl.remove(); } catch (e) { /* ignore */ }
+                }
+                
+                // セルモーダルを閉じる
                 closeCellModal(false);
                 
+                // JSON編集ツリーからセルを削除
                 if (currentModalCell && currentModalCell.parentNode) {
                     currentModalCell.remove();
                 }
                 
+                // ツリーレイアウトを再計算して保存
                 autoSave({ immediate: true });
                 runLiveTest();
                 _stjScheduleTreeLayout();
                 
                 console.log(`[STJ Editor] 🗑️ エントリ削除完了: ${entryName}`);
-            }, 300);
+            }, 400);
         }
     );
 });
