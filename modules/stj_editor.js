@@ -1649,40 +1649,44 @@ function installGhostObserver(worldName) {
     if (targets.length === 0) return;
 
     let checking = false;
-    const check = async () => {
-        if (checking) return;
-        checking = true;
-        try {
-            const ctx = getSTContext();
-            const headers = (typeof ctx?.getRequestHeaders === 'function')
-                ? ctx.getRequestHeaders()
-                : { 'Content-Type': 'application/json' };
-            const r = await fetch('/api/worldinfo/get', {
-                method: 'POST', headers,
-                body: JSON.stringify({ name: worldName }),
-                cache: 'no-store',
-            });
-            if (!r.ok) return;
-            const d = await r.json();
-            const serverUids = new Set(
-                Object.values(d.entries || {}).map(e => String(e.uid))
-            );
-            let removed = 0;
-            const rootSelectors = ['#world_popup .world_entry', '#WorldInfo .world_entry', '#WorldInfo [uid]'];
-            for (const sel of rootSelectors) {
-                document.querySelectorAll(sel).forEach(el => {
+const check = async () => {
+    if (checking) return;
+    checking = true;
+    try {
+        const ctx = getSTContext();
+        const headers = (typeof ctx?.getRequestHeaders === 'function')
+            ? ctx.getRequestHeaders()
+            : { 'Content-Type': 'application/json' };
+        const r = await fetch('/api/worldinfo/get', {
+            method: 'POST', headers,
+            body: JSON.stringify({ name: worldName }),
+            cache: 'no-store',
+        });
+        if (!r.ok) return;
+        const d = await r.json();
+        const serverUids = new Set(
+            Object.values(d.entries || {}).map(e => String(e.uid))
+        );
+        let removed = 0;
+        const rootSelectors = ['#world_popup .world_entry', '#WorldInfo .world_entry', '#WorldInfo [uid]'];
+        for (const sel of rootSelectors) {
+            document.querySelectorAll(sel).forEach(el => {
                 const domUid = el.getAttribute('uid');
                 if (domUid && !serverUids.has(String(domUid))) {
                     el.remove();
                     removed++;
                 }
             });
-            if (removed > 0) {
-                console.log(`[STJ Editor] 👻 幽霊エントリ ${removed} 件を継続監視で削除`);
-            }
-        } catch (e) { /* ignore */ }
-        finally { checking = false; }
-    };
+        }  // ★ 追加：for ループを閉じる（この1行が抜けていた）
+        if (removed > 0) {
+            console.log(`[STJ Editor] 👻 幽霊エントリ ${removed} 件を継続監視で削除`);
+        }
+    } catch (e) {
+        /* ignore */
+    } finally {
+        checking = false;
+    }
+};
 
     _ghostObserver = new MutationObserver((mutations) => {
         const hasAdded = mutations.some(m =>
