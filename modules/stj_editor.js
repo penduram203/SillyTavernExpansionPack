@@ -1673,7 +1673,11 @@ const check = async () => {
             document.querySelectorAll(sel).forEach(el => {
                 const domUid = el.getAttribute('uid');
                 if (domUid && !serverUids.has(String(domUid))) {
-                    el.remove();
+                    // 先に非表示（レイアウトシフトを起こさない）
+                    el.style.setProperty('display', 'none', 'important');
+                    el.style.setProperty('visibility', 'hidden', 'important');
+                    // 100ms後にDOMから完全除去
+                    setTimeout(() => { try { el.remove(); } catch (e) {} }, 100);
                     removed++;
                 }
             });
@@ -1790,10 +1794,6 @@ function installPostDeletionWatcher(worldName, uid, comment) {
             try { await _forceSyncSTCacheWithServer(worldName); } catch (e) {}
             cleanDom(serverUids);
 
-            // 500ms毎の2回に1回リフレッシュ（描画をサーバー状態に寄せる）
-            if (tick % 2 === 0) {
-                try { document.getElementById('world_refresh')?.click(); } catch (e) {}
-            }
         } catch (e) { /* ignore */ }
         setTimeout(tickFn, 500);
     };
