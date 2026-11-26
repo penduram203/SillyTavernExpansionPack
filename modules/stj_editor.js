@@ -1943,6 +1943,31 @@ try {
     console.warn('[STJ Editor] world_info 強制再取得エラー:', e);
 }
     
+
+// ★ 6.6（新規追加）image_display_extension からも該当キーを削除
+try {
+    const ctx2 = getSTContext();
+    const char = ctx2?.characters?.[ctx2?.characterId] || ctx2?.character;
+    if (char && entryName) {
+        const key = String(entryName).trim();
+        const ext = char?.data?.extensions?.image_display_extension;
+        if (ext && typeof ext === 'object' && Object.prototype.hasOwnProperty.call(ext, key)) {
+            delete ext[key];
+            try {
+                window.CharStore?.saveCharacterExtension?.(
+                    'image_display_extension', ext, { immediate: true }
+                );
+            } catch (e) { /* ignore */ }
+            try {
+                window.dispatchEvent(new CustomEvent('lbe-image-map-updated', {
+                    detail: { charName: char.name, imageMap: ext }
+                }));
+            } catch (e) { /* ignore */ }
+            console.log(`[STJ Editor] 🧹 image_display_extension から "${key}" を削除`);
+        }
+    }
+} catch (e) { /* ignore */ }
+    
     
 // 7. ロアブック編集画面の DOM から削除
 try {
@@ -6688,12 +6713,17 @@ if (addBtn) {
 })();
 
 // ============================================================
-// ★ 削除済みエントリ UID 記録 + 保存時フィルタ
-//   ST本体の内部キャッシュが触れないため、fetch を横取りして
-//   /api/worldinfo/edit 送信前に削除済みエントリを除去する。
+// ★ 削除済みエントリ UID 記録 + 保存時フィルタ（コメント正規化版）
 // ============================================================
 const _stjDeletedRecords = new Map(); // worldName -> Map(uid -> { comment, deletedAt })
-const STJ_DELETED_TTL_MS = 120000;     // 2分間ブロック
+const STJ_DELETED_TTL_MS = 10 * 60 * 1000;  // 10分
+
+function _stjNormalizeComment(s) {
+    if (typeof s !== 'string') return '';
+    return s.trim()
+        .replace(/\s*[（(](?:常時有効|無効|Constant|Disabled)[）)]\s*$/i, '')
+        .trim();
+}
 
 function stjRecordDeletedEntry(worldName, uid, comment) {
     if (!worldName || uid === null || uid === undefined) return;
@@ -6721,7 +6751,6 @@ function _stjCleanupDeletedRecords() {
 
     const _origFetch = window.fetch;
     window.fetch = async function(url, opts) {
-        // /api/worldinfo/edit への POST のみ対象
         if (typeof url === 'string'
             && url.includes('/api/worldinfo/edit')
             && opts
@@ -6736,29 +6765,35 @@ function _stjCleanupDeletedRecords() {
 
                 if (recs && recs.size > 0 && entries && typeof entries === 'object') {
                     let stripped = 0;
+                    const kept = [];
                     for (const k of Object.keys(entries)) {
                         const uid = String(entries[k]?.uid ?? k);
                         const comment = String(entries[k]?.comment ?? '');
                         const rec = recs.get(uid);
                         if (!rec) continue;
 
-                        // uid + comment が一致 → 削除したエントリの復活 → 除去
-                        if (rec.comment === comment) {
+                        const normRec = _stjNormalizeComment(rec.comment);
+                        const normCur = _stjNormalizeComment(comment);
+
+                        // ★ 正規化後に一致 → 削除済みエントリの復活と判定して除去
+                        if (normRec === normCur) {
                             delete entries[k];
                             stripped++;
                             continue;
                         }
-                        // comment が異なる = ユーザーが新規作成した別エントリ → 許可 & 記録クリア
+                        // 本当に別のエントリ（コメントが全く違う）→ 記録クリア
                         recs.delete(uid);
+                        kept.push(uid);
                     }
                     if (stripped > 0) {
                         opts = { ...opts, body: JSON.stringify(parsed) };
-                        console.log(`[STJ Editor] 🛡️ 保存前フィルタ: 削除済みエントリ ${stripped} 件を除去しました`);
+                        console.log(
+                            `[STJ Editor] 🛡️ 保存前フィルタ: 削除済みエントリ ${stripped} 件を除去 ` +
+                            `(残レコード: ${recs.size}件${kept.length ? ', 再利用許可: ' + kept.join(',') : ''})`
+                        );
                     }
                 }
-            } catch (e) {
-                // パース不能な body は素通し
-            }
+            } catch (e) { /* パース不能な body は素通し */ }
         }
         return _origFetch.call(this, url, opts);
     };
