@@ -2668,7 +2668,7 @@ modal.querySelector('.stj-cell-modal-delete').addEventListener('click', (e) => {
         return;
     }
     
-    // 1. 自作の確認ダイアログを表示
+    // 1. 自作の確認ダイアログを表示（改行付き）
     showDeleteConfirmDialog(
         `画像データを残してエントリを削除しますか？\nエントリ: ${entryName}\nこの操作は取り消せません！`,
         () => {
@@ -2697,16 +2697,19 @@ modal.querySelector('.stj-cell-modal-delete').addEventListener('click', (e) => {
                 return;
             }
             
-            // 3. 公式ダイアログ(#dialogue_popup)を自動でスキップ（即座にOKを押す）
+            // 3. 公式ダイアログ(#dialogue_popup)を即座に非表示化してスキップ
             const observer = new MutationObserver((mutations, obs) => {
                 const popup = document.querySelector('#dialogue_popup');
                 if (popup && popup.style.display !== 'none' && !popup.classList.contains('stj-auto-confirmed')) {
                     popup.classList.add('stj-auto-confirmed');
                     
-                    // 文言の書き換え（念のため）
+                    // ★ 修正: 即座に非表示にしてユーザーに見せない
+                    popup.style.setProperty('display', 'none', 'important');
+                    
+                    // ★ 修正: innerHTML で <br> を使って確実に改行
                     const textEl = popup.querySelector('#dialogue_popup_text');
                     if (textEl) {
-                        textEl.textContent = `画像データを残してエントリを削除しますか？\nエントリ: ${entryName}\nこの操作は取り消せません！`;
+                        textEl.innerHTML = `画像データを残してエントリを削除しますか？<br>エントリ: <b>${entryName}</b><br>この操作は取り消せません！`;
                     }
                     
                     // 即座に「はい」を自動クリック
@@ -2714,11 +2717,11 @@ modal.querySelector('.stj-cell-modal-delete').addEventListener('click', (e) => {
                     if (okBtn) {
                         setTimeout(() => {
                             okBtn.click();
-                        }, 50);
+                        }, 10);
                     }
                     
                     // Observerは一度処理したら切断
-                    setTimeout(() => obs.disconnect(), 500);
+                    setTimeout(() => obs.disconnect(), 300);
                 }
             });
             observer.observe(document.body, { 
@@ -2737,7 +2740,6 @@ modal.querySelector('.stj-cell-modal-delete').addEventListener('click', (e) => {
             deleteBtn.dispatchEvent(clickEvent);
             
             // 5. セルモーダルを閉じ、セルを削除する処理を予約
-            //    （ST本体の削除完了を待つため少し遅延させる）
             setTimeout(() => {
                 // セルモーダルを閉じる
                 closeCellModal(false);
