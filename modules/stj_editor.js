@@ -1779,6 +1779,43 @@ async function stjDeleteWorldEntryDirect(uid, entryName) {
         saveOk = resp.ok;
     } catch (e) { /* ignore */ }
     if (!saveOk) return { ok: false, reason: 'save_failed' };
+    stjRecordDeletedEntry(worldName, uid, entryName || '');
+
+    // ★ 3秒間サーバー状態を監視し、復活していたら再削除
+    for (let attempt = 1; attempt <= 10; attempt++) {
+        await new Promise(r => setTimeout(r, 300));
+        try {
+            const vr = await fetch('/api/worldinfo/get', {
+                method: 'POST', headers,
+                body: JSON.stringify({ name: worldName }),
+                cache: 'no-store',
+            });
+            if (!vr.ok) continue;
+            const vd = await vr.json();
+            const vEntries = vd?.entries || {};
+            const stillThere = Object.keys(vEntries).some(k =>
+                (uid && String(vEntries[k]?.uid ?? k) === String(uid)) ||
+                (entryName && String(vEntries[k]?.comment ?? '').trim() === String(entryName).trim())
+            );
+            if (!stillThere) {
+                console.log(`[STJ Editor] ✅ 削除確認 (${attempt}/10)`);
+                break;
+            }
+            console.log(`[STJ Editor] ⚠️ 復活検知 (${attempt}/10) → 再削除`);
+            stjRecordDeletedEntry(worldName, uid, entryName || '');
+            const filtered = {};
+            for (const k of Object.keys(vEntries)) {
+                const isTarget = (uid && String(vEntries[k]?.uid ?? k) === String(uid))
+                    || (entryName && String(vEntries[k]?.comment ?? '').trim() === String(entryName).trim());
+                if (!isTarget) filtered[k] = vEntries[k];
+            }
+            await fetch('/api/worldinfo/edit', {
+                method: 'POST', headers,
+                body: JSON.stringify({ name: worldName, data: { entries: filtered } }),
+            });
+        } catch (e) { /* ignore */ }
+    }
+    
     // ★ 削除の検証＋復活時の再削除
     for (let attempt = 1; attempt <= 5; attempt++) {
         await new Promise(r => setTimeout(r, 150));
