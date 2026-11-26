@@ -1761,7 +1761,7 @@ function _applyCommentAndKeyDefault(entryEl, assignedName) {
                     console.warn(LOG, 'world_refresh click failed:', e);
                 }
             }
-        }, 200); // ★ 正確に1秒待機
+        }, 100); // ★ 正確に0.1秒待機
     }
 
     // 1. #WIDrawerIcon のクリックを検知
