@@ -2705,7 +2705,7 @@ async function exportUnifiedBundleJson(options = {}) {
                     if (popup) {
                         const textEl = popup.querySelector('#dialogue_popup_text, .dialogue_popup_text');
                         if (textEl && !textEl.dataset.stjRewritten) {
-                            textEl.innerHTML = `画像データを残してエントリを削除しますか？<br>エントリ:<br><b>${entryName}</b><br>この操作は取り消せません！`;
+                            textEl.innerHTML = `画像データを残してエントリを削除しますか？<br><br>エントリ:<br><b>${entryName}</b><br><br>この操作は取り消せません！`;
                             textEl.dataset.stjRewritten = '1';
                         }
                         const okBtn = popup.querySelector('#dialogue_popup_ok, .dialogue_popup_ok');
