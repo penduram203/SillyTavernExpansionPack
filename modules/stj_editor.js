@@ -1642,8 +1642,11 @@ function installGhostObserver(worldName) {
     if (_ghostObserverTimer) { clearTimeout(_ghostObserverTimer); _ghostObserverTimer = null; }
     if (_ghostObserverStopTimer) { clearTimeout(_ghostObserverStopTimer); _ghostObserverStopTimer = null; }
 
-    const target = document.getElementById('world_popup');
-    if (!target) return;
+    const targets = [
+        document.getElementById('world_popup'),
+        document.getElementById('WorldInfo'),
+    ].filter(Boolean);
+    if (targets.length === 0) return;
 
     let checking = false;
     const check = async () => {
@@ -1665,7 +1668,9 @@ function installGhostObserver(worldName) {
                 Object.values(d.entries || {}).map(e => String(e.uid))
             );
             let removed = 0;
-            document.querySelectorAll('#world_popup .world_entry').forEach(el => {
+            const rootSelectors = ['#world_popup .world_entry', '#WorldInfo .world_entry', '#WorldInfo [uid]'];
+            for (const sel of rootSelectors) {
+                document.querySelectorAll(sel).forEach(el => {
                 const domUid = el.getAttribute('uid');
                 if (domUid && !serverUids.has(String(domUid))) {
                     el.remove();
@@ -1690,7 +1695,7 @@ function installGhostObserver(worldName) {
             check();
         }, 150);
     });
-    _ghostObserver.observe(target, { childList: true, subtree: true });
+    targets.forEach(t => _ghostObserver.observe(t, { childList: true, subtree: true }));
 
     // 即時1回実行
     check();
@@ -1705,7 +1710,93 @@ function installGhostObserver(worldName) {
         console.log('[STJ Editor] 👻 幽霊監視を終了しました');
     }, 30000);
 }
-  
+
+// ============================================================
+// ★ 削除後ウォッチドッグ: 15秒間サーバーとDOM/キャッシュを強制同期
+// ============================================================
+function installPostDeletionWatcher(worldName, uid, comment) {
+    if (!worldName) return;
+    const startedAt = Date.now();
+    const MAX_MS = 15000;
+    let tick = 0;
+    let stopped = false;
+
+    const cleanDom = (serverUids) => {
+        let removed = 0;
+        const scan = (root, sel) => {
+            if (!root) return;
+            root.querySelectorAll(sel).forEach(el => {
+                const domUid = el.getAttribute('uid');
+                if (domUid && !serverUids.has(String(domUid))) {
+                    el.remove(); removed++;
+                }
+            });
+        };
+        scan(document.getElementById('world_popup'), '.world_entry');
+        scan(document.getElementById('WorldInfo'), '.world_entry, [uid]');
+        if (removed > 0) {
+            console.log(`[STJ Editor] 🧹 幽霊DOM除去 (tick=${tick}): ${removed}件`);
+        }
+    };
+
+    const tickFn = async () => {
+        if (stopped) return;
+        if (Date.now() - startedAt > MAX_MS) {
+            stopped = true;
+            console.log('[STJ Editor] 🛡️ 削除後ウォッチ終了');
+            return;
+        }
+        tick++;
+        try {
+            const ctx = getSTContext();
+            const headers = (typeof ctx?.getRequestHeaders === 'function')
+                ? ctx.getRequestHeaders()
+                : { 'Content-Type': 'application/json' };
+            const r = await fetch('/api/worldinfo/get', {
+                method: 'POST', headers,
+                body: JSON.stringify({ name: worldName }),
+                cache: 'no-store',
+            });
+            if (!r.ok) return;
+            const d = await r.json();
+            const entries = d.entries || {};
+
+            // サーバーに復活していたら再削除
+            const revived = Object.keys(entries).some(k =>
+                (uid && String(entries[k]?.uid ?? k) === String(uid)) ||
+                (comment && String(entries[k]?.comment ?? '').trim() === String(comment).trim())
+            );
+            if (revived) {
+                console.log(`[STJ Editor] ⚠️ 復活検知 (tick=${tick}) → 再削除`);
+                stjRecordDeletedEntry(worldName, uid, comment || '');
+                const filtered = {};
+                for (const k of Object.keys(entries)) {
+                    const isTarget = (uid && String(entries[k]?.uid ?? k) === String(uid))
+                        || (comment && String(entries[k]?.comment ?? '').trim() === String(comment).trim());
+                    if (!isTarget) filtered[k] = entries[k];
+                }
+                await fetch('/api/worldinfo/edit', {
+                    method: 'POST', headers,
+                    body: JSON.stringify({ name: worldName, data: { entries: filtered } }),
+                });
+            }
+
+            // STキャッシュ再同期 + DOM幽霊除去
+            const serverUids = new Set(Object.values(entries).map(e => String(e?.uid)));
+            try { await _forceSyncSTCacheWithServer(worldName); } catch (e) {}
+            cleanDom(serverUids);
+
+            // 500ms毎の2回に1回リフレッシュ（描画をサーバー状態に寄せる）
+            if (tick % 2 === 0) {
+                try { document.getElementById('world_refresh')?.click(); } catch (e) {}
+            }
+        } catch (e) { /* ignore */ }
+        setTimeout(tickFn, 500);
+    };
+    setTimeout(tickFn, 200);
+    console.log(`[STJ Editor] 🛡️ 削除後ウォッチ開始: uid=${uid}, comment="${comment || ''}"`);
+}
+    
 // ============================================================
 // ★ ロアブックエントリの直接削除（ST公式確認ダイアログを一切出さない）
 //   ゴミ箱ボタンをクリックすると callGenericPopup が必ず走るため、
@@ -2061,6 +2152,7 @@ setTimeout(forceCleanGhostDom, 2500);
             ctx.eventSource.emit(ctx.eventTypes.WORLDINFO_UPDATED, worldName, uid);
         }
     } catch (e) { /* ignore */ }
+    installPostDeletionWatcher(worldName, uid, entryName || '');
     console.log(`[STJ Editor] 🗑️ エントリ直接削除完了: world="${worldName}", uid=${uid}, name="${entryName}"`);
     return { ok: true };
 }
