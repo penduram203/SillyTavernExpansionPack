@@ -9281,6 +9281,47 @@ function exposeGicApi() {
 function initializeGIC() {
     console.log('[GIC] 初期化開始');
     loadPersistedState();
+
+    // ★ セルモーダル内サムネイルクリック後の拡大画像にもプロンプトオーバーレイを表示
+    (function setupCellModalPromptOverlay() {
+        if (window.__gicCellModalPromptOverlayInstalled) return;
+        window.__gicCellModalPromptOverlayInstalled = true;
+
+        const syncModalPreviews = () => {
+            const modal = document.getElementById('stj_cell_modal')
+                || document.querySelector('.stj-cell-modal');
+            if (!modal) return;
+
+            modal.querySelectorAll('img').forEach((img) => {
+                // サムネイル一覧の小さな画像ではなく、拡大表示領域の画像を優先対象とする
+                const previewBox =
+                    img.closest('.stj-cell-preview, .stj-image-preview, .stj-lightbox, [class*="preview"], [class*="lightbox"]')
+                    || img.parentElement;
+                if (!previewBox) return;
+
+                // クリックで開く拡大ビュー判定（またはプレビューコンテナ内）
+                const isExpanded =
+                    previewBox.matches('.stj-cell-preview, .stj-image-preview, .stj-lightbox, [class*="preview"], [class*="lightbox"]')
+                    || previewBox.dataset.expanded === 'true'
+                    || img.classList.contains('expanded')
+                    || img.closest('[data-expanded="true"]') !== null;
+
+                if (isExpanded) {
+                    updatePromptOverlay(previewBox);
+                }
+            });
+        };
+
+        const mo = new MutationObserver(() => {
+            syncModalPreviews();
+        });
+        mo.observe(document.body, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['src', 'class', 'style', 'data-expanded'],
+        });
+    })();
     
     // ★ 言語変更を監視してボタンラベルを再翻訳
     if (window.ExpI18n?.onLanguageChange) {
