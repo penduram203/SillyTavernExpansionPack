@@ -3602,7 +3602,7 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
             attributeFilter: ['class', 'style', 'open', 'hidden', 'disabled'],
         });
 
-        pollTimer = setInterval(tick, 20);
+        pollTimer = setInterval(tick, 200);
         timeoutId = setTimeout(() => finish(clicked), timeoutMs);
         tick();
     });
