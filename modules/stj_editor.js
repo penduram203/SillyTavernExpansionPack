@@ -3608,7 +3608,7 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
             await stjDeleteWorldEntryDirect(uid, kw);
         }
 
-        await new Promise((r) => setTimeout(r, 20));
+        await new Promise((r) => setTimeout(r, 200));
         if (kw) _explicitlyDeletedKeys.add(kw);
 
         if (entryHostEl) {
