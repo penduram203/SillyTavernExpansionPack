@@ -1518,14 +1518,23 @@ function getCurrentCharacterName() {
         }
 
         /* ============================================================
-           ★ 拡大ビュー用プロンプトオーバーレイ
+           ★ 拡大ビュー用プロンプトオーバーレイ（ギャラリー ＋ セルモーダル拡大ビュー）
            ============================================================ */
-        ${promptOverlaySel} {
+        ${promptOverlaySel},
+        #stj_cell_modal .gic-prompt-overlay,
+        .stj-cell-modal .gic-prompt-overlay {
             opacity: 0 !important;
             pointer-events: none !important;
             transition: opacity 0.15s ease !important;
         }
-        ${promptOverlayHoverSel} {
+        ${promptOverlayHoverSel},
+        #stj_cell_modal .stj-cell-preview:hover .gic-prompt-overlay,
+        #stj_cell_modal .stj-image-preview:hover .gic-prompt-overlay,
+        #stj_cell_modal .gic-lightbox:hover .gic-prompt-overlay,
+        #stj_cell_modal [class*="preview"]:hover .gic-prompt-overlay,
+        #stj_cell_modal .gic-prompt-overlay:hover,
+        .stj-cell-modal [class*="preview"]:hover .gic-prompt-overlay,
+        .stj-cell-modal .gic-prompt-overlay:hover {
             opacity: 1 !important;
             pointer-events: auto !important;
         }
