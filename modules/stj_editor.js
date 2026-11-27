@@ -3611,7 +3611,7 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
         // ① 最初の削除確認ダイアログで「はい」が選ばれたら即座に「エントリ削除中…」を表示して操作不能化
         const confirmed = await askCustomConfirm();
         if (!confirmed) return;
-
+        setOfficialDialogSuppressed(true);
         showDeletingOverlay();
 
         const entryHostEl = currentCellModal.querySelector('#stj_cell_modal_entry_host');
@@ -3671,6 +3671,7 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
         console.error('[STJ Editor] セルモーダル削除エラー:', err);
         window.toastr?.error?.(_t('stj.delete.error', '削除処理に失敗しました'));
     } finally {
+        setOfficialDialogSuppressed(false);
         hideDeletingOverlay();
         deleteButton.dataset.deleting = 'false';
     }
