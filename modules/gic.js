@@ -9278,11 +9278,7 @@ function exposeGicApi() {
     console.log('[GIC] ✅ #dragGallery 幅事前固定オブザーバを設置しました (3列対応: 560px)');
 })();
 
-function initializeGIC() {
-    console.log('[GIC] 初期化開始');
-    loadPersistedState();
-
-    // ★ セルモーダル内サムネイルクリック後の拡大画像にもプロンプトオーバーレイを表示
+// ★ セルモーダル内サムネイルクリック後の拡大画像にもプロンプトオーバーレイを表示
     (function setupCellModalPromptOverlay() {
         if (window.__gicCellModalPromptOverlayInstalled) return;
         window.__gicCellModalPromptOverlayInstalled = true;
@@ -9322,6 +9318,11 @@ function initializeGIC() {
             attributeFilter: ['src', 'class', 'style', 'data-expanded'],
         });
     })();
+
+function initializeGIC() {
+    console.log('[GIC] 初期化開始');
+    loadPersistedState();
+    setupCellModalPromptOverlay();
     
     // ★ 言語変更を監視してボタンラベルを再翻訳
     if (window.ExpI18n?.onLanguageChange) {
