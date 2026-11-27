@@ -3854,6 +3854,7 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
                 autoSave({ immediate: true });
             }
         });
+        ensureCellModalCommentHeaderEditor(modal);
 
         return modal;
     }
@@ -3922,6 +3923,7 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
                 }
             });
         });
+        bindCellModalCommentEditor(currentCellModal, currentModalCell);
     }
 
     function closeCellModal(revert) {
