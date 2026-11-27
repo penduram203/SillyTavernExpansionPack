@@ -2923,7 +2923,7 @@ async function exportUnifiedBundleJson(options = {}) {
                 let effectiveCharName = charName;
                 if (!effectiveCharName) {
                     for (let i = 0; i < 10; i++) {
-                        await new Promise(r => setTimeout(r, 200));
+                        await new Promise(r => setTimeout(r, 20));
                         effectiveCharName = detectCharacterNameFromDOM() || '';
                         if (effectiveCharName) {
                             if (nameEl) nameEl.textContent = effectiveCharName;
