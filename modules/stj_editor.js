@@ -3164,7 +3164,7 @@ function ensureCellModalInnerTextPoleStyle(modal) {
             margin-top: 5px !important;
             margin-bottom: 5px !important;
             height: fit-content !important;
-            font-size: calc(var(--exp-scale, 1) * 19px) !important;
+            font-size: calc(var(--exp-scale, 1) * 18px) !important;
         }
     `;
 }
