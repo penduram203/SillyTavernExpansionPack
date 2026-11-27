@@ -2997,11 +2997,14 @@ function ensureCellModalCommentHeaderEditor(modal) {
 
         textarea = document.createElement('textarea');
         textarea.className = 'text_pole';
-        textarea.rows = 1;
-        textarea.name = 'comment';
+        textarea.setAttribute('rows', '1');
+        textarea.setAttribute('name', 'comment');
         textarea.setAttribute('data-i18n', '[placeholder]Entry Title/Memo');
-        textarea.placeholder = _t('stj.entry_title_memo', 'エントリータイトル/メモ');
-        textarea.style.cssText = 'width:100%;min-height:0;resize:none;line-height:1.3;';
+        textarea.setAttribute('placeholder', 'エントリータイトル/メモ');
+        textarea.setAttribute(
+            'style',
+            'width: 100%; font-size: 25px; min-height: 0px; resize: none; line-height: 1.3;'
+        );
 
         wrap.appendChild(textarea);
 
@@ -3018,8 +3021,17 @@ function ensureCellModalCommentHeaderEditor(modal) {
                 header.appendChild(wrap);
             }
         }
-    } else if (kwDisplay) {
-        kwDisplay.remove();
+    } else {
+        if (kwDisplay) kwDisplay.remove();
+        textarea.className = 'text_pole';
+        textarea.setAttribute('rows', '1');
+        textarea.setAttribute('name', 'comment');
+        textarea.setAttribute('data-i18n', '[placeholder]Entry Title/Memo');
+        textarea.setAttribute('placeholder', 'エントリータイトル/メモ');
+        textarea.setAttribute(
+            'style',
+            'width: 100%; font-size: 25px; min-height: 0px; resize: none; line-height: 1.3;'
+        );
     }
 
     return textarea;
@@ -3125,6 +3137,36 @@ function bindCellModalCommentEditor(modal, cell) {
     textarea._stjCommentInputHandler = onEdit;
     textarea.addEventListener('input', onEdit);
     textarea.addEventListener('change', onEdit);
+}
+
+function ensureCellModalInnerTextPoleStyle(modal) {
+    if (!modal) return;
+    const styleId = 'stj_cell_modal_inner_text_pole_style';
+    let styleEl = document.getElementById(styleId);
+    if (!styleEl) {
+        styleEl = document.createElement('style');
+        styleEl.id = styleId;
+        document.head.appendChild(styleEl);
+    }
+    styleEl.textContent = `
+        #stj_cell_modal :not(#stj_cell_modal_comment_wrap) > .text_pole,
+        #stj_cell_modal #stj_cell_modal_entry_host .text_pole,
+        #stj_cell_modal .stj-cell-modal-body .text_pole,
+        #stj_cell_modal .lbe-section .text_pole {
+            background-color: var(--black30a) !important;
+            color: var(--SmartThemeBodyColor) !important;
+            border: 1px solid var(--SmartThemeBorderColor) !important;
+            border-radius: 5px !important;
+            font-family: var(--mainFontFamily) !important;
+            padding: 3px 5px !important;
+            width: 100% !important;
+            margin: 5px 0 !important;
+            margin-top: 5px !important;
+            margin-bottom: 5px !important;
+            height: fit-content !important;
+            font-size: 20px !important;
+        }
+    `;
 }
     
     function createCellModal() {
@@ -3854,8 +3896,8 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
                 autoSave({ immediate: true });
             }
         });
+        ensureCellModalInnerTextPoleStyle(modal);
         ensureCellModalCommentHeaderEditor(modal);
-
         return modal;
     }
 
