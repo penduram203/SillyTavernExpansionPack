@@ -68,6 +68,33 @@
     let _pendingDeleteUid = null;
     let _pendingDeleteKw = null;
     let _pendingDeleteAt = 0;
+
+    const OFFICIAL_DIALOG_SUPPRESS_CLASS = 'stj-suppress-official-dialog';
+
+    function ensureOfficialDialogSuppressStyle() {
+        if (document.getElementById('stj_suppress_official_dialog_style')) return;
+        const style = document.createElement('style');
+        style.id = 'stj_suppress_official_dialog_style';
+        style.textContent = `
+            body.${OFFICIAL_DIALOG_SUPPRESS_CLASS} #dialogue_popup,
+            body.${OFFICIAL_DIALOG_SUPPRESS_CLASS} #dialogue_popup_blocker,
+            body.${OFFICIAL_DIALOG_SUPPRESS_CLASS} .popup:not(#stj_confirm_dialog):not(#stj_cell_modal):not(#stj_export_modal),
+            body.${OFFICIAL_DIALOG_SUPPRESS_CLASS} .popup_blocker,
+            body.${OFFICIAL_DIALOG_SUPPRESS_CLASS} dialog[open]:not(#stj_confirm_dialog):not(#stj_cell_modal):not(#stj_export_modal),
+            body.${OFFICIAL_DIALOG_SUPPRESS_CLASS} [role="dialog"]:not(#stj_confirm_dialog):not(#stj_cell_modal):not(#stj_export_modal) {
+                display: none !important;
+                visibility: hidden !important;
+                opacity: 0 !important;
+                pointer-events: none !important;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    function setOfficialDialogSuppressed(suppressed) {
+        ensureOfficialDialogSuppressStyle();
+        document.body.classList.toggle(OFFICIAL_DIALOG_SUPPRESS_CLASS, !!suppressed);
+    }
     
     // ===== エディタ初期化中フラグ =====
     let _editorLoading = false;
