@@ -3299,6 +3299,184 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
     if (deleteButton.dataset.deleting === 'true') return;
     deleteButton.dataset.deleting = 'true';
 
+    // 「新規エントリ作成中…」の要素を探して位置・サイズ・フォント等を完全同期するヘルパー
+    const findCreatingOverlayTemplate = () => {
+        const byIdOrClass = document.querySelector(
+            '#stj_creating_overlay, #stj_create_overlay, .stj-creating-overlay, .stj_creating_overlay'
+        );
+        if (byIdOrClass) return byIdOrClass;
+
+        const allEls = Array.from(document.querySelectorAll('div, span, p, section'));
+        for (const el of allEls) {
+            if (el.id === 'stj_deleting_overlay') continue;
+            if (el.children.length > 2) continue;
+            const txt = (el.textContent || '').trim();
+            if (txt.includes('新規エントリ作成中')) {
+                return el;
+            }
+        }
+        return null;
+    };
+
+    const showDeletingOverlay = () => {
+        let overlay = document.getElementById('stj_deleting_overlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'stj_deleting_overlay';
+            overlay.setAttribute('role', 'status');
+            overlay.setAttribute('aria-live', 'assertive');
+            document.body.appendChild(overlay);
+        }
+
+        const tpl = findCreatingOverlayTemplate();
+        if (tpl) {
+            const cs = window.getComputedStyle(tpl);
+            const rect = tpl.getBoundingClientRect();
+            const propsToCopy = [
+                'position', 'top', 'left', 'right', 'bottom',
+                'width', 'height', 'minWidth', 'minHeight', 'maxWidth', 'maxHeight',
+                'margin', 'padding', 'border', 'borderRadius',
+                'background', 'backgroundColor', 'backdropFilter', 'boxShadow',
+                'color', 'fontFamily', 'fontSize', 'fontWeight', 'fontStyle',
+                'lineHeight', 'letterSpacing', 'textAlign',
+                'display', 'flexDirection', 'alignItems', 'justifyContent', 'gap',
+                'pointerEvents', 'userSelect', 'cursor',
+            ];
+            for (const prop of propsToCopy) {
+                const val = cs[prop];
+                if (val && val !== '' && val !== 'none' && val !== 'auto') {
+                    overlay.style[prop] = val;
+                } else if (prop === 'pointerEvents' || prop === 'display') {
+                    overlay.style[prop] = val;
+                }
+            }
+            // 「新規エントリ作成中…」が非表示状態でも表示できるよう最低限の可視化を保証
+            if (cs.display === 'none' || !cs.display) {
+                overlay.style.display = 'flex';
+                overlay.style.alignItems = cs.alignItems && cs.alignItems !== 'normal' ? cs.alignItems : 'center';
+                overlay.style.justifyContent = cs.justifyContent && cs.justifyContent !== 'normal' ? cs.justifyContent : 'center';
+            }
+            if (!cs.position || cs.position === 'static') {
+                overlay.style.position = 'fixed';
+                overlay.style.inset = '0';
+            }
+            if (rect.width > 0 && rect.height > 0 && cs.position !== 'fixed') {
+                overlay.style.width = `${Math.round(rect.width)}px`;
+                overlay.style.height = `${Math.round(rect.height)}px`;
+            }
+            const tplZ = parseInt(cs.zIndex, 10);
+            overlay.style.zIndex = String(Number.isFinite(tplZ) ? Math.max(tplZ, 2147483000) : 2147483000);
+        } else {
+            // テンプレート未発見時のフォールバック（全画面操作ブロック＋中央表示）
+            overlay.style.cssText = [
+                'position: fixed',
+                'inset: 0',
+                'width: 100vw',
+                'height: 100vh',
+                'z-index: 2147483000',
+                'display: flex',
+                'align-items: center',
+                'justify-content: center',
+                'background: rgba(0, 0, 0, 0.45)',
+                'color: #ffffff',
+                'font-size: 16px',
+                'font-weight: 600',
+                'pointer-events: auto',
+                'user-select: none',
+            ].join(';');
+        }
+
+        // 操作を確実にブロック
+        overlay.style.pointerEvents = 'auto';
+        overlay.textContent = _t('stj.delete.in_progress', 'エントリ削除中…');
+
+        // オーバーレイ表示中のキー・マウス操作を遮断
+        const blockEvent = (ev) => {
+            if (!document.getElementById('stj_deleting_overlay')) return;
+            ev.stopPropagation();
+            ev.preventDefault();
+        };
+        if (!overlay._stjBlockersAttached) {
+            overlay._stjBlockersAttached = true;
+            ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'contextmenu', 'wheel'].forEach((evtName) => {
+                overlay.addEventListener(evtName, blockEvent, { capture: true });
+            });
+            const keyBlocker = (ev) => {
+                if (!document.getElementById('stj_deleting_overlay')) return;
+                ev.stopPropagation();
+                ev.preventDefault();
+            };
+            overlay._stjKeyBlocker = keyBlocker;
+            document.addEventListener('keydown', keyBlocker, { capture: true });
+        }
+    };
+
+    const hideDeletingOverlay = () => {
+        const overlay = document.getElementById('stj_deleting_overlay');
+        if (!overlay) return;
+        if (overlay._stjKeyBlocker) {
+            document.removeEventListener('keydown', overlay._stjKeyBlocker, { capture: true });
+        }
+        overlay.remove();
+    };
+
+    // JSON編集ツリーから該当セルが消える瞬間を待つ
+    const waitUntilCellRemovedFromTree = (targetCell, targetUid, targetKw, timeoutMs = 6000) => new Promise((resolve) => {
+        const isCellGone = () => {
+            const treeRoot = document.querySelector('#stj_export_modal') || document.body;
+            if (targetCell && targetCell.isConnected && treeRoot.contains(targetCell)) {
+                return false;
+            }
+            if (targetUid) {
+                const byUid = treeRoot.querySelector(`[data-uid="${CSS.escape(String(targetUid))}"]`);
+                if (byUid && byUid.isConnected) return false;
+            }
+            if (targetKw) {
+                const cells = Array.from(treeRoot.querySelectorAll('.stj-tree-cell, [data-keyword]'));
+                const matched = cells.some((c) => {
+                    if (!c.isConnected) return false;
+                    const cKw = (c.dataset?.keyword || c.textContent || '').trim();
+                    return cKw === targetKw;
+                });
+                if (matched) return false;
+            }
+            return true;
+        };
+
+        if (isCellGone()) {
+            resolve(true);
+            return;
+        }
+
+        let done = false;
+        const finish = (val) => {
+            if (done) return;
+            done = true;
+            observer.disconnect();
+            clearInterval(poll);
+            clearTimeout(timer);
+            resolve(val);
+        };
+
+        const observer = new MutationObserver(() => {
+            if (isCellGone()) finish(true);
+        });
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['class', 'style', 'data-uid', 'data-keyword'],
+        });
+
+        const poll = setInterval(() => {
+            if (isCellGone()) finish(true);
+        }, 30);
+
+        const timer = setTimeout(() => {
+            finish(isCellGone());
+        }, timeoutMs);
+    });
+
     const askCustomConfirm = () => new Promise((resolve) => {
         showDeleteConfirmDialog(
             _t(
@@ -3403,8 +3581,11 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
     });
 
     try {
+        // ① 最初の削除確認ダイアログで「はい」が選ばれたら即座に「エントリ削除中…」を表示して操作不能化
         const confirmed = await askCustomConfirm();
         if (!confirmed) return;
+
+        showDeletingOverlay();
 
         const entryHostEl = currentCellModal.querySelector('#stj_cell_modal_entry_host');
         const officialDeleteBtn =
@@ -3412,6 +3593,7 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
             entryHostEl?._movedEntryEl?.querySelector('.delete_entry_button') ||
             document.querySelector(`#world_popup .world_entry[uid="${escapeCssAttrValue(uid)}"] .delete_entry_button`);
 
+        // ② 公式ダイアログ自動確定・クローズ待機
         const officialPromise = waitAndAutoConfirmOfficialDialog(5000);
 
         if (officialDeleteBtn) {
@@ -3438,7 +3620,7 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
             entryHostEl.style.display = 'none';
         }
 
-        cell.remove();
+        // ③ モーダルを閉じ、④ ツリーから該当セルが消えるのを待ってからオーバーレイを解除
         closeCellModal(false);
 
         const charName =
@@ -3446,17 +3628,23 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
             detectCharacterNameFromDOM() ||
             '';
 
+        const cellGonePromise = waitUntilCellRemovedFromTree(cell, uid, kw, 6000);
+
         if (charName) {
             await syncEditorWithLatestLorebook(charName);
             scheduleUnifiedBundleExport(charName, 800);
         }
 
+        cell.remove();
         runLiveTest();
         _stjScheduleTreeLayout();
+
+        await cellGonePromise;
     } catch (err) {
         console.error('[STJ Editor] セルモーダル削除エラー:', err);
         window.toastr?.error?.(_t('stj.delete.error', '削除処理に失敗しました'));
     } finally {
+        hideDeletingOverlay();
         deleteButton.dataset.deleting = 'false';
     }
 });
