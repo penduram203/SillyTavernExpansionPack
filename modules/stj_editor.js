@@ -2981,6 +2981,152 @@ async function exportUnifiedBundleJson(options = {}) {
         }
     }
 
+// 1. createCellModal() 内: #stj_cell_modal_keyword_display を削除し、comment 編集欄を同じ位置へ挿入
+function ensureCellModalCommentHeaderEditor(modal) {
+    if (!modal) return null;
+
+    const kwDisplay = modal.querySelector('#stj_cell_modal_keyword_display');
+    let wrap = modal.querySelector('#stj_cell_modal_comment_wrap');
+    let textarea = wrap?.querySelector('textarea[name="comment"]');
+
+    if (!wrap) {
+        wrap = document.createElement('div');
+        wrap.id = 'stj_cell_modal_comment_wrap';
+        wrap.className = 'flex-container flex1';
+        wrap.style.cssText = 'flex:1;min-width:120px;margin:0;padding:0;align-items:center;';
+
+        textarea = document.createElement('textarea');
+        textarea.className = 'text_pole';
+        textarea.rows = 1;
+        textarea.name = 'comment';
+        textarea.setAttribute('data-i18n', '[placeholder]Entry Title/Memo');
+        textarea.placeholder = _t('stj.entry_title_memo', 'エントリータイトル/メモ');
+        textarea.style.cssText = 'width:100%;min-height:0;resize:none;line-height:1.3;';
+
+        wrap.appendChild(textarea);
+
+        if (kwDisplay && kwDisplay.parentElement) {
+            kwDisplay.parentElement.replaceChild(wrap, kwDisplay);
+        } else {
+            const header =
+                modal.querySelector('.stj-cell-modal-header, .stj_cell_modal_header, .modal-header') ||
+                modal.firstElementChild;
+            const cancelBtn = modal.querySelector('#stj_cell_modal_cancel');
+            if (header && cancelBtn && cancelBtn.parentElement === header) {
+                cancelBtn.insertAdjacentElement('afterend', wrap);
+            } else if (header) {
+                header.appendChild(wrap);
+            }
+        }
+    } else if (kwDisplay) {
+        kwDisplay.remove();
+    }
+
+    return textarea;
+}
+
+// 2. 入力内容をロアブックエントリの「名前(comment)」と「キーワード(key/keys)」へ同期
+function syncModalCommentToLorebookEntry(modal, cell, rawValue) {
+    const newValue = String(rawValue ?? '').trim();
+    const entryHostEl = modal?.querySelector('#stj_cell_modal_entry_host');
+    const entryEl =
+        entryHostEl?.querySelector('.world_entry[uid]') ||
+        entryHostEl?._movedEntryEl ||
+        null;
+
+    if (entryEl) {
+        const commentField = entryEl.querySelector(
+            'input[name="comment"], textarea[name="comment"], .world_entry_comment input, .world_entry_comment textarea'
+        );
+        if (commentField && commentField.value !== newValue) {
+            commentField.value = newValue;
+            commentField.dispatchEvent(new Event('input', { bubbles: true }));
+            commentField.dispatchEvent(new Event('change', { bubbles: true }));
+            if (window.$) {
+                try { window.$(commentField).trigger('input').trigger('change'); } catch (_) {}
+            }
+        }
+
+        const keyFields = Array.from(entryEl.querySelectorAll(
+            'textarea[name="key"], textarea[name="keys"], input[name="key"], input[name="keys"]'
+        ));
+        for (const kf of keyFields) {
+            if (kf.value !== newValue) {
+                kf.value = newValue;
+                kf.dispatchEvent(new Event('input', { bubbles: true }));
+                kf.dispatchEvent(new Event('change', { bubbles: true }));
+                if (window.$) {
+                    try { window.$(kf).trigger('input').trigger('change'); } catch (_) {}
+                }
+            }
+        }
+    }
+
+    if (cell) {
+        const oldKw = (getCellKeyword(cell) || '').trim();
+        cell.dataset.keyword = newValue;
+        cell.setAttribute('data-keyword', newValue);
+
+        const labelTargets = cell.querySelectorAll(
+            '.stj-cell-keyword, .stj-node-title, .stj-cell-title, [data-role="keyword"]'
+        );
+        if (labelTargets.length > 0) {
+            labelTargets.forEach((el) => {
+                if (el.children.length === 0) el.textContent = newValue;
+            });
+        } else if (cell.children.length === 0) {
+            cell.textContent = newValue;
+        }
+
+        const uid = getCellUid(cell);
+        const worldName = getCharacterWorldInfoName();
+        if (worldName && uid && oldKw && newValue && oldKw !== newValue && window.LorebookExpansion) {
+            try {
+                const prevData = window.LorebookExpansion.getDataFor(worldName, uid, { comment: oldKw, keys: [oldKw] });
+                const hasMeaningfulData =
+                    Boolean(prevData?.img_prompt) ||
+                    Boolean(prevData?.negative_prompt) ||
+                    (Array.isArray(prevData?.choices) && prevData.choices.length > 0) ||
+                    (Array.isArray(prevData?.variables) && prevData.variables.length > 0);
+                if (hasMeaningfulData) {
+                    window.LorebookExpansion.setDataFor(worldName, uid, { comment: newValue, keys: [newValue] }, prevData);
+                }
+            } catch (_) {}
+        }
+    }
+}
+
+// 3. モーダルを開く際（openCellModal 内）に初期値をセットし、入力イベントをバインド
+function bindCellModalCommentEditor(modal, cell) {
+    const textarea = ensureCellModalCommentHeaderEditor(modal);
+    if (!textarea) return;
+
+    const entryHostEl = modal.querySelector('#stj_cell_modal_entry_host');
+    const entryEl =
+        entryHostEl?.querySelector('.world_entry[uid]') ||
+        entryHostEl?._movedEntryEl ||
+        null;
+    const entryCommentVal = entryEl?.querySelector(
+        'input[name="comment"], textarea[name="comment"], .world_entry_comment input, .world_entry_comment textarea'
+    )?.value;
+
+    const initialValue = (entryCommentVal ?? getCellKeyword(cell) ?? '').trim();
+    textarea.value = initialValue;
+
+    if (textarea._stjCommentInputHandler) {
+        textarea.removeEventListener('input', textarea._stjCommentInputHandler);
+        textarea.removeEventListener('change', textarea._stjCommentInputHandler);
+    }
+
+    const onEdit = () => {
+        syncModalCommentToLorebookEntry(modal, cell, textarea.value);
+    };
+
+    textarea._stjCommentInputHandler = onEdit;
+    textarea.addEventListener('input', onEdit);
+    textarea.addEventListener('change', onEdit);
+}
+    
     function createCellModal() {
         const modal = document.createElement('div');
         modal.id = 'stj_cell_modal';
