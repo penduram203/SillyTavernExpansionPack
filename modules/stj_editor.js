@@ -68,31 +68,6 @@
     let _pendingDeleteUid = null;
     let _pendingDeleteKw = null;
     let _pendingDeleteAt = 0;
-
-const OFFICIAL_DIALOG_SUPPRESS_CLASS = 'stj-suppress-official-dialog';
-
-function ensureOfficialDialogSuppressStyle() {
-    if (document.getElementById('stj_suppress_official_dialog_style')) return;
-    const style = document.createElement('style');
-    style.id = 'stj_suppress_official_dialog_style';
-    style.textContent = `
-        body.${OFFICIAL_DIALOG_SUPPRESS_CLASS} #dialogue_popup,
-        body.${OFFICIAL_DIALOG_SUPPRESS_CLASS} #dialogue_popup_blocker,
-        body.${OFFICIAL_DIALOG_SUPPRESS_CLASS} .popup:not(#stj_confirm_dialog):not(#stj_cell_modal):not(#stj_export_modal),
-        body.${OFFICIAL_DIALOG_SUPPRESS_CLASS} .popup_blocker,
-        body.${OFFICIAL_DIALOG_SUPPRESS_CLASS} dialog[open]:not(#stj_confirm_dialog):not(#stj_cell_modal):not(#stj_export_modal),
-        body.${OFFICIAL_DIALOG_SUPPRESS_CLASS} [role="dialog"]:not(#stj_confirm_dialog):not(#stj_cell_modal):not(#stj_export_modal) {
-            opacity: 0 !important;
-            pointer-events: none !important;
-        }
-    `;
-    document.head.appendChild(style);
-}
-
-function setOfficialDialogSuppressed(suppressed) {
-    ensureOfficialDialogSuppressStyle();
-    document.body.classList.toggle(OFFICIAL_DIALOG_SUPPRESS_CLASS, !!suppressed);
-}
     
     // ===== エディタ初期化中フラグ =====
     let _editorLoading = false;
@@ -3324,6 +3299,7 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
     if (deleteButton.dataset.deleting === 'true') return;
     deleteButton.dataset.deleting = 'true';
 
+    // 「新規エントリ作成中…」の要素を探して位置・サイズ・フォント等を完全同期するヘルパー
     const findCreatingOverlayTemplate = () => {
         const byIdOrClass = document.querySelector(
             '#stj_creating_overlay, #stj_create_overlay, .stj-creating-overlay, .stj_creating_overlay'
@@ -3374,6 +3350,7 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
                     overlay.style[prop] = val;
                 }
             }
+            // 「新規エントリ作成中…」が非表示状態でも表示できるよう最低限の可視化を保証
             if (cs.display === 'none' || !cs.display) {
                 overlay.style.display = 'flex';
                 overlay.style.alignItems = cs.alignItems && cs.alignItems !== 'normal' ? cs.alignItems : 'center';
@@ -3390,6 +3367,7 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
             const tplZ = parseInt(cs.zIndex, 10);
             overlay.style.zIndex = String(Number.isFinite(tplZ) ? Math.max(tplZ, 2147483000) : 2147483000);
         } else {
+            // テンプレート未発見時のフォールバック（全画面操作ブロック＋中央表示）
             overlay.style.cssText = [
                 'position: fixed',
                 'inset: 0',
@@ -3408,9 +3386,11 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
             ].join(';');
         }
 
+        // 操作を確実にブロック
         overlay.style.pointerEvents = 'auto';
         overlay.textContent = _t('stj.delete.in_progress', 'エントリ削除中…');
 
+        // オーバーレイ表示中のキー・マウス操作を遮断
         const blockEvent = (ev) => {
             if (!document.getElementById('stj_deleting_overlay')) return;
             ev.stopPropagation();
@@ -3440,6 +3420,63 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
         overlay.remove();
     };
 
+    // JSON編集ツリーから該当セルが消える瞬間を待つ
+    const waitUntilCellRemovedFromTree = (targetCell, targetUid, targetKw, timeoutMs = 6000) => new Promise((resolve) => {
+        const isCellGone = () => {
+            const treeRoot = document.querySelector('#stj_export_modal') || document.body;
+            if (targetCell && targetCell.isConnected && treeRoot.contains(targetCell)) {
+                return false;
+            }
+            if (targetUid) {
+                const byUid = treeRoot.querySelector(`[data-uid="${CSS.escape(String(targetUid))}"]`);
+                if (byUid && byUid.isConnected) return false;
+            }
+            if (targetKw) {
+                const cells = Array.from(treeRoot.querySelectorAll('.stj-tree-cell, [data-keyword]'));
+                const matched = cells.some((c) => {
+                    if (!c.isConnected) return false;
+                    const cKw = (c.dataset?.keyword || c.textContent || '').trim();
+                    return cKw === targetKw;
+                });
+                if (matched) return false;
+            }
+            return true;
+        };
+
+        if (isCellGone()) {
+            resolve(true);
+            return;
+        }
+
+        let done = false;
+        const finish = (val) => {
+            if (done) return;
+            done = true;
+            observer.disconnect();
+            clearInterval(poll);
+            clearTimeout(timer);
+            resolve(val);
+        };
+
+        const observer = new MutationObserver(() => {
+            if (isCellGone()) finish(true);
+        });
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['class', 'style', 'data-uid', 'data-keyword'],
+        });
+
+        const poll = setInterval(() => {
+            if (isCellGone()) finish(true);
+        }, 30);
+
+        const timer = setTimeout(() => {
+            finish(isCellGone());
+        }, timeoutMs);
+    });
+
     const askCustomConfirm = () => new Promise((resolve) => {
         showDeleteConfirmDialog(
             _t(
@@ -3451,85 +3488,86 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
         );
     });
 
-    const isOfficialDialogOpen = (el) => {
-        if (!el) return false;
-        if (el.id === 'stj_confirm_dialog' || el.id === 'stj_cell_modal' || el.id === 'stj_export_modal') {
-            return false;
-        }
-        if (el.closest('#stj_confirm_dialog') || el.closest('#stj_cell_modal') || el.closest('#stj_export_modal')) {
-            return false;
-        }
-        if (el.tagName === 'DIALOG' && !el.open) return false;
-        const cs = window.getComputedStyle(el);
-        if (cs.display === 'none' || cs.visibility === 'hidden') return false;
-        if (el.hasAttribute('hidden')) return false;
-        return true;
-    };
-
-    const getOpenOfficialDialogs = () => {
-        return Array.from(document.querySelectorAll(
-            '#dialogue_popup, .popup, dialog[open], [role="dialog"]'
-        )).filter(isOfficialDialogOpen);
-    };
-
     const findOfficialOkButton = () => {
-        const dialogs = getOpenOfficialDialogs();
-        for (const dlg of dialogs) {
-            const btn = dlg.querySelector(
-                '#dialogue_popup_ok, .popup-button-ok, button.ok, [data-result="ok"], .swal2-confirm'
-            );
-            if (btn && !btn.disabled && window.getComputedStyle(btn).display !== 'none') {
-                return btn;
+        const candidates = Array.from(document.querySelectorAll(
+            '#dialogue_popup_ok, .popup-button-ok, button.ok, [data-result="ok"], .swal2-confirm'
+        ));
+        for (const btn of candidates) {
+            if (!btn || btn.disabled) continue;
+            if (btn.closest('#stj_confirm_dialog') || btn.closest('#stj_cell_modal') || btn.closest('#stj_export_modal')) {
+                continue;
             }
+            const rect = btn.getBoundingClientRect();
+            if (rect.width === 0 || rect.height === 0) continue;
+            const cs = window.getComputedStyle(btn);
+            if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity || '1') === 0) {
+                continue;
+            }
+            return btn;
         }
         return null;
     };
 
-    const clickOkOnce = (btn) => {
+    const hasVisibleOfficialDialog = () => {
+        const nodes = Array.from(document.querySelectorAll(
+            '#dialogue_popup, .popup, dialog[open], [role="dialog"]'
+        ));
+        return nodes.some((el) => {
+            if (!el || el.id === 'stj_confirm_dialog' || el.id === 'stj_cell_modal' || el.id === 'stj_export_modal') {
+                return false;
+            }
+            if (el.closest('#stj_confirm_dialog') || el.closest('#stj_cell_modal')) {
+                return false;
+            }
+            const rect = el.getBoundingClientRect();
+            if (rect.width === 0 || rect.height === 0) return false;
+            const cs = window.getComputedStyle(el);
+            return cs.display !== 'none' && cs.visibility !== 'hidden' && parseFloat(cs.opacity || '1') > 0;
+        });
+    };
+
+    const pressOkButton = (btn) => {
         if (!btn) return;
+        try { btn.focus({ preventScroll: true }); } catch (_) {}
         try { btn.click(); } catch (_) {}
         if (window.$) {
             try { window.$(btn).trigger('click'); } catch (_) {}
         }
     };
 
-    const waitAndAutoConfirmOfficialDialog = (timeoutMs = 4000) => new Promise((resolve) => {
+    const waitAndAutoConfirmOfficialDialog = (timeoutMs = 5000) => new Promise((resolve) => {
         let settled = false;
-        let clickedBtn = null;
-        let clickCount = 0;
-        let lastClickAt = 0;
+        let clicked = false;
+        let pollTimer = null;
+        let timeoutId = null;
+        let observer = null;
 
-        const finish = (ok) => {
+        const finish = (result) => {
             if (settled) return;
             settled = true;
-            observer.disconnect();
-            clearInterval(timer);
-            clearTimeout(to);
-            resolve(ok);
+            if (observer) {
+                try { observer.disconnect(); } catch (_) {}
+            }
+            if (pollTimer) clearInterval(pollTimer);
+            if (timeoutId) clearTimeout(timeoutId);
+            resolve(result);
         };
 
         const tick = () => {
             if (settled) return;
-            const openDialogs = getOpenOfficialDialogs();
-            if (clickCount > 0 && openDialogs.length === 0) {
+            const visible = hasVisibleOfficialDialog();
+            if (clicked && !visible) {
                 finish(true);
                 return;
             }
-
             const okBtn = findOfficialOkButton();
             if (okBtn) {
-                const now = Date.now();
-                // 同一ボタンへの連続誤爆を防ぎつつ、閉じなければ 180ms 後に 1 回だけ再送
-                if (okBtn !== clickedBtn || now - lastClickAt >= 180) {
-                    clickedBtn = okBtn;
-                    lastClickAt = now;
-                    clickCount++;
-                    clickOkOnce(okBtn);
-                }
+                clicked = true;
+                pressOkButton(okBtn);
             }
         };
 
-        const observer = new MutationObserver(() => tick());
+        observer = new MutationObserver(() => tick());
         observer.observe(document.body, {
             childList: true,
             subtree: true,
@@ -3537,37 +3575,16 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
             attributeFilter: ['class', 'style', 'open', 'hidden', 'disabled'],
         });
 
-        const timer = setInterval(tick, 20);
-        const to = setTimeout(() => {
-            finish(clickCount > 0);
-        }, timeoutMs);
-
+        pollTimer = setInterval(tick, 20);
+        timeoutId = setTimeout(() => finish(clicked), timeoutMs);
         tick();
     });
 
-    const isCellStillInTree = (targetCell, targetUid, targetKw) => {
-        const treeRoot = document.querySelector('#stj_export_modal') || document.body;
-        if (targetCell && targetCell.isConnected && treeRoot.contains(targetCell)) {
-            return true;
-        }
-        if (targetUid) {
-            const byUid = treeRoot.querySelector(`[data-uid="${CSS.escape(String(targetUid))}"]`);
-            if (byUid && byUid.isConnected) return true;
-        }
-        if (targetKw) {
-            const cells = Array.from(treeRoot.querySelectorAll('.stj-tree-cell, [data-keyword]'));
-            if (cells.some((c) => c.isConnected && (c.dataset?.keyword || c.textContent || '').trim() === targetKw)) {
-                return true;
-            }
-        }
-        return false;
-    };
-
     try {
+        // ① 最初の削除確認ダイアログで「はい」が選ばれたら即座に「エントリ削除中…」を表示して操作不能化
         const confirmed = await askCustomConfirm();
         if (!confirmed) return;
 
-        setOfficialDialogSuppressed(true);
         showDeletingOverlay();
 
         const entryHostEl = currentCellModal.querySelector('#stj_cell_modal_entry_host');
@@ -3576,10 +3593,14 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
             entryHostEl?._movedEntryEl?.querySelector('.delete_entry_button') ||
             document.querySelector(`#world_popup .world_entry[uid="${escapeCssAttrValue(uid)}"] .delete_entry_button`);
 
-        const officialPromise = waitAndAutoConfirmOfficialDialog(4000);
+        // ② 公式ダイアログ自動確定・クローズ待機
+        const officialPromise = waitAndAutoConfirmOfficialDialog(5000);
 
         if (officialDeleteBtn) {
-            clickOkOnce(officialDeleteBtn);
+            officialDeleteBtn.click();
+            if (window.$) {
+                try { window.$(officialDeleteBtn).trigger('click'); } catch (_) {}
+            }
         }
 
         const passed = await officialPromise;
@@ -3587,12 +3608,8 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
             await stjDeleteWorldEntryDirect(uid, kw);
         }
 
+        await new Promise((r) => setTimeout(r, 200));
         if (kw) _explicitlyDeletedKeys.add(kw);
-
-        // ロアブックキャッシュを即時クリアし、後続の新規作成が古いキャッシュで詰まらないようにする
-        try {
-            window.LorebookExpansion?.clearWorldInfoEntriesCache?.(worldName);
-        } catch (_) {}
 
         if (entryHostEl) {
             delete entryHostEl._movedEntryEl;
@@ -3603,9 +3620,7 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
             entryHostEl.style.display = 'none';
         }
 
-        if (cell && cell.isConnected) {
-            cell.remove();
-        }
+        // ③ モーダルを閉じ、④ ツリーから該当セルが消えるのを待ってからオーバーレイを解除
         closeCellModal(false);
 
         const charName =
@@ -3613,24 +3628,22 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
             detectCharacterNameFromDOM() ||
             '';
 
+        const cellGonePromise = waitUntilCellRemovedFromTree(cell, uid, kw, 6000);
+
         if (charName) {
             await syncEditorWithLatestLorebook(charName);
             scheduleUnifiedBundleExport(charName, 800);
         }
 
+        cell.remove();
         runLiveTest();
         _stjScheduleTreeLayout();
 
-        // ツリーからセルが消えるまで最大 2.5 秒だけ待ってすぐ解除
-        const startWait = Date.now();
-        while (isCellStillInTree(cell, uid, kw) && Date.now() - startWait < 2500) {
-            await new Promise((r) => setTimeout(r, 30));
-        }
+        await cellGonePromise;
     } catch (err) {
         console.error('[STJ Editor] セルモーダル削除エラー:', err);
         window.toastr?.error?.(_t('stj.delete.error', '削除処理に失敗しました'));
     } finally {
-        setOfficialDialogSuppressed(false);
         hideDeletingOverlay();
         deleteButton.dataset.deleting = 'false';
     }
