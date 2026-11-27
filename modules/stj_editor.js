@@ -3311,14 +3311,82 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
         );
     });
 
-    // ST公式確認ダイアログの「はい / OK」ボタンを自動押下する待機処理
-    const waitAndAutoConfirmOfficialDialog = (timeoutMs = 4000) => new Promise((resolve) => {
+    // 自作確認ダイアログ以外の「表示中のST公式ダイアログ」を取得
+    const getVisibleOfficialDialogs = () => {
+        const nodes = Array.from(document.querySelectorAll(
+            '#dialogue_popup, .popup, dialog[open], [role="dialog"]'
+        ));
+        return nodes.filter((el) => {
+            if (!el || el.id === 'stj_confirm_dialog' || el.id === 'stj_cell_modal' || el.id === 'stj_export_modal') {
+                return false;
+            }
+            if (el.closest('#stj_confirm_dialog') || el.closest('#stj_cell_modal')) {
+                return false;
+            }
+            const rect = el.getBoundingClientRect();
+            if (rect.width === 0 || rect.height === 0) return false;
+            const cs = window.getComputedStyle(el);
+            if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity || '1') === 0) {
+                return false;
+            }
+            return true;
+        });
+    };
+
+    // ボタンに対して pointer/mouse/click と jQuery click を発火
+    const triggerButtonPress = (btn) => {
+        if (!btn || btn.disabled) return;
+        try { btn.focus({ preventScroll: true }); } catch (_) {}
+        for (const evtName of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+            try {
+                btn.dispatchEvent(new MouseEvent(evtName, {
+                    bubbles: true,
+                    cancelable: true,
+                    view: window,
+                }));
+            } catch (_) {}
+        }
+        try { btn.click(); } catch (_) {}
+        if (window.$) {
+            try { window.$(btn).trigger('click'); } catch (_) {}
+        }
+    };
+
+    // ダイアログ要素を確実に閉じる（確定後またはタイムアウト時の後始末）
+    const forceCloseOfficialDialog = (dlg) => {
+        if (!dlg) return;
+        try {
+            if (typeof dlg.close === 'function' && dlg.open) {
+                dlg.close();
+            }
+        } catch (_) {}
+        try {
+            if (dlg.id === 'dialogue_popup') {
+                dlg.classList.remove('open', 'visible', 'show', 'active');
+                dlg.style.setProperty('display', 'none', 'important');
+                const blocker = document.getElementById('dialogue_popup_blocker') || document.querySelector('.popup_blocker');
+                if (blocker) {
+                    blocker.classList.remove('open', 'visible', 'show', 'active');
+                    blocker.style.setProperty('display', 'none', 'important');
+                }
+            } else if (dlg.classList?.contains('popup')) {
+                dlg.classList.remove('open', 'visible', 'show', 'active');
+                dlg.style.setProperty('display', 'none', 'important');
+            }
+        } catch (_) {}
+    };
+
+    // ST公式確認ダイアログが開いたら最速で「はい / OK」を押し、閉じるまで見届ける
+    const autoConfirmAndCloseOfficialDialog = (timeoutMs = 5000) => new Promise((resolve) => {
         let settled = false;
+        let sawDialog = false;
+        let lastClickedAt = 0;
+        let targetDialog = null;
+        let observer = null;
         let pollTimer = null;
         let timeoutId = null;
-        let observer = null;
 
-        const finish = (ok) => {
+        const cleanup = (result) => {
             if (settled) return;
             settled = true;
             if (observer) {
@@ -3326,44 +3394,56 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
             }
             if (pollTimer) clearInterval(pollTimer);
             if (timeoutId) clearTimeout(timeoutId);
-            resolve(ok);
+            resolve(result);
         };
 
-        const tryClickOfficialOk = () => {
-            const candidates = Array.from(document.querySelectorAll(
-                '#dialogue_popup .popup-button-ok, ' +
-                '.popup .popup-button-ok, ' +
-                'dialog[open] .popup-button-ok, ' +
-                'dialog[open] button.ok'
-            ));
+        const step = () => {
+            const dialogs = getVisibleOfficialDialogs();
 
-            for (const btn of candidates) {
-                if (!btn || btn.disabled) continue;
-                const rect = btn.getBoundingClientRect();
-                if (rect.width === 0 || rect.height === 0) continue;
-                const cs = window.getComputedStyle(btn);
-                if (cs.display === 'none' || cs.visibility === 'hidden') continue;
-
-                // 自作確認ダイアログ（#stj_confirm_dialog）のボタンは除外
-                if (btn.closest('#stj_confirm_dialog')) continue;
-
-                btn.click();
-                if (window.$) {
-                    try { window.$(btn).trigger('click'); } catch (_) {}
+            // すでに押下済みで、対象ダイアログが閉じた場合は完了
+            if (sawDialog) {
+                const stillOpen = targetDialog
+                    ? dialogs.includes(targetDialog)
+                    : dialogs.length > 0;
+                if (!stillOpen) {
+                    cleanup(true);
+                    return;
                 }
-                return true;
+                // 押下から 250ms 経っても閉じない場合は再押下または強制クローズ
+                if (Date.now() - lastClickedAt > 250) {
+                    const activeDlg = targetDialog || dialogs[0];
+                    const okBtn = activeDlg?.querySelector?.(
+                        '.popup-button-ok, button.ok, [data-result="ok"], .yes_button'
+                    );
+                    if (okBtn && Date.now() - lastClickedAt < 900) {
+                        triggerButtonPress(okBtn);
+                        lastClickedAt = Date.now();
+                    } else if (activeDlg) {
+                        forceCloseOfficialDialog(activeDlg);
+                        cleanup(true);
+                        return;
+                    }
+                }
             }
-            return false;
+
+            for (const dlg of dialogs) {
+                const okBtn = dlg.querySelector(
+                    '.popup-button-ok, button.ok, [data-result="ok"], .yes_button'
+                );
+                if (okBtn) {
+                    sawDialog = true;
+                    targetDialog = dlg;
+                    lastClickedAt = Date.now();
+                    triggerButtonPress(okBtn);
+                    return;
+                }
+            }
         };
 
-        if (tryClickOfficialOk()) {
-            finish(true);
-            return;
-        }
+        step();
+        if (settled) return;
 
-        observer = new MutationObserver(() => {
-            if (tryClickOfficialOk()) finish(true);
-        });
+        observer = new MutationObserver(() => step());
         observer.observe(document.body, {
             childList: true,
             subtree: true,
@@ -3371,12 +3451,14 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
             attributeFilter: ['class', 'style', 'open', 'hidden'],
         });
 
-        pollTimer = setInterval(() => {
-            if (tryClickOfficialOk()) finish(true);
-        }, 30);
+        pollTimer = setInterval(step, 16);
 
         timeoutId = setTimeout(() => {
-            finish(false);
+            const remaining = getVisibleOfficialDialogs();
+            for (const dlg of remaining) {
+                forceCloseOfficialDialog(dlg);
+            }
+            cleanup(sawDialog);
         }, timeoutMs);
     });
 
@@ -3387,32 +3469,26 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
             return;
         }
 
-        // 2. 自作ダイアログで「はい」が選ばれた時のみ、ST公式ゴミ箱ボタン押下＋公式ダイアログ自動「はい」を実行
+        // 2. 自作ダイアログで「はい」が選ばれた時のみ、ST公式ゴミ箱ボタン押下＋公式ダイアログ自動「はい」＆自動クローズを実行
         const entryHostEl = currentCellModal.querySelector('#stj_cell_modal_entry_host');
         const officialDeleteBtn =
             entryHostEl?.querySelector('.delete_entry_button') ||
             entryHostEl?._movedEntryEl?.querySelector('.delete_entry_button') ||
             document.querySelector(`#world_popup .world_entry[uid="${escapeCssAttrValue(uid)}"] .delete_entry_button`);
 
-        const officialConfirmPromise = waitAndAutoConfirmOfficialDialog(4000);
+        const officialConfirmPromise = autoConfirmAndCloseOfficialDialog(5000);
 
         if (officialDeleteBtn) {
-            officialDeleteBtn.click();
-            if (window.$) {
-                try { window.$(officialDeleteBtn).trigger('click'); } catch (_) {}
-            }
+            triggerButtonPress(officialDeleteBtn);
         }
 
         const officialPassed = await officialConfirmPromise;
 
-        // 公式ダイアログが開かなかった場合や公式ボタン経由で削除されなかった場合のフォールバック
-        if (!officialPassed) {
-            if (typeof stjDeleteWorldEntryDirect === 'function') {
-                await stjDeleteWorldEntryDirect(uid, kw);
-            }
+        if (!officialPassed && typeof stjDeleteWorldEntryDirect === 'function') {
+            await stjDeleteWorldEntryDirect(uid, kw);
         }
 
-        await new Promise(r => setTimeout(r, 250));
+        await new Promise(r => setTimeout(r, 200));
 
         if (kw) {
             _explicitlyDeletedKeys.add(kw);
