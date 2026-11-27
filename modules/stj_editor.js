@@ -2923,7 +2923,7 @@ async function exportUnifiedBundleJson(options = {}) {
                 let effectiveCharName = charName;
                 if (!effectiveCharName) {
                     for (let i = 0; i < 10; i++) {
-                        await new Promise(r => setTimeout(r, 20));
+                        await new Promise(r => setTimeout(r, 200));
                         effectiveCharName = detectCharacterNameFromDOM() || '';
                         if (effectiveCharName) {
                             if (nameEl) nameEl.textContent = effectiveCharName;
@@ -3608,7 +3608,7 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
             await stjDeleteWorldEntryDirect(uid, kw);
         }
 
-        await new Promise((r) => setTimeout(r, 200));
+        await new Promise((r) => setTimeout(r, 20));
         if (kw) _explicitlyDeletedKeys.add(kw);
 
         if (entryHostEl) {
