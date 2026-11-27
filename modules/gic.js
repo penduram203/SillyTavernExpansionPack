@@ -5106,28 +5106,91 @@ function getKeywordForImage(charName, fileName) {
     return null;
 }
 
+function resolveImageIdentityForOverlay(img, hostEl) {
+    let charName =
+        img?.dataset?.gicOrigChar ||
+        hostEl?.dataset?.gicOrigChar ||
+        hostEl?.dataset?.charName ||
+        getCurrentCharacterName() ||
+        null;
+
+    let fileName =
+        img?.dataset?.gicOrigFile ||
+        hostEl?.dataset?.gicOrigFile ||
+        hostEl?.dataset?.fileName ||
+        hostEl?.dataset?.file ||
+        null;
+
+    if (!fileName && img) {
+        const candidates = [
+            img.dataset?.gicPendingSrc,
+            img.dataset?.gicOrigSrc,
+            img.getAttribute('data-file'),
+            img.getAttribute('data-filename'),
+            img.getAttribute('src'),
+            img.src,
+        ].filter(Boolean);
+
+        for (const raw of candidates) {
+            if (typeof raw !== 'string') continue;
+            if (raw.startsWith('data:') || raw.startsWith('blob:')) continue;
+            const clean = raw.split('?')[0].split('#')[0];
+            const lastSeg = clean.split('/').pop();
+            if (!lastSeg) continue;
+            let decoded = lastSeg;
+            try { decoded = decodeURIComponent(lastSeg); } catch (e) { /* ignore */ }
+            const resolved = resolveOriginalFileName(decoded) || decoded;
+            if (/\.(png|jpe?g|gif|webp|avif|bmp|mp4|webm)$/i.test(resolved)) {
+                fileName = resolved;
+                break;
+            }
+        }
+    }
+
+    return { charName, fileName };
+}
+
 function updatePromptOverlay(panel) {
     if (!panel) return;
 
-    const img = panel.querySelector('img');
-    if (!img) { removePromptOverlay(panel); return; }
+    const img = panel.tagName === 'IMG' ? panel : panel.querySelector('img');
+    if (!img) {
+        removePromptOverlay(panel);
+        return;
+    }
 
-    const charName = img.dataset?.gicOrigChar;
-    const fileName = img.dataset?.gicOrigFile;
-    if (!charName || !fileName) { removePromptOverlay(panel); return; }
+    const { charName, fileName } = resolveImageIdentityForOverlay(img, panel);
+    if (!charName || !fileName) {
+        removePromptOverlay(panel);
+        return;
+    }
+
+    // 他のヘルパー（getKeywordForImage 等）と互換性を保つため dataset にも補完
+    if (!img.dataset.gicOrigChar) img.dataset.gicOrigChar = charName;
+    if (!img.dataset.gicOrigFile) img.dataset.gicOrigFile = fileName;
 
     const prompt = getImagePrompt(charName, fileName) || '';
     const negativePrompt = getImageNegativePrompt(charName, fileName) || '';
 
-    // どちらも無ければ何も表示しない
-    if (!prompt && !negativePrompt) { removePromptOverlay(panel); return; }
-
-    let overlay = panel.querySelector('.' + PROMPT_OVERLAY_CLASS);
-    if (!overlay) {
-        overlay = createPromptOverlay(panel);
+    if (!prompt && !negativePrompt) {
+        removePromptOverlay(panel);
+        return;
     }
 
-    // ── ポジティブパネル ──
+    // img が absolute 基準になれるよう、必要に応じて親コンテナを relative 化
+    const targetContainer = (panel.tagName === 'IMG' && panel.parentElement)
+        ? panel.parentElement
+        : panel;
+    const cs = window.getComputedStyle(targetContainer);
+    if (cs.position === 'static') {
+        targetContainer.style.position = 'relative';
+    }
+
+    let overlay = targetContainer.querySelector('.' + PROMPT_OVERLAY_CLASS);
+    if (!overlay) {
+        overlay = createPromptOverlay(targetContainer);
+    }
+
     const promptPanel = overlay.querySelector('.gic-prompt-panel');
     if (promptPanel) {
         if (prompt) {
@@ -5138,7 +5201,6 @@ function updatePromptOverlay(panel) {
         }
     }
 
-    // ── ネガティブパネル ──
     const negPanel = overlay.querySelector('.gic-negative-prompt-panel');
     if (negPanel) {
         if (negativePrompt) {
@@ -5149,7 +5211,6 @@ function updatePromptOverlay(panel) {
         }
     }
 
-    // ── コピーボタンの表示制御 ──
     const copyBtn = overlay.querySelector('.gic-prompt-copy');
     if (copyBtn) copyBtn.style.display = prompt ? '' : 'none';
 
@@ -5159,7 +5220,6 @@ function updatePromptOverlay(panel) {
     const copyBothBtn = overlay.querySelector('.gic-both-prompt-copy');
     if (copyBothBtn) copyBothBtn.style.display = (prompt || negativePrompt) ? '' : 'none';
 
-    // ── キーワード表示制御（既存） ──
     const keyword = getKeywordForImage(charName, fileName);
     const keywordBtn = overlay.querySelector('.gic-keyword-label-btn');
     const keywordText = overlay.querySelector('.gic-keyword-text');
@@ -8938,7 +8998,11 @@ function exposeGicApi() {
         lockUserInput,                                  // ★
         unlockUserInput,                                // ★
         isInputLocked: () => _inputLocked,              // ★
-
+        
+        // ★ 拡大ビュー用プロンプトオーバーレイ
+        updatePromptOverlay,
+        removePromptOverlay,
+        
         ensureThumbnailForVideo,
         generateVideoThumbnailBlob,
         videoFileToThumbName,
