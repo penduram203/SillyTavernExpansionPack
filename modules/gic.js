@@ -5106,12 +5106,6 @@ function getKeywordForImage(charName, fileName) {
     return null;
 }
 
-const GIC_OVERLAY_DBG = true;
-function gicOverlayLog(...args) {
-    if (!GIC_OVERLAY_DBG) return;
-    console.log('[GIC-OVERLAY-DBG]', ...args);
-}
-
 function resolveImageIdentityForOverlay(img, hostEl) {
     let charName =
         img?.dataset?.gicOrigChar ||
@@ -5153,58 +5147,37 @@ function resolveImageIdentityForOverlay(img, hostEl) {
         }
     }
 
-    gicOverlayLog('resolveImageIdentityForOverlay:', {
-        charName,
-        fileName,
-        imgSrc: img?.currentSrc || img?.src || null,
-        imgClasses: img?.className || null,
-        hostClasses: hostEl?.className || null,
-    });
-
     return { charName, fileName };
 }
 
 function updatePromptOverlay(panel) {
-    if (!panel) {
-        gicOverlayLog('updatePromptOverlay aborted: panel is null/undefined');
-        return;
-    }
+    if (!panel) return;
 
     const img = panel.tagName === 'IMG' ? panel : panel.querySelector('img');
     if (!img) {
-        gicOverlayLog('updatePromptOverlay: no <img> inside panel, removing overlay', panel);
         removePromptOverlay(panel);
         return;
     }
 
     const { charName, fileName } = resolveImageIdentityForOverlay(img, panel);
     if (!charName || !fileName) {
-        gicOverlayLog('updatePromptOverlay: missing charName or fileName', { charName, fileName, img });
         removePromptOverlay(panel);
         return;
     }
 
+    // 他のヘルパー（getKeywordForImage 等）と互換性を保つため dataset にも補完
     if (!img.dataset.gicOrigChar) img.dataset.gicOrigChar = charName;
     if (!img.dataset.gicOrigFile) img.dataset.gicOrigFile = fileName;
 
     const prompt = getImagePrompt(charName, fileName) || '';
     const negativePrompt = getImageNegativePrompt(charName, fileName) || '';
 
-    gicOverlayLog('prompt lookup result:', {
-        charName,
-        fileName,
-        hasPrompt: Boolean(prompt),
-        hasNegPrompt: Boolean(negativePrompt),
-        promptLen: prompt.length,
-        negLen: negativePrompt.length,
-    });
-
     if (!prompt && !negativePrompt) {
-        gicOverlayLog('updatePromptOverlay: both prompt and negativePrompt empty -> removePromptOverlay');
         removePromptOverlay(panel);
         return;
     }
 
+    // img が absolute 基準になれるよう、必要に応じて親コンテナを relative 化
     const targetContainer = (panel.tagName === 'IMG' && panel.parentElement)
         ? panel.parentElement
         : panel;
@@ -5214,40 +5187,8 @@ function updatePromptOverlay(panel) {
     }
 
     let overlay = targetContainer.querySelector('.' + PROMPT_OVERLAY_CLASS);
-    const createdNew = !overlay;
     if (!overlay) {
         overlay = createPromptOverlay(targetContainer);
-    }
-
-    // 親コンテナホバー時に確実に表示されるよう JS 側でもホバー状態を補助同期
-    if (!targetContainer.dataset.gicHoverBound) {
-        targetContainer.dataset.gicHoverBound = '1';
-        targetContainer.addEventListener('mouseenter', () => {
-            const ov = targetContainer.querySelector('.' + PROMPT_OVERLAY_CLASS);
-            gicOverlayLog('targetContainer mouseenter', {
-                containerClass: targetContainer.className,
-                overlayFound: Boolean(ov),
-            });
-            if (ov) {
-                ov.style.opacity = '1';
-                ov.style.pointerEvents = 'auto';
-            }
-        });
-        targetContainer.addEventListener('mouseleave', (e) => {
-            const ov = targetContainer.querySelector('.' + PROMPT_OVERLAY_CLASS);
-            const related = e.relatedTarget;
-            if (ov && related && ov.contains(related)) {
-                return;
-            }
-            gicOverlayLog('targetContainer mouseleave', {
-                containerClass: targetContainer.className,
-                relatedTarget: related?.className || related?.tagName || null,
-            });
-            if (ov) {
-                ov.style.opacity = '';
-                ov.style.pointerEvents = '';
-            }
-        });
     }
 
     const promptPanel = overlay.querySelector('.gic-prompt-panel');
@@ -5292,13 +5233,6 @@ function updatePromptOverlay(panel) {
         if (keywordBtn) keywordBtn.style.display = 'none';
         if (keywordText) keywordText.style.display = 'none';
     }
-
-    gicOverlayLog('updatePromptOverlay completed:', {
-        createdNew,
-        containerTag: targetContainer.tagName,
-        containerClass: targetContainer.className,
-        keyword: keyword || null,
-    });
 }
 
 function closePreviewElement(el) {
@@ -9485,81 +9419,39 @@ function initializeGIC() {
         }
     }, 2000);
 
-    // ★ セルモーダル／JSONモーダル内サムネイルクリック後の拡大画像にもプロンプトオーバーレイを表示
+    // ★ セルモーダル内サムネイルクリック後の拡大画像にもプロンプトオーバーレイを表示
     (function setupCellModalPromptOverlay() {
         if (window.__gicCellModalPromptOverlayInstalled) return;
         window.__gicCellModalPromptOverlayInstalled = true;
-        gicOverlayLog('setupCellModalPromptOverlay installed');
 
-        const findCandidateContainers = () => {
-            const containers = new Set();
+        const syncModalPreviews = () => {
+            const modal = document.getElementById('stj_cell_modal')
+                || document.querySelector('.stj-cell-modal');
+            if (!modal) return;
 
-            // 既知のセルモーダル系要素
-            document.querySelectorAll('#stj_cell_modal, .stj-cell-modal, [id*="cell"][id*="modal"], [class*="cell"][class*="modal"], [class*="lightbox"]').forEach((modal) => {
-                modal.querySelectorAll('img').forEach((img) => {
-                    const rect = img.getBoundingClientRect();
-                    const box =
-                        img.closest('.stj-cell-preview, .stj-image-preview, .stj-lightbox, [class*="preview"], [class*="lightbox"], [class*="zoom"], [class*="expand"]')
-                        || img.parentElement;
-                    if (box) containers.add(box);
-                });
-            });
+            modal.querySelectorAll('img').forEach((img) => {
+                // サムネイル一覧の小さな画像ではなく、拡大表示領域の画像を優先対象とする
+                const previewBox =
+                    img.closest('.stj-cell-preview, .stj-image-preview, .stj-lightbox, [class*="preview"], [class*="lightbox"]')
+                    || img.parentElement;
+                if (!previewBox) return;
 
-            // ギャラリー外の大きめの拡大表示画像（モーダルやライトボックス内の画像）
-            document.querySelectorAll('img').forEach((img) => {
-                if (img.closest('#gallery, .gallery, [id*="gallery"]')) return;
-                const rect = img.getBoundingClientRect();
-                const inModal = Boolean(img.closest('[role="dialog"], .modal, [class*="modal"], [class*="overlay"], [class*="viewer"], [class*="lightbox"]'));
-                const isLarge = rect.width >= 220 && rect.height >= 160;
-                if (inModal && isLarge) {
-                    containers.add(img.parentElement || img);
+                // クリックで開く拡大ビュー判定（またはプレビューコンテナ内）
+                const isExpanded =
+                    previewBox.matches('.stj-cell-preview, .stj-image-preview, .stj-lightbox, [class*="preview"], [class*="lightbox"]')
+                    || previewBox.dataset.expanded === 'true'
+                    || img.classList.contains('expanded')
+                    || img.closest('[data-expanded="true"]') !== null;
+
+                if (isExpanded) {
+                    updatePromptOverlay(previewBox);
                 }
-            });
-
-            return Array.from(containers);
-        };
-
-        const syncModalPreviews = (reason = 'mutation') => {
-            const list = findCandidateContainers();
-            gicOverlayLog('syncModalPreviews triggered:', { reason, candidateCount: list.length });
-            list.forEach((box) => {
-                updatePromptOverlay(box);
             });
         };
 
-        // クリック直後にもスキャン（拡大画像がDOM生成・表示されるタイミングを捕捉）
-        document.addEventListener('click', (e) => {
-            const target = e.target;
-            const img = target?.tagName === 'IMG' ? target : target?.closest?.('img');
-            if (img && !img.closest('#gallery, [id*="gallery"]')) {
-                gicOverlayLog('non-gallery <img> clicked:', {
-                    src: img.currentSrc || img.src,
-                    className: img.className,
-                    parentClass: img.parentElement?.className,
-                });
-            }
-            setTimeout(() => syncModalPreviews('click+50ms'), 50);
-            setTimeout(() => syncModalPreviews('click+250ms'), 250);
-        }, true);
-
-        let debounceTimer = null;
-        const mo = new MutationObserver((mutations) => {
-            let relevant = false;
-            for (const m of mutations) {
-                if (m.type === 'childList' && (m.addedNodes.length > 0 || m.removedNodes.length > 0)) {
-                    relevant = true;
-                    break;
-                }
-                if (m.type === 'attributes') {
-                    relevant = true;
-                    break;
-                }
-            }
-            if (!relevant) return;
-            clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(() => syncModalPreviews('mutation'), 80);
+        const mo = new MutationObserver(() => {
+            syncModalPreviews();
         });
-
         mo.observe(document.body, {
             childList: true,
             subtree: true,
