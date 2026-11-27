@@ -3003,7 +3003,7 @@ function ensureCellModalCommentHeaderEditor(modal) {
         textarea.setAttribute('placeholder', 'エントリータイトル/メモ');
         textarea.setAttribute(
             'style',
-            'width: 100%; font-size: calc(var(--exp-scale, 1) * -25px); min-height: 0px; resize: none; line-height: 1.3;'
+            'width: 100%; font-size: 25px; min-height: 0px; resize: none; line-height: 1.3;'
         );
 
         wrap.appendChild(textarea);
@@ -3030,7 +3030,7 @@ function ensureCellModalCommentHeaderEditor(modal) {
         textarea.setAttribute('placeholder', 'エントリータイトル/メモ');
         textarea.setAttribute(
             'style',
-            'width: 100%; font-size: calc(var(--exp-scale, 1) * -25px); min-height: 0px; resize: none; line-height: 1.3;'
+            'width: 100%; font-size: 25px; min-height: 0px; resize: none; line-height: 1.3;'
         );
     }
 
