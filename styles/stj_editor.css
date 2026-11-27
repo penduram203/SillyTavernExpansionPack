@@ -871,18 +871,6 @@
   background: #c53030 !important;
 }
 
-body.stj-suppress-official-dialog #dialogue_popup,
-body.stj-suppress-official-dialog #dialogue_popup_blocker,
-body.stj-suppress-official-dialog .popup:not(#stj_confirm_dialog):not(#stj_cell_modal):not(#stj_export_modal),
-body.stj-suppress-official-dialog .popup_blocker,
-body.stj-suppress-official-dialog dialog[open]:not(#stj_confirm_dialog):not(#stj_cell_modal):not(#stj_export_modal),
-body.stj-suppress-official-dialog [role="dialog"]:not(#stj_confirm_dialog):not(#stj_cell_modal):not(#stj_export_modal) {
-    display: none !important;
-    visibility: hidden !important;
-    opacity: 0 !important;
-    pointer-events: none !important;
-}
-
 /* ============================================================
    ★ セルポップアップ / 拡大表示中はギャラリーページャーを非表示・クリック無効
    ============================================================ */
