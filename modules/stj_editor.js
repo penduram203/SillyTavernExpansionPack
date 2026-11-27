@@ -3291,215 +3291,160 @@ modal.querySelector('#stj_cell_modal_delete').addEventListener('click', async (e
     const worldName = getCharacterWorldInfoName();
 
     if (!worldName || !uid) {
-        window.toastr?.warning?.('エントリ情報が取得できません');
+        window.toastr?.warning?.(_t('stj.delete.missing_info', 'エントリ情報が取得できません'));
         return;
     }
 
-    // 二重クリック防止
     const deleteButton = e.currentTarget;
     if (deleteButton.dataset.deleting === 'true') return;
     deleteButton.dataset.deleting = 'true';
 
-    try {
-        const ctx = getSTContext();
+    // 自作確認ダイアログ（「はい」で true、「いいえ」で false）
+    const askCustomConfirm = () => new Promise((resolve) => {
+        showDeleteConfirmDialog(
+            _t(
+                'stj.confirm.delete_entry_msg',
+                'この世界情報エントリを削除しますか？\n（「はい」を押すと確認後に削除を実行します）'
+            ),
+            () => resolve(true),
+            () => resolve(false)
+        );
+    });
 
-        // ==================================================
-        // 第1段階：自作確認ダイアログ
-        // ==================================================
+    // ST公式確認ダイアログの「はい / OK」ボタンを自動押下する待機処理
+    const waitAndAutoConfirmOfficialDialog = (timeoutMs = 4000) => new Promise((resolve) => {
+        let settled = false;
+        let pollTimer = null;
+        let timeoutId = null;
+        let observer = null;
 
-        let confirmed = false;
-
-        if (ctx?.Popup?.show?.confirm) {
-            // STのPopup APIを使って自作確認
-            confirmed = await ctx.Popup.show.confirm(
-                '削除確認',
-                'この世界情報エントリを削除しますか？'
-            );
-        } else {
-            // 旧APIへのフォールバック
-            const callGenericPopup =
-                window.callGenericPopup || ctx?.callGenericPopup;
-            const POPUP_TYPE = window.POPUP_TYPE || ctx?.POPUP_TYPE;
-            const POPUP_RESULT = window.POPUP_RESULT || ctx?.POPUP_RESULT;
-
-            if (
-                typeof callGenericPopup !== 'function' ||
-                POPUP_TYPE?.CONFIRM === undefined
-            ) {
-                window.toastr?.warning?.('確認ダイアログを表示できません');
-                return;
+        const finish = (ok) => {
+            if (settled) return;
+            settled = true;
+            if (observer) {
+                try { observer.disconnect(); } catch (_) {}
             }
+            if (pollTimer) clearInterval(pollTimer);
+            if (timeoutId) clearTimeout(timeoutId);
+            resolve(ok);
+        };
 
-            const result = await callGenericPopup(
-                'この世界情報エントリを削除しますか？',
-                POPUP_TYPE.CONFIRM
-            );
+        const tryClickOfficialOk = () => {
+            const candidates = Array.from(document.querySelectorAll(
+                '#dialogue_popup .popup-button-ok, ' +
+                '.popup .popup-button-ok, ' +
+                'dialog[open] .popup-button-ok, ' +
+                'dialog[open] button.ok'
+            ));
 
-            confirmed = POPUP_RESULT?.AFFIRMATIVE !== undefined
-                ? result === POPUP_RESULT.AFFIRMATIVE
-                : result === true;
-        }
+            for (const btn of candidates) {
+                if (!btn || btn.disabled) continue;
+                const rect = btn.getBoundingClientRect();
+                if (rect.width === 0 || rect.height === 0) continue;
+                const cs = window.getComputedStyle(btn);
+                if (cs.display === 'none' || cs.visibility === 'hidden') continue;
 
-        // 「いいえ」なら完全に終了
-        if (confirmed !== true) {
-            console.log(
-                '[STJ Editor] 自作確認ダイアログ：削除キャンセル'
-            );
+                // 自作確認ダイアログ（#stj_confirm_dialog）のボタンは除外
+                if (btn.closest('#stj_confirm_dialog')) continue;
+
+                btn.click();
+                if (window.$) {
+                    try { window.$(btn).trigger('click'); } catch (_) {}
+                }
+                return true;
+            }
+            return false;
+        };
+
+        if (tryClickOfficialOk()) {
+            finish(true);
             return;
         }
 
-        console.log(
-            '[STJ Editor] 自作確認ダイアログ：削除承認'
-        );
-
-        // ==================================================
-        // 第2段階：ST公式ゴミ箱ボタンを取得
-        // ==================================================
-
-        const entryHostEl = currentCellModal.querySelector(
-            '#stj_cell_modal_entry_host'
-        );
-
-        const officialDeleteButton =
-            entryHostEl?.querySelector('.delete_entry_button')
-            || entryHostEl?._movedEntryEl?.querySelector(
-                '.delete_entry_button'
-            );
-
-        if (!officialDeleteButton) {
-            window.toastr?.warning?.(
-                'ST公式の削除ボタンが見つかりません'
-            );
-            return;
-        }
-
-        // ==================================================
-        // 第3段階：ST公式確認ダイアログを監視
-        //         表示された瞬間に「はい」を自動クリック
-        // ==================================================
-
-        const officialConfirmPromise = new Promise((resolve) => {
-            let finished = false;
-
-            const observer = new MutationObserver(() => {
-                if (finished) return;
-
-                // ST公式ダイアログの肯定ボタン
-                const okButton = document.querySelector(
-                    '#dialogue_popup .popup-button-ok'
-                );
-
-                if (!okButton) return;
-
-                // 非表示状態のボタンは無視
-                if (okButton.getClientRects().length === 0) return;
-                if (okButton.disabled) return;
-
-                finished = true;
-                observer.disconnect();
-                clearTimeout(timeoutId);
-
-                console.log(
-                    '[STJ Editor] ST公式確認ダイアログを検出。「はい」を自動クリック'
-                );
-
-                // 最速でST公式の「はい」を実行
-                okButton.click();
-
-                resolve(true);
-            });
-
-            // 公式ダイアログの生成・表示を監視
-            observer.observe(document.body, {
-                childList: true,
-                subtree: true,
-                attributes: true,
-                attributeFilter: [
-                    'class',
-                    'style',
-                    'hidden'
-                ]
-            });
-
-            // 公式ダイアログが表示されなかった場合
-            const timeoutId = setTimeout(() => {
-                if (finished) return;
-
-                finished = true;
-                observer.disconnect();
-
-                resolve(false);
-            }, 10000);
+        observer = new MutationObserver(() => {
+            if (tryClickOfficialOk()) finish(true);
+        });
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['class', 'style', 'open', 'hidden'],
         });
 
-        // ST公式の削除ボタンを実行
-        // ここで公式確認ダイアログが開く
-        officialDeleteButton.click();
+        pollTimer = setInterval(() => {
+            if (tryClickOfficialOk()) finish(true);
+        }, 30);
 
-        // 公式ダイアログの「はい」が押されるまで待機
-        const officialAccepted = await officialConfirmPromise;
+        timeoutId = setTimeout(() => {
+            finish(false);
+        }, timeoutMs);
+    });
 
-        if (!officialAccepted) {
-            console.error(
-                '[STJ Editor] ST公式確認ダイアログを検出できませんでした'
-            );
-
-            window.toastr?.warning?.(
-                'ST公式確認ダイアログを検出できませんでした'
-            );
+    try {
+        // 1. まず自作確認ダイアログを表示
+        const confirmed = await askCustomConfirm();
+        if (!confirmed) {
             return;
         }
 
-        // ==================================================
-        // 第4段階：削除後のJSON編集画面を同期
-        // ==================================================
+        // 2. 自作ダイアログで「はい」が選ばれた時のみ、ST公式ゴミ箱ボタン押下＋公式ダイアログ自動「はい」を実行
+        const entryHostEl = currentCellModal.querySelector('#stj_cell_modal_entry_host');
+        const officialDeleteBtn =
+            entryHostEl?.querySelector('.delete_entry_button') ||
+            entryHostEl?._movedEntryEl?.querySelector('.delete_entry_button') ||
+            document.querySelector(`#world_popup .world_entry[uid="${escapeCssAttrValue(uid)}"] .delete_entry_button`);
 
-        // 公式削除処理がDOMに反映されるまで少し待機
-        await new Promise(resolve => setTimeout(resolve, 200));
+        const officialConfirmPromise = waitAndAutoConfirmOfficialDialog(4000);
 
-        // 削除対象を復元しないようにキーワードを記録
+        if (officialDeleteBtn) {
+            officialDeleteBtn.click();
+            if (window.$) {
+                try { window.$(officialDeleteBtn).trigger('click'); } catch (_) {}
+            }
+        }
+
+        const officialPassed = await officialConfirmPromise;
+
+        // 公式ダイアログが開かなかった場合や公式ボタン経由で削除されなかった場合のフォールバック
+        if (!officialPassed) {
+            if (typeof stjDeleteWorldEntryDirect === 'function') {
+                await stjDeleteWorldEntryDirect(uid, kw);
+            }
+        }
+
+        await new Promise(r => setTimeout(r, 250));
+
         if (kw) {
             _explicitlyDeletedKeys.add(kw);
         }
 
-        // JSON編集ツリーからセルを削除
-        cell.remove();
-
-        // モーダル内の移動済みDOMを誤って復元しないようにする
         if (entryHostEl) {
             delete entryHostEl._movedEntryEl;
             delete entryHostEl._sourceEntryEl;
             delete entryHostEl._entryPlaceholder;
             delete entryHostEl._syncEntry;
+            entryHostEl.innerHTML = '';
+            entryHostEl.style.display = 'none';
         }
 
-        // モーダルを閉じる
+        cell.remove();
         closeCellModal(false);
 
-        // 最新のロアブック情報からJSON編集画面を同期
         const charName =
-            document.getElementById('stj_char_name_display')
-                ?.textContent || '';
+            document.getElementById('stj_char_name_display')?.textContent?.trim() ||
+            detectCharacterNameFromDOM() ||
+            '';
 
         if (charName) {
             await syncEditorWithLatestLorebook(charName);
-
             scheduleUnifiedBundleExport(charName, 800);
         }
 
-        console.log(
-            '[STJ Editor] ST公式削除およびJSON編集画面同期完了',
-            { worldName, uid, keyword: kw }
-        );
-
+        runLiveTest();
+        _stjScheduleTreeLayout();
     } catch (err) {
-        console.error(
-            '[STJ Editor] 削除処理エラー:',
-            err
-        );
-
-        window.toastr?.error?.('削除処理に失敗しました');
-
+        console.error('[STJ Editor] セルモーダル削除エラー:', err);
+        window.toastr?.error?.(_t('stj.delete.error', '削除処理に失敗しました'));
     } finally {
         deleteButton.dataset.deleting = 'false';
     }
