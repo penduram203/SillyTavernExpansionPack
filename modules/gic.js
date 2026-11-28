@@ -4872,6 +4872,7 @@ async function copyPromptToClipboard(text) {
 }
 
 function createPromptOverlay(container) {
+    if (!container) return null;
     const existing = container.querySelector('.' + PROMPT_OVERLAY_CLASS);
     if (existing) return existing;
 
@@ -5148,13 +5149,33 @@ function bindOverlayButton(btn, fn) {
     if (!btn || btn.dataset.gicBound === '1') return;
     btn.dataset.gicBound = '1';
 
-    btn.addEventListener('pointerdown', (e) => {
+    let lastRunAt = 0;
+
+    const stopOnly = (e) => {
         e.stopPropagation();
-    }, true);
+        if (typeof e.stopImmediatePropagation === 'function') {
+            e.stopImmediatePropagation();
+        }
+    };
+
+    btn.addEventListener('pointerdown', stopOnly, true);
+    btn.addEventListener('mousedown', stopOnly, true);
 
     btn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
+        if (typeof e.stopImmediatePropagation === 'function') {
+            e.stopImmediatePropagation();
+        }
+
+        const now = Date.now();
+        if (now - lastRunAt < 250) {
+            gicOverlayLog('button-click-debounced', { className: btn.className }, true);
+            return;
+        }
+        lastRunAt = now;
+
+        gicOverlayLog('button-click-run', { className: btn.className }, true);
         fn();
     }, true);
 }
