@@ -5349,7 +5349,7 @@ function gicOverlayLog(key, payload, force = false, minIntervalMs = GIC_DBG_THRO
     }
 
     __gicDbgLastByKey.set(key, { at: now, raw: rawPayload });
-    console.log('[GIC-OVERLAY-DBG]', key, payload ?? '');
+    //console.log('[GIC-OVERLAY-DBG]', key, payload ?? '');
 }
 
 function resolveImageIdentityForOverlay(img, hostEl) {
