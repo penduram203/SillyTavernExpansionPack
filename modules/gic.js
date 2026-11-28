@@ -5151,33 +5151,25 @@ function bindOverlayButton(btn, fn) {
 
     let lastRunAt = 0;
 
-    const stopOnly = (e) => {
-        e.stopPropagation();
-        if (typeof e.stopImmediatePropagation === 'function') {
-            e.stopImmediatePropagation();
+    const triggerOnce = (source, e) => {
+        if (e) {
+            e.preventDefault();
+            e.stopPropagation();
         }
+        const now = Date.now();
+        gicOverlayLog('btn-event', { source, className: btn.className, dt: now - lastRunAt }, true);
+        if (now - lastRunAt < 300) return;
+        lastRunAt = now;
+        fn();
     };
 
-    btn.addEventListener('pointerdown', stopOnly, true);
-    btn.addEventListener('mousedown', stopOnly, true);
-
-    btn.addEventListener('click', (e) => {
-        e.preventDefault();
+    btn.addEventListener('pointerdown', (e) => {
         e.stopPropagation();
-        if (typeof e.stopImmediatePropagation === 'function') {
-            e.stopImmediatePropagation();
-        }
-
-        const now = Date.now();
-        if (now - lastRunAt < 250) {
-            gicOverlayLog('button-click-debounced', { className: btn.className }, true);
-            return;
-        }
-        lastRunAt = now;
-
-        gicOverlayLog('button-click-run', { className: btn.className }, true);
-        fn();
+        gicOverlayLog('btn-event', { source: 'pointerdown', className: btn.className }, true);
     }, true);
+
+    btn.addEventListener('pointerup', (e) => triggerOnce('pointerup', e), true);
+    btn.addEventListener('click', (e) => triggerOnce('click', e), true);
 }
 
 function findActiveTemplateInputsInModal(overlayEl) {
@@ -9738,32 +9730,36 @@ function initializeGIC() {
         window.__gicCellModalPromptOverlayInstalled = true;
         gicOverlayLog('setupCellModalPromptOverlay installed');
 
-        const findCandidateContainers = () => {
+        function findCandidateContainers() {
             const containers = new Set();
 
-            // 既知のセルモーダル系要素
-            document.querySelectorAll('#stj_cell_modal, .stj-cell-modal, [id*="cell"][id*="modal"], [class*="cell"][class*="modal"], [class*="lightbox"]').forEach((modal) => {
+            const modals = document.querySelectorAll(
+                '#stj_cell_modal, .stj-cell-modal, [id*="cell"][id*="modal"], [class*="cell"][class*="modal"], [class*="lightbox"]'
+            );
+
+            modals.forEach((modal) => {
+                const mRect = modal.getBoundingClientRect();
+                if (mRect.width === 0 || mRect.height === 0) return;
+
                 modal.querySelectorAll('img').forEach((img) => {
                     const rect = img.getBoundingClientRect();
+                    if (rect.width < 120 || rect.height < 120) return;
                     const box =
-                        img.closest('.stj-cell-preview, .stj-image-preview, .stj-lightbox, [class*="preview"], [class*="lightbox"], [class*="zoom"], [class*="expand"]')
+                        img.closest('.stj-media-zoom, .stj-cell-modal-slot, .stj-cell-preview, .stj-image-preview, [class*="preview"], [class*="zoom"]')
                         || img.parentElement;
                     if (box) containers.add(box);
                 });
             });
 
-            // ギャラリー外の大きめの拡大表示画像（モーダルやライトボックス内の画像）
-            document.querySelectorAll('img').forEach((img) => {
-                if (img.closest('#gallery, .gallery, [id*="gallery"]')) return;
-                const rect = img.getBoundingClientRect();
-                const inModal = Boolean(img.closest('[role="dialog"], .modal, [class*="modal"], [class*="overlay"], [class*="viewer"], [class*="lightbox"]'));
-                const isLarge = rect.width >= 220 && rect.height >= 160;
-                if (inModal && isLarge) {
-                    containers.add(img.parentElement || img);
-                }
-            });
-
             return Array.from(containers);
+        }
+
+        const syncModalPreviews = (reason = 'mutation') => {
+            const list = findCandidateContainers();
+            gicOverlayLog('syncModalPreviews triggered:', { reason, candidateCount: list.length });
+            list.forEach((box) => {
+                updatePromptOverlay(box);
+            });
         };
 
         const syncModalPreviews = (reason = 'mutation') => {
