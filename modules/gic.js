@@ -1691,24 +1691,35 @@ function adjustSplitImageGap(container, overlay) {
     mediaEl.style.setProperty('margin-right', 'auto', 'important');
 
     requestAnimationFrame(() => {
+        const hostRect = container.getBoundingClientRect();
         const ovRect = overlay.getBoundingClientRect();
         const imgRect = mediaEl.getBoundingClientRect();
-        if (!ovRect.width || !imgRect.width) return;
+        if (!hostRect.width || !ovRect.width || !imgRect.height) return;
 
-        const originalGap = imgRect.left - ovRect.right;
-        if (originalGap <= 0) return;
+        const rightAreaWidth = Math.max(0, hostRect.width - ovRect.width);
 
-        const targetGap = originalGap * 0.25;
-        const shiftPx = Math.max(0, Math.round(originalGap - targetGap));
+        // 実描画幅を取得（width: auto なら imgRect.width がそのまま実幅、念のため自然比率からも算出）
+        let renderedWidth = imgRect.width;
+        const natW = mediaEl.naturalWidth || mediaEl.videoWidth || 0;
+        const natH = mediaEl.naturalHeight || mediaEl.videoHeight || 0;
+        if (natW > 0 && natH > 0) {
+            const fitByHeight = imgRect.height * (natW / natH);
+            renderedWidth = Math.min(rightAreaWidth, fitByHeight);
+        }
 
-        mediaEl.style.setProperty('margin-left', `${shiftPx}px`, 'important');
+        // 本来中央配置だった場合の左側の隙間
+        const originalGap = Math.max(0, (rightAreaWidth - renderedWidth) / 2);
+        const targetGap = Math.round(originalGap * 0.25);
+
+        mediaEl.style.setProperty('margin-left', `${targetGap}px`, 'important');
         mediaEl.style.setProperty('margin-right', 'auto', 'important');
 
         gicOverlayLog('split-gap-adjusted', {
+            rightAreaWidth: Math.round(rightAreaWidth),
+            renderedWidth: Math.round(renderedWidth),
             originalGap: Math.round(originalGap),
-            targetGap: Math.round(targetGap),
-            shiftPx,
-        });
+            targetGap,
+        }, true);
     });
 }
 
@@ -1741,7 +1752,7 @@ function injectSplitOverlayStyle() {
         .gic-split-host {
             display: flex !important;
             flex-direction: row !important;
-            align-items: stretch !important;
+            align-items: center !important;
             justify-content: flex-start !important;
             gap: 0 !important;
             overflow: hidden !important;
@@ -1751,13 +1762,15 @@ function injectSplitOverlayStyle() {
         .gic-split-host > canvas,
         .gic-split-host > .stj-media-zoom-content {
             order: 2 !important;
-            flex: 1 1 80% !important;
-            width: 80% !important;
+            flex: 0 1 auto !important;
+            width: auto !important;
             max-width: 80% !important;
-            height: 100% !important;
+            height: auto !important;
             max-height: 100% !important;
             object-fit: contain !important;
-            margin: 0 !important;
+            margin-top: 0 !important;
+            margin-bottom: 0 !important;
+            margin-right: auto !important;
             position: relative !important;
         }
         .gic-split-host > .gic-prompt-overlay {
