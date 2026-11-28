@@ -4959,46 +4959,37 @@ function createPromptOverlay(container) {
         return btn;
     };
 
+    // 1. 4つのボタン要素を生成
     const promptCopyBtn = makeBtn('gic-prompt-copy', 'プロンプトをコピー');
     const negCopyBtn = makeBtn('gic-negative-prompt-copy', 'ネガティブをコピー');
     const bothCopyBtn = makeBtn('gic-both-prompt-copy', '両方コピー');
     const reuseBtn = makeBtn('gic-reuse-prompt-btn', '再利用', 'rgb(45, 95, 135)');
 
-    const bindAction = (btn, handler) => {
-        btn.addEventListener('click', async (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            gicOverlayLog('overlay button clicked:', {
-                className: btn.className,
-                label: btn.textContent,
-            });
-            await handler();
-        }, true);
-    };
-
-    bindAction(promptCopyBtn, async () => {
+    // 2. 各ボタンに bindOverlayButton でクリック処理を登録
+    bindOverlayButton(promptCopyBtn, () => {
         const p = overlay.dataset.gicPrompt || '';
-        await copyTextWithFeedback(p, 'プロンプトをコピーしました');
+        copyTextWithFeedback(p, 'プロンプトをコピーしました');
     });
 
-    bindAction(negCopyBtn, async () => {
+    bindOverlayButton(negCopyBtn, () => {
         const n = overlay.dataset.gicNegPrompt || '';
-        await copyTextWithFeedback(n, 'ネガティブプロンプトをコピーしました');
+        copyTextWithFeedback(n, 'ネガティブプロンプトをコピーしました');
     });
 
-    bindAction(bothCopyBtn, async () => {
+    bindOverlayButton(bothCopyBtn, () => {
         const p = overlay.dataset.gicPrompt || '';
         const n = overlay.dataset.gicNegPrompt || '';
         const combined = [p, n].filter(Boolean).join('\n\n[Negative Prompt]\n');
-        await copyTextWithFeedback(combined, 'プロンプトとネガティブをコピーしました');
+        copyTextWithFeedback(combined, 'プロンプトとネガティブをコピーしました');
     });
 
-    bindAction(reuseBtn, async () => {
+    bindOverlayButton(reuseBtn, () => {
         const p = overlay.dataset.gicPrompt || '';
         const n = overlay.dataset.gicNegPrompt || '';
         applyReusePromptToModal(overlay, p, n);
     });
 
+    // 3. copyRow に順番に追加
     copyRow.appendChild(promptCopyBtn);
     copyRow.appendChild(negCopyBtn);
     copyRow.appendChild(bothCopyBtn);
@@ -5051,9 +5042,7 @@ function createPromptOverlay(container) {
     overlay.appendChild(negPanel);
 
     container.appendChild(overlay);
-    gicOverlayLog('createPromptOverlay appended:', {
-        containerClass: container.className || container.tagName,
-    });
+    gicOverlayLog('create-overlay', { containerClass: container.className || container.tagName }, true);
     return overlay;
 }
 
@@ -5062,54 +5051,53 @@ function removePromptOverlay(panel) {
     panel.querySelectorAll('.' + PROMPT_OVERLAY_CLASS).forEach(el => el.remove());
 }
 
-async function copyTextWithFeedback(text, toastMessage) {
+async function copyTextWithFeedback(text, successMessage) {
     const value = String(text ?? '');
-    gicOverlayLog('copyTextWithFeedback called:', {
-        toastMessage,
-        length: value.length,
-    });
+    gicOverlayLog('copy-click', { len: value.length, msg: successMessage }, true);
+
+    if (!value) {
+        showGicCopyToast('コピー対象のプロンプトが空です', true);
+        return false;
+    }
 
     let copied = false;
-    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function' && window.isSecureContext) {
         try {
             await navigator.clipboard.writeText(value);
             copied = true;
-            gicOverlayLog('clipboard.writeText succeeded');
-        } catch (err) {
-            gicOverlayLog('clipboard.writeText failed, fallback to execCommand:', err);
+        } catch (_) {
+            copied = false;
         }
     }
 
     if (!copied) {
+        const ta = document.createElement('textarea');
+        ta.value = value;
+        ta.setAttribute('aria-hidden', 'true');
+        ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;';
+        document.body.appendChild(ta);
         try {
-            const ta = document.createElement('textarea');
-            ta.value = value;
-            ta.setAttribute('readonly', '');
-            ta.style.position = 'fixed';
-            ta.style.top = '-9999px';
-            ta.style.left = '-9999px';
-            document.body.appendChild(ta);
-            ta.focus();
+            ta.focus({ preventScroll: true });
             ta.select();
             ta.setSelectionRange(0, ta.value.length);
-            copied = document.execCommand('copy');
-            document.body.removeChild(ta);
-            gicOverlayLog('execCommand(copy) result:', copied);
-        } catch (err) {
-            gicOverlayLog('execCommand(copy) error:', err);
+            copied = Boolean(document.execCommand('copy'));
+        } catch (_) {
+            copied = false;
+        } finally {
+            ta.remove();
         }
     }
 
+    gicOverlayLog('copy-result', { copied, len: value.length }, true);
     showGicCopyToast(
-        copied ? toastMessage : 'クリップボードへのコピーに失敗しました',
+        copied ? successMessage : 'クリップボードにコピーできませんでした',
         !copied
     );
     return copied;
 }
 
 function showGicCopyToast(message, isError = false) {
-    gicOverlayLog('showGicCopyToast:', { message, isError });
-
     let toast = document.getElementById('gic-prompt-copy-toast');
     if (!toast) {
         toast = document.createElement('div');
@@ -5126,27 +5114,49 @@ function showGicCopyToast(message, isError = false) {
             'color: #ffffff;',
             'pointer-events: none;',
             'box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);',
-            'transition: opacity 0.2s ease, transform 0.2s ease;',
+            'transition: opacity 0.2s ease;',
             'opacity: 0;',
-            'transform: translateY(8px);',
         ].join(' ');
         document.body.appendChild(toast);
     }
 
     toast.textContent = message;
-    toast.style.background = isError ? 'rgba(160, 25, 25, 0.95)' : 'rgba(30, 30, 30, 0.95)';
-    toast.style.border = isError ? '1px solid #ff7777' : '1px solid #66aa66';
-
-    requestAnimationFrame(() => {
-        toast.style.opacity = '1';
-        toast.style.transform = 'translateY(0)';
-    });
+    toast.style.background = isError ? 'rgba(165, 25, 25, 0.96)' : 'rgba(28, 28, 28, 0.96)';
+    toast.style.border = isError ? '1px solid #ff7b7b' : '1px solid #69b869';
+    toast.style.opacity = '1';
 
     clearTimeout(toast._hideTimer);
     toast._hideTimer = setTimeout(() => {
         toast.style.opacity = '0';
-        toast.style.transform = 'translateY(8px)';
     }, 2200);
+}
+
+function isVisibleEditableField(el) {
+    if (!el || el.disabled || el.readOnly) return false;
+    if (el.closest('.' + PROMPT_OVERLAY_CLASS)) return false;
+    const rect = el.getBoundingClientRect();
+    const cs = window.getComputedStyle(el);
+    return (
+        rect.width > 0 &&
+        rect.height > 0 &&
+        cs.display !== 'none' &&
+        cs.visibility !== 'hidden'
+    );
+}
+
+function bindOverlayButton(btn, fn) {
+    if (!btn || btn.dataset.gicBound === '1') return;
+    btn.dataset.gicBound = '1';
+
+    btn.addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+    }, true);
+
+    btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        fn();
+    }, true);
 }
 
 function findActiveTemplateInputsInModal(overlayEl) {
@@ -5154,133 +5164,111 @@ function findActiveTemplateInputsInModal(overlayEl) {
         overlayEl?.closest('#stj_cell_modal, .stj-cell-modal, [id*="cell"][id*="modal"], [class*="cell"][class*="modal"], [role="dialog"]')
         || document.getElementById('stj_cell_modal')
         || document.querySelector('.stj-cell-modal')
-        || document;
+        || document.body;
 
-    // 1. 現在アクティブ／選択中の template ブロックを優先探索
-    const activeTemplateScope =
-        modal.querySelector('.stj-template-item.active, .stj-template-item.selected, [data-active="true"], [aria-selected="true"]')
-        || modal;
+    // 現在選択中・アクティブなテンプレート領域があれば優先する
+    const activeScope =
+        modal.querySelector(
+            '.stj-template-item.active, .stj-template-item.selected, .template-item.active, .template-item.selected, [data-active="true"], [aria-selected="true"]'
+        ) || modal;
 
-    const collectFields = (root) => {
-        const fields = Array.from(root.querySelectorAll('textarea, input[type="text"]'));
-        return fields.filter((el) => {
-            if (el.closest('.' + PROMPT_OVERLAY_CLASS)) return false;
-            const style = window.getComputedStyle(el);
-            return style.display !== 'none' && style.visibility !== 'hidden';
-        });
-    };
+    let fields = Array.from(activeScope.querySelectorAll('textarea, input[type="text"], input:not([type])'))
+        .filter(isVisibleEditableField);
 
-    let candidates = collectFields(activeTemplateScope);
-    if (candidates.length < 2 && activeTemplateScope !== modal) {
-        candidates = collectFields(modal);
+    if (fields.length === 0 && activeScope !== modal) {
+        fields = Array.from(modal.querySelectorAll('textarea, input[type="text"], input:not([type])'))
+            .filter(isVisibleEditableField);
     }
 
-    const matchField = (list, patterns) => {
-        for (const el of list) {
-            const meta = [
-                el.id || '',
-                el.name || '',
-                el.className || '',
-                el.placeholder || '',
-                el.getAttribute('aria-label') || '',
-                el.getAttribute('data-field') || '',
-                el.getAttribute('data-role') || '',
-                el.closest('[data-field], [class*="prompt"], [class*="negative"]')?.className || '',
-                el.closest('[data-field], [class*="prompt"], [class*="negative"]')?.getAttribute('data-field') || '',
-                el.parentElement?.textContent?.slice(0, 40) || '',
-            ].join(' ').toLowerCase();
+    const scoreNegative = (el) => {
+        const text = [
+            el.id, el.name, el.className, el.placeholder,
+            el.getAttribute('aria-label'), el.getAttribute('data-field'),
+            el.closest('[data-field], [class*="prompt"], [class*="neg"]')?.className,
+            el.closest('[data-field], [class*="prompt"], [class*="neg"]')?.getAttribute('data-field'),
+            el.closest('.form-group, .field, .row, div')?.querySelector('label')?.textContent,
+        ].filter(Boolean).join(' ').toLowerCase();
 
-            if (patterns.some((re) => re.test(meta))) {
-                return el;
-            }
-        }
-        return null;
+        if (/negative|neg[-_]?prompt|ネガティブ/.test(text)) return 10;
+        return 0;
     };
 
-    const negativeInput = matchField(candidates, [
-        /negative/,
-        /neg[-_]?prompt/,
-        /ネガティブ/,
-    ]);
+    const scorePositive = (el) => {
+        const text = [
+            el.id, el.name, el.className, el.placeholder,
+            el.getAttribute('aria-label'), el.getAttribute('data-field'),
+            el.closest('[data-field], [class*="prompt"], [class*="pos"]')?.className,
+            el.closest('[data-field], [class*="prompt"], [class*="pos"]')?.getAttribute('data-field'),
+            el.closest('.form-group, .field, .row, div')?.querySelector('label')?.textContent,
+        ].filter(Boolean).join(' ').toLowerCase();
 
-    let positiveInput = matchField(candidates.filter((el) => el !== negativeInput), [
-        /\bprompt\b/,
-        /pos[-_]?prompt/,
-        /positive/,
-        /プロンプト/,
-    ]);
+        if (/negative|neg[-_]?prompt|ネガティブ/.test(text)) return -10;
+        if (/\bprompt\b|pos[-_]?prompt|positive|プロンプト/.test(text)) return 10;
+        if (el.tagName === 'TEXTAREA') return 5;
+        return 1;
+    };
 
-    // ラベル／属性で判別できない場合のフォールバック（最初の2つのテキスト欄を順にポジティブ／ネガティブとみなす）
-    if (!positiveInput && candidates.length >= 1 && candidates[0] !== negativeInput) {
-        positiveInput = candidates[0];
-    }
+    const sortedNeg = [...fields].sort((a, b) => scoreNegative(b) - scoreNegative(a));
+    const negativeInput = sortedNeg[0] && scoreNegative(sortedNeg[0]) > 0 ? sortedNeg[0] : null;
+
+    const posCandidates = fields.filter((el) => el !== negativeInput);
+    const sortedPos = [...posCandidates].sort((a, b) => scorePositive(b) - scorePositive(a));
+    const positiveInput = sortedPos[0] || null;
+
     const fallbackNeg = !negativeInput
-        ? candidates.find((el) => el !== positiveInput) || null
+        ? fields.find((el) => el !== positiveInput && el.tagName === 'TEXTAREA') || null
         : negativeInput;
 
-    gicOverlayLog('findActiveTemplateInputsInModal:', {
-        modalId: modal.id || modal.className || 'document',
-        candidateCount: candidates.length,
-        hasPositive: Boolean(positiveInput),
-        hasNegative: Boolean(fallbackNeg),
-        positiveId: positiveInput?.id || positiveInput?.className || null,
-        negativeId: fallbackNeg?.id || fallbackNeg?.className || null,
-    });
+    gicOverlayLog('reuse-targets', {
+        fieldsFound: fields.length,
+        posTag: positiveInput?.tagName || null,
+        posId: positiveInput?.id || positiveInput?.name || positiveInput?.className || null,
+        negTag: fallbackNeg?.tagName || null,
+        negId: fallbackNeg?.id || fallbackNeg?.name || fallbackNeg?.className || null,
+    }, true);
 
-    return {
-        positiveInput,
-        negativeInput: fallbackNeg,
-    };
+    return { positiveInput, negativeInput: fallbackNeg };
 }
 
-function overwriteFieldValue(inputEl, newValue) {
-    if (!inputEl) return false;
-    const text = String(newValue ?? '');
+function overwriteFieldValue(el, nextValue) {
+    if (!el) return false;
+    const val = String(nextValue ?? '');
+    const proto = el.tagName === 'TEXTAREA'
+        ? HTMLTextAreaElement.prototype
+        : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
 
-    // 既存値を完全に空にしてから新しい値をセット（元の文字列を残さない）
-    const proto = inputEl.tagName === 'TEXTAREA'
-        ? window.HTMLTextAreaElement.prototype
-        : window.HTMLInputElement.prototype;
-    const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
-
-    if (descriptor && typeof descriptor.set === 'function') {
-        descriptor.set.call(inputEl, '');
-        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-        descriptor.set.call(inputEl, text);
+    el.focus({ preventScroll: true });
+    if (setter) {
+        setter.call(el, '');
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        setter.call(el, val);
     } else {
-        inputEl.value = '';
-        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-        inputEl.value = text;
+        el.value = '';
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.value = val;
     }
-
-    inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-    inputEl.dispatchEvent(new Event('change', { bubbles: true }));
-    gicOverlayLog('overwriteFieldValue applied:', {
-        tag: inputEl.tagName,
-        id: inputEl.id || null,
-        className: inputEl.className || null,
-        newLen: text.length,
-    });
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
 }
 
 function applyReusePromptToModal(overlayEl, prompt, negativePrompt) {
     const { positiveInput, negativeInput } = findActiveTemplateInputsInModal(overlayEl);
     if (!positiveInput && !negativeInput) {
-        gicOverlayLog('applyReusePromptToModal: target fields not found');
         showGicCopyToast('反映先のプロンプト欄が見つかりませんでした', true);
         return false;
     }
 
-    const posUpdated = positiveInput ? overwriteFieldValue(positiveInput, prompt || '') : false;
-    const negUpdated = negativeInput ? overwriteFieldValue(negativeInput, negativePrompt || '') : false;
+    const okPos = positiveInput ? overwriteFieldValue(positiveInput, prompt || '') : false;
+    const okNeg = negativeInput ? overwriteFieldValue(negativeInput, negativePrompt || '') : false;
 
-    gicOverlayLog('applyReusePromptToModal result:', { posUpdated, negUpdated });
-    if (posUpdated || negUpdated) {
+    gicOverlayLog('reuse-applied', { okPos, okNeg }, true);
+    if (okPos || okNeg) {
         showGicCopyToast('現在のテンプレートに再利用しました');
         return true;
     }
-    showGicCopyToast('プロンプト欄への反映に失敗しました', true);
+    showGicCopyToast('テンプレート欄への反映に失敗しました', true);
     return false;
 }
 
@@ -5329,9 +5317,21 @@ function getKeywordForImage(charName, fileName) {
 }
 
 const GIC_OVERLAY_DBG = true;
-function gicOverlayLog(...args) {
+const GIC_DBG_THROTTLE_MS = 1500;
+let __gicLastDbgAt = 0;
+let __gicLastDbgKey = '';
+
+function gicOverlayLog(key, payload, force = false) {
     if (!GIC_OVERLAY_DBG) return;
-    console.log('[GIC-OVERLAY-DBG]', ...args);
+    const now = Date.now();
+    const sig = `${key}:${typeof payload === 'object' ? JSON.stringify(payload) : String(payload)}`;
+    if (!force) {
+        if (sig === __gicLastDbgKey && now - __gicLastDbgAt < GIC_DBG_THROTTLE_MS * 3) return;
+        if (now - __gicLastDbgAt < GIC_DBG_THROTTLE_MS) return;
+    }
+    __gicLastDbgAt = now;
+    __gicLastDbgKey = sig;
+    console.log('[GIC-OVERLAY-DBG]', key, payload ?? '');
 }
 
 function resolveImageIdentityForOverlay(img, hostEl) {
