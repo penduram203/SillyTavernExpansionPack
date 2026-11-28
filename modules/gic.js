@@ -5330,7 +5330,7 @@ function getKeywordForImage(charName, fileName) {
 }
 
 const GIC_OVERLAY_DBG = true;
-const GIC_DBG_THROTTLE_MS = 1500;
+const GIC_DBG_THROTTLE_MS = 5000;
 let __gicLastDbgAt = 0;
 let __gicLastDbgKey = '';
 
