@@ -5466,32 +5466,39 @@ function updatePromptOverlay(panel) {
     // 親コンテナホバー時に確実に表示されるよう JS 側でもホバー状態を補助同期
     if (!targetContainer.dataset.gicHoverBound) {
         targetContainer.dataset.gicHoverBound = '1';
-        targetContainer.addEventListener('mouseenter', () => {
+        let hideTimer = null;
+
+        const showOverlay = () => {
+            clearTimeout(hideTimer);
             const ov = targetContainer.querySelector('.' + PROMPT_OVERLAY_CLASS);
-            gicOverlayLog('targetContainer mouseenter', {
-                containerClass: targetContainer.className,
-                overlayFound: Boolean(ov),
-            });
             if (ov) {
                 ov.style.opacity = '1';
                 ov.style.pointerEvents = 'auto';
             }
-        });
-        targetContainer.addEventListener('mouseleave', (e) => {
+        };
+
+        const scheduleHideOverlay = (e) => {
             const ov = targetContainer.querySelector('.' + PROMPT_OVERLAY_CLASS);
-            const related = e.relatedTarget;
-            if (ov && related && ov.contains(related)) {
+            const related = e?.relatedTarget;
+            if (
+                (ov && related && ov.contains(related)) ||
+                (related && targetContainer.contains(related))
+            ) {
                 return;
             }
-            gicOverlayLog('targetContainer mouseleave', {
-                containerClass: targetContainer.className,
-                relatedTarget: related?.className || related?.tagName || null,
-            });
-            if (ov) {
-                ov.style.opacity = '';
-                ov.style.pointerEvents = '';
-            }
-        });
+            clearTimeout(hideTimer);
+            hideTimer = setTimeout(() => {
+                const currentOv = targetContainer.querySelector('.' + PROMPT_OVERLAY_CLASS);
+                if (!currentOv) return;
+                // 現在カーソルがオーバーレイ上にある場合は閉じない
+                if (currentOv.matches(':hover')) return;
+                currentOv.style.opacity = '';
+                currentOv.style.pointerEvents = '';
+            }, 80);
+        };
+
+        targetContainer.addEventListener('pointerenter', showOverlay);
+        targetContainer.addEventListener('pointerleave', scheduleHideOverlay);
     }
 
     const promptPanel = overlay.querySelector('.gic-prompt-panel');
@@ -9782,29 +9789,75 @@ function initializeGIC() {
             setTimeout(() => syncModalPreviews('click+250ms'), 250);
         }, true);
 
+let isSyncing = false;
         let debounceTimer = null;
-        const mo = new MutationObserver((mutations) => {
-            let relevant = false;
-            for (const m of mutations) {
-                if (m.type === 'childList' && (m.addedNodes.length > 0 || m.removedNodes.length > 0)) {
-                    relevant = true;
-                    break;
-                }
-                if (m.type === 'attributes') {
-                    relevant = true;
-                    break;
-                }
+
+        const runSync = (reason) => {
+            if (isSyncing) return;
+            isSyncing = true;
+            try {
+                mo.disconnect();
+                syncModalPreviews(reason);
+            } finally {
+                isSyncing = false;
+                mo.observe(document.body, {
+                    childList: true,
+                    subtree: true,
+                    attributes: true,
+                    attributeFilter: ['src', 'class', 'data-expanded'],
+                });
             }
-            if (!relevant) return;
+        };
+
+let isSyncing = false;
+        let debounceTimer = null;
+
+        const runSync = (reason) => {
+            if (isSyncing) return;
+            isSyncing = true;
+            try {
+                mo.disconnect();
+                syncModalPreviews(reason);
+            } finally {
+                isSyncing = false;
+                mo.observe(document.body, {
+                    childList: true,
+                    subtree: true,
+                    attributes: true,
+                    attributeFilter: ['src', 'class', 'data-expanded'],
+                });
+            }
+        };
+
+        const mo = new MutationObserver((mutations) => {
+            if (isSyncing) return;
+            const hasRelevantChange = mutations.some((m) => {
+                if (m.type === 'childList') {
+                    // 自分のオーバーレイ追加・削除だけの変化は無視
+                    const touchedNodes = [...m.addedNodes, ...m.removedNodes];
+                    if (
+                        touchedNodes.length > 0 &&
+                        touchedNodes.every(
+                            (n) => n.nodeType === 1 && n.classList?.contains(PROMPT_OVERLAY_CLASS)
+                        )
+                    ) {
+                        return false;
+                    }
+                    return touchedNodes.length > 0;
+                }
+                return m.type === 'attributes';
+            });
+            if (!hasRelevantChange) return;
+
             clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(() => syncModalPreviews('mutation'), 80);
+            debounceTimer = setTimeout(() => runSync('mutation'), 120);
         });
 
         mo.observe(document.body, {
             childList: true,
             subtree: true,
             attributes: true,
-            attributeFilter: ['src', 'class', 'style', 'data-expanded'],
+            attributeFilter: ['src', 'class', 'data-expanded'],
         });
     })();
     
