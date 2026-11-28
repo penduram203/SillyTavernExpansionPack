@@ -1739,6 +1739,27 @@ function injectSplitOverlayStyle() {
     document.head.appendChild(style);
 }
 
+function bindSplitGapObservers(container, overlay) {
+    if (!container || !overlay) return;
+
+    const runAdjust = () => adjustSplitImageGap(container, overlay);
+    runAdjust();
+
+    const mediaEl = container.querySelector('img, video, canvas, .stj-media-zoom-content');
+    if (mediaEl && !mediaEl.dataset.gicGapBound) {
+        mediaEl.dataset.gicGapBound = '1';
+        mediaEl.addEventListener('load', runAdjust);
+        mediaEl.addEventListener('loadedmetadata', runAdjust);
+    }
+
+    if (!container.dataset.gicGapResizeBound && typeof ResizeObserver === 'function') {
+        container.dataset.gicGapResizeBound = '1';
+        const ro = new ResizeObserver(() => runAdjust());
+        ro.observe(container);
+        ro.observe(overlay);
+    }
+}
+
 function applySplitOverlayLayout(container, overlay) {
     if (!container || !overlay) return;
     if (typeof isExpandedZoomBox === 'function' && !isExpandedZoomBox(container)) {
@@ -1766,6 +1787,41 @@ function applySplitOverlayLayout(container, overlay) {
     overlay.style.setProperty('min-width', '160px', 'important');
     overlay.style.setProperty('height', '100%', 'important');
     overlay.style.setProperty('overflow-y', 'auto', 'important');
+
+    bindSplitGapObservers(container, overlay);
+}
+
+function adjustSplitImageGap(container, overlay) {
+    if (!container || !overlay) return;
+    const mediaEl = container.querySelector(
+        'img, video, canvas, .stj-media-zoom-content'
+    );
+    if (!mediaEl) return;
+
+    // 一旦リセットして本来の隙間（オーバーレイ右端 〜 画像左端）を計測
+    mediaEl.style.setProperty('margin-left', '0px', 'important');
+    mediaEl.style.setProperty('margin-right', 'auto', 'important');
+
+    requestAnimationFrame(() => {
+        const ovRect = overlay.getBoundingClientRect();
+        const imgRect = mediaEl.getBoundingClientRect();
+        if (!ovRect.width || !imgRect.width) return;
+
+        const originalGap = imgRect.left - ovRect.right;
+        if (originalGap <= 0) return;
+
+        const targetGap = originalGap * 0.25;
+        const shiftPx = Math.max(0, Math.round(originalGap - targetGap));
+
+        mediaEl.style.setProperty('margin-left', `${shiftPx}px`, 'important');
+        mediaEl.style.setProperty('margin-right', 'auto', 'important');
+
+        gicOverlayLog('split-gap-adjusted', {
+            originalGap: Math.round(originalGap),
+            targetGap: Math.round(targetGap),
+            shiftPx,
+        });
+    });
 }
 
 (function injectUnregisterButtonStyle() {
