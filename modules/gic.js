@@ -1678,6 +1678,92 @@ function getCurrentCharacterName() {
     console.log('[GIC] 🖼️ ギャラリー配置CSSを注入しました');
 })();
 
+const SPLIT_LAYOUT_STYLE_ID = 'gic-split-overlay-style';
+
+function injectSplitOverlayStyle() {
+    if (document.getElementById(SPLIT_LAYOUT_STYLE_ID)) return;
+    const style = document.createElement('style');
+    style.id = SPLIT_LAYOUT_STYLE_ID;
+    style.textContent = `
+        .gic-split-host {
+            display: flex !important;
+            flex-direction: row !important;
+            align-items: stretch !important;
+            justify-content: flex-start !important;
+            gap: 0 !important;
+            overflow: hidden !important;
+        }
+        .gic-split-host > img,
+        .gic-split-host > video,
+        .gic-split-host > canvas,
+        .gic-split-host > .stj-media-zoom-content {
+            order: 2 !important;
+            flex: 1 1 80% !important;
+            width: 80% !important;
+            max-width: 80% !important;
+            height: 100% !important;
+            max-height: 100% !important;
+            object-fit: contain !important;
+            margin: 0 !important;
+            position: relative !important;
+        }
+        .gic-split-host > .gic-prompt-overlay {
+            order: 1 !important;
+            position: relative !important;
+            top: auto !important;
+            right: auto !important;
+            bottom: auto !important;
+            left: auto !important;
+            transform: none !important;
+            flex: 0 0 20% !important;
+            width: 20% !important;
+            min-width: 160px !important;
+            max-width: 20% !important;
+            height: 100% !important;
+            max-height: 100% !important;
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
+            z-index: 15001 !important;
+            box-sizing: border-box !important;
+        }
+        .gic-split-host > .gic-prompt-overlay .gic-keyword-text {
+            font-size: 15px !important;
+            word-break: break-word !important;
+        }
+        .gic-split-host > .gic-prompt-overlay .gic-prompt-panel,
+        .gic-split-host > .gic-prompt-overlay .gic-negative-prompt-panel {
+            max-height: 28vh !important;
+            width: 100% !important;
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+function applySplitOverlayLayout(container, overlay) {
+    if (!container || !overlay) return;
+    injectSplitOverlayStyle();
+
+    // ギャラリー内の既存プレビューと区別し、モーダル／拡大ビュー系に適用
+    const isModalOrZoom = Boolean(
+        container.closest('#stj_cell_modal, .stj-cell-modal, #stj_media_zoom, .stj-media-zoom, [id*="cell"][id*="modal"], [class*="cell"][class*="modal"], [class*="lightbox"]')
+    );
+    if (!isModalOrZoom) return;
+
+    container.classList.add('gic-split-host');
+
+    overlay.style.setProperty('position', 'relative', 'important');
+    overlay.style.setProperty('top', 'auto', 'important');
+    overlay.style.setProperty('right', 'auto', 'important');
+    overlay.style.setProperty('bottom', 'auto', 'important');
+    overlay.style.setProperty('left', 'auto', 'important');
+    overlay.style.setProperty('transform', 'none', 'important');
+    overlay.style.setProperty('width', '20%', 'important');
+    overlay.style.setProperty('max-width', '20%', 'important');
+    overlay.style.setProperty('min-width', '160px', 'important');
+    overlay.style.setProperty('height', '100%', 'important');
+    overlay.style.setProperty('overflow-y', 'auto', 'important');
+}
+
 (function injectUnregisterButtonStyle() {
     if (document.getElementById('gic-unregister-button-style')) return;
     const style = document.createElement('style');
@@ -5043,6 +5129,7 @@ function createPromptOverlay(container) {
     overlay.appendChild(negPanel);
 
     container.appendChild(overlay);
+    applySplitOverlayLayout(container, overlay);
     gicOverlayLog('create-overlay', { containerClass: container.className || container.tagName }, true);
     return overlay;
 }
@@ -5462,9 +5549,11 @@ function updatePromptOverlay(panel) {
     // ★ ここに配置（overlay 生成・取得直後、各子要素の描画更新前）
     overlay.dataset.gicPrompt = prompt;
     overlay.dataset.gicNegPrompt = negativePrompt;
+
+    applySplitOverlayLayout(targetContainer, overlay);
     
     // 親コンテナホバー時に確実に表示されるよう JS 側でもホバー状態を補助同期
-if (!targetContainer.dataset.gicHoverBound) {
+    if (!targetContainer.dataset.gicHoverBound) {
         targetContainer.dataset.gicHoverBound = '1';
 
         const ensureVisible = () => {
