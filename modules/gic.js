@@ -1741,14 +1741,12 @@ function injectSplitOverlayStyle() {
 
 function applySplitOverlayLayout(container, overlay) {
     if (!container || !overlay) return;
+    if (!isExpandedZoomBox(container)) {
+        overlay.remove();
+        container.classList.remove('gic-split-host');
+        return;
+    }
     injectSplitOverlayStyle();
-
-    // ギャラリー内の既存プレビューと区別し、モーダル／拡大ビュー系に適用
-    const isModalOrZoom = Boolean(
-        container.closest('#stj_cell_modal, .stj-cell-modal, #stj_media_zoom, .stj-media-zoom, [id*="cell"][id*="modal"], [class*="cell"][class*="modal"], [class*="lightbox"]')
-    );
-    if (!isModalOrZoom) return;
-
     container.classList.add('gic-split-host');
 
     overlay.style.setProperty('position', 'relative', 'important');
@@ -9819,42 +9817,74 @@ function initializeGIC() {
         window.__gicCellModalPromptOverlayInstalled = true;
         gicOverlayLog('setupCellModalPromptOverlay installed');
 
+        function isExpandedZoomBox(el) {
+            if (!el) return false;
+            if (el.closest('.stj-cell-modal-slot') && !el.closest('#stj_media_zoom, .stj-media-zoom')) {
+                return false;
+            }
+            const isExplicitZoom = Boolean(
+                el.matches('#stj_media_zoom, .stj-media-zoom, [class*="zoom"], [class*="lightbox"]') ||
+                el.closest('#stj_media_zoom, .stj-media-zoom, [class*="zoom"], [class*="lightbox"]')
+            );
+            if (!isExplicitZoom) return false;
+
+            const rect = el.getBoundingClientRect();
+            const cs = window.getComputedStyle(el);
+            return (
+                rect.width > 120 &&
+                rect.height > 120 &&
+                cs.display !== 'none' &&
+                cs.visibility !== 'hidden'
+            );
+        }
+
         function findCandidateContainers() {
             const containers = new Set();
-            const zoomActive = Boolean(
-                document.querySelector('#stj_media_zoom, .stj-media-zoom')
+
+            const zoomNodes = document.querySelectorAll(
+                '#stj_media_zoom, .stj-media-zoom, [id*="cell"][id*="modal"] [class*="zoom"], [class*="cell"][class*="modal"] [class*="zoom"], [class*="cell"][class*="modal"] [class*="lightbox"]'
             );
 
-            const modals = document.querySelectorAll(
-                '#stj_cell_modal, .stj-cell-modal, [id*="cell"][id*="modal"], [class*="cell"][class*="modal"], [class*="lightbox"]'
-            );
+            zoomNodes.forEach((node) => {
+                const box = node.matches('#stj_media_zoom, .stj-media-zoom, [class*="zoom"], [class*="lightbox"]')
+                    ? node
+                    : node.closest('#stj_media_zoom, .stj-media-zoom, [class*="zoom"], [class*="lightbox"]');
+                if (!box || !isExpandedZoomBox(box)) return;
 
-            modals.forEach((modal) => {
-                const mRect = modal.getBoundingClientRect();
-                if (mRect.width === 0 || mRect.height === 0) return;
+                const img = box.querySelector('img, video, canvas');
+                if (!img) return;
+                const iRect = img.getBoundingClientRect();
+                if (iRect.width < 120 || iRect.height < 120) return;
 
-                modal.querySelectorAll('img').forEach((img) => {
-                    const rect = img.getBoundingClientRect();
-                    if (rect.width < 120 || rect.height < 120) return;
-                    const inZoom = Boolean(img.closest('#stj_media_zoom, .stj-media-zoom'));
-                    if (zoomActive && !inZoom) return;
-
-                    const box =
-                        img.closest('.stj-media-zoom, .stj-cell-preview, .stj-image-preview, [class*="preview"], [class*="zoom"]')
-                        || img.parentElement;
-                    if (box) containers.add(box);
-                });
+                containers.add(box);
             });
 
             return Array.from(containers);
         }
 
+        function cleanupNonZoomOverlays() {
+            document.querySelectorAll('.' + PROMPT_OVERLAY_CLASS).forEach((ov) => {
+                const host = ov.parentElement;
+                if (!host || !isExpandedZoomBox(host)) {
+                    ov.remove();
+                    if (host) {
+                        host.classList.remove('gic-split-host');
+                        if (host.style.position === 'relative') {
+                            host.style.position = '';
+                        }
+                    }
+                }
+            });
+        }
+        
         const syncModalPreviews = (reason = 'mutation') => {
+            cleanupNonZoomOverlays();
             const list = findCandidateContainers();
             gicOverlayLog('syncModalPreviews triggered:', { reason, candidateCount: list.length });
             list.forEach((box) => {
                 updatePromptOverlay(box);
             });
+            cleanupNonZoomOverlays();
         };
 
         // クリック直後にもスキャン（拡大画像がDOM生成・表示されるタイミングを捕捉）
