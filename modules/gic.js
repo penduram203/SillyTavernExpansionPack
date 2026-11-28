@@ -9809,26 +9809,6 @@ let isSyncing = false;
             }
         };
 
-let isSyncing = false;
-        let debounceTimer = null;
-
-        const runSync = (reason) => {
-            if (isSyncing) return;
-            isSyncing = true;
-            try {
-                mo.disconnect();
-                syncModalPreviews(reason);
-            } finally {
-                isSyncing = false;
-                mo.observe(document.body, {
-                    childList: true,
-                    subtree: true,
-                    attributes: true,
-                    attributeFilter: ['src', 'class', 'data-expanded'],
-                });
-            }
-        };
-
         const mo = new MutationObserver((mutations) => {
             if (isSyncing) return;
             const hasRelevantChange = mutations.some((m) => {
