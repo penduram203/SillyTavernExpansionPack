@@ -5464,41 +5464,29 @@ function updatePromptOverlay(panel) {
     overlay.dataset.gicNegPrompt = negativePrompt;
     
     // 親コンテナホバー時に確実に表示されるよう JS 側でもホバー状態を補助同期
-    if (!targetContainer.dataset.gicHoverBound) {
+if (!targetContainer.dataset.gicHoverBound) {
         targetContainer.dataset.gicHoverBound = '1';
-        let hideTimer = null;
 
-        const showOverlay = () => {
-            clearTimeout(hideTimer);
+        const ensureVisible = () => {
             const ov = targetContainer.querySelector('.' + PROMPT_OVERLAY_CLASS);
-            if (ov) {
-                ov.style.opacity = '1';
-                ov.style.pointerEvents = 'auto';
-            }
+            if (!ov) return;
+            if (ov.style.opacity !== '1') ov.style.opacity = '1';
+            if (ov.style.pointerEvents !== 'auto') ov.style.pointerEvents = 'auto';
         };
 
-        const scheduleHideOverlay = (e) => {
+        const clearInlineState = (e) => {
             const ov = targetContainer.querySelector('.' + PROMPT_OVERLAY_CLASS);
+            if (!ov) return;
             const related = e?.relatedTarget;
-            if (
-                (ov && related && ov.contains(related)) ||
-                (related && targetContainer.contains(related))
-            ) {
+            if (related && (ov.contains(related) || targetContainer.contains(related))) {
                 return;
             }
-            clearTimeout(hideTimer);
-            hideTimer = setTimeout(() => {
-                const currentOv = targetContainer.querySelector('.' + PROMPT_OVERLAY_CLASS);
-                if (!currentOv) return;
-                // 現在カーソルがオーバーレイ上にある場合は閉じない
-                if (currentOv.matches(':hover')) return;
-                currentOv.style.opacity = '';
-                currentOv.style.pointerEvents = '';
-            }, 80);
+            if (ov.style.opacity !== '') ov.style.opacity = '';
+            if (ov.style.pointerEvents !== '') ov.style.pointerEvents = '';
         };
 
-        targetContainer.addEventListener('pointerenter', showOverlay);
-        targetContainer.addEventListener('pointerleave', scheduleHideOverlay);
+        targetContainer.addEventListener('pointerenter', ensureVisible);
+        targetContainer.addEventListener('pointerleave', clearInlineState);
     }
 
     const promptPanel = overlay.querySelector('.gic-prompt-panel');
@@ -9744,6 +9732,9 @@ function initializeGIC() {
 
         function findCandidateContainers() {
             const containers = new Set();
+            const zoomActive = Boolean(
+                document.querySelector('#stj_media_zoom, .stj-media-zoom')
+            );
 
             const modals = document.querySelectorAll(
                 '#stj_cell_modal, .stj-cell-modal, [id*="cell"][id*="modal"], [class*="cell"][class*="modal"], [class*="lightbox"]'
@@ -9756,8 +9747,11 @@ function initializeGIC() {
                 modal.querySelectorAll('img').forEach((img) => {
                     const rect = img.getBoundingClientRect();
                     if (rect.width < 120 || rect.height < 120) return;
+                    const inZoom = Boolean(img.closest('#stj_media_zoom, .stj-media-zoom'));
+                    if (zoomActive && !inZoom) return;
+
                     const box =
-                        img.closest('.stj-media-zoom, .stj-cell-modal-slot, .stj-cell-preview, .stj-image-preview, [class*="preview"], [class*="zoom"]')
+                        img.closest('.stj-media-zoom, .stj-cell-preview, .stj-image-preview, [class*="preview"], [class*="zoom"]')
                         || img.parentElement;
                     if (box) containers.add(box);
                 });
