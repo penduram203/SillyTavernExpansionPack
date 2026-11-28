@@ -5331,7 +5331,7 @@ function getKeywordForImage(charName, fileName) {
 const GIC_OVERLAY_DBG = true;
 function gicOverlayLog(...args) {
     if (!GIC_OVERLAY_DBG) return;
-    //console.log('[GIC-OVERLAY-DBG]', ...args);
+    console.log('[GIC-OVERLAY-DBG]', ...args);
 }
 
 function resolveImageIdentityForOverlay(img, hostEl) {
