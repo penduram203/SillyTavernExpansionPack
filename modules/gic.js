@@ -9893,14 +9893,6 @@ function initializeGIC() {
             cleanupNonZoomOverlays();
         };
 
-        const syncModalPreviews = (reason = 'mutation') => {
-            const list = findCandidateContainers();
-            gicOverlayLog('syncModalPreviews triggered:', { reason, candidateCount: list.length });
-            list.forEach((box) => {
-                updatePromptOverlay(box);
-            });
-        };
-
         // クリック直後にもスキャン（拡大画像がDOM生成・表示されるタイミングを捕捉）
         document.addEventListener('click', (e) => {
             const target = e.target;
