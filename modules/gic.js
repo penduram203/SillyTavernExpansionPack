@@ -1741,12 +1741,18 @@ function injectSplitOverlayStyle() {
 
 function applySplitOverlayLayout(container, overlay) {
     if (!container || !overlay) return;
-    if (!isExpandedZoomBox(container)) {
+    if (typeof isExpandedZoomBox === 'function' && !isExpandedZoomBox(container)) {
         overlay.remove();
         container.classList.remove('gic-split-host');
         return;
     }
     injectSplitOverlayStyle();
+
+    const isModalOrZoom = Boolean(
+        container.closest('#stj_cell_modal, .stj-cell-modal, #stj_media_zoom, .stj-media-zoom, [id*="cell"][id*="modal"], [class*="cell"][class*="modal"], [class*="lightbox"]')
+    );
+    if (!isModalOrZoom) return;
+
     container.classList.add('gic-split-host');
 
     overlay.style.setProperty('position', 'relative', 'important');
@@ -9876,7 +9882,7 @@ function initializeGIC() {
                 }
             });
         }
-        
+
         const syncModalPreviews = (reason = 'mutation') => {
             cleanupNonZoomOverlays();
             const list = findCandidateContainers();
@@ -9885,6 +9891,14 @@ function initializeGIC() {
                 updatePromptOverlay(box);
             });
             cleanupNonZoomOverlays();
+        };
+
+        const syncModalPreviews = (reason = 'mutation') => {
+            const list = findCandidateContainers();
+            gicOverlayLog('syncModalPreviews triggered:', { reason, candidateCount: list.length });
+            list.forEach((box) => {
+                updatePromptOverlay(box);
+            });
         };
 
         // クリック直後にもスキャン（拡大画像がDOM生成・表示されるタイミングを捕捉）
