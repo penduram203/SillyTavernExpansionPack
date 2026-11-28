@@ -1680,6 +1680,59 @@ function getCurrentCharacterName() {
 
 const SPLIT_LAYOUT_STYLE_ID = 'gic-split-overlay-style';
 
+function adjustSplitImageGap(container, overlay) {
+    if (!container || !overlay) return;
+    const mediaEl = container.querySelector(
+        'img, video, canvas, .stj-media-zoom-content'
+    );
+    if (!mediaEl) return;
+
+    mediaEl.style.setProperty('margin-left', '0px', 'important');
+    mediaEl.style.setProperty('margin-right', 'auto', 'important');
+
+    requestAnimationFrame(() => {
+        const ovRect = overlay.getBoundingClientRect();
+        const imgRect = mediaEl.getBoundingClientRect();
+        if (!ovRect.width || !imgRect.width) return;
+
+        const originalGap = imgRect.left - ovRect.right;
+        if (originalGap <= 0) return;
+
+        const targetGap = originalGap * 0.25;
+        const shiftPx = Math.max(0, Math.round(originalGap - targetGap));
+
+        mediaEl.style.setProperty('margin-left', `${shiftPx}px`, 'important');
+        mediaEl.style.setProperty('margin-right', 'auto', 'important');
+
+        gicOverlayLog('split-gap-adjusted', {
+            originalGap: Math.round(originalGap),
+            targetGap: Math.round(targetGap),
+            shiftPx,
+        });
+    });
+}
+
+function bindSplitGapObservers(container, overlay) {
+    if (!container || !overlay) return;
+
+    const runAdjust = () => adjustSplitImageGap(container, overlay);
+    runAdjust();
+
+    const mediaEl = container.querySelector('img, video, canvas, .stj-media-zoom-content');
+    if (mediaEl && !mediaEl.dataset.gicGapBound) {
+        mediaEl.dataset.gicGapBound = '1';
+        mediaEl.addEventListener('load', runAdjust);
+        mediaEl.addEventListener('loadedmetadata', runAdjust);
+    }
+
+    if (!container.dataset.gicGapResizeBound && typeof ResizeObserver === 'function') {
+        container.dataset.gicGapResizeBound = '1';
+        const ro = new ResizeObserver(() => runAdjust());
+        ro.observe(container);
+        ro.observe(overlay);
+    }
+}
+
 function injectSplitOverlayStyle() {
     if (document.getElementById(SPLIT_LAYOUT_STYLE_ID)) return;
     const style = document.createElement('style');
@@ -1766,6 +1819,8 @@ function applySplitOverlayLayout(container, overlay) {
     overlay.style.setProperty('min-width', '160px', 'important');
     overlay.style.setProperty('height', '100%', 'important');
     overlay.style.setProperty('overflow-y', 'auto', 'important');
+
+    bindSplitGapObservers(container, overlay);
 }
 
 (function injectUnregisterButtonStyle() {
