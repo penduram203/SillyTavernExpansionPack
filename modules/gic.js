@@ -5330,20 +5330,25 @@ function getKeywordForImage(charName, fileName) {
 }
 
 const GIC_OVERLAY_DBG = true;
-const GIC_DBG_THROTTLE_MS = 15;
-let __gicLastDbgAt = 0;
-let __gicLastDbgKey = '';
+const GIC_DBG_THROTTLE_MS = 15000;
+const __gicDbgLastByKey = new Map();
 
-function gicOverlayLog(key, payload, force = false) {
+function gicOverlayLog(key, payload, force = false, minIntervalMs = GIC_DBG_THROTTLE_MS) {
     if (!GIC_OVERLAY_DBG) return;
+
     const now = Date.now();
-    const sig = `${key}:${typeof payload === 'object' ? JSON.stringify(payload) : String(payload)}`;
+    const prev = __gicDbgLastByKey.get(key) || { at: 0, raw: '' };
+    const rawPayload = typeof payload === 'object' && payload !== null
+        ? JSON.stringify(payload)
+        : String(payload ?? '');
+
     if (!force) {
-        if (sig === __gicLastDbgKey && now - __gicLastDbgAt < GIC_DBG_THROTTLE_MS * 3) return;
-        if (now - __gicLastDbgAt < GIC_DBG_THROTTLE_MS) return;
+        if (now - prev.at < minIntervalMs) {
+            return;
+        }
     }
-    __gicLastDbgAt = now;
-    __gicLastDbgKey = sig;
+
+    __gicDbgLastByKey.set(key, { at: now, raw: rawPayload });
     console.log('[GIC-OVERLAY-DBG]', key, payload ?? '');
 }
 
