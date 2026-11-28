@@ -4871,195 +4871,417 @@ async function copyPromptToClipboard(text) {
     }
 }
 
-function createPromptOverlay(panel) {
-    const _t = (k, fb) => window.ExpI18n?.t(k, fb) ?? fb;
+function createPromptOverlay(container) {
+    const existing = container.querySelector('.' + PROMPT_OVERLAY_CLASS);
+    if (existing) return existing;
 
     const overlay = document.createElement('div');
     overlay.className = PROMPT_OVERLAY_CLASS;
-    overlay.style.cssText = `
-        position: absolute;
-        bottom: 8px;
-        left: 8px;
-        right: auto;
-        transform: none;
-        width: max-content;
-        max-width: min(700px, calc(100% - 16px));
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        z-index: 15001;
-        box-sizing: border-box;
-        align-items: flex-start;
-    `;
+    overlay.style.cssText = [
+        'position: absolute;',
+        'bottom: 8px;',
+        'left: 8px;',
+        'right: auto;',
+        'transform: none;',
+        'width: max-content;',
+        'max-width: min(700px, 100% - 16px);',
+        'display: flex;',
+        'flex-direction: column;',
+        'gap: 6px;',
+        'z-index: 15001;',
+        'box-sizing: border-box;',
+        'align-items: flex-start;',
+    ].join(' ');
 
-    // ── キーワードラベル（機能なし） ──
-    const keywordBtn = document.createElement('div');
-    keywordBtn.className = 'gic-keyword-label-btn';
-    keywordBtn.textContent = _t('gic.prompt.keyword', 'キーワード');
-    keywordBtn.style.cssText = `
-        align-self: flex-start;
-        padding: 6px 12px;
-        background: #444444;
-        color: #ffffff;
-        border: 1px solid #666666;
-        border-radius: 4px;
-        font-size: 12px;
-        font-family: inherit;
-        pointer-events: none;
-        user-select: none;
-        display: none;
-    `;
-    overlay.appendChild(keywordBtn);
+    const keywordLabelBtn = document.createElement('div');
+    keywordLabelBtn.className = 'gic-keyword-label-btn';
+    keywordLabelBtn.textContent = 'キーワード';
+    keywordLabelBtn.style.cssText = [
+        'align-self: flex-start;',
+        'padding: 6px 12px;',
+        'background: rgb(68, 68, 68);',
+        'color: rgb(255, 255, 255);',
+        'border: 1px solid rgb(102, 102, 102);',
+        'border-radius: 4px;',
+        'font-size: 12px;',
+        'font-family: inherit;',
+        'pointer-events: none;',
+        'user-select: none;',
+    ].join(' ');
 
-    // ── キーワード本文 ──
     const keywordText = document.createElement('div');
     keywordText.className = 'gic-keyword-text';
-    keywordText.style.cssText = `
-        align-self: flex-start;
-        padding: 6px 12px;
-        background: #000000;
-        color: #ffffff;
-        border: 2px solid #000000;
-        border-radius: 4px;
-        font-size: 20px;
-        font-weight: bold;
-        font-family: inherit;
-        pointer-events: none;
-        user-select: none;
-        max-width: 100%;
-        word-break: break-word;
-        line-height: 1.3;
-        box-sizing: border-box;
-        display: none;
-    `;
-    overlay.appendChild(keywordText);
+    keywordText.style.cssText = [
+        'align-self: flex-start;',
+        'padding: 6px 12px;',
+        'background: rgb(0, 0, 0);',
+        'color: rgb(255, 255, 255);',
+        'border: 2px solid rgb(0, 0, 0);',
+        'border-radius: 4px;',
+        'font-size: 20px;',
+        'font-weight: bold;',
+        'font-family: inherit;',
+        'pointer-events: none;',
+        'user-select: none;',
+        'max-width: 100%;',
+        'word-break: break-word;',
+        'line-height: 1.3;',
+        'box-sizing: border-box;',
+    ].join(' ');
 
-    // ── コピーボタン群 ──
     const copyRow = document.createElement('div');
     copyRow.className = 'gic-copy-row';
-    copyRow.style.cssText = `
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
-        align-items: flex-start;
-        pointer-events: auto;
-        align-self: flex-start;
-    `;
+    copyRow.style.cssText = [
+        'display: flex;',
+        'flex-wrap: wrap;',
+        'gap: 6px;',
+        'align-items: flex-start;',
+        'pointer-events: auto;',
+        'align-self: flex-start;',
+    ].join(' ');
 
-    const makeButton = (text, className) => {
+    const makeBtn = (className, label, bgColor = 'rgb(68, 68, 68)') => {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = className;
-        btn.textContent = text;
-        btn.style.cssText = `
-            padding: 6px 12px;
-            background: #444;
-            color: #ffffff;
-            border: 1px solid #666;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 12px;
-            font-family: inherit;
-            pointer-events: auto;
-        `;
+        btn.textContent = label;
+        btn.style.cssText = [
+            'padding: 6px 12px;',
+            `background: ${bgColor};`,
+            'color: rgb(255, 255, 255);',
+            'border: 1px solid rgb(102, 102, 102);',
+            'border-radius: 4px;',
+            'cursor: pointer;',
+            'font-size: 12px;',
+            'font-family: inherit;',
+            'pointer-events: auto;',
+        ].join(' ');
         return btn;
     };
 
-    // プロンプトをコピー
-    const copyBtn = makeButton(_t('gic.prompt.copy_prompt', 'プロンプトをコピー'), 'gic-prompt-copy');
-    copyBtn.addEventListener('click', async (e) => {
-        e.stopPropagation(); e.preventDefault();
-        const p = overlay.querySelector('.gic-prompt-panel');
-        const text = p ? (p.textContent || '') : '';
-        const ok = await copyPromptToClipboard(text);
-        showCopyToast(ok
-            ? _t('gic.toast.copy_prompt', 'プロンプトをコピーしました')
-            : _t('gic.toast.copy_failed', 'コピーに失敗しました'));
+    const promptCopyBtn = makeBtn('gic-prompt-copy', 'プロンプトをコピー');
+    const negCopyBtn = makeBtn('gic-negative-prompt-copy', 'ネガティブをコピー');
+    const bothCopyBtn = makeBtn('gic-both-prompt-copy', '両方コピー');
+    const reuseBtn = makeBtn('gic-reuse-prompt-btn', '再利用', 'rgb(45, 95, 135)');
+
+    const bindAction = (btn, handler) => {
+        btn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            gicOverlayLog('overlay button clicked:', {
+                className: btn.className,
+                label: btn.textContent,
+            });
+            await handler();
+        }, true);
+    };
+
+    bindAction(promptCopyBtn, async () => {
+        const p = overlay.dataset.gicPrompt || '';
+        await copyTextWithFeedback(p, 'プロンプトをコピーしました');
     });
-    copyRow.appendChild(copyBtn);
 
-    // ネガティブをコピー
-    const copyNegBtn = makeButton(_t('gic.prompt.copy_negative', 'ネガティブをコピー'), 'gic-negative-prompt-copy');
-    copyNegBtn.addEventListener('click', async (e) => {
-        e.stopPropagation(); e.preventDefault();
-        const p = overlay.querySelector('.gic-negative-prompt-panel');
-        const text = p ? (p.textContent || '') : '';
-        const ok = await copyPromptToClipboard(text);
-        showCopyToast(ok
-            ? _t('gic.toast.copy_negative', 'ネガティブプロンプトをコピーしました')
-            : _t('gic.toast.copy_failed', 'コピーに失敗しました'));
+    bindAction(negCopyBtn, async () => {
+        const n = overlay.dataset.gicNegPrompt || '';
+        await copyTextWithFeedback(n, 'ネガティブプロンプトをコピーしました');
     });
-    copyRow.appendChild(copyNegBtn);
 
-    // 両方コピー
-    const copyBothBtn = makeButton(_t('gic.prompt.copy_both', '両方コピー'), 'gic-both-prompt-copy');
-    copyBothBtn.addEventListener('click', async (e) => {
-        e.stopPropagation(); e.preventDefault();
-        const p = overlay.querySelector('.gic-prompt-panel');
-        const n = overlay.querySelector('.gic-negative-prompt-panel');
-        const posText = (p && p.style.display !== 'none') ? (p.textContent || '') : '';
-        const negText = (n && n.style.display !== 'none') ? (n.textContent || '') : '';
-        const combined = [posText, negText].filter(Boolean).join('\n\n');
-        const ok = await copyPromptToClipboard(combined);
-        showCopyToast(ok
-            ? _t('gic.toast.copy_both', 'プロンプトとネガティブをコピーしました')
-            : _t('gic.toast.copy_failed', 'コピーに失敗しました'));
+    bindAction(bothCopyBtn, async () => {
+        const p = overlay.dataset.gicPrompt || '';
+        const n = overlay.dataset.gicNegPrompt || '';
+        const combined = [p, n].filter(Boolean).join('\n\n[Negative Prompt]\n');
+        await copyTextWithFeedback(combined, 'プロンプトとネガティブをコピーしました');
     });
-    copyRow.appendChild(copyBothBtn);
 
-    overlay.appendChild(copyRow);
+    bindAction(reuseBtn, async () => {
+        const p = overlay.dataset.gicPrompt || '';
+        const n = overlay.dataset.gicNegPrompt || '';
+        applyReusePromptToModal(overlay, p, n);
+    });
 
-    // ── ポジティブプロンプトパネル ──
+    copyRow.appendChild(promptCopyBtn);
+    copyRow.appendChild(negCopyBtn);
+    copyRow.appendChild(bothCopyBtn);
+    copyRow.appendChild(reuseBtn);
+
     const promptPanel = document.createElement('div');
     promptPanel.className = 'gic-prompt-panel';
-    promptPanel.style.cssText = `
-        background: rgba(0, 0, 0, 0.88);
-        color: #ffffff;
-        padding: 10px 12px;
-        border-radius: 4px;
-        font-size: 12px;
-        font-family: monospace;
-        white-space: pre-wrap;
-        word-break: break-word;
-        overflow-wrap: anywhere;
-        border: 1px solid #555;
-        box-sizing: border-box;
-        line-height: 1.4;
-        max-height: calc(100vh - 120px);
-        overflow-y: auto;
-        width: 100%;
-    `;
-    overlay.appendChild(promptPanel);
+    promptPanel.style.cssText = [
+        'background: rgba(0, 0, 0, 0.88);',
+        'color: rgb(255, 255, 255);',
+        'padding: 10px 12px;',
+        'border-radius: 4px;',
+        'font-size: 12px;',
+        'font-family: monospace;',
+        'white-space: pre-wrap;',
+        'word-break: break-word;',
+        'overflow-wrap: anywhere;',
+        'border: 1px solid rgb(85, 85, 85);',
+        'box-sizing: border-box;',
+        'line-height: 1.4;',
+        'max-height: calc(-120px + 100vh);',
+        'overflow-y: auto;',
+        'width: 100%;',
+    ].join(' ');
 
-    // ── ネガティブプロンプトパネル ──
     const negPanel = document.createElement('div');
     negPanel.className = 'gic-negative-prompt-panel';
-    negPanel.style.cssText = `
-        background: rgba(40, 0, 0, 0.88);
-        color: #ffcccc;
-        padding: 10px 12px;
-        border-radius: 4px;
-        font-size: 12px;
-        font-family: monospace;
-        white-space: pre-wrap;
-        word-break: break-word;
-        overflow-wrap: anywhere;
-        border: 1px solid #884444;
-        box-sizing: border-box;
-        line-height: 1.4;
-        max-height: calc(100vh - 120px);
-        overflow-y: auto;
-        width: 100%;
-    `;
+    negPanel.style.cssText = [
+        'background: rgba(40, 0, 0, 0.88);',
+        'color: rgb(255, 204, 204);',
+        'padding: 10px 12px;',
+        'border-radius: 4px;',
+        'font-size: 12px;',
+        'font-family: monospace;',
+        'white-space: pre-wrap;',
+        'word-break: break-word;',
+        'overflow-wrap: anywhere;',
+        'border: 1px solid rgb(136, 68, 68);',
+        'box-sizing: border-box;',
+        'line-height: 1.4;',
+        'max-height: calc(-120px + 100vh);',
+        'overflow-y: auto;',
+        'width: 100%;',
+    ].join(' ');
+
+    overlay.appendChild(keywordLabelBtn);
+    overlay.appendChild(keywordText);
+    overlay.appendChild(copyRow);
+    overlay.appendChild(promptPanel);
     overlay.appendChild(negPanel);
 
-    panel.appendChild(overlay);
+    container.appendChild(overlay);
+    gicOverlayLog('createPromptOverlay appended:', {
+        containerClass: container.className || container.tagName,
+    });
     return overlay;
 }
 
 function removePromptOverlay(panel) {
     if (!panel) return;
     panel.querySelectorAll('.' + PROMPT_OVERLAY_CLASS).forEach(el => el.remove());
+}
+
+async function copyTextWithFeedback(text, toastMessage) {
+    const value = String(text ?? '');
+    gicOverlayLog('copyTextWithFeedback called:', {
+        toastMessage,
+        length: value.length,
+    });
+
+    let copied = false;
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        try {
+            await navigator.clipboard.writeText(value);
+            copied = true;
+            gicOverlayLog('clipboard.writeText succeeded');
+        } catch (err) {
+            gicOverlayLog('clipboard.writeText failed, fallback to execCommand:', err);
+        }
+    }
+
+    if (!copied) {
+        try {
+            const ta = document.createElement('textarea');
+            ta.value = value;
+            ta.setAttribute('readonly', '');
+            ta.style.position = 'fixed';
+            ta.style.top = '-9999px';
+            ta.style.left = '-9999px';
+            document.body.appendChild(ta);
+            ta.focus();
+            ta.select();
+            ta.setSelectionRange(0, ta.value.length);
+            copied = document.execCommand('copy');
+            document.body.removeChild(ta);
+            gicOverlayLog('execCommand(copy) result:', copied);
+        } catch (err) {
+            gicOverlayLog('execCommand(copy) error:', err);
+        }
+    }
+
+    showGicCopyToast(
+        copied ? toastMessage : 'クリップボードへのコピーに失敗しました',
+        !copied
+    );
+    return copied;
+}
+
+function showGicCopyToast(message, isError = false) {
+    gicOverlayLog('showGicCopyToast:', { message, isError });
+
+    let toast = document.getElementById('gic-prompt-copy-toast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'gic-prompt-copy-toast';
+        toast.style.cssText = [
+            'position: fixed;',
+            'bottom: 24px;',
+            'right: 24px;',
+            'z-index: 2147483647;',
+            'padding: 10px 16px;',
+            'border-radius: 6px;',
+            'font-size: 13px;',
+            'font-weight: bold;',
+            'color: #ffffff;',
+            'pointer-events: none;',
+            'box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);',
+            'transition: opacity 0.2s ease, transform 0.2s ease;',
+            'opacity: 0;',
+            'transform: translateY(8px);',
+        ].join(' ');
+        document.body.appendChild(toast);
+    }
+
+    toast.textContent = message;
+    toast.style.background = isError ? 'rgba(160, 25, 25, 0.95)' : 'rgba(30, 30, 30, 0.95)';
+    toast.style.border = isError ? '1px solid #ff7777' : '1px solid #66aa66';
+
+    requestAnimationFrame(() => {
+        toast.style.opacity = '1';
+        toast.style.transform = 'translateY(0)';
+    });
+
+    clearTimeout(toast._hideTimer);
+    toast._hideTimer = setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(8px)';
+    }, 2200);
+}
+
+function findActiveTemplateInputsInModal(overlayEl) {
+    const modal =
+        overlayEl?.closest('#stj_cell_modal, .stj-cell-modal, [id*="cell"][id*="modal"], [class*="cell"][class*="modal"], [role="dialog"]')
+        || document.getElementById('stj_cell_modal')
+        || document.querySelector('.stj-cell-modal')
+        || document;
+
+    // 1. 現在アクティブ／選択中の template ブロックを優先探索
+    const activeTemplateScope =
+        modal.querySelector('.stj-template-item.active, .stj-template-item.selected, [data-active="true"], [aria-selected="true"]')
+        || modal;
+
+    const collectFields = (root) => {
+        const fields = Array.from(root.querySelectorAll('textarea, input[type="text"]'));
+        return fields.filter((el) => {
+            if (el.closest('.' + PROMPT_OVERLAY_CLASS)) return false;
+            const style = window.getComputedStyle(el);
+            return style.display !== 'none' && style.visibility !== 'hidden';
+        });
+    };
+
+    let candidates = collectFields(activeTemplateScope);
+    if (candidates.length < 2 && activeTemplateScope !== modal) {
+        candidates = collectFields(modal);
+    }
+
+    const matchField = (list, patterns) => {
+        for (const el of list) {
+            const meta = [
+                el.id || '',
+                el.name || '',
+                el.className || '',
+                el.placeholder || '',
+                el.getAttribute('aria-label') || '',
+                el.getAttribute('data-field') || '',
+                el.getAttribute('data-role') || '',
+                el.closest('[data-field], [class*="prompt"], [class*="negative"]')?.className || '',
+                el.closest('[data-field], [class*="prompt"], [class*="negative"]')?.getAttribute('data-field') || '',
+                el.parentElement?.textContent?.slice(0, 40) || '',
+            ].join(' ').toLowerCase();
+
+            if (patterns.some((re) => re.test(meta))) {
+                return el;
+            }
+        }
+        return null;
+    };
+
+    const negativeInput = matchField(candidates, [
+        /negative/,
+        /neg[-_]?prompt/,
+        /ネガティブ/,
+    ]);
+
+    let positiveInput = matchField(candidates.filter((el) => el !== negativeInput), [
+        /\bprompt\b/,
+        /pos[-_]?prompt/,
+        /positive/,
+        /プロンプト/,
+    ]);
+
+    // ラベル／属性で判別できない場合のフォールバック（最初の2つのテキスト欄を順にポジティブ／ネガティブとみなす）
+    if (!positiveInput && candidates.length >= 1 && candidates[0] !== negativeInput) {
+        positiveInput = candidates[0];
+    }
+    const fallbackNeg = !negativeInput
+        ? candidates.find((el) => el !== positiveInput) || null
+        : negativeInput;
+
+    gicOverlayLog('findActiveTemplateInputsInModal:', {
+        modalId: modal.id || modal.className || 'document',
+        candidateCount: candidates.length,
+        hasPositive: Boolean(positiveInput),
+        hasNegative: Boolean(fallbackNeg),
+        positiveId: positiveInput?.id || positiveInput?.className || null,
+        negativeId: fallbackNeg?.id || fallbackNeg?.className || null,
+    });
+
+    return {
+        positiveInput,
+        negativeInput: fallbackNeg,
+    };
+}
+
+function overwriteFieldValue(inputEl, newValue) {
+    if (!inputEl) return false;
+    const text = String(newValue ?? '');
+
+    // 既存値を完全に空にしてから新しい値をセット（元の文字列を残さない）
+    const proto = inputEl.tagName === 'TEXTAREA'
+        ? window.HTMLTextAreaElement.prototype
+        : window.HTMLInputElement.prototype;
+    const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+
+    if (descriptor && typeof descriptor.set === 'function') {
+        descriptor.set.call(inputEl, '');
+        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+        descriptor.set.call(inputEl, text);
+    } else {
+        inputEl.value = '';
+        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+        inputEl.value = text;
+    }
+
+    inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+    inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+    gicOverlayLog('overwriteFieldValue applied:', {
+        tag: inputEl.tagName,
+        id: inputEl.id || null,
+        className: inputEl.className || null,
+        newLen: text.length,
+    });
+    return true;
+}
+
+function applyReusePromptToModal(overlayEl, prompt, negativePrompt) {
+    const { positiveInput, negativeInput } = findActiveTemplateInputsInModal(overlayEl);
+    if (!positiveInput && !negativeInput) {
+        gicOverlayLog('applyReusePromptToModal: target fields not found');
+        showGicCopyToast('反映先のプロンプト欄が見つかりませんでした', true);
+        return false;
+    }
+
+    const posUpdated = positiveInput ? overwriteFieldValue(positiveInput, prompt || '') : false;
+    const negUpdated = negativeInput ? overwriteFieldValue(negativeInput, negativePrompt || '') : false;
+
+    gicOverlayLog('applyReusePromptToModal result:', { posUpdated, negUpdated });
+    if (posUpdated || negUpdated) {
+        showGicCopyToast('現在のテンプレートに再利用しました');
+        return true;
+    }
+    showGicCopyToast('プロンプト欄への反映に失敗しました', true);
+    return false;
 }
 
 function getKeywordForImage(charName, fileName) {
@@ -5219,6 +5441,10 @@ function updatePromptOverlay(panel) {
         overlay = createPromptOverlay(targetContainer);
     }
 
+    // ★ ここに配置（overlay 生成・取得直後、各子要素の描画更新前）
+    overlay.dataset.gicPrompt = prompt;
+    overlay.dataset.gicNegPrompt = negativePrompt;
+    
     // 親コンテナホバー時に確実に表示されるよう JS 側でもホバー状態を補助同期
     if (!targetContainer.dataset.gicHoverBound) {
         targetContainer.dataset.gicHoverBound = '1';
